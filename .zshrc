@@ -150,34 +150,28 @@ encrypt_k3s_secret() {
     sops --encrypt --age $(echo $SOPS_AGE_KEYS  | grep -oP "public key: \K(.*)") --encrypted-regex '^(data|stringData)$' --in-place "$1"
 }
 decrypt_k3s_secret() {
-    # Extract the secret key from the combined environment variable
     local secret_key=$(echo -e $SOPS_AGE_KEYS | tail -n 1)
 
-    # Write the secret key to a temporary file
     local temp_key_file=$(mktemp)
+
     echo "$secret_key" > "$temp_key_file"
 
-    # Use the temporary file for decryption
     SOPS_AGE_KEY_FILE="$temp_key_file" sops --decrypt --encrypted-regex '^(data|stringData)$' --in-place "$1"
 
-    # Cleanup
     rm -f "$temp_key_file"
 }
 encrypt() {
     sops --encrypt --age $(echo $SOPS_AGE_KEYS | grep -oP "public key: \K(.*)") --in-place "$1"
 }
 decrypt() {
-    # Extract the secret key from the combined environment variable
     local secret_key=$(echo -e $SOPS_AGE_KEYS | tail -n 1)
 
-    # Write the secret key to a temporary file
     local temp_key_file=$(mktemp)
+
     echo "$secret_key" > "$temp_key_file"
 
-    # Use the temporary file for decryption
     SOPS_AGE_KEY_FILE="$temp_key_file" sops --decrypt --in-place "$1"
 
-    # Cleanup
     rm -f "$temp_key_file"
 }
 
@@ -204,11 +198,10 @@ unlock_bw_if_locked() {
   fi
 }
 
-# General function to load data from Bitwarden with caching
 load_from_bitwarden_with_cache() {
   local item_name="$1"
   local cache_file="$CACHE_DIR/${item_name}.cache"
-  local max_age=14400 # 24 hours
+  local max_age=14400 
 
   if [[ -f "$cache_file" && $(($(date +%s) - $(stat -c %Y "$cache_file"))) -lt $max_age ]]; then
     echo "$(cat "$cache_file")"
@@ -230,7 +223,6 @@ load_from_bitwarden_with_cache() {
   fi
 }
 
-# Function to load Cloudflare Email with caching
 load_cloudflare_email() {
   export CLOUDFLARE_EMAIL="$(load_from_bitwarden_with_cache "CLOUDFLARE_EMAIL")"
 }
@@ -266,16 +258,14 @@ load_sops_age_keys() {
 
   local cache_file_pub="$CACHE_DIR/sops_age_pub_key.cache"
   local cache_file_sec="$CACHE_DIR/sops_age_sec_key.cache"
-  local max_age=14400 # 24 hours
+  local max_age=14400
 
   # Check if the cache files exist and are fresh
   if [[ -f "$cache_file_pub" && -f "$cache_file_sec" && $(($(date +%s) - $(stat -c %Y "$cache_file_pub"))) -lt $max_age && $(($(date +%s) - $(stat -c %Y "$cache_file_sec"))) -lt $max_age ]]; then
     local public_key="$(<"$cache_file_pub")"
     local secret_key="$(<"$cache_file_sec")"
   else
-    # Fetch the public key
     local public_key=$(bw list items --search "SOPS_AGE_PUB_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_PUB_KEY") | .notes')
-    # Fetch the secret key
     local secret_key=$(bw list items --search "SOPS_AGE_SECRET_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_SECRET_KEY") | .notes')
 
     if [[ -z $public_key || $public_key == "null" || -z $secret_key || $secret_key == "null" ]]; then
@@ -283,12 +273,10 @@ load_sops_age_keys() {
       return 1
     fi
 
-    # Save the fetched keys to cache
     echo "$public_key" > "$cache_file_pub"
     echo "$secret_key" > "$cache_file_sec"
   fi
 
-  # Combine the keys into one environment variable
   export SOPS_AGE_KEYS="${public_key}\n${secret_key}"
 }
 
