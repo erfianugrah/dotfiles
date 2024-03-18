@@ -104,8 +104,6 @@ source ~/zsh-defer/zsh-defer.plugin.zsh
 # Preferred editor for local and remote sessions
 if [[ -n $SSH_CONNECTION ]]; then
   export EDITOR='vim'
-elseif
-  export EDITOR='nvim'
 else
   export EDITOR='code'
 fi
@@ -199,7 +197,7 @@ unlock_bw_if_locked() {
 load_from_bitwarden_with_cache() {
   local item_name="$1"
   local cache_file="$CACHE_DIR/${item_name}.cache"
-  local max_age=86400 # 24 hours
+  local max_age=14400 # 24 hours
 
   if [[ -f "$cache_file" && $(($(date +%s) - $(stat -c %Y "$cache_file"))) -lt $max_age ]]; then
     echo "$(cat "$cache_file")"
@@ -257,7 +255,7 @@ load_sops_age_keys() {
 
   local cache_file_pub="$CACHE_DIR/sops_age_pub_key.cache"
   local cache_file_sec="$CACHE_DIR/sops_age_sec_key.cache"
-  local max_age=86400 # 24 hours
+  local max_age=14400 # 24 hours
 
   # Check if the cache files exist and are fresh
   if [[ -f "$cache_file_pub" && -f "$cache_file_sec" && $(($(date +%s) - $(stat -c %Y "$cache_file_pub"))) -lt $max_age && $(($(date +%s) - $(stat -c %Y "$cache_file_sec"))) -lt $max_age ]]; then
