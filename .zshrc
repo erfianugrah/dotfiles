@@ -137,17 +137,40 @@ alias bw='NODE_OPTIONS="--no-deprecation" bw'
 eval "$(zoxide init zsh)"
 
 encrypt_k3s_secret() {
-    sops --encrypt --age $(cat $SOPS_AGE_KEY_FILE | grep -oP "public key: \K(.*)") --encrypted-regex '^(data|stringData)$' --in-place "$1"
+    sops --encrypt --age $(echo $SOPS_AGE_KEYS  | grep -oP "public key: \K(.*)") --encrypted-regex '^(data|stringData)$' --in-place "$1"
 }
 decrypt_k3s_secret() {
-    sops --decrypt --age $(cat $SOPS_AGE_KEY_FILE | grep -oP "public key: \K(.*)") --encrypted-regex '^(data|stringData)$' --in-place "$1"
+    # Extract the secret key from the combined environment variable
+    local secret_key=$(echo -e $SOPS_AGE_KEYS | tail -n 1)
+
+    # Write the secret key to a temporary file
+    local temp_key_file=$(mktemp)
+    echo "$secret_key" > "$temp_key_file"
+
+    # Use the temporary file for decryption
+    SOPS_AGE_KEY_FILE="$temp_key_file" sops --decrypt --encrypted-regex '^(data|stringData)$' --in-place "$1"
+
+    # Cleanup
+    rm -f "$temp_key_file"
 }
 encrypt() {
-    sops --encrypt --age $(cat $SOPS_AGE_KEY_FILE | grep -oP "public key: \K(.*)") --in-place "$1"
+    sops --encrypt --age $(echo $SOPS_AGE_KEYS | grep -oP "public key: \K(.*)") --in-place "$1"
 }
 decrypt() {
-    sops --decrypt --age $(cat $SOPS_AGE_KEY_FILE | grep -oP "public key: \K(.*)") --in-place "$1"
+    # Extract the secret key from the combined environment variable
+    local secret_key=$(echo -e $SOPS_AGE_KEYS | tail -n 1)
+
+    # Write the secret key to a temporary file
+    local temp_key_file=$(mktemp)
+    echo "$secret_key" > "$temp_key_file"
+
+    # Use the temporary file for decryption
+    SOPS_AGE_KEY_FILE="$temp_key_file" sops --decrypt --in-place "$1"
+
+    # Cleanup
+    rm -f "$temp_key_file"
 }
+
 encrypt_tf() {
   encrypt secrets.tfvars && encrypt terraform.tfstate && encrypt terraform.tfstate.backup
 }
@@ -170,7 +193,6 @@ unlock_bw_if_locked() {
     export BW_SESSION="$(bw unlock --raw)"
   fi
 }
-
 
 load_cloudflare_email() {
   unlock_bw_if_locked
@@ -332,35 +354,22 @@ load_cloudflare_api_token() {
 
 load_cloudflare_api_token "$@"
 
-load_sops_age_key() {
+load_sops_age_keys() {
   unlock_bw_if_locked
 
-  # Search for the item containing the SOPS Age key
-  local search_result
-  search_result=$(bw list items --search "SOPS_AGE_KEY" --session $BW_SESSION)
+  # Fetch the public key
+  local public_key=$(bw list items --search "SOPS_AGE_PUB_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_PUB_KEY") | .notes')
 
-  # Parse the ID of the first matching item
-  local secure_note_id
-  secure_note_id=$(echo "$search_result" | jq -r '.[0].id')
+  # Fetch the secret key
+  local secret_key=$(bw list items --search "SOPS_AGE_SECRET_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_SECRET_KEY") | .notes')
 
-  # Check if an ID was found
-  if [[ -z $secure_note_id || $secure_note_id == "null" ]]; then
-    echo "No item found containing 'SOPS_AGE_KEY'" >&2
+  if [[ -z $public_key || $public_key == "null" || -z $secret_key || $secret_key == "null" ]]; then
+    echo "Failed to retrieve SOPS Age keys from Bitwarden." >&2
     return 1
   fi
 
-  # Fetch the SOPS Age key from Bitwarden using the found ID
-  local sops_age_key
-  sops_age_key=$(bw get item $secure_note_id --session $BW_SESSION | jq -r '.notes')
-
-  # Check if the key was successfully retrieved
-  if [[ -z $sops_age_key || $sops_age_key == "null" ]]; then
-    echo "Failed to retrieve SOPS Age key from Bitwarden." >&2
-    return 1
-  fi
-
-  # Save the key to a temporary file and export its path
-  local temp_key_file=$(mktemp)
-  echo "$sops_age_key" > "$temp_key_file"
-  export SOPS_AGE_KEY_FILE="$temp_key_file"
+  # Combine the keys into one environment variable
+  export SOPS_AGE_KEYS="${public_key}\n${secret_key}"
 }
+
+load_sops_age_keys "$@"
