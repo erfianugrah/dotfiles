@@ -26,3 +26,25 @@ git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:
 git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
 curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash
 ```
+
+### Other tools
+
+### age
+
+```
+brew install age
+```
+
+### sops
+
+```
+curl -LO https://github.com/getsops/sops/releases/download/v3.8.1/sops-v3.8.1.linux.amd64
+mv sops-v3.8.1.linux.amd64 /usr/local/bin/sops
+chmod +x /usr/local/bin/sops
+age-keygen -o key.txt
+```
+
+### bitwarden-cli
+```
+brew install bitwarden-cli
+```
