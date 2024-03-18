@@ -102,10 +102,21 @@ source ~/zsh-defer/zsh-defer.plugin.zsh
 # export LANG=en_US.UTF-8
 
 # Preferred editor for local and remote sessions
-if [[ -n $SSH_CONNECTION ]]; then
+# if [[ -n $SSH_CONNECTION ]]; then
+#   export EDITOR='vim'
+# else
+#   export EDITOR='code'
+# fi
+
+# Attempt to set EDITOR to vim, nano, then code, in that order of preference
+if command -v vim &> /dev/null; then
   export EDITOR='vim'
+elif command -v nano &> /dev/null; then
+  export EDITOR='nano'
+elif command -v code &> /dev/null; then
+  export EDITOR='code --wait'
 else
-  export EDITOR='code'
+  echo "No preferred editor found. Consider installing vim, nano, or Visual Studio Code."
 fi
 
 # Compilation flags
