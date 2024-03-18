@@ -130,6 +130,7 @@ alias w=wrangler
 alias cft=cf-terraforming
 alias p=python3
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
+export CACHE_DIR="$HOME/.cache/zsh"
 # export TF_LOG=debug
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
@@ -194,162 +195,59 @@ unlock_bw_if_locked() {
   fi
 }
 
+# General function to load data from Bitwarden with caching
+load_from_bitwarden_with_cache() {
+  local item_name="$1"
+  local cache_file="$CACHE_DIR/${item_name}.cache"
+  local max_age=86400 # 24 hours
+
+  if [[ -f "$cache_file" && $(($(date +%s) - $(stat -c %Y "$cache_file"))) -lt $max_age ]]; then
+    echo "$(cat "$cache_file")"
+  else
+    unlock_bw_if_locked
+    local search_result=$(bw list items --search "$item_name" --session $BW_SESSION)
+    local secure_note_id=$(echo "$search_result" | jq -r '.[0].id')
+    if [[ -z $secure_note_id || $secure_note_id == "null" ]]; then
+      echo "No item found containing '$item_name'" >&2
+      return 1
+    fi
+    local item_value=$(bw get item $secure_note_id --session $BW_SESSION | jq -r '.notes')
+    if [[ -z $item_value || $item_value == "null" ]]; then
+      echo "Failed to retrieve $item_name from Bitwarden." >&2
+      return 1
+    fi
+    echo "$item_value" > "$cache_file"
+    echo "$item_value"
+  fi
+}
+
+# Function to load Cloudflare Email with caching
 load_cloudflare_email() {
-  unlock_bw_if_locked
-
-  # Search for the item containing the Cloudflare API key
-  local search_result
-  search_result=$(bw list items --search "CLOUDFLARE_EMAIL" --session $BW_SESSION)
-
-  # Parse the ID of the first matching item
-  local secure_note_id
-  secure_note_id=$(echo "$search_result" | jq -r '.[0].id')
-
-  # Check if an ID was found
-  if [[ -z $secure_note_id || $secure_note_id == "null" ]]; then
-    echo "No item found containing 'CLOUDFLARE_EMAIL'" >&2
-    return 1
-  fi
-
-  # Fetch the Cloudflare API key from Bitwarden using the found ID
-  local cloudflare_email
-  cloudflare_email=$(bw get item $secure_note_id --session $BW_SESSION | jq -r '.notes')
-
-  # Check if the API key was successfully retrieved
-  if [[ -z $cloudflare_email || $cloudflare_email == "null" ]]; then
-    echo "Failed to retrieve Cloudflare API key from Bitwarden." >&2
-    return 1
-  fi
-
-  export CLOUDFLARE_EMAIL="$cloudflare_email"
+  export CLOUDFLARE_EMAIL="$(load_from_bitwarden_with_cache "CLOUDFLARE_EMAIL")"
 }
 
 load_cloudflare_email "$@"
 
 load_cloudflare_account_id() {
-  unlock_bw_if_locked
-
-  # Search for the item containing the Cloudflare API key
-  local search_result
-  search_result=$(bw list items --search "CLOUDFLARE_ACCOUNT_ID" --session $BW_SESSION)
-
-  # Parse the ID of the first matching item
-  local secure_note_id
-  secure_note_id=$(echo "$search_result" | jq -r '.[0].id')
-
-  # Check if an ID was found
-  if [[ -z $secure_note_id || $secure_note_id == "null" ]]; then
-    echo "No item found containing 'CLOUDFLARE_ACCOUNT_ID'" >&2
-    return 1
-  fi
-
-  # Fetch the Cloudflare API key from Bitwarden using the found ID
-  local cloudflare_account_id
-  cloudflare_account_id=$(bw get item $secure_note_id --session $BW_SESSION | jq -r '.notes')
-
-  # Check if the API key was successfully retrieved
-  if [[ -z $cloudflare_account_id || $cloudflare_account_id == "null" ]]; then
-    echo "Failed to retrieve Cloudflare API key from Bitwarden." >&2
-    return 1
-  fi
-
-  export CLOUDFLARE_ACCOUNT_ID="$cloudflare_account_id"
+  export CLOUDFLARE_ACCOUNT_ID="$(load_from_bitwarden_with_cache "CLOUDFLARE_ACCOUNT_ID")"
 }
 
 load_cloudflare_account_id "$@"
 
 load_cloudflare_zone_id() {
-  unlock_bw_if_locked
-
-  # Search for the item containing the Cloudflare API key
-  local search_result
-  search_result=$(bw list items --search "CLOUDFLARE_ZONE_ID" --session $BW_SESSION)
-
-  # Parse the ID of the first matching item
-  local secure_note_id
-  secure_note_id=$(echo "$search_result" | jq -r '.[0].id')
-
-  # Check if an ID was found
-  if [[ -z $secure_note_id || $secure_note_id == "null" ]]; then
-    echo "No item found containing 'CLOUDFLARE_ZONE_ID'" >&2
-    return 1
-  fi
-
-  # Fetch the Cloudflare API key from Bitwarden using the found ID
-  local cloudflare_zone_id
-  cloudflare_zone_id=$(bw get item $secure_note_id --session $BW_SESSION | jq -r '.notes')
-
-  # Check if the API key was successfully retrieved
-  if [[ -z $cloudflare_zone_id || $cloudflare_zone_id == "null" ]]; then
-    echo "Failed to retrieve Cloudflare API key from Bitwarden." >&2
-    return 1
-  fi
-
-  export CLOUDFLARE_ZONE_ID="$cloudflare_zone_id"
+  export CLOUDFLARE_ZONE_ID="$(load_from_bitwarden_with_cache "CLOUDFLARE_ZONE_ID")"
 }
 
 load_cloudflare_zone_id "$@"
 
 load_cloudflare_api_key() {
-  unlock_bw_if_locked
-
-  # Search for the item containing the Cloudflare API key
-  local search_result
-  search_result=$(bw list items --search "CLOUDFLARE_API_KEY" --session $BW_SESSION)
-
-  # Parse the ID of the first matching item
-  local secure_note_id
-  secure_note_id=$(echo "$search_result" | jq -r '.[0].id')
-
-  # Check if an ID was found
-  if [[ -z $secure_note_id || $secure_note_id == "null" ]]; then
-    echo "No item found containing 'CLOUDFLARE_API_KEY'" >&2
-    return 1
-  fi
-
-  # Fetch the Cloudflare API key from Bitwarden using the found ID
-  local cloudflare_api_key
-  cloudflare_api_key=$(bw get item $secure_note_id --session $BW_SESSION | jq -r '.notes')
-
-  # Check if the API key was successfully retrieved
-  if [[ -z $cloudflare_api_key || $cloudflare_api_key == "null" ]]; then
-    echo "Failed to retrieve Cloudflare API key from Bitwarden." >&2
-    return 1
-  fi
-
-  export CLOUDFLARE_API_KEY="$cloudflare_api_key"
+  export CLOUDFLARE_API_KEY="$(load_from_bitwarden_with_cache "CLOUDFLARE_API_KEY")"
 }
 
 load_cloudflare_api_key "$@"
 
 load_cloudflare_api_token() {
-  unlock_bw_if_locked
-
-  # Search for the item containing the Cloudflare API key
-  local search_result
-  search_result=$(bw list items --search "CLOUDFLARE_API_TOKEN" --session $BW_SESSION)
-
-  # Parse the ID of the first matching item
-  local secure_note_id
-  secure_note_id=$(echo "$search_result" | jq -r '.[0].id')
-
-  # Check if an ID was found
-  if [[ -z $secure_note_id || $secure_note_id == "null" ]]; then
-    echo "No item found containing 'CLOUDFLARE_API_TOKEN'" >&2
-    return 1
-  fi
-
-  # Fetch the Cloudflare API key from Bitwarden using the found ID
-  local cloudflare_api_token
-  cloudflare_api_token=$(bw get item $secure_note_id --session $BW_SESSION | jq -r '.notes')
-
-  # Check if the API key was successfully retrieved
-  if [[ -z $cloudflare_api_token || $cloudflare_api_token == "null" ]]; then
-    echo "Failed to retrieve Cloudflare API key from Bitwarden." >&2
-    return 1
-  fi
-
-  export CLOUDFLARE_API_TOKEN="$cloudflare_api_token"
+  export CLOUDFLARE_API_TOKEN="$(load_from_bitwarden_with_cache "CLOUDFLARE_API_TOKEN")"
 }
 
 load_cloudflare_api_token "$@"
@@ -357,15 +255,28 @@ load_cloudflare_api_token "$@"
 load_sops_age_keys() {
   unlock_bw_if_locked
 
-  # Fetch the public key
-  local public_key=$(bw list items --search "SOPS_AGE_PUB_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_PUB_KEY") | .notes')
+  local cache_file_pub="$CACHE_DIR/sops_age_pub_key.cache"
+  local cache_file_sec="$CACHE_DIR/sops_age_sec_key.cache"
+  local max_age=86400 # 24 hours
 
-  # Fetch the secret key
-  local secret_key=$(bw list items --search "SOPS_AGE_SECRET_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_SECRET_KEY") | .notes')
+  # Check if the cache files exist and are fresh
+  if [[ -f "$cache_file_pub" && -f "$cache_file_sec" && $(($(date +%s) - $(stat -c %Y "$cache_file_pub"))) -lt $max_age && $(($(date +%s) - $(stat -c %Y "$cache_file_sec"))) -lt $max_age ]]; then
+    local public_key="$(<"$cache_file_pub")"
+    local secret_key="$(<"$cache_file_sec")"
+  else
+    # Fetch the public key
+    local public_key=$(bw list items --search "SOPS_AGE_PUB_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_PUB_KEY") | .notes')
+    # Fetch the secret key
+    local secret_key=$(bw list items --search "SOPS_AGE_SECRET_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_SECRET_KEY") | .notes')
 
-  if [[ -z $public_key || $public_key == "null" || -z $secret_key || $secret_key == "null" ]]; then
-    echo "Failed to retrieve SOPS Age keys from Bitwarden." >&2
-    return 1
+    if [[ -z $public_key || $public_key == "null" || -z $secret_key || $secret_key == "null" ]]; then
+      echo "Failed to retrieve SOPS Age keys from Bitwarden." >&2
+      return 1
+    fi
+
+    # Save the fetched keys to cache
+    echo "$public_key" > "$cache_file_pub"
+    echo "$secret_key" > "$cache_file_sec"
   fi
 
   # Combine the keys into one environment variable
