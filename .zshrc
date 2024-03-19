@@ -227,13 +227,15 @@ unlock_bw_if_locked() {
   if [[ -z $BW_SESSION ]] ; then
     >&2 echo 'bw locked - unlocking into a new session'
     export BW_SESSION="$(bw unlock --raw)"
-  fi
-  # Check if BW_SESSION is set
-  if [[ -z $BW_SESSION ]]; then
-    echo "Failed to set BW_SESSION environment variable." >&2
-    return 1
+    # After attempting to unlock, check if BW_SESSION is still empty
+    if [[ -z $BW_SESSION ]]; then
+      echo "Failed to set BW_SESSION environment variable." >&2
+      return 1
+    else
+      echo "BW_SESSION set successfully."
+    fi
   else
-    echo "BW_SESSION set successfully."
+    echo "BW_SESSION is already set."
   fi
 }
 
