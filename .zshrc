@@ -325,12 +325,21 @@ tx_switch() {
 }
 
 if [[ -z "$TMUX" ]]; then
+  # Check if any tmux sessions exist
   if tmux list-sessions &> /dev/null; then
-    tmux attach -t default || tmux new-session -s default
+    # Try to attach to a session named "default"
+    if ! tmux attach -t default 2>/dev/null; then
+      # If "default" session doesn't exist, attach to the first session and rename it
+      session_name=$(tmux list-sessions -F "#{session_name}" | head -n 1)
+      tmux rename-session -t "$session_name" default
+      tmux attach -t default
+    fi
   else
+    # If no sessions exist, create a new session named "default"
     tmux new-session -s default
   fi
 fi
+
 
 if [[ -n "$TMUX" ]]; then
     export TERM="screen-256color"
