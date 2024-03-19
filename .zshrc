@@ -233,21 +233,34 @@ ansible_update() {
 }
 
 unlock_bw_if_locked() {
-  if [[ -z $BW_SESSION ]] ; then
-    >&2 echo 'bw locked - unlocking into a new session'
-    export BW_SESSION="$(bw unlock --raw)"
-    # After attempting to unlock, check if BW_SESSION is still empty
-    if [[ -z $BW_SESSION ]]; then
-      echo "Failed to set BW_SESSION environment variable." >&2
-      return 1
-    else
-      echo "BW_SESSION set successfully."
-    fi
-  else
-    echo "BW_SESSION is already set."
-  fi
-}
+    local max_retries=3
+    local retries=0
 
+    if [[ -z $BW_SESSION ]]; then
+        echo 'bw locked - unlocking into a new session' >&2
+
+        while [[ $retries -lt $max_retries ]]; do
+            export BW_SESSION="$(bw unlock --raw)"
+            
+            # After attempting to unlock, check if BW_SESSION is still empty
+            if [[ -z $BW_SESSION ]]; then
+                echo "Unlock attempt failed. Please try again." >&2
+                ((retries++))
+                
+                # Check if maximum retries have been reached
+                if [[ $retries -eq $max_retries ]]; then
+                    echo "Failed to set BW_SESSION environment variable after $max_retries attempts." >&2
+                    return 1
+                fi
+            else
+                echo "BW_SESSION set successfully."
+                return 0
+            fi
+        done
+    else
+        echo "BW_SESSION is already set."
+    fi
+}
 
 load_from_bitwarden_and_set_env() {
   local item_name="$1"
