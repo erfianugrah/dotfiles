@@ -93,7 +93,9 @@ plugins=(
   terraform
   tmux
 )
+
 ZSH_TMUX_AUTOSTART=true
+
 source $ZSH/oh-my-zsh.sh
 source ~/zsh-defer/zsh-defer.plugin.zsh
 # User configuration
