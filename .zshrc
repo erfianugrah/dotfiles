@@ -92,6 +92,12 @@ plugins=(
   zsh-syntax-highlighting
   terraform
   tmux
+  npm
+  docker-compose
+  kubectl
+  python
+  pip
+  gh
 )
 
 ZSH_TMUX_AUTOSTART=true
