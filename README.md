@@ -29,13 +29,37 @@ curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | 
 
 ### Other tools
 
-### age
+#### vim/nvim
+
+```
+brew install neovim vim
+```
+
+#### brew
+
+```
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+#### opentofu and terraform
+
+```
+brew install opentofu terraform
+```
+
+#### tmux
+
+```
+brew install tmux
+```
+
+#### age
 
 ```
 brew install age
 ```
 
-### sops
+#### sops
 
 ```
 curl -LO https://github.com/getsops/sops/releases/download/v3.8.1/sops-v3.8.1.linux.amd64
@@ -44,7 +68,8 @@ chmod +x /usr/local/bin/sops
 age-keygen -o key.txt
 ```
 
-### bitwarden-cli
+#### bitwarden-cli
+
 ```
 brew install bitwarden-cli
 ```
