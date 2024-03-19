@@ -91,8 +91,9 @@ plugins=(
   zsh-autosuggestions
   zsh-syntax-highlighting
   terraform
+  tmux
 )
-
+ZSH_TMUX_AUTOSTART=true
 source $ZSH/oh-my-zsh.sh
 source ~/zsh-defer/zsh-defer.plugin.zsh
 # User configuration
@@ -107,14 +108,6 @@ source ~/zsh-defer/zsh-defer.plugin.zsh
 # else
 #   export EDITOR='code'
 # fi
-
-if [[ -z "$TMUX" ]]; then
-  if tmux list-sessions &> /dev/null; then
-    tmux attach -t default || tmux new-session -s default
-  else
-    tmux new-session -s default
-  fi
-fi
 
 # Attempt to set EDITOR to vim, nano, then code, in that order of preference
 if command -v vim &> /dev/null; then
@@ -322,3 +315,8 @@ tx_switch() {
   # Switch the tmux client to the newly created session
   tmux switch-client -t "$session_name"
 }
+
+if [ -z "$TMUX" ] && [ "$ZSH_TMUX_AUTOSTART" = "true" ]; then
+  tmux attach || tmux new-session
+fi
+
