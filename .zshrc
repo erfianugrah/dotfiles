@@ -310,8 +310,6 @@ load_sops_age_keys() {
 
 load_sops_age_keys
 
-# Define the function in your .zshrc file
-# Define a function in your .zshrc file
 tx_switch() {
   # Check if a session name is provided as an argument
   local session_name="${1:-default}"
