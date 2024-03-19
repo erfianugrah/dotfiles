@@ -316,7 +316,10 @@ tx_switch() {
   tmux switch-client -t "$session_name"
 }
 
-if [ -z "$TMUX" ] && [ "$ZSH_TMUX_AUTOSTART" = "true" ]; then
-  tmux attach || tmux new-session
+if [[ -z "$TMUX" ]]; then
+  if tmux list-sessions &> /dev/null; then
+    tmux attach -t default || tmux new-session -s default
+  else
+    tmux new-session -s default
+  fi
 fi
-
