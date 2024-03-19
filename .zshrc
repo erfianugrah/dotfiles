@@ -323,3 +323,7 @@ if [[ -z "$TMUX" ]]; then
     tmux new-session -s default
   fi
 fi
+
+if [[ -n "$TMUX" ]]; then
+    export TERM="screen-256color"
+fi
