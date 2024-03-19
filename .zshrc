@@ -119,19 +119,13 @@ else
   echo "No preferred editor found. Consider installing vim, nano, or Visual Studio Code."
 fi
 
-# Add to the end of your .zshrc file
 if [[ -z "$TMUX" ]]; then
-  if [[ -z "$TMUX_SKIP_AUTO_ATTACH" ]]; then
-    if tmux list-sessions &> /dev/null; then
-      tmux attach -t default || tmux new-session -s default
-    else
-      tmux new-session -s default
-    fi
+  if tmux list-sessions &> /dev/null; then
+    tmux attach -t default || tmux new-session -s default
   else
-    echo "Skipping automatic tmux attachment due to TMUX_SKIP_AUTO_ATTACH being set."
+    tmux new-session -s default
   fi
 fi
-
 
 # Compilation flags
 # export ARCHFLAGS="-arch x86_64"
@@ -315,3 +309,16 @@ load_sops_age_keys() {
 }
 
 load_sops_age_keys
+
+# Define the function in your .zshrc file
+# Define a function in your .zshrc file
+tx_switch() {
+  # Check if a session name is provided as an argument
+  local session_name="${1:-default}"
+
+  # Create a new session in detached mode (-d) with the given name
+  tmux new-session -d -s "$session_name"
+
+  # Switch the tmux client to the newly created session
+  tmux switch-client -t "$session_name"
+}
