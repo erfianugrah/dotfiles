@@ -119,6 +119,20 @@ else
   echo "No preferred editor found. Consider installing vim, nano, or Visual Studio Code."
 fi
 
+# Add to the end of your .zshrc file
+if [[ -z "$TMUX" ]]; then
+  if [[ -z "$TMUX_SKIP_AUTO_ATTACH" ]]; then
+    if tmux list-sessions &> /dev/null; then
+      tmux attach -t default || tmux new-session -s default
+    else
+      tmux new-session -s default
+    fi
+  else
+    echo "Skipping automatic tmux attachment due to TMUX_SKIP_AUTO_ATTACH being set."
+  fi
+fi
+
+
 # Compilation flags
 # export ARCHFLAGS="-arch x86_64"
 
@@ -139,7 +153,6 @@ alias w=wrangler
 alias cft=cf-terraforming
 alias p=python3
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
-export CACHE_DIR="$HOME/.cache/zsh"
 # export TF_LOG=debug
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
@@ -147,22 +160,43 @@ export CACHE_DIR="$HOME/.cache/zsh"
 eval "$(zoxide init zsh)"
 
 encrypt_k3s_secret() {
-    sops --encrypt --age $(echo $SOPS_AGE_KEYS  | grep -oP "public key: \K(.*)") --encrypted-regex '^(data|stringData)$' --in-place "$1"
+    # Extract the public key from SOPS_AGE_KEYS and use it for encryption
+    local public_key=$(echo $SOPS_AGE_KEYS | grep -oP "public key: \K(.*)")
+    
+    # Ensure the public key is extracted correctly
+    if [[ -z $public_key ]]; then
+        echo "Failed to extract public key from SOPS_AGE_KEYS" >&2
+        return 1
+    fi
+
+    # Perform encryption using the extracted public key
+    sops --encrypt --age $public_key --encrypted-regex '^(data|stringData)$' --in-place "$1"
 }
+
 decrypt_k3s_secret() {
+    # Extract the secret key from SOPS_AGE_KEYS
     local secret_key=$(echo -e $SOPS_AGE_KEYS | tail -n 1)
 
+    # Create a temporary file to hold the secret key
     local temp_key_file=$(mktemp)
 
+    # Write the secret key to the temporary file
     echo "$secret_key" > "$temp_key_file"
 
-    SOPS_AGE_KEY_FILE="$temp_key_file" sops --decrypt --encrypted-regex '^(data|stringData)$' --in-place "$1"
+    # Set the SOPS_AGE_KEY_FILE environment variable to point to the temporary key file
+    export SOPS_AGE_KEY_FILE="$temp_key_file"
 
+    # Perform decryption
+    sops --decrypt --encrypted-regex '^(data|stringData)$' --in-place "$1"
+
+    # Clean up the temporary key file
     rm -f "$temp_key_file"
 }
+
 encrypt() {
     sops --encrypt --age $(echo $SOPS_AGE_KEYS | grep -oP "public key: \K(.*)") --in-place "$1"
 }
+
 decrypt() {
     local secret_key=$(echo -e $SOPS_AGE_KEYS | tail -n 1)
 
@@ -178,15 +212,19 @@ decrypt() {
 encrypt_tf() {
   encrypt secrets.tfvars && encrypt terraform.tfstate && encrypt terraform.tfstate.backup
 }
+
 decrypt_tf() {
   decrypt secrets.tfvars && decrypt terraform.tfstate && decrypt terraform.tfstate.backup
 }
+
 ansible_on() {
    ansible-playbook -i my-playbooks/inventory.yml my-playbooks/poweron.yml --ask-become-pass
 }
+
 ansible_off() {
    ansible-playbook -i my-playbooks/inventory.yml my-playbooks/shutdown.yml --ask-become-pass
 }
+
 ansible_update() {
    ansible-playbook -i my-playbooks/inventory.yml my-playbooks/update.yml --ask-become-pass
 }
@@ -196,88 +234,84 @@ unlock_bw_if_locked() {
     >&2 echo 'bw locked - unlocking into a new session'
     export BW_SESSION="$(bw unlock --raw)"
   fi
-}
-
-load_from_bitwarden_with_cache() {
-  local item_name="$1"
-  local cache_file="$CACHE_DIR/${item_name}.cache"
-  local max_age=14400 
-
-  if [[ -f "$cache_file" && $(($(date +%s) - $(stat -c %Y "$cache_file"))) -lt $max_age ]]; then
-    echo "$(cat "$cache_file")"
+  # Check if BW_SESSION is set
+  if [[ -z $BW_SESSION ]]; then
+    echo "Failed to set BW_SESSION environment variable." >&2
+    return 1
   else
-    unlock_bw_if_locked
-    local search_result=$(bw list items --search "$item_name" --session $BW_SESSION)
-    local secure_note_id=$(echo "$search_result" | jq -r '.[0].id')
-    if [[ -z $secure_note_id || $secure_note_id == "null" ]]; then
-      echo "No item found containing '$item_name'" >&2
-      return 1
-    fi
-    local item_value=$(bw get item $secure_note_id --session $BW_SESSION | jq -r '.notes')
-    if [[ -z $item_value || $item_value == "null" ]]; then
-      echo "Failed to retrieve $item_name from Bitwarden." >&2
-      return 1
-    fi
-    echo "$item_value" > "$cache_file"
-    echo "$item_value"
+    echo "BW_SESSION set successfully."
   fi
 }
 
-load_cloudflare_email() {
-  export CLOUDFLARE_EMAIL="$(load_from_bitwarden_with_cache "CLOUDFLARE_EMAIL")"
+
+load_from_bitwarden_and_set_env() {
+  local item_name="$1"
+  local env_var_name="$2"
+
+  # Check if the environment variable is already set
+  if [[ -n ${(P)env_var_name} ]]; then
+    echo "$env_var_name environment variable is already set."
+    return 0
+  fi
+
+  unlock_bw_if_locked
+  local search_result=$(bw list items --search "$item_name" --session $BW_SESSION)
+  local secure_note_id=$(echo "$search_result" | jq -r '.[0].id')
+  if [[ -z $secure_note_id || $secure_note_id == "null" ]]; then
+    echo "No item found containing '$item_name'" >&2
+    return 1
+  fi
+  local item_value=$(bw get item $secure_note_id --session $BW_SESSION | jq -r '.notes')
+  if [[ -z $item_value || $item_value == "null" ]]; then
+    echo "Failed to retrieve $item_name from Bitwarden." >&2
+    return 1
+  fi
+
+  # Set the environment variable
+  export "$env_var_name=$item_value"
+
+  # Recheck if the environment variable is set using Zsh compatible method
+  if [[ -z ${(P)env_var_name} ]]; then
+    echo "Failed to set environment variable for $item_name." >&2
+    return 1
+  else
+    echo "$env_var_name set successfully."
+  fi
 }
 
-load_cloudflare_email "$@"
-
-load_cloudflare_account_id() {
-  export CLOUDFLARE_ACCOUNT_ID="$(load_from_bitwarden_with_cache "CLOUDFLARE_ACCOUNT_ID")"
-}
-
-load_cloudflare_account_id "$@"
-
-load_cloudflare_zone_id() {
-  export CLOUDFLARE_ZONE_ID="$(load_from_bitwarden_with_cache "CLOUDFLARE_ZONE_ID")"
-}
-
-load_cloudflare_zone_id "$@"
-
-load_cloudflare_api_key() {
-  export CLOUDFLARE_API_KEY="$(load_from_bitwarden_with_cache "CLOUDFLARE_API_KEY")"
-}
-
-load_cloudflare_api_key "$@"
-
-load_cloudflare_api_token() {
-  export CLOUDFLARE_API_TOKEN="$(load_from_bitwarden_with_cache "CLOUDFLARE_API_TOKEN")"
-}
-
-load_cloudflare_api_token "$@"
+load_from_bitwarden_and_set_env "CLOUDFLARE_EMAIL" "CLOUDFLARE_EMAIL"
+load_from_bitwarden_and_set_env "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_ACCOUNT_ID"
+load_from_bitwarden_and_set_env "CLOUDFLARE_ZONE_ID" "CLOUDFLARE_ZONE_ID"
+load_from_bitwarden_and_set_env "CLOUDFLARE_API_KEY" "CLOUDFLARE_API_KEY"
+load_from_bitwarden_and_set_env "CLOUDFLARE_API_TOKEN" "CLOUDFLARE_API_TOKEN"
 
 load_sops_age_keys() {
-  unlock_bw_if_locked
-
-  local cache_file_pub="$CACHE_DIR/sops_age_pub_key.cache"
-  local cache_file_sec="$CACHE_DIR/sops_age_sec_key.cache"
-  local max_age=14400
-
-  # Check if the cache files exist and are fresh
-  if [[ -f "$cache_file_pub" && -f "$cache_file_sec" && $(($(date +%s) - $(stat -c %Y "$cache_file_pub"))) -lt $max_age && $(($(date +%s) - $(stat -c %Y "$cache_file_sec"))) -lt $max_age ]]; then
-    local public_key="$(<"$cache_file_pub")"
-    local secret_key="$(<"$cache_file_sec")"
-  else
-    local public_key=$(bw list items --search "SOPS_AGE_PUB_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_PUB_KEY") | .notes')
-    local secret_key=$(bw list items --search "SOPS_AGE_SECRET_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_SECRET_KEY") | .notes')
-
-    if [[ -z $public_key || $public_key == "null" || -z $secret_key || $secret_key == "null" ]]; then
-      echo "Failed to retrieve SOPS Age keys from Bitwarden." >&2
-      return 1
-    fi
-
-    echo "$public_key" > "$cache_file_pub"
-    echo "$secret_key" > "$cache_file_sec"
+  # Check if the SOPS_AGE_KEYS environment variable is already set
+  if [[ -n $SOPS_AGE_KEYS ]]; then
+    echo "SOPS_AGE_KEYS environment variable is already set."
+    return 0
   fi
 
+  unlock_bw_if_locked
+
+  local public_key=$(bw list items --search "SOPS_AGE_PUB_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_PUB_KEY") | .notes')
+  local secret_key=$(bw list items --search "SOPS_AGE_SECRET_KEY" --session $BW_SESSION | jq -r '.[] | select(.name == "SOPS_AGE_SECRET_KEY") | .notes')
+
+  if [[ -z $public_key || $public_key == "null" || -z $secret_key || $secret_key == "null" ]]; then
+    echo "Failed to retrieve SOPS Age keys from Bitwarden." >&2
+    return 1
+  fi
+
+  # Concatenate the keys with a newline and set them as a single environment variable
   export SOPS_AGE_KEYS="${public_key}\n${secret_key}"
+
+  # Recheck if the environment variable is set
+  if [[ -z $SOPS_AGE_KEYS ]]; then
+    echo "Failed to set SOPS_AGE_KEYS environment variable." >&2
+    return 1
+  else
+    echo "SOPS_AGE_KEYS environment variable set successfully."
+  fi
 }
 
-load_sops_age_keys "$@"
+load_sops_age_keys
