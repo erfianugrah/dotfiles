@@ -108,6 +108,14 @@ source ~/zsh-defer/zsh-defer.plugin.zsh
 #   export EDITOR='code'
 # fi
 
+if [[ -z "$TMUX" ]]; then
+  if tmux list-sessions &> /dev/null; then
+    tmux attach -t default || tmux new-session -s default
+  else
+    tmux new-session -s default
+  fi
+fi
+
 # Attempt to set EDITOR to vim, nano, then code, in that order of preference
 if command -v vim &> /dev/null; then
   export EDITOR='vim'
@@ -117,14 +125,6 @@ elif command -v code &> /dev/null; then
   export EDITOR='code --wait'
 else
   echo "No preferred editor found. Consider installing vim, nano, or Visual Studio Code."
-fi
-
-if [[ -z "$TMUX" ]]; then
-  if tmux list-sessions &> /dev/null; then
-    tmux attach -t default || tmux new-session -s default
-  else
-    tmux new-session -s default
-  fi
 fi
 
 # Compilation flags
