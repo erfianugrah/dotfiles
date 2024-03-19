@@ -1,4 +1,5 @@
-### Install zsh with brew or apt or bash
+### Setup
+#### Install zsh with brew or apt or bash
 
 ```
 brew install zsh
@@ -6,19 +7,19 @@ sudo apt-get install zsh
 sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
 ```
 
-### powerlevel10k theme
+#### powerlevel10k theme
 
 ```
 git clone https://github.com/romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerlevel10k
 ```
 
-### Set theme
+#### Set theme
 
 ```
 ZSH_THEME="powerlevel10k/powerlevel10k"
 ```
 
-### Useful plugins
+#### Useful plugins
 
 ```
 git clone https://github.com/marlonrichert/zsh-autocomplete.git
