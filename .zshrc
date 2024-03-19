@@ -100,6 +100,14 @@ plugins=(
   gh
 )
 
+if [[ -z "$TMUX" ]]; then
+  if tmux list-sessions &> /dev/null; then
+    tmux attach -t default || tmux new-session -s default
+  else
+    tmux new-session -s default
+  fi
+fi
+
 ZSH_TMUX_AUTOSTART=true
 
 source $ZSH/oh-my-zsh.sh
@@ -323,23 +331,6 @@ tx_switch() {
   # Switch the tmux client to the newly created session
   tmux switch-client -t "$session_name"
 }
-
-if [[ -z "$TMUX" ]]; then
-  # Check if any tmux sessions exist
-  if tmux list-sessions &> /dev/null; then
-    # Try to attach to a session named "default"
-    if ! tmux attach -t default 2>/dev/null; then
-      # If "default" session doesn't exist, attach to the first session and rename it
-      session_name=$(tmux list-sessions -F "#{session_name}" | head -n 1)
-      tmux rename-session -t "$session_name" default
-      tmux attach -t default
-    fi
-  else
-    # If no sessions exist, create a new session named "default"
-    tmux new-session -s default
-  fi
-fi
-
 
 if [[ -n "$TMUX" ]]; then
     export TERM="screen-256color"
