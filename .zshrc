@@ -90,6 +90,9 @@ plugins=(
   ansible
   zsh-autosuggestions
   zsh-syntax-highlighting
+  zsh-interactive-cd
+  zsh-navigation-tools
+  zsh-completions
   terraform
   tmux
   npm
@@ -99,6 +102,8 @@ plugins=(
   pip
   gh
 )
+
+autoload -U compinit && compinit
 
 if [[ -z "$TMUX" ]]; then
   if tmux list-sessions &> /dev/null; then
