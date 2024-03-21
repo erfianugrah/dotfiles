@@ -307,7 +307,6 @@ load_from_bitwarden_and_set_env "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_ACCOUNT_ID"
 load_from_bitwarden_and_set_env "CLOUDFLARE_ZONE_ID" "CLOUDFLARE_ZONE_ID"
 load_from_bitwarden_and_set_env "CLOUDFLARE_API_KEY" "CLOUDFLARE_API_KEY"
 load_from_bitwarden_and_set_env "CLOUDFLARE_API_TOKEN" "CLOUDFLARE_API_TOKEN"
-load_from_bitwarden_and_set_env "GITHUB_PAT_ZSH" "GH_TOKEN"
 
 load_sops_age_keys() {
   # Check if the SOPS_AGE_KEYS environment variable is already set
