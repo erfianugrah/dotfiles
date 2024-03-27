@@ -161,6 +161,9 @@ alias w=wrangler
 alias cft=cf-terraforming
 alias p=python3
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
+export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/usr/local/cuda/extras/CUPTI/lib64:$LD_LIBRARY_PATH
+
 # export TF_LOG=debug
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
