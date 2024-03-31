@@ -1,5 +1,6 @@
 let g:netrw_dirhistmax  =10
-let g:netrw_dirhistcnt =5
+let g:netrw_dirhistcnt =6
+let g:netrw_dirhist_6='/home/erfi'
 let g:netrw_dirhist_5='/home/erfi/k3s/.git'
 let g:netrw_dirhist_4='/home/erfi/dotfiles/.kube'
 let g:netrw_dirhist_3='/home/erfi/.ssh'
