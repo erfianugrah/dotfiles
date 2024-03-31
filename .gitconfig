@@ -1,6 +1,3 @@
-[user]
-	email = $CLOUDFLARE_EMAIL 
-	name = Erfi Anugrah
 [http]
 	postBuffer = 524288000
 	version = HTTP/2

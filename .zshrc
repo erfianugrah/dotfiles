@@ -307,6 +307,10 @@ load_from_bitwarden_and_set_env() {
 }
 
 load_from_bitwarden_and_set_env "CLOUDFLARE_EMAIL" "CLOUDFLARE_EMAIL"
+load_from_bitwarden_and_set_env "CLOUDFLARE_EMAIL" "GIT_AUTHOR_EMAIL"
+load_from_bitwarden_and_set_env "CLOUDFLARE_EMAIL" "GIT_COMMITTER_EMAIL"
+load_from_bitwarden_and_set_env "MY_NAME" "GIT_AUTHOR_NAME"
+load_from_bitwarden_and_set_env "MY_NAME" "GIT_COMMITTER_NAME"
 load_from_bitwarden_and_set_env "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_ACCOUNT_ID"
 load_from_bitwarden_and_set_env "CLOUDFLARE_ZONE_ID" "CLOUDFLARE_ZONE_ID"
 load_from_bitwarden_and_set_env "CLOUDFLARE_API_KEY" "CLOUDFLARE_API_KEY"
