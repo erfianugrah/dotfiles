@@ -1,0 +1,20 @@
+[user]
+	email = $CLOUDFLARE_EMAIL 
+	name = Erfi Anugrah
+[http]
+	postBuffer = 524288000
+	version = HTTP/2
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+[init]
+	defaultBranch = main
+[credential "https://dev.azure.com"]
+	useHttpPath = true
+[credential]
+	credentialStore = cache
+	guiPrompt = false
+	helper = 
+	helper = /usr/local/bin/git-credential-manager
