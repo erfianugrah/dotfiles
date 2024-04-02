@@ -103,6 +103,8 @@ plugins=(
   gh
 )
 
+ZSH_TMUX_AUTOSTART=true
+
 autoload -U compinit && compinit
 
 if [[ -z "$TMUX" ]]; then
@@ -112,8 +114,6 @@ if [[ -z "$TMUX" ]]; then
     tmux new-session -s default
   fi
 fi
-
-ZSH_TMUX_AUTOSTART=true
 
 source $ZSH/oh-my-zsh.sh
 source ~/zsh-defer/zsh-defer.plugin.zsh
