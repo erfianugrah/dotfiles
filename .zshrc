@@ -130,16 +130,7 @@ source ~/zsh-defer/zsh-defer.plugin.zsh
 #   export EDITOR='code'
 # fi
 
-# Attempt to set EDITOR to vim, nano, then code, in that order of preference
-if command -v vim &> /dev/null; then
-  export EDITOR='vim'
-elif command -v nano &> /dev/null; then
-  export EDITOR='nano'
-elif command -v code &> /dev/null; then
-  export EDITOR='code --wait'
-else
-  echo "No preferred editor found. Consider installing vim, nano, or Visual Studio Code."
-fi
+
 
 # Compilation flags
 # export ARCHFLAGS="-arch x86_64"
@@ -162,14 +153,21 @@ alias cft=cf-terraforming
 alias p=python3
 alias vim=nvim
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
+# export TF_LOG=debug
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/extras/CUPTI/lib64:$LD_LIBRARY_PATH
 
-# export TF_LOG=debug
-# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+# Attempt to set EDITOR to vim, nano, then code, in that order of preference
+if command -v vim &> /dev/null; then
+  export EDITOR='vim'
+elif command -v nano &> /dev/null; then
+  export EDITOR='nano'
+elif command -v code &> /dev/null; then
+  export EDITOR='code --wait'
+else
+  echo "No preferred editor found. Consider installing vim, nano, or Visual Studio Code."
+fi
 
-eval "$(zoxide init zsh)"
 
 encrypt_k3s_secret() {
     # Extract the public key from SOPS_AGE_KEYS and use it for encryption
@@ -362,3 +360,8 @@ if [[ -n "$TMUX" ]]; then
     export TERM="screen-256color"
 fi
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+# To customize prompt, run `p10k configure` or edit ~/dotfiles/.p10k.zsh.
+[[ ! -f ~/dotfiles/.p10k.zsh ]] || source ~/dotfiles/.p10k.zsh
+
+eval "$(zoxide init zsh)"
