@@ -142,8 +142,7 @@ alias tf=terraform
 alias w=wrangler
 alias cft=cf-terraforming
 alias p=python3
-alias v=vim
-alias vim=nvim
+alias v=nvim
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 # export TF_LOG=debug
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
@@ -152,7 +151,9 @@ export NVIM_LOG_FILE=/home/erfi/.config
 source ~/dotfiles/functions.zsh
 
 # Attempt to set EDITOR to vim, nano, then code, in that order of preference
-if command -v vim &> /dev/null; then
+if command -v nvim &> /dev/null; then
+  export EDITOR='nvim'
+elif command -v vim &> /dev/null; then
   export EDITOR='vim'
 elif command -v nano &> /dev/null; then
   export EDITOR='nano'
