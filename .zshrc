@@ -108,14 +108,6 @@ ZSH_TMUX_DEFAULT_SESSION_NAME="default"
 
 autoload -U compinit && compinit
 
-if [[ -z "$TMUX" ]]; then
-  if tmux list-sessions &> /dev/null; then
-    tmux attach -t default || tmux new-session -s default
-  else
-    tmux new-session -s default
-  fi
-fi
-
 source $ZSH/oh-my-zsh.sh
 source ~/zsh-defer/zsh-defer.plugin.zsh
 # User configuration
@@ -130,8 +122,6 @@ source ~/zsh-defer/zsh-defer.plugin.zsh
 # else
 #   export EDITOR='code'
 # fi
-
-
 
 # Compilation flags
 # export ARCHFLAGS="-arch x86_64"
@@ -172,6 +162,14 @@ else
   echo "No preferred editor found. Consider installing vim, nano, or Visual Studio Code."
 fi
 
+if [[ -z "$TMUX" ]]; then
+  if tmux list-sessions &> /dev/null; then
+    tmux attach -t default || tmux new-session -s default
+  else
+    tmux new-session -s default
+  fi
+fi
+i
 # To customize prompt, run `p10k configure` or edit ~/dotfiles/.p10k.zsh.
 [[ ! -f ~/dotfiles/.p10k.zsh ]] || source ~/dotfiles/.p10k.zsh
 
