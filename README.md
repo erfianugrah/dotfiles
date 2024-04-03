@@ -34,6 +34,7 @@ curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | 
 
 ```
 brew install neovim vim
+git clone https://github.com/erfianugrah/kickstart.nvim
 ```
 
 #### brew
@@ -52,6 +53,7 @@ brew install opentofu terraform
 
 ```
 brew install tmux
+git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 ```
 
 #### age
