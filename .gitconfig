@@ -15,3 +15,7 @@
 	guiPrompt = false
 	helper = 
 	helper = /usr/local/bin/git-credential-manager
+[gpg]
+	format = ssh
+[user]
+	signingkey = /home/erfi/.ssh/id_github_signing_key.pub
