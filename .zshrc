@@ -148,7 +148,7 @@ alias bw='NODE_OPTIONS="--no-deprecation" bw'
 # export TF_LOG=debug
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/extras/CUPTI/lib64:$LD_LIBRARY_PATH
-
+export NVIM_LOG_FILE=/home/erfi/.config
 source ~/dotfiles/functions.zsh
 
 # Attempt to set EDITOR to vim, nano, then code, in that order of preference
