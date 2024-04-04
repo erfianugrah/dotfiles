@@ -133,16 +133,6 @@ load_from_bitwarden_and_set_env() {
   fi
 }
 
-load_from_bitwarden_and_set_env "CLOUDFLARE_EMAIL" "CLOUDFLARE_EMAIL"
-load_from_bitwarden_and_set_env "CLOUDFLARE_EMAIL" "GIT_AUTHOR_EMAIL"
-load_from_bitwarden_and_set_env "CLOUDFLARE_EMAIL" "GIT_COMMITTER_EMAIL"
-load_from_bitwarden_and_set_env "MY_NAME" "GIT_AUTHOR_NAME"
-load_from_bitwarden_and_set_env "MY_NAME" "GIT_COMMITTER_NAME"
-load_from_bitwarden_and_set_env "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_ACCOUNT_ID"
-load_from_bitwarden_and_set_env "CLOUDFLARE_ZONE_ID" "CLOUDFLARE_ZONE_ID"
-load_from_bitwarden_and_set_env "CLOUDFLARE_API_KEY" "CLOUDFLARE_API_KEY"
-load_from_bitwarden_and_set_env "CLOUDFLARE_API_TOKEN" "CLOUDFLARE_API_TOKEN"
-
 load_sops_age_keys() {
   # Check if the SOPS_AGE_KEYS environment variable is already set
   if [[ -n $SOPS_AGE_KEYS ]]; then
@@ -172,8 +162,6 @@ load_sops_age_keys() {
   fi
 }
 
-load_sops_age_keys
-
 tx_switch() {
   # Check if a session name is provided as an argument
   local session_name="${1:-default}"
@@ -183,4 +171,17 @@ tx_switch() {
 
   # Switch the tmux client to the newly created session
   tmux switch-client -t "$session_name"
+}
+
+load_bw() {
+  load_from_bitwarden_and_set_env "CLOUDFLARE_EMAIL" "CLOUDFLARE_EMAIL"
+  load_from_bitwarden_and_set_env "CLOUDFLARE_EMAIL" "GIT_AUTHOR_EMAIL"
+  load_from_bitwarden_and_set_env "CLOUDFLARE_EMAIL" "GIT_COMMITTER_EMAIL"
+  load_from_bitwarden_and_set_env "MY_NAME" "GIT_AUTHOR_NAME"
+  load_from_bitwarden_and_set_env "MY_NAME" "GIT_COMMITTER_NAME"
+  load_from_bitwarden_and_set_env "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_ACCOUNT_ID"
+  load_from_bitwarden_and_set_env "CLOUDFLARE_ZONE_ID" "CLOUDFLARE_ZONE_ID"
+  load_from_bitwarden_and_set_env "CLOUDFLARE_API_KEY" "CLOUDFLARE_API_KEY"
+  load_from_bitwarden_and_set_env "CLOUDFLARE_API_TOKEN" "CLOUDFLARE_API_TOKEN"
+  load_sops_age_keys
 }
