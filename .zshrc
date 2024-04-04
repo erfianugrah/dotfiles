@@ -145,9 +145,8 @@ alias p=python3
 alias v=nvim
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 # export TF_LOG=debug
-export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/usr/local/cuda/extras/CUPTI/lib64:$LD_LIBRARY_PATH
 export NVIM_LOG_FILE=/home/erfi/.config
+export DOCKER_BUILDKIT=1
 source ~/dotfiles/functions.zsh
 
 # Attempt to set EDITOR to vim, nano, then code, in that order of preference
@@ -163,13 +162,14 @@ else
   echo "No preferred editor found. Consider installing vim, nano, or Visual Studio Code."
 fi
 
-if [[ -z "$TMUX" ]]; then
-  if tmux list-sessions &> /dev/null; then
-    tmux attach -t default || tmux new-session -s default
-  else
-    tmux new-session -s default
-  fi
-fi
+# if [[ -z "$TMUX" ]]; then
+#   if tmux list-sessions &> /dev/null; then
+#     tmux attach -t default || tmux new-session -s default
+#   else
+#     tmux new-session -s default
+#   fi
+# fi
+
 # To customize prompt, run `p10k configure` or edit ~/dotfiles/.p10k.zsh.
 [[ ! -f ~/dotfiles/.p10k.zsh ]] || source ~/dotfiles/.p10k.zsh
 
