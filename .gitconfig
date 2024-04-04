@@ -12,9 +12,8 @@
 	useHttpPath = true
 [credential]
 	credentialStore = cache
-	guiPrompt = false
-	helper = 
-	helper = /usr/local/bin/git-credential-manager
+  guiPrompt = false
+	helper = /mnt/c/Program\\ Files/Git/mingw64/bin/git-credential-manager.exe
 [gpg]
 	format = ssh
 [user]
