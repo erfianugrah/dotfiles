@@ -34,7 +34,7 @@ curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | 
 
 ```
 brew install neovim vim
-git clone https://github.com/erfianugrah/kickstart.nvim
+git clone https://github.com/erfianugrah/kickstart.nvim.git "${XDG_CONFIG_HOME:-$HOME/.config}"/nvim
 ```
 
 #### brew
