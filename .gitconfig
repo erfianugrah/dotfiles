@@ -13,7 +13,8 @@
 [credential]
 	credentialStore = cache
   guiPrompt = false
-	helper = /mnt/c/Program\\ Files/Git/mingw64/bin/git-credential-manager.exe
+	helper = 
+	helper = /usr/local/bin/git-credential-manager
 [gpg]
 	format = ssh
 [user]
