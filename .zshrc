@@ -143,13 +143,8 @@ alias w=wrangler
 alias cft=cf-terraforming
 alias p=python3
 alias v=nvim
-alias ld='eza -lD'
-alias lf='eza -lf --color=always | grep -v /'
-alias lh='eza -dl .* --group-directories-first'
-alias ll='eza -al --group-directories-first'
-alias ls='eza -alf --color=always --sort=size | grep -v /'
-alias lt='eza -al --sort=modified'
-alias bw='NODE_OPTIONS="--no-deprecation" bw'
+alias ls=eza
+ias bw='NODE_OPTIONS="--no-deprecation" bw'
 # export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
