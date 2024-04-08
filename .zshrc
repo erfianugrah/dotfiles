@@ -92,7 +92,6 @@ plugins=(
   zsh-syntax-highlighting
   zsh-interactive-cd
   zsh-navigation-tools
-  zsh-completions
   terraform
   tmux
   npm
@@ -109,7 +108,6 @@ ZSH_TMUX_DEFAULT_SESSION_NAME="default"
 autoload -U compinit && compinit
 
 source $ZSH/oh-my-zsh.sh
-source ~/zsh-defer/zsh-defer.plugin.zsh
 # User configuration
 
 # export MANPATH="/usr/local/man:$MANPATH"
@@ -146,7 +144,7 @@ alias v=nvim
 alias ls=eza
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 # export TF_LOG=debug
-export NVIM_LOG_FILE=/home/erfi/.config
+export NVIM_LOG_FILE=~/.config
 export DOCKER_BUILDKIT=1
 source ~/dotfiles/functions.zsh
 
@@ -174,8 +172,7 @@ fi
 # To customize prompt, run `p10k configure` or edit ~/dotfiles/.p10k.zsh.
 [[ ! -f ~/dotfiles/.p10k.zsh ]] || source ~/dotfiles/.p10k.zsh
 
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 eval "$(zoxide init zsh)"
 
-# bun completions
-[ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"
+# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
+[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh

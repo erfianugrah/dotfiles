@@ -12,10 +12,7 @@
 	useHttpPath = true
 [credential]
 	credentialStore = cache
-  guiPrompt = false
-	helper = 
-	helper = /usr/local/bin/git-credential-manager
-[gpg]
-	format = ssh
 [user]
-	signingkey = /home/erfi/.ssh/id_github_signing_key.pub
+	signingkey = BC4056524A00EAB4
+[commit]
+	gpgsign = true
