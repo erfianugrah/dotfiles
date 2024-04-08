@@ -41,8 +41,10 @@ git clone https://github.com/erfianugrah/kickstart.nvim.git "${XDG_CONFIG_HOME:-
 
 ```
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+xargs brew install < brew_packages_list.txt
 ```
 
+### Selective Install
 #### opentofu and terraform
 
 ```
