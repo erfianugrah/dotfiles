@@ -184,5 +184,3 @@ eval "$(zoxide init zsh)"
 
 # bun completions
 [ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"
-
-
