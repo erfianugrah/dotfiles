@@ -143,7 +143,7 @@ alias w=wrangler
 alias cft=cf-terraforming
 alias p=python3
 alias v=nvim
-alias ls=exa
+alias ls=eza
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 # export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
