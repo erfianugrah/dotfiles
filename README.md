@@ -18,7 +18,10 @@ git clone https://github.com/romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerl
 ```
 ZSH_THEME="powerlevel10k/powerlevel10k"
 ```
-
+#### Meslo Nerd Font
+```
+https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.0/Meslo.zip
+```
 #### Useful plugins
 
 ```
