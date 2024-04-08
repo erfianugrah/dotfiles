@@ -144,7 +144,7 @@ alias cft=cf-terraforming
 alias p=python3
 alias v=nvim
 alias ls=eza
-ias bw='NODE_OPTIONS="--no-deprecation" bw'
+alias bw='NODE_OPTIONS="--no-deprecation" bw'
 # export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
