@@ -117,6 +117,7 @@ pandoc
 pcre
 pcre2
 perl
+pipx
 pixman
 pkg-config
 prettierd
