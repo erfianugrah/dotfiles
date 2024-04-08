@@ -22,6 +22,7 @@ deno
 dust
 exiftool
 expat
+eza
 flyctl
 fontconfig
 freetype
@@ -128,6 +129,7 @@ pcre
 pcre2
 perl
 pinentry
+pinentry-mac
 pipx
 pixman
 pkg-config
