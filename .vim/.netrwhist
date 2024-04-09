@@ -1,9 +1,0 @@
-let g:netrw_dirhistmax  =10
-let g:netrw_dirhistcnt =7
-let g:netrw_dirhist_7='/home/erfi/.config/nvim'
-let g:netrw_dirhist_6='/home/erfi'
-let g:netrw_dirhist_5='/home/erfi/k3s/.git'
-let g:netrw_dirhist_4='/home/erfi/dotfiles/.kube'
-let g:netrw_dirhist_3='/home/erfi/.ssh'
-let g:netrw_dirhist_2='/home/erfi/.wrangler/config'
-let g:netrw_dirhist_1='/home/erfi'
