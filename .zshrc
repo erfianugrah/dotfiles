@@ -10,13 +10,13 @@ fi
 # export PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program\ Files/Git/mingw64/bin:$HOME/.local/bin:$HOME/.bun/bin:$PATH
 
 # Path to your oh-my-zsh installation.
-export ZSH=$HOME/.oh-my-zsh
+# export ZSH=$HOME/.oh-my-zsh
 
 # Set name of the theme to load --- if set to "random", it will
 # load a random theme each time oh-my-zsh is loaded, in which case,
 # to know which specific one was loaded, run: echo $RANDOM_THEME
 # See https://github.com/ohmyzsh/ohmyzsh/wiki/Themes
-ZSH_THEME="powerlevel10k/powerlevel10k"
+# ZSH_THEME="powerlevel10k/powerlevel10k"
 
 # Set list of themes to pick from when loading at random
 # Setting this variable when ZSH_THEME=random will cause zsh to load
@@ -107,7 +107,7 @@ ZSH_TMUX_DEFAULT_SESSION_NAME="default"
 
 autoload -U compinit && compinit
 
-source $ZSH/oh-my-zsh.sh
+# source $ZSH/oh-my-zsh.sh
 # User configuration
 
 # export MANPATH="/usr/local/man:$MANPATH"
@@ -146,6 +146,8 @@ alias bw='NODE_OPTIONS="--no-deprecation" bw'
 # export TF_LOG=debug
 export NVIM_LOG_FILE=~/.config
 export DOCKER_BUILDKIT=1
+export STARSHIP_CONFIG=~/starship.toml
+export STARSHIP_CACHE=~/.starship/cache
 source ~/dotfiles/functions.zsh
 
 # Attempt to set EDITOR to vim, nano, then code, in that order of preference
@@ -170,12 +172,12 @@ fi
 # fi
 
 # To customize prompt, run `p10k configure` or edit ~/dotfiles/.p10k.zsh.
-[[ ! -f ~/dotfiles/.p10k.zsh ]] || source ~/dotfiles/.p10k.zsh
+# [[ ! -f ~/dotfiles/.p10k.zsh ]] || source ~/dotfiles/.p10k.zsh
 
 eval "$(zoxide init zsh)"
-
+eval "$(starship init zsh)"
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+# [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 # bun completions
 [ -s "/Users/erfi/.bun/_bun" ] && source "/Users/erfi/.bun/_bun"
@@ -183,3 +185,5 @@ eval "$(zoxide init zsh)"
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
+source /usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
