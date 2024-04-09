@@ -101,6 +101,8 @@ plugins=(
   python
   pip
   gh
+  colored-man-pages
+  debian
 )
 
 ZSH_TMUX_AUTOSTART=true
