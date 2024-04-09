@@ -150,6 +150,8 @@ alias bw='NODE_OPTIONS="--no-deprecation" bw'
 # export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
+export STARSHIP_CONFIG=/home/erfi/starship.toml
+export STARSHIP_CACHE=/home/erfi/.starship/cache
 source ~/dotfiles/functions.zsh
 
 # Attempt to set EDITOR to vim, nano, then code, in that order of preference
