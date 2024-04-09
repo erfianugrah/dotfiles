@@ -187,3 +187,7 @@ load_bw() {
   load_from_bitwarden_and_set_env "CLOUDFLARE_ACCESS_OLLAMA_SECRET" "CLOUDFLARE_ACCESS_OLLAMA_SECRET"
   load_sops_age_keys
 }
+
+p10k_colours() {
+  for i in {0..255}; do print -Pn "%K{$i}  %k%F{$i}${(l:3::0:)i}%f " ${${(M)$((i%6)):#3}:+$'\n'}; done
+}
