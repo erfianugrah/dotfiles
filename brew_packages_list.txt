@@ -151,3 +151,4 @@ zlib
 zsh
 zsh-async
 zstd
+stow
