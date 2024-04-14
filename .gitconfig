@@ -19,3 +19,5 @@
 	format = ssh
 [user]
 	signingkey = /home/erfi/.ssh/id_github_signing_key.pub
+[commit]
+	gpgsign = true
