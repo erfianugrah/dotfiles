@@ -67,3 +67,12 @@ age-keygen -o key.txt
 ```markdown
 brew install bitwarden-cli
 ```
+
+##### deck c compiler setup
+```markdown
+sudo steamos-readonly disable 
+sudo pacman-key --init
+sudo pacman-key --populate holo
+sudo pacman-key --populate archlinux
+sudo pacman -S glibc linux-api-headers gcc 
+```
