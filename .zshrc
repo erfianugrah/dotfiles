@@ -143,6 +143,7 @@ alias p=python3
 alias v=nvim
 alias ls=eza
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
+alias wezterm='flatpak run org.wezfurlong.wezterm'
 # export TF_LOG=debug
 export NVIM_LOG_FILE=~/.config
 export DOCKER_BUILDKIT=1
@@ -172,7 +173,7 @@ fi
 eval "$(zoxide init zsh)"
 
 # bun completions
-[ -s "/Users/erfi/.bun/_bun" ] && source "/Users/erfi/.bun/_bun"
+[ -s "/home/deck/.bun/_bun" ] && source "/home/deck/.bun/_bun"
 
 # bun
 export BUN_INSTALL="$HOME/.bun"
@@ -180,3 +181,5 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+
+export GPG_TTY=$(tty)
