@@ -13,7 +13,7 @@
 [credential]
 	credentialStore = cache
 [user]
-	signingkey = 04F70FCAE3598239
+	signingkey = 467F2F6E18D11D9D
 [commit]
 	gpgsign = true
 [credential "https://github.com"]
