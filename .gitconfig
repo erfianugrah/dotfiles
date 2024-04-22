@@ -14,8 +14,6 @@
 	credentialStore = cache
 [user]
 	signingkey = 467F2F6E18D11D9D
-[commit]
-	gpgsign = true
 [credential "https://github.com"]
 	helper = 
 	helper = !/home/linuxbrew/.linuxbrew/bin/gh auth git-credential

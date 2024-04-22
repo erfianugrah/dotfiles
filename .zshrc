@@ -142,6 +142,7 @@ alias cft=cf-terraforming
 alias p=python3
 alias v=nvim
 alias ls=eza
+alias c=cargo
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias wezterm='flatpak run org.wezfurlong.wezterm'
 # export TF_LOG=debug
