@@ -175,3 +175,16 @@ fig
 marta
 vagrant
 virtualbox
+duf
+bat 
+procs 
+rm-improved  
+tre-command 
+bandwhich 
+bpytop 
+gping 
+dua-cli 
+httpie 
+neofetch 
+tlrc 
+thefuck

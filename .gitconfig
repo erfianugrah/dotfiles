@@ -15,4 +15,4 @@
 [user]
 	signingkey = BC4056524A00EAB4
 [commit]
-	gpgsign = true
+	; gpgsign = true
