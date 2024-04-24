@@ -18,9 +18,7 @@
 [credential "https://gist.github.com"]
 	helper = 
 	helper = !/home/linuxbrew/.linuxbrew/bin/gh auth git-credential
-[gpg]
-	format = ssh
 [user]
-	signingkey = /home/deck/.ssh/id_gh_deck.pub
+	signingkey = 240EEE1442DCAF90
 [commit]
 	gpgsign = true
