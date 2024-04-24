@@ -184,3 +184,4 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 export GPG_TTY=$(tty)
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
