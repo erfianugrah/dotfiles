@@ -172,7 +172,7 @@ fi
 # fi
 
 eval "$(zoxide init zsh)"
-
+eval $(thefuck --alias)
 # bun completions
 [ -s "/home/deck/.bun/_bun" ] && source "/home/deck/.bun/_bun"
 

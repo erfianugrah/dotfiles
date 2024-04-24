@@ -18,8 +18,6 @@ ca-certificates
 caddy
 cairo
 certifi
-cf-terraforming
-cfctl
 cmatrix
 cups
 curl
@@ -66,10 +64,8 @@ iputils
 isl
 jpeg-turbo
 k9s
-kdash
 kompose
 krb5
-kubelogin
 kubernetes-cli
 libassuan
 libcap
