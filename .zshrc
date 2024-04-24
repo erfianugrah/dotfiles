@@ -146,7 +146,6 @@ alias c=cargo
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias wezterm='flatpak run org.wezfurlong.wezterm'
 # export TF_LOG=debug
-export GPG_TTY=$(tty)
 export NVIM_LOG_FILE=~/.config
 export DOCKER_BUILDKIT=1
 source ~/dotfiles/functions.zsh
@@ -183,3 +182,5 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+
+export GPG_TTY=$(tty)
