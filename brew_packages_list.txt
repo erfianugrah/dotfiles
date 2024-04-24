@@ -24,7 +24,9 @@ cmatrix
 cups
 curl
 dbus
+ddgr
 deno
+dog
 dua-cli
 duf
 dust
