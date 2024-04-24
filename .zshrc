@@ -182,6 +182,7 @@ fi
 
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 eval "$(zoxide init zsh)"
+eval $(thefuck --alias)
 # eval "$(starship init zsh)"
 # bun completions
 [ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"
