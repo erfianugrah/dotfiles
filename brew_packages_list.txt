@@ -178,3 +178,16 @@ zoxide
 zsh
 zsh-async
 zstd
+duf
+bat 
+procs 
+rm-improved  
+tre-command 
+bandwhich 
+bpytop 
+gping 
+dua-cli 
+httpie 
+neofetch 
+tlrc 
+thefuck
