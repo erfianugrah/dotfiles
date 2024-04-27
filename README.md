@@ -4,7 +4,7 @@
 ```markdown
 brew install zsh
 sudo apt-get install zsh
-sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
+curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh | bash
 ```
 #### Install powerlevel10k theme and set it as the default theme
 
@@ -12,9 +12,9 @@ sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/i
 git clone https://github.com/romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerlevel10k
 ZSH_THEME="powerlevel10k/powerlevel10k"
 ```
-#### Install Meslo Nerd Font
+#### Install Ioseka Term Nerd Font
 
-Download from `https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.0/Meslo.zip`
+Download from `curl -OL https://github.com/ryanoasis/nerd-fonts/releases/latest/download/IosevkaTermNF.tar.xz`
 
 #### Useful plugins
 
