@@ -1,7 +1,6 @@
 acl
 age
 alsa-lib
-antigen
 attr
 bandwhich
 bat
@@ -26,8 +25,6 @@ dbus
 ddgr
 deno
 diff-so-fancy
-dog
-dua-cli
 duf
 dust
 elfutils
@@ -36,7 +33,6 @@ expat
 eza
 fontconfig
 freetype
-gatsby-cli
 gcc
 gcc@11
 gdbm
@@ -151,8 +147,6 @@ pixman
 pkg-config
 prettierd
 procs
-pure
-python@3.11
 python@3.12
 readline
 ripgrep
@@ -163,7 +157,6 @@ scc
 sqlite
 sslscan
 systemd
-tea
 texinfo
 thefuck
 tlrc
@@ -175,7 +168,6 @@ unibilium
 unzip
 utf8proc
 util-linux
-vault
 vim
 xorgproto
 xsel
