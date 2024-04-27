@@ -11,6 +11,7 @@ bison
 bitwarden-cli
 bpytop
 brotli
+btop
 bzip2
 c-ares
 ca-certificates
