@@ -1,6 +1,15 @@
  ### Setup
-#### Install zsh with brew or apt or bash
+#### Add apt repos to vyos
+```shell
+sudo echo "deb http://deb.debian.org/debian/ bookworm main" >> /etc/apt/sources.list && \
+sudo echo "deb-src http://deb.debian.org/debian/ bookworm main" >> /etc/apt/sources.list && \
+sudo echo "deb http://deb.debian.org/debian/ bookworm-updates main" >> /etc/apt/sources.list && \
+sudo echo "deb-src http://deb.debian.org/debian/ bookworm-updates main" >> /etc/apt/sources.list && \
+sudo echo "deb http://security.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list && \
+sudo echo "deb-src http://security.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list
 
+```
+#### Install zsh with brew or apt or bash
 ```markdown
 brew install zsh
 sudo apt-get install zsh

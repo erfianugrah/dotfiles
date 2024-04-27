@@ -8,7 +8,7 @@ fi
 
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
-export PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program\ Files/Git/mingw64/bin:$HOME/.local/bin:$HOME/.bun/bin:$PATH
+# export PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program\ Files/Git/mingw64/bin:$HOME/.local/bin:$HOME/.bun/bin:$PATH
 
 # Path to your oh-my-zsh installation.
 export ZSH=$HOME/.oh-my-zsh
@@ -85,35 +85,26 @@ plugins=(
   git-auto-fetch
   git-prompt
   sudo
-  vscode
   github
   brew
-  ansible
   zsh-autosuggestions
   zsh-syntax-highlighting
   zsh-interactive-cd
   zsh-navigation-tools
   zsh-completions
-  terraform
-  tmux
-  npm
   docker-compose
-  kubectl
-  python
-  pip
   gh
   colored-man-pages
   debian
-  rust
 )
 
-ZSH_TMUX_AUTOSTART=true
-ZSH_TMUX_DEFAULT_SESSION_NAME="default"
+# ZSH_TMUX_AUTOSTART=true
+# ZSH_TMUX_DEFAULT_SESSION_NAME="default"
 
 autoload -U compinit && compinit
 
 source $ZSH/oh-my-zsh.sh
-source ~/zsh-defer/zsh-defer.plugin.zsh
+# source ~/zsh-defer/zsh-defer.plugin.zsh
 # User configuration
 
 # export MANPATH="/usr/local/man:$MANPATH"
@@ -184,6 +175,3 @@ fi
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 eval "$(zoxide init zsh)"
 eval $(thefuck --alias)
-# eval "$(starship init zsh)"
-# bun completions
-[ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"
