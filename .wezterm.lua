@@ -4,11 +4,8 @@ local wezterm = require("wezterm")
 -- This will hold the configuration.
 local config = wezterm.config_builder()
 
--- This is where you actually apply your config choices
-
 -- For example, changing the color scheme:
 config.color_scheme = "lovelace"
--- config.term = "xterm-265color"
 
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
