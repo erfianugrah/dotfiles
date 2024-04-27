@@ -13,8 +13,6 @@
 [credential]
 	credentialStore = cache
   guiPrompt = false
-	helper = 
-	helper = /usr/local/bin/git-credential-manager
 [user]
 	email = erfi.anugrah@gmail.com
 	name = Erfi Anugrah
