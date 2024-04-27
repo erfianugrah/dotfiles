@@ -131,16 +131,9 @@ source $ZSH/oh-my-zsh.sh
 # alias ohmyzsh="mate ~/.oh-my-zsh"
    
 POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true
-alias k=kubectl
-alias t=tofu
-alias tf=terraform
-alias w=wrangler
-alias cft=cf-terraforming
-alias p=python3
 alias v=nvim
 alias ls=eza
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
-alias c=cargo
 # export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
