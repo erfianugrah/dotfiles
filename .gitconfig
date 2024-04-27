@@ -16,7 +16,7 @@
 	helper = 
 	helper = /usr/local/bin/git-credential-manager
 [user]
-	signingkey = EA90A914B6E44363
+	signingkey = AEF0D6CDEA5FBB1C
 [commit]
 	gpgsign = true
 [alias]
