@@ -8,14 +8,8 @@
 	required = true
 [init]
 	defaultBranch = main
-[credential "https://dev.azure.com"]
-	useHttpPath = true
 [credential]
 	credentialStore = cache
-  guiPrompt = false
-[user]
-	email = erfi.anugrah@gmail.com
-	name = Erfi Anugrah
 [alias]
 	dsf = diff --color
 [pager]
