@@ -1,4 +1,5 @@
  ### Setup
+
 #### Add apt repos to vyos
 ```shell
 sudo echo "deb http://deb.debian.org/debian/ bookworm main" >> /etc/apt/sources.list && \
@@ -11,9 +12,8 @@ sudo echo "deb-src http://security.debian.org/debian-security bookworm-security 
 ```
 #### Install zsh with brew or apt or bash
 ```markdown
-brew install zsh
 sudo apt-get install zsh
-sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
+curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh | bash
 ```
 #### Install powerlevel10k theme and set it as the default theme
 
@@ -46,32 +46,6 @@ git clone https://github.com/erfianugrah/kickstart.nvim.git "${XDG_CONFIG_HOME:-
 xargs brew install < brew_packages_list.txt
 ```
 #### Selective tool installation
-
-##### opentofu and Terraform
-
-```markdown
-brew install opentofu terraform
-```
-##### tmux and tpm plugin manager setup
-
-```markdown
-brew install tmux
-git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
-```
-##### age
-
-```markdown
-brew install age
-```
-##### sops, a secrets manager plugin
-
-```markdown
-curl -LO https://github.com/getsops/sops/releases/download/v3.8.1/sops-v3.8.1.linux.amd64
-mv sops-v3.8.1.linux.amd64 /usr/local/bin/sops
-chmod +x /usr/local/bin/sops
-age-keygen -o key.txt
-```
-##### bitwarden-cli, a CLI for accessing the Bitwarden password manager
 
 ```markdown
 brew install bitwarden-cli
