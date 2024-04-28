@@ -115,6 +115,7 @@ little-cms2
 llvm
 lua
 luajit
+luarocks
 luv
 lz4
 lzo
