@@ -3,9 +3,14 @@ local wezterm = require("wezterm")
 
 -- This will hold the configuration.
 local config = wezterm.config_builder()
+local gpus = wezterm.gui.enumerate_gpus()
 -- This is where you actually apply your config choices
 -- For example, changing the color scheme:
 config.color_scheme = "lovelace"
+
+-- Deck GPU
+config.webgpu_preferred_adapter = gpus[1]
+config.front_end = "WebGpu"
 
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
