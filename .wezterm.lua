@@ -3,6 +3,7 @@ local wezterm = require("wezterm")
 
 -- This will hold the configuration.
 local config = wezterm.config_builder()
+local gpus = wezterm.gui.enumerate_gpus()
 
 -- Theme
 config.color_scheme = "lovelace"
@@ -14,19 +15,14 @@ config.initial_cols = 160
 -- Cursor
 config.default_cursor_style = "BlinkingBar"
 
+-- GPU Acceleration
+config.front_end = "WebGpu"
+
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
-	-- Test GPU
-	config.webgpu_preferred_adapter = {
-		backend = "Vulkan",
-		device = 8712,
-		device_type = "DiscreteGpu",
-		driver = "NVIDIA",
-		driver_info = "552.12",
-		name = "NVIDIA GeForce RTX 3080 Ti",
-		vendor = 4318,
-	}
-	config.front_end = "WebGpu"
+	-- GPU
+	config.webgpu_preferred_adapter = gpus[1]
+
 	-- WSL
 	config.default_domain = "WSL:Ubuntu"
 	config.default_cwd = "/home/erfi"
