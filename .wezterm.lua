@@ -44,7 +44,7 @@ config.keys = {
 }
 -- Fonts
 config.font = wezterm.font({ family = "IosevkaTerm NF", weight = "Regular" })
-config.font_size = 11.5
+config.font_size = 12
 config.line_height = 1
 
 -- Window Close Prompt
