@@ -3,9 +3,16 @@ local wezterm = require("wezterm")
 
 -- This will hold the configuration.
 local config = wezterm.config_builder()
--- This is where you actually apply your config choices
--- For example, changing the color scheme:
+
+-- Theme
 config.color_scheme = "lovelace"
+
+-- Window Size
+config.initial_rows = 40
+config.initial_cols = 160
+
+-- Cursor
+config.default_cursor_style = "BlinkingBar"
 
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
@@ -39,7 +46,7 @@ config.keys = {
 -- Fonts
 config.font = wezterm.font({ family = "IosevkaTerm NF", weight = "Regular" })
 config.font_size = 11
-config.line_height = 1.2
+config.line_height = 1.1
 
 -- and finally, return the configuration to wezterm
 return config
