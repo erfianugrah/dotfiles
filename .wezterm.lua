@@ -13,7 +13,10 @@ config.initial_rows = 40
 config.initial_cols = 160
 
 -- Cursor
-config.default_cursor_style = "SteadyBar"
+config.default_cursor_style = "BlinkingBar"
+
+-- FPS
+config.animation_fps = 60
 
 -- GPU Acceleration
 config.front_end = "WebGpu"
