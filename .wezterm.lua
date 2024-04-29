@@ -4,27 +4,28 @@ local wezterm = require("wezterm")
 -- This will hold the configuration.
 local config = wezterm.config_builder()
 local gpus = wezterm.gui.enumerate_gpus()
--- This is where you actually apply your config choices
--- For example, changing the color scheme:
+
+-- Theme
 config.color_scheme = "lovelace"
 
--- Deck GPU
-config.webgpu_preferred_adapter = gpus[1]
+-- Window Size
+config.initial_rows = 40
+config.initial_cols = 160
+
+-- Cursor
+config.default_cursor_style = "BlinkingBar"
+
+-- FPS
+config.animation_fps = 60
+
+-- GPU Acceleration
 config.front_end = "WebGpu"
 
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
-	-- Test GPU
-	config.webgpu_preferred_adapter = {
-		backend = "Vulkan",
-		device = 8712,
-		device_type = "DiscreteGpu",
-		driver = "NVIDIA",
-		driver_info = "552.12",
-		name = "NVIDIA GeForce RTX 3080 Ti",
-		vendor = 4318,
-	}
-	config.front_end = "WebGpu"
+	-- GPU
+	config.webgpu_preferred_adapter = gpus[1]
+
 	-- WSL
 	config.default_domain = "WSL:Ubuntu"
 	config.default_cwd = "/home/erfi"
@@ -43,8 +44,11 @@ config.keys = {
 }
 -- Fonts
 config.font = wezterm.font({ family = "IosevkaTerm NF", weight = "Regular" })
-config.font_size = 11
-config.line_height = 1.2
+config.font_size = 11.5
+config.line_height = 1
+
+-- Window Close Prompt
+config.window_close_confirmation = "NeverPrompt"
 
 -- and finally, return the configuration to wezterm
 return config
