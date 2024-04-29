@@ -196,7 +196,6 @@ sqlite
 sslscan
 stow
 systemd
-tailscale
 texinfo
 thefuck
 tidy-html5
