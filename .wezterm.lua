@@ -13,7 +13,7 @@ config.initial_rows = 40
 config.initial_cols = 160
 
 -- Cursor
-config.default_cursor_style = "BlinkingBar"
+config.default_cursor_style = "SteadyBar"
 
 -- FPS
 config.animation_fps = 120
