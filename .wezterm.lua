@@ -16,7 +16,7 @@ config.initial_cols = 160
 config.default_cursor_style = "BlinkingBar"
 
 -- FPS
-config.animation_fps = 60
+config.animation_fps = 120
 
 -- GPU Acceleration
 config.front_end = "WebGpu"
