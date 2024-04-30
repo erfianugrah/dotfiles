@@ -149,6 +149,7 @@ pixman
 pkg-config
 prettierd
 procs
+python@3.11
 python@3.12
 readline
 ripgrep
@@ -161,7 +162,6 @@ sslscan
 systemd
 texinfo
 thefuck
-tlrc
 tmux
 tre-command
 tree-sitter
