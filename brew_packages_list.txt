@@ -19,6 +19,7 @@ caddy
 cairo
 certifi
 cf-terraforming
+cloudflared
 cmatrix
 cups
 curl
