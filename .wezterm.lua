@@ -22,6 +22,9 @@ config.animation_fps = 120
 config.front_end = "WebGpu"
 config.webgpu_preferred_adapter = gpus[1]
 
+--Scrollback
+config.scrollback_lines = 5000
+
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- Paste Action
@@ -32,7 +35,8 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 		{ key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
 	}
 	-- GPU
-	config.webgpu_preferred_adapter = gpus[0]
+	config.front_end = "WebGpu"
+	config.webgpu_preferred_adapter = gpus[1]
 
 	-- WSL
 	config.default_domain = "WSL:Ubuntu"
