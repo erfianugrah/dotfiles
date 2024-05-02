@@ -4,7 +4,7 @@ local wezterm = require("wezterm")
 -- This will hold the configuration.
 local config = wezterm.config_builder()
 local gpus = wezterm.gui.enumerate_gpus()
-
+local act = wezterm.action
 -- Theme
 config.color_scheme = "lovelace"
 
@@ -16,14 +16,26 @@ config.initial_cols = 160
 config.default_cursor_style = "BlinkingBar"
 
 -- FPS
-config.animation_fps = 60
+config.animation_fps = 120
 
 -- GPU Acceleration
 config.front_end = "WebGpu"
 config.webgpu_preferred_adapter = gpus[1]
+
+--Scrollback
+config.scrollback_lines = 5000
+
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
+	-- Paste Action
+	config.keys = {
+		-- paste from the clipboard
+		{ key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") },
+		-- paste from the primary selection
+		{ key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
+	}
 	-- GPU
+	config.front_end = "WebGpu"
 	config.webgpu_preferred_adapter = gpus[1]
 
 	-- WSL
