@@ -20,7 +20,7 @@ config.animation_fps = 60
 
 -- GPU Acceleration
 config.front_end = "WebGpu"
-config.webgpu_preferred_adapter = gpus[0]
+config.webgpu_preferred_adapter = gpus[1]
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- GPU
