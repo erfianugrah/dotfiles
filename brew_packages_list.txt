@@ -114,6 +114,7 @@ libyaml
 linux-headers@5.15
 little-cms2
 llvm
+ltex-ls
 lua
 luajit
 luarocks
@@ -131,9 +132,11 @@ neofetch
 neovim
 nettle
 node
+node@16
 npth
 oniguruma
 openapi-generator
+openjdk
 openjdk@11
 openldap
 openssl@1.1
@@ -161,7 +164,9 @@ scc
 sqlite
 sslscan
 systemd
+terraform-ls
 texinfo
+tflint
 thefuck
 tmux
 tre-command
