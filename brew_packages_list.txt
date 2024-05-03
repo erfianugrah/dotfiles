@@ -140,6 +140,7 @@ linux-headers@5.15
 little-cms2
 llvm
 llvm@17
+ltex-ls
 lua
 luajit
 luarocks
@@ -165,6 +166,7 @@ npth
 oniguruma
 openapi-generator
 openexr
+openjdk
 openjdk@11
 openldap
 openssl@3
