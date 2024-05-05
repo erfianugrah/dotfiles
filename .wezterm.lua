@@ -25,6 +25,68 @@ config.webgpu_preferred_adapter = gpus[1]
 --Scrollback
 config.scrollback_lines = 5000
 
+-- Tmux alternative
+config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 5000 }
+config.keys = {
+	-- splitting panes
+	{
+		mods = "LEADER",
+		key = "-",
+		action = act.SplitVertical({ domain = "CurrentPaneDomain" }),
+	},
+	{
+		mods = "LEADER",
+		key = "=",
+		action = act.SplitHorizontal({ domain = "CurrentPaneDomain" }),
+	},
+	{
+		mods = "LEADER",
+		key = "m",
+		action = act.TogglePaneZoomState,
+	},
+	-- rotate panes
+	{
+		mods = "LEADER",
+		key = "Space",
+		action = act.RotatePanes("Clockwise"),
+	},
+	-- show the pane selection mode, but have it swap the active and selected panes
+	{
+		mods = "LEADER",
+		key = "0",
+		action = wezterm.action.PaneSelect({
+			mode = "SwapWithActive",
+		}),
+	},
+	{
+		key = "w",
+		mods = "LEADER",
+		action = act.CloseCurrentPane({ confirm = false }),
+	},
+	{
+		key = "h",
+		mods = "LEADER",
+		action = act.ActivatePaneDirection("Left"),
+	},
+	{
+		key = "l",
+		mods = "LEADER",
+		action = act.ActivatePaneDirection("Right"),
+	},
+	{
+		key = "k",
+		mods = "LEADER",
+		action = act.ActivatePaneDirection("Up"),
+	},
+	{
+		key = "j",
+		mods = "LEADER",
+		action = act.ActivatePaneDirection("Down"),
+	},
+	-- Keybind for launch_menu
+	{ mods = "ALT", key = "l", action = wezterm.action.ShowLauncher },
+}
+
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- Paste Action
@@ -50,10 +112,6 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	}
 end
 
--- Keybind for launch_menu
-config.keys = {
-	{ key = "l", mods = "ALT", action = wezterm.action.ShowLauncher },
-}
 -- Fonts
 config.font = wezterm.font({ family = "IosevkaTerm NF", weight = "Regular" })
 config.font_size = 12
