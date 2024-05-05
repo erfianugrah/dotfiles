@@ -150,6 +150,7 @@ alias wezterm='flatpak run org.wezfurlong.wezterm'
 export NVIM_LOG_FILE=~/.config
 export DOCKER_BUILDKIT=1
 source ~/dotfiles/functions.zsh
+source ~/dotfiles/wezterm.sh
 
 # Attempt to set EDITOR to vim, nano, then code, in that order of preference
 if command -v nvim &> /dev/null; then
