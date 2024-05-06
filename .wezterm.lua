@@ -26,76 +26,76 @@ config.webgpu_preferred_adapter = gpus[1]
 config.scrollback_lines = 5000
 
 -- Tmux alternative
---[[ config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 5000 } ]]
+config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 5000 }
 config.keys = {
-	-- -- splitting panes
-	-- {
-	-- 	mods = "LEADER",
-	-- 	key = "-",
-	-- 	action = act.SplitVertical({ domain = "CurrentPaneDomain" }),
-	-- },
-	-- {
-	-- 	mods = "LEADER",
-	-- 	key = "=",
-	-- 	action = act.SplitHorizontal({ domain = "CurrentPaneDomain" }),
-	-- },
-	-- {
-	-- 	mods = "LEADER",
-	-- 	key = "m",
-	-- 	action = act.TogglePaneZoomState,
-	-- },
-	-- -- rotate panes
-	-- {
-	-- 	mods = "LEADER",
-	-- 	key = "Space",
-	-- 	action = act.RotatePanes("Clockwise"),
-	-- },
-	-- -- show the pane selection mode, but have it swap the active and selected panes
-	-- {
-	-- 	mods = "LEADER",
-	-- 	key = "0",
-	-- 	action = wezterm.action.PaneSelect({
-	-- 		mode = "SwapWithActive",
-	-- 	}),
-	-- },
-	-- {
-	-- 	key = "w",
-	-- 	mods = "LEADER",
-	-- 	action = act.CloseCurrentPane({ confirm = false }),
-	-- },
-	-- {
-	-- 	key = "LeftArrow",
-	-- 	mods = "LEADER",
-	-- 	action = act.ActivatePaneDirection("Left"),
-	-- },
-	-- {
-	-- 	key = "RightArrow",
-	-- 	mods = "LEADER",
-	-- 	action = act.ActivatePaneDirection("Right"),
-	-- },
-	-- {
-	-- 	key = "UpArrow",
-	-- 	mods = "LEADER",
-	-- 	action = act.ActivatePaneDirection("Up"),
-	-- },
-	-- {
-	-- 	key = "DownArrow",
-	-- 	mods = "LEADER",
-	-- 	action = act.ActivatePaneDirection("Down"),
-	-- },
+	-- splitting panes
+	{
+		mods = "LEADER",
+		key = "-",
+		action = act.SplitVertical({ domain = "CurrentPaneDomain" }),
+	},
+	{
+		mods = "LEADER",
+		key = "=",
+		action = act.SplitHorizontal({ domain = "CurrentPaneDomain" }),
+	},
+	{
+		mods = "LEADER",
+		key = "m",
+		action = act.TogglePaneZoomState,
+	},
+	-- rotate panes
+	{
+		mods = "LEADER",
+		key = "Space",
+		action = act.RotatePanes("Clockwise"),
+	},
+	-- show the pane selection mode, but have it swap the active and selected panes
+	{
+		mods = "LEADER",
+		key = "0",
+		action = wezterm.action.PaneSelect({
+			mode = "SwapWithActive",
+		}),
+	},
+	{
+		key = "w",
+		mods = "LEADER",
+		action = act.CloseCurrentPane({ confirm = false }),
+	},
+	{
+		key = "LeftArrow",
+		mods = "LEADER",
+		action = act.ActivatePaneDirection("Left"),
+	},
+	{
+		key = "RightArrow",
+		mods = "LEADER",
+		action = act.ActivatePaneDirection("Right"),
+	},
+	{
+		key = "UpArrow",
+		mods = "LEADER",
+		action = act.ActivatePaneDirection("Up"),
+	},
+	{
+		key = "DownArrow",
+		mods = "LEADER",
+		action = act.ActivatePaneDirection("Down"),
+	},
 	-- Keybind for launch_menu
-	{ mods = "ALT", key = "l", action = wezterm.action.ShowLauncher },
+	{ mods = "ALT", key = "L", action = wezterm.action.ShowLauncher },
 }
 
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- Paste Action
-	config.keys = {
-		-- paste from the clipboard
-		{ key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") },
-		-- paste from the primary selection
-		{ key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
-	}
+	-- config.keys = {
+	-- 	-- paste from the clipboard
+	-- 	{ key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") },
+	-- 	-- paste from the primary selection
+	-- 	{ key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
+	-- }
 	-- GPU
 	config.front_end = "WebGpu"
 	config.webgpu_preferred_adapter = gpus[1]
