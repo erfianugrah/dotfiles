@@ -25,9 +25,26 @@ config.webgpu_preferred_adapter = gpus[1]
 --Scrollback
 config.scrollback_lines = 5000
 
+-- Switching to relative workspaces
+wezterm.on("update-right-status", function(window, pane)
+	window:set_right_status(window:active_workspace())
+end)
+
 -- Tmux alternative
-config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 5000 }
+config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 2000 }
 config.keys = {
+	-- Relative Navigation for workspaces
+	{ key = "n", mods = "LEADER", action = act.SwitchWorkspaceRelative(1) },
+	{ key = "p", mods = "LEADER", action = act.SwitchWorkspaceRelative(-1) },
+	-- Show the launcher in fuzzy selection mode and have it list all workspaces
+	-- and allow activating one.
+	{
+		key = "c",
+		mods = "LEADER",
+		action = act.ShowLauncherArgs({
+			flags = "FUZZY|WORKSPACES",
+		}),
+	},
 	-- splitting panes
 	{
 		mods = "LEADER",
@@ -58,28 +75,30 @@ config.keys = {
 			mode = "SwapWithActive",
 		}),
 	},
+	-- Close Current Pane
 	{
 		key = "w",
 		mods = "LEADER",
 		action = act.CloseCurrentPane({ confirm = false }),
 	},
+	-- Pane Navigation
 	{
-		key = "LeftArrow",
+		key = "h",
 		mods = "LEADER",
 		action = act.ActivatePaneDirection("Left"),
 	},
 	{
-		key = "RightArrow",
+		key = "l",
 		mods = "LEADER",
 		action = act.ActivatePaneDirection("Right"),
 	},
 	{
-		key = "UpArrow",
+		key = "k",
 		mods = "LEADER",
 		action = act.ActivatePaneDirection("Up"),
 	},
 	{
-		key = "DownArrow",
+		key = "j",
 		mods = "LEADER",
 		action = act.ActivatePaneDirection("Down"),
 	},
