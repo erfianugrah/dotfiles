@@ -1,6 +1,6 @@
 -- Pull in the wezterm API
 local wezterm = require("wezterm")
-
+local mux = wezterm.mux
 -- This will hold the configuration.
 local config = wezterm.config_builder()
 local gpus = wezterm.gui.enumerate_gpus()
@@ -45,6 +45,11 @@ config.keys = {
 			flags = "FUZZY|WORKSPACES",
 		}),
 	},
+	-- {
+	-- 	key = "r",
+	-- 	mods = "LEADER",
+	-- 	action = mux.rename_workspace(mux.get_active_workspace()),
+	-- },
 	-- splitting panes
 	{
 		mods = "LEADER",
@@ -71,7 +76,7 @@ config.keys = {
 	{
 		mods = "LEADER",
 		key = "0",
-		action = wezterm.action.PaneSelect({
+		action = act.PaneSelect({
 			mode = "SwapWithActive",
 		}),
 	},
@@ -85,7 +90,7 @@ config.keys = {
 	{
 		key = "x",
 		mods = "LEADER",
-		action = wezterm.action.CloseCurrentTab({ confirm = true }),
+		action = act.CloseCurrentTab({ confirm = true }),
 	},
 	-- Pane Navigation
 	{
