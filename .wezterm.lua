@@ -81,6 +81,12 @@ config.keys = {
 		mods = "LEADER",
 		action = act.CloseCurrentPane({ confirm = false }),
 	},
+	-- Close Current Tab
+	{
+		key = "x",
+		mods = "LEADER",
+		action = wezterm.action.CloseCurrentTab({ confirm = true }),
+	},
 	-- Pane Navigation
 	{
 		key = "h",
