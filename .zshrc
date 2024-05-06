@@ -107,8 +107,8 @@ plugins=(
   rust
 )
 
-ZSH_TMUX_AUTOSTART=true
-ZSH_TMUX_DEFAULT_SESSION_NAME="default"
+# ZSH_TMUX_AUTOSTART=true
+# ZSH_TMUX_DEFAULT_SESSION_NAME="default"
 
 autoload -U compinit && compinit
 
