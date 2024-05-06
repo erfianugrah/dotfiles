@@ -24,7 +24,68 @@ config.webgpu_preferred_adapter = gpus[1]
 
 --Scrollback
 config.scrollback_lines = 5000
-config.debug_key_events = true
+
+-- Tmux alternative
+--[[ config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 5000 } ]]
+config.keys = {
+	-- -- splitting panes
+	-- {
+	-- 	mods = "LEADER",
+	-- 	key = "-",
+	-- 	action = act.SplitVertical({ domain = "CurrentPaneDomain" }),
+	-- },
+	-- {
+	-- 	mods = "LEADER",
+	-- 	key = "=",
+	-- 	action = act.SplitHorizontal({ domain = "CurrentPaneDomain" }),
+	-- },
+	-- {
+	-- 	mods = "LEADER",
+	-- 	key = "m",
+	-- 	action = act.TogglePaneZoomState,
+	-- },
+	-- -- rotate panes
+	-- {
+	-- 	mods = "LEADER",
+	-- 	key = "Space",
+	-- 	action = act.RotatePanes("Clockwise"),
+	-- },
+	-- -- show the pane selection mode, but have it swap the active and selected panes
+	-- {
+	-- 	mods = "LEADER",
+	-- 	key = "0",
+	-- 	action = wezterm.action.PaneSelect({
+	-- 		mode = "SwapWithActive",
+	-- 	}),
+	-- },
+	-- {
+	-- 	key = "w",
+	-- 	mods = "LEADER",
+	-- 	action = act.CloseCurrentPane({ confirm = false }),
+	-- },
+	-- {
+	-- 	key = "LeftArrow",
+	-- 	mods = "LEADER",
+	-- 	action = act.ActivatePaneDirection("Left"),
+	-- },
+	-- {
+	-- 	key = "RightArrow",
+	-- 	mods = "LEADER",
+	-- 	action = act.ActivatePaneDirection("Right"),
+	-- },
+	-- {
+	-- 	key = "UpArrow",
+	-- 	mods = "LEADER",
+	-- 	action = act.ActivatePaneDirection("Up"),
+	-- },
+	-- {
+	-- 	key = "DownArrow",
+	-- 	mods = "LEADER",
+	-- 	action = act.ActivatePaneDirection("Down"),
+	-- },
+	-- Keybind for launch_menu
+	{ mods = "ALT", key = "l", action = wezterm.action.ShowLauncher },
+}
 
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
@@ -34,12 +95,7 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 		{ key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") },
 		-- paste from the primary selection
 		{ key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
-		-- test
-		--[[ { key = "v", mods = "CTRL", action = act.Nop }, ]]
 	}
-	--[[ 	config.canonicalize_pasted_newlines = "LineFeed" ]]
-	--[[ config.allow_win32_input_mode = false ]]
-
 	-- GPU
 	config.front_end = "WebGpu"
 	config.webgpu_preferred_adapter = gpus[1]
@@ -56,13 +112,9 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	}
 end
 
--- Keybind for launch_menu
-config.keys = {
-	{ key = "l", mods = "ALT", action = wezterm.action.ShowLauncher },
-}
 -- Fonts
 config.font = wezterm.font({ family = "IosevkaTerm NF", weight = "Regular" })
-config.font_size = 11.5
+config.font_size = 11
 config.line_height = 1
 
 -- Window Close Prompt
