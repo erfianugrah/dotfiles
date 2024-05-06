@@ -4,6 +4,7 @@ alsa-lib
 attr
 bandwhich
 bat
+bat-extras
 berkeley-db
 berkeley-db@5
 binutils
