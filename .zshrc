@@ -114,6 +114,7 @@ autoload -U compinit && compinit
 
 source $ZSH/oh-my-zsh.sh
 source ~/zsh-defer/zsh-defer.plugin.zsh
+
 # User configuration
 
 # export MANPATH="/usr/local/man:$MANPATH"
@@ -156,6 +157,7 @@ export DOCKER_BUILDKIT=1
 # export STARSHIP_CONFIG=/home/erfi/starship.toml
 # export STARSHIP_CACHE=/home/erfi/.starship/cache
 source ~/dotfiles/functions.zsh
+source ~/dotfiles/wezterm.sh
 
 # Attempt to set EDITOR to vim, nano, then code, in that order of preference
 if command -v nvim &> /dev/null; then
