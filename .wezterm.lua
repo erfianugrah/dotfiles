@@ -114,7 +114,7 @@ config.keys = {
 		action = act.ActivatePaneDirection("Down"),
 	},
 	-- Keybind for launch_menu
-	{ mods = "ALT", key = "L", action = wezterm.action.ShowLauncher },
+	{ mods = "ALT", key = "l", action = wezterm.action.ShowLauncher },
 }
 
 -- Windows
