@@ -1,6 +1,6 @@
 -- Pull in the wezterm API
 local wezterm = require("wezterm")
-
+local mux = wezterm.mux
 -- This will hold the configuration.
 local config = wezterm.config_builder()
 local gpus = wezterm.gui.enumerate_gpus()
@@ -25,9 +25,31 @@ config.webgpu_preferred_adapter = gpus[1]
 --Scrollback
 config.scrollback_lines = 5000
 
+-- Switching to relative workspaces
+wezterm.on("update-right-status", function(window, pane)
+	window:set_right_status(window:active_workspace())
+end)
+
 -- Tmux alternative
-config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 5000 }
+config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 2000 }
 config.keys = {
+	-- Relative Navigation for workspaces
+	{ key = "n", mods = "LEADER", action = act.SwitchWorkspaceRelative(1) },
+	{ key = "p", mods = "LEADER", action = act.SwitchWorkspaceRelative(-1) },
+	-- Show the launcher in fuzzy selection mode and have it list all workspaces
+	-- and allow activating one.
+	{
+		key = "c",
+		mods = "LEADER",
+		action = act.ShowLauncherArgs({
+			flags = "FUZZY|WORKSPACES",
+		}),
+	},
+	-- {
+	-- 	key = "r",
+	-- 	mods = "LEADER",
+	-- 	action = mux.rename_workspace(mux.get_active_workspace()),
+	-- },
 	-- splitting panes
 	{
 		mods = "LEADER",
@@ -54,15 +76,23 @@ config.keys = {
 	{
 		mods = "LEADER",
 		key = "0",
-		action = wezterm.action.PaneSelect({
+		action = act.PaneSelect({
 			mode = "SwapWithActive",
 		}),
 	},
+	-- Close Current Pane
 	{
 		key = "w",
 		mods = "LEADER",
 		action = act.CloseCurrentPane({ confirm = false }),
 	},
+	-- Close Current Tab
+	{
+		key = "x",
+		mods = "LEADER",
+		action = act.CloseCurrentTab({ confirm = true }),
+	},
+	-- Pane Navigation
 	{
 		key = "h",
 		mods = "LEADER",
@@ -90,12 +120,12 @@ config.keys = {
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- Paste Action
-	config.keys = {
-		-- paste from the clipboard
-		{ key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") },
-		-- paste from the primary selection
-		{ key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
-	}
+	-- config.keys = {
+	-- 	-- paste from the clipboard
+	-- 	{ key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") },
+	-- 	-- paste from the primary selection
+	-- 	{ key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
+	-- }
 	-- GPU
 	config.front_end = "WebGpu"
 	config.webgpu_preferred_adapter = gpus[1]
