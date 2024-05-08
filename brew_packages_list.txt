@@ -154,8 +154,10 @@ pixman
 pkg-config
 prettierd
 procs
-python@3.11
-python@3.12
+python-charset-normalizer
+python-idna
+python-requests
+python-urllib3
 readline
 ripgrep
 rm-improved
