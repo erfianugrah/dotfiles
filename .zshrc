@@ -151,7 +151,7 @@ alias v=nvim
 alias ls=eza
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
-# export TF_LOG=debug
+export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
 # export STARSHIP_CONFIG=/home/erfi/starship.toml
