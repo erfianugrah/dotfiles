@@ -39,10 +39,34 @@ config.keys = {
 	-- Show the launcher in fuzzy selection mode and have it list all workspaces
 	-- and allow activating one.
 	{
-		key = "c",
+		key = "s",
 		mods = "LEADER",
 		action = act.ShowLauncherArgs({
 			flags = "FUZZY|WORKSPACES",
+		}),
+	},
+	{
+		key = "c",
+		mods = "LEADER",
+		action = act.PromptInputLine({
+			description = wezterm.format({
+				{ Attribute = { Intensity = "Bold" } },
+				{ Foreground = { AnsiColor = "Fuchsia" } },
+				{ Text = "Enter name for new workspace" },
+			}),
+			action = wezterm.action_callback(function(window, pane, line)
+				-- line will be `nil` if they hit escape without entering anything
+				-- An empty string if they just hit enter
+				-- Or the actual line of text they wrote
+				if line then
+					window:perform_action(
+						act.SwitchToWorkspace({
+							name = line,
+						}),
+						pane
+					)
+				end
+			end),
 		}),
 	},
 	-- {
@@ -116,7 +140,13 @@ config.keys = {
 	-- Keybind for launch_menu
 	{ mods = "ALT", key = "l", action = wezterm.action.ShowLauncher },
 }
-
+for i = 1, 8 do
+	table.insert(config.keys, {
+		key = tostring(i),
+		mods = "LEADER",
+		action = act.ActivateTab(i - 1),
+	})
+end
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- Paste Action
