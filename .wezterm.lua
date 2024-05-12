@@ -23,7 +23,7 @@ config.front_end = "WebGpu"
 config.webgpu_preferred_adapter = gpus[1]
 
 --Scrollback
-config.scrollback_lines = 5000
+config.scrollback_lines = 10000
 
 -- Switching to relative workspaces
 wezterm.on("update-right-status", function(window, pane)
