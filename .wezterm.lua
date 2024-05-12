@@ -169,6 +169,11 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 			domain = { DomainName = "local" },
 			args = { "powershell.exe", "-NoLogo" },
 		},
+		{
+			label = "Command Prompt",
+			domain = { DomainName = "local" },
+			args = { "cmd.exe" },
+		},
 	}
 end
 
