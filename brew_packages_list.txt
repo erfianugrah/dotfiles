@@ -22,6 +22,7 @@ certifi
 cf-terraforming
 cloudflared
 cmatrix
+concurrencykit
 cups
 curl
 dbus
@@ -69,6 +70,7 @@ kompose
 krb5
 kubelogin
 kubernetes-cli
+ldns
 libassuan
 libcap
 libedit
@@ -158,6 +160,8 @@ python-charset-normalizer
 python-idna
 python-requests
 python-urllib3
+python@3.11
+python@3.12
 readline
 ripgrep
 rm-improved
