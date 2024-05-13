@@ -50,10 +50,16 @@ decrypt() {
 
 encrypt_tf() {
   encrypt secrets.tfvars && encrypt terraform.tfstate && encrypt terraform.tfstate.backup
+  for file in *.tfstate*; do
+    encrypt "$file"
+  done
 }
 
 decrypt_tf() {
   decrypt secrets.tfvars && decrypt terraform.tfstate && decrypt terraform.tfstate.backup
+  for file in *.tfstate*; do
+    decrypt "$file"
+  done
 }
 
 ansible_on() {
