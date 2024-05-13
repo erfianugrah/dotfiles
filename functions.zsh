@@ -188,10 +188,14 @@ load_bw() {
   load_from_bitwarden_and_set_env "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_ACCOUNT_ID"
   load_from_bitwarden_and_set_env "CLOUDFLARE_ZONE_ID" "CLOUDFLARE_ZONE_ID"
   load_from_bitwarden_and_set_env "CLOUDFLARE_API_KEY" "CLOUDFLARE_API_KEY"
-  load_from_bitwarden_and_set_env "CLOUDFLARE_API_TOKEN" "CLOUDFLARE_API_TOKEN"
   load_from_bitwarden_and_set_env "CLOUDFLARE_ACCESS_OLLAMA_ID" "CLOUDFLARE_ACCESS_OLLAMA_ID"
   load_from_bitwarden_and_set_env "CLOUDFLARE_ACCESS_OLLAMA_SECRET" "CLOUDFLARE_ACCESS_OLLAMA_SECRET"
+  load_from_bitwarden_and_set_env "CARGO_ROOT_KEY" "CARGO_REGISTRY_TOKEN"
   load_sops_age_keys
+}
+
+load_wrangler_token() {
+  load_from_bitwarden_and_set_env "CLOUDFLARE_API_TOKEN" "CLOUDFLARE_API_TOKEN"
 }
 
 p10k_colours() {
