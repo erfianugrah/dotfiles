@@ -24,6 +24,15 @@ config.webgpu_preferred_adapter = gpus[1]
 
 --Scrollback
 config.scrollback_lines = 10000
+act.SendKey({
+	key = "RightArrow",
+	mods = "CTRL",
+})
+
+act.SendKey({
+	key = "LeftArrow",
+	mods = "CTRL",
+})
 
 -- Switching to relative workspaces
 wezterm.on("update-right-status", function(window, pane)
@@ -33,6 +42,32 @@ end)
 -- Tmux alternative
 config.leader = { key = "a", mods = "CTRL", timeout_milliseconds = 2000 }
 config.keys = {
+	-- Jump words
+	{
+		key = "LeftArrow",
+		mods = "CTRL",
+		action = act.SendKey({
+			key = "b",
+			mods = "ALT",
+		}),
+	},
+	{
+		key = "RightArrow",
+		mods = "CTRL",
+		action = act.SendKey({
+			key = "f",
+			mods = "ALT",
+		}),
+	},
+	-- Delete by word
+	{
+		key = "Backspace",
+		mods = "CTRL",
+		action = act.SendKey({
+			key = "w",
+			mods = "CTRL",
+		}),
+	},
 	-- Relative Navigation for workspaces
 	{ key = "n", mods = "LEADER", action = act.SwitchWorkspaceRelative(1) },
 	{ key = "p", mods = "LEADER", action = act.SwitchWorkspaceRelative(-1) },
