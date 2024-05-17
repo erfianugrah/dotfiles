@@ -224,7 +224,7 @@ alias v=nvim
 alias ls=eza
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
-alias z=cd
+alias z=j
 export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
@@ -258,4 +258,4 @@ fi
 [ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"
 
 eval "$(fzf --zsh)"
-eval "$(zoxide init --cmd cd zsh)"
+eval "$(zoxide init --cmd j zsh)"
