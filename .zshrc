@@ -153,6 +153,8 @@ zinit snippet OMZP::gh
 zinit snippet OMZP::debian
 zinit snippet OMZP::rust
 zinit snippet OMZP::colored-man-pages
+zinit snippet OMZP::zsh-interactive-cd
+zinit snippet OMZP::zsh-navigation-tools
 
 autoload -Uz compinit && compinit
 zinit cdreplay -q
