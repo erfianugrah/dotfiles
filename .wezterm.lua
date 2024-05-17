@@ -59,6 +59,15 @@ config.keys = {
 			mods = "ALT",
 		}),
 	},
+	-- Delete by word
+	{
+		key = "Backspace",
+		mods = "CTRL",
+		action = act.SendKey({
+			key = "w",
+			mods = "CTRL",
+		}),
+	},
 	-- Relative Navigation for workspaces
 	{ key = "n", mods = "LEADER", action = act.SwitchWorkspaceRelative(1) },
 	{ key = "p", mods = "LEADER", action = act.SwitchWorkspaceRelative(-1) },
