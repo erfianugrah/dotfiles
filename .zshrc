@@ -101,6 +101,7 @@ plugins=(
   python
   pip
   gh
+  rust
 )
 
 # ZSH_TMUX_AUTOSTART=true
