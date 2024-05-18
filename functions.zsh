@@ -92,7 +92,7 @@ unlock_bw_if_locked() {
                 # Check if maximum retries have been reached
                 if [[ $retries -eq $max_retries ]]; then
                     echo "Failed to set BW_SESSION environment variable after $max_retries attempts." >&2
-                    exit 1
+                    return 1
                 fi
             else
                 echo "BW_SESSION set successfully."
