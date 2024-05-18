@@ -22,7 +22,6 @@ certifi
 cf-terraforming
 cloudflared
 cmatrix
-concurrencykit
 cups
 curl
 dbus
@@ -72,7 +71,6 @@ kompose
 krb5
 kubelogin
 kubernetes-cli
-ldns
 libassuan
 libcap
 libedit
@@ -175,6 +173,7 @@ scc
 sqlite
 sslscan
 systemd
+terraform
 terraform-ls
 texinfo
 tflint
