@@ -232,6 +232,7 @@ alias cft=cf-terraforming
 alias p=python3
 alias v=nvim
 alias ls=eza
+alias cat=bat
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
 # alias z=j
