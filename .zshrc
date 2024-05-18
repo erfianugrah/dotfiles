@@ -32,8 +32,10 @@ zinit light zsh-users/zsh-syntax-highlighting
 zinit light zsh-users/zsh-completions
 zinit light zsh-users/zsh-autosuggestions
 zinit light Aloxaf/fzf-tab
+zinit light zsh-users/zsh-history-substring-search
+
 # # Path to your oh-my-zsh installation.
-# export ZSH=$HOME/.oh-my-zsh
+export ZSH=$HOME/.oh-my-zsh
 
 # Set name of the theme to load --- if set to "random", it will
 # load a random theme each time oh-my-zsh is loaded, in which case,
@@ -131,6 +133,7 @@ zinit light Aloxaf/fzf-tab
 
 # ZSH_TMUX_AUTOSTART=true
 # ZSH_TMUX_DEFAULT_SESSION_NAME="default"
+
 # Add in snippets
 zinit snippet OMZP::git
 zinit snippet OMZP::git-auto-fetch
@@ -167,9 +170,11 @@ zinit cdreplay -q
 bindkey '^p' history-search-backward
 bindkey '^n' history-search-forward
 bindkey '^[w' kill-region
+bindkey '^[[A' history-substring-search-up
+bindkey '^[[B' history-substring-search-down
 
 # History
-HISTSIZE=100000
+HISTSIZE=10000000
 HISTFILE=~/.zsh_history
 SAVEHIST=$HISTSIZE
 HISTDUP=erase
@@ -187,7 +192,7 @@ zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 zstyle ':completion:*' menu no
 zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls $realpath'
 zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls $realpath'
-# source $ZSH/oh-my-zsh.sh
+source $ZSH/oh-my-zsh.sh
 # source ~/zsh-defer/zsh-defer.plugin.zsh
 
 # User configuration
