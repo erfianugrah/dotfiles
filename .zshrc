@@ -33,6 +33,8 @@ zinit light zsh-users/zsh-syntax-highlighting
 zinit light zsh-users/zsh-completions
 zinit light zsh-users/zsh-autosuggestions
 zinit light Aloxaf/fzf-tab
+zinit light zsh-users/zsh-history-substring-search
+zinit light zdharma-continuum/fast-syntax-highlighting
 # Set name of the theme to load --- if set to "random", it will
 # load a random theme each time oh-my-zsh is loaded, in which case,
 # to know which specific one was loaded, run: echo $RANDOM_THEME
@@ -145,6 +147,8 @@ zinit snippet OMZP::python
 zinit snippet OMZP::debian
 zinit snippet OMZP::rust
 zinit snippet OMZP::colored-man-pages
+zinit snippet OMZP::zsh-interactive-cd
+zinit snippet OMZP::zsh-navigation-tools
 
 
 autoload -Uz compinit && compinit
@@ -156,6 +160,15 @@ autoload -Uz compinit && compinit
 zinit cdreplay -q
 
 source $ZSH/oh-my-zsh.sh
+
+# Keybindings
+# bindkey -e
+bindkey '^p' history-search-backward
+bindkey '^n' history-search-forward
+bindkey '^[w' kill-region
+bindkey '^[[A' history-substring-search-up
+bindkey '^[[B' history-substring-search-down
+
 # User configuration
 # History
 HISTSIZE=100000
