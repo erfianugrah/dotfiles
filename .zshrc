@@ -28,12 +28,13 @@ source "${ZINIT_HOME}/zinit.zsh"
 zinit ice depth=1; zinit light romkatv/powerlevel10k
 
 # Add in zsh plugins
-zinit light zsh-users/zsh-syntax-highlighting
+# zinit light zsh-users/zsh-syntax-highlighting
 zinit light zsh-users/zsh-completions
 zinit light zsh-users/zsh-autosuggestions
 zinit light Aloxaf/fzf-tab
 zinit light zsh-users/zsh-history-substring-search
-
+zinit light zdharma-continuum/fast-syntax-highlighting
+# zinit light marlonrichert/zsh-autocomplete
 # # Path to your oh-my-zsh installation.
 export ZSH=$HOME/.oh-my-zsh
 
@@ -174,6 +175,7 @@ bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
 
 # History
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 HISTSIZE=10000000
 HISTFILE=~/.zsh_history
 SAVEHIST=$HISTSIZE
@@ -192,6 +194,8 @@ zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 zstyle ':completion:*' menu no
 zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls $realpath'
 zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls $realpath'
+zstyle ':fzf-tab:complete:__zoxide_zi:*' fzf-preview 'ls $realpath'
+zstyle ':fzf-tab:complete:__zoxide_j:*' fzf-preview 'ls $realpath'
 source $ZSH/oh-my-zsh.sh
 # source ~/zsh-defer/zsh-defer.plugin.zsh
 
@@ -231,7 +235,7 @@ alias v=nvim
 alias ls=eza
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
-alias z=j
+# alias z=j
 export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
@@ -265,4 +269,4 @@ fi
 [ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"
 
 eval "$(fzf --zsh)"
-eval "$(zoxide init --cmd j zsh)"
+eval "$(zoxide init zsh)"

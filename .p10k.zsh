@@ -109,7 +109,7 @@
     # wifi                  # wifi speed
     # example               # example user-defined segment (see prompt_example function below)
   )
-
+typeset -g POWERLEVEL9K_INSTANT_PROMPT=quiet
   # Defines character set used by powerlevel10k. It's best to let `p10k configure` set it for you.
   typeset -g POWERLEVEL9K_MODE=nerdfont-v3
   # When set to `moderate`, some icons will have an extra space after them. This is meant to avoid
