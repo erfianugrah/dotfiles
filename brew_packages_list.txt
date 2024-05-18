@@ -32,11 +32,13 @@ diff-so-fancy
 duf
 dust
 elfutils
+entr
 exiftool
 expat
 eza
 fontconfig
 freetype
+fzf
 gcc
 gcc@11
 gdbm
@@ -114,9 +116,11 @@ libxslt
 libxt
 libxtst
 libyaml
+libzip
 linux-headers@5.15
 little-cms2
 llvm
+lpeg
 ltex-ls
 lua
 luajit
@@ -175,6 +179,7 @@ terraform-ls
 texinfo
 tflint
 thefuck
+tldr
 tmux
 tre-command
 tree-sitter
@@ -190,6 +195,7 @@ xz
 z3
 zip
 zlib
+zoxide
 zsh
 zsh-async
 zstd
