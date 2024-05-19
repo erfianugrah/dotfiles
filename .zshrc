@@ -75,7 +75,7 @@ export ZSH=$HOME/.oh-my-zsh
 # DISABLE_AUTO_TITLE="true"
 
 # Uncomment the following line to enable command auto-correction.
-# ENABLE_CORRECTION="true"
+ENABLE_CORRECTION="true"
 
 # Uncomment the following line to display red dots whilst waiting for completion.
 # You can also set it to another string to have that shown instead of the default red dots.
@@ -195,7 +195,7 @@ zstyle ':completion:*' menu no
 zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls $realpath'
 zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls $realpath'
 zstyle ':fzf-tab:complete:__zoxide_zi:*' fzf-preview 'ls $realpath'
-source $ZSH/oh-my-zsh.sh
+# source $ZSH/oh-my-zsh.sh
 # source ~/zsh-defer/zsh-defer.plugin.zsh
 
 # User configuration
