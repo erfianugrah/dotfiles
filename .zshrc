@@ -195,7 +195,7 @@ zstyle ':completion:*' menu no
 zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls $realpath'
 zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls $realpath'
 zstyle ':fzf-tab:complete:__zoxide_zi:*' fzf-preview 'ls $realpath'
-# source $ZSH/oh-my-zsh.sh
+source $ZSH/oh-my-zsh.sh
 # source ~/zsh-defer/zsh-defer.plugin.zsh
 
 # User configuration
