@@ -75,7 +75,7 @@ export ZSH=$HOME/.oh-my-zsh
 # DISABLE_AUTO_TITLE="true"
 
 # Uncomment the following line to enable command auto-correction.
-ENABLE_CORRECTION="true"
+# ENABLE_CORRECTION="true"
 
 # Uncomment the following line to display red dots whilst waiting for completion.
 # You can also set it to another string to have that shown instead of the default red dots.
@@ -157,8 +157,8 @@ zinit snippet OMZP::gh
 zinit snippet OMZP::debian
 zinit snippet OMZP::rust
 zinit snippet OMZP::colored-man-pages
-zinit snippet OMZP::zsh-interactive-cd
-zinit snippet OMZP::zsh-navigation-tools
+# zinit snippet OMZP::zsh-interactive-cd
+# zinit snippet OMZP::zsh-navigation-tools
 
 autoload -Uz compinit && compinit
 zinit cdreplay -q
@@ -175,7 +175,7 @@ bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
 
 # History
-ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+# ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 HISTSIZE=10000000
 HISTFILE=~/.zsh_history
 SAVEHIST=$HISTSIZE
@@ -193,8 +193,7 @@ zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 zstyle ':completion:*' menu no
 zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls $realpath'
-zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls $realpath'
-zstyle ':fzf-tab:complete:__zoxide_zi:*' fzf-preview 'ls $realpath'
+zstyle ':fzf-tab:complete:z:*' fzf-preview 'ls $realpath'
 source $ZSH/oh-my-zsh.sh
 # source ~/zsh-defer/zsh-defer.plugin.zsh
 
