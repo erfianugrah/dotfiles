@@ -13,6 +13,7 @@ bitwarden-cli
 bpytop
 brotli
 btop
+bun
 bzip2
 c-ares
 ca-certificates
@@ -32,6 +33,7 @@ duf
 dust
 elfutils
 entr
+eslint
 exiftool
 expat
 eza
@@ -156,7 +158,6 @@ pinentry
 pipx
 pixman
 pkg-config
-prettierd
 procs
 python-charset-normalizer
 python-idna
