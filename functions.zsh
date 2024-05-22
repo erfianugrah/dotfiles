@@ -195,7 +195,7 @@ load_bw() {
 }
 
 load_wrangler_token() {
-  load_from_bitwarden_and_set_env "CLOUDFLARE_API_TOKEN" "CLOUDFLARE_API_TOKEN"
+  load_from_bitwarden_and_set_env "CLOUDFLARE_WRANGLER_TOKEN" "CLOUDFLARE_API_TOKEN"
 }
 
 p10k_colours() {
