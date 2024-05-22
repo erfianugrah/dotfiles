@@ -265,8 +265,5 @@ fi
 #   fi
 # fi
 
-# bun completions
-[ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"
-
 eval "$(fzf --zsh)"
 eval "$(zoxide init zsh)"
