@@ -209,6 +209,11 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 			domain = { DomainName = "local" },
 			args = { "cmd.exe" },
 		},
+		{
+			label = "WSL2",
+			domain = { DomainName = "local" },
+			args = { "wsl.exe" },
+		},
 	}
 end
 
