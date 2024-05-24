@@ -139,6 +139,12 @@ config.keys = {
 			mode = "SwapWithActive",
 		}),
 	},
+	-- Open new tab in current domain
+	{
+		key = "t",
+		mods = "LEADER",
+		action = act.SpawnTab("CurrentPaneDomain"),
+	},
 	-- Close Current Pane
 	{
 		key = "w",
