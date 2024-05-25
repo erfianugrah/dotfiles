@@ -12,6 +12,8 @@
 	useHttpPath = true
 [credential]
 	credentialStore = cache
+	helper = 
+	helper = /usr/local/bin/git-credential-manager
 ; [commit]
 ; 	gpgsign = true
 [alias]
