@@ -191,6 +191,7 @@ load_bw() {
   load_from_bitwarden_and_set_env "CLOUDFLARE_ACCESS_OLLAMA_ID" "CLOUDFLARE_ACCESS_OLLAMA_ID"
   load_from_bitwarden_and_set_env "CLOUDFLARE_ACCESS_OLLAMA_SECRET" "CLOUDFLARE_ACCESS_OLLAMA_SECRET"
   load_from_bitwarden_and_set_env "CARGO_ROOT_KEY" "CARGO_REGISTRY_TOKEN"
+  load_from_bitwarden_and_set_env "GITHUB_PAT_ZSH" "GITHUB_TOKEN"
   load_sops_age_keys
 }
 

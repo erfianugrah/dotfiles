@@ -2,8 +2,6 @@
 #### Install zsh with brew or apt or bash
 
 ```markdown
-brew install zsh
-sudo apt-get install zsh
 sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
 ```
 #### Install powerlevel10k theme and set it as the default theme

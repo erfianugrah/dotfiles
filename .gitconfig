@@ -12,13 +12,8 @@
 	useHttpPath = true
 [credential]
 	credentialStore = cache
-  guiPrompt = false
-	helper = 
-	helper = /usr/local/bin/git-credential-manager
-[user]
-	signingkey = AEF0D6CDEA5FBB1C
-[commit]
-	gpgsign = true
+; [commit]
+; 	gpgsign = true
 [alias]
 	dsf = diff --color
 [pager]
