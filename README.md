@@ -2,6 +2,7 @@
 #### Install Pacman packages
 ```sh
 sudo pacman -Q|cut -f 1 -d " "
+pacman -S --needed git base-devel && git clone https://aur.archlinux.org/yay-bin.git && cd yay-bin && makepkg -si
 ```
 ```sh
 xargs sudo pacman -S < pacman_packages.txt
