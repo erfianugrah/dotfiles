@@ -50,6 +50,8 @@ cdparanoia
 chromaprint
 cifs-utils
 cjson
+cloudflare-warp-bin
+cloudflare-warp-bin-debug
 cloudflared
 colord
 colord-gtk-common
@@ -73,6 +75,7 @@ default-cursors
 deno
 desktop-file-utils
 device-mapper
+diff-so-fancy
 diffutils
 djvulibre
 docker
@@ -154,6 +157,7 @@ gnome-desktop-4
 gnome-desktop-common
 gnome-disk-utility
 gnome-font-viewer
+gnome-keybindings
 gnome-keyring
 gnome-logs
 gnome-maps
@@ -551,6 +555,7 @@ neovim
 net-snmp
 nettle
 networkmanager
+nftables
 node-gyp
 nodejs
 nodejs-nopt
@@ -740,6 +745,8 @@ xorgproto
 xvidcore
 xxhash
 xz
+yay-bin
+yay-bin-debug
 yelp
 yelp-xsl
 zbar

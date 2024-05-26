@@ -5,7 +5,7 @@ sudo pacman -Q|cut -f 1 -d " "
 pacman -S --needed git base-devel && git clone https://aur.archlinux.org/yay-bin.git && cd yay-bin && makepkg -si
 ```
 ```sh
-xargs sudo pacman -S < pacman_packages.txt
+xargs sudo pacman -S --noconfirm --needed < pacman_packages.txt
 ```
 #### Install Meslo Nerd Font
 
@@ -38,5 +38,5 @@ age-keygen -o key.txt
 ##### bitwarden-cli, a CLI for accessing the Bitwarden password manager
 
 ```sh
-npm -i -g bitwarden-cli
+sudo npm i -g @bitwarden/cli
 ```
