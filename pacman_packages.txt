@@ -79,7 +79,13 @@ diff-so-fancy
 diffutils
 djvulibre
 docker
+docker-compose
 dotconf
+dotnet-host
+dotnet-runtime
+dotnet-sdk
+dotnet-targeting-pack
+dpkg
 duktape
 e2fsprogs
 editorconfig-core-c
@@ -553,6 +559,7 @@ ncurses
 neon
 neovim
 net-snmp
+netstandard-targeting-pack
 nettle
 networkmanager
 nftables
