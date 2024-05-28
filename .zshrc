@@ -151,8 +151,8 @@ zinit snippet OMZP::command-not-found
 zinit snippet OMZP::terraform
 zinit snippet OMZP::tmux
 zinit snippet OMZP::npm
-# zinit snippet OMZP::docker-compose
-# zinit snippet OMZP::docker
+zinit snippet OMZP::docker-compose
+zinit snippet OMZP::docker
 zinit snippet OMZP::python
 zinit snippet OMZP::gh
 zinit snippet OMZP::debian
