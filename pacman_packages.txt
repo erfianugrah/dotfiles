@@ -5,6 +5,7 @@ acl
 adobe-source-code-pro-fonts
 adwaita-cursors
 adwaita-icon-theme
+adwaita-icon-theme-legacy
 age
 alsa-card-profiles
 alsa-lib
@@ -28,6 +29,7 @@ base
 base-devel
 bash
 bat
+bind
 binutils
 bison
 bluez
@@ -36,6 +38,7 @@ bolt
 bridge-utils
 brltty
 brotli
+btop
 btrfs-progs
 bubblewrap
 bzip2
@@ -78,6 +81,7 @@ device-mapper
 diff-so-fancy
 diffutils
 djvulibre
+dnssec-anchors
 docker
 docker-compose
 dotconf
@@ -254,6 +258,7 @@ ijs
 imagemagick
 imath
 imlib2
+intel-gpu-tools
 iproute2
 iptables
 iputils
@@ -261,6 +266,7 @@ iso-codes
 jansson
 jbig2dec
 jbigkit
+jemalloc
 jq
 js115
 json-c
@@ -383,6 +389,7 @@ libltc
 libluv
 libmalcontent
 libmanette
+libmaxminddb
 libmd
 libmediaart
 libmicrodns
@@ -430,6 +437,7 @@ libpng
 libportal
 libportal-gtk3
 libportal-gtk4
+libprocps
 libproxy
 libpsl
 libpulse
@@ -474,6 +482,8 @@ libusbmuxd
 libutempter
 libuv
 libva
+libva-intel-driver
+libva-utils
 libvdpau
 libverto
 libvncserver
@@ -553,6 +563,7 @@ mpg123
 msgpack-c
 msgraph
 mtdev
+mtr
 mutter
 nautilus
 ncurses
@@ -597,6 +608,7 @@ pciutils
 pcre
 pcre2
 pcsclite
+peg
 perl
 perl-error
 perl-mailtools
@@ -675,6 +687,7 @@ systemd-sysvcompat
 taglib
 talloc
 tar
+tcpdump
 tdb
 tecla
 terraform
@@ -684,6 +697,7 @@ tmux
 totem
 totem-pl-parser
 tpm2-tss
+traceroute
 tracker3
 tracker3-miners
 tree-sitter
@@ -728,6 +742,7 @@ x264
 x265
 xcb-proto
 xcb-util
+xclip
 xdg-dbus-proxy
 xdg-desktop-portal
 xdg-desktop-portal-gnome
@@ -745,6 +760,7 @@ xorg-xhost
 xorg-xkbcomp
 xorg-xmodmap
 xorg-xprop
+xorg-xrandr
 xorg-xrdb
 xorg-xset
 xorg-xwayland
