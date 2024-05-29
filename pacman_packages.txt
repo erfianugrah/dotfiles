@@ -279,6 +279,7 @@ l-smash
 lame
 lcms2
 ldb
+less
 libadwaita
 libao
 libarchive
