@@ -149,7 +149,7 @@ zinit snippet OMZP::kubectl
 zinit snippet OMZP::kubectx
 zinit snippet OMZP::command-not-found
 zinit snippet OMZP::terraform
-zinit snippet OMZP::tmux
+# zinit snippet OMZP::tmux
 zinit snippet OMZP::npm
 zinit snippet OMZP::docker-compose
 zinit snippet OMZP::docker
@@ -235,6 +235,7 @@ alias ls=eza
 alias cat=bat
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
+alias zj=zellij
 # alias z=j
 export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
