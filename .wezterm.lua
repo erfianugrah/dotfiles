@@ -179,7 +179,7 @@ config.keys = {
 		action = act.ActivatePaneDirection("Down"),
 	},
 	-- Keybind for launch_menu
-	{ mods = "ALT", key = "l", action = wezterm.action.ShowLauncher },
+	{ mods = "ALT", key = "L", action = wezterm.action.ShowLauncher },
 }
 for i = 1, 8 do
 	table.insert(config.keys, {
