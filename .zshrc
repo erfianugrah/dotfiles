@@ -240,6 +240,7 @@ alias cat=bat
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
 alias zj=zellij
+alias zja="zj a --index"
 # alias z=j
 export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
@@ -272,4 +273,3 @@ fi
 
 eval "$(fzf --zsh)"
 eval "$(zoxide init zsh)"
-eval "$(zellij setup --generate-auto-start zsh)"
