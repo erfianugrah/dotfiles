@@ -12,8 +12,6 @@
 	useHttpPath = true
 [credential]
 	credentialStore = cache
-; [commit]
-; 	gpgsign = true
 [alias]
 	dsf = diff --color
 [pager]
@@ -42,3 +40,7 @@
 	stripLeadingSymbols = false
 	useUnicodeRuler = false
 	markEmptyLines = false
+[user]
+	signingkey = CF0EE001BAEDAA58
+[commit]
+	gpgsign = true
