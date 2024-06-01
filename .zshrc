@@ -158,6 +158,7 @@ zinit snippet OMZP::gh
 zinit snippet OMZP::debian
 zinit snippet OMZP::rust
 zinit snippet OMZP::colored-man-pages
+zinit snippet OMZP::ssh-agent
 # zinit snippet OMZP::zsh-interactive-cd
 # zinit snippet OMZP::zsh-navigation-tools
 
@@ -167,7 +168,10 @@ zinit cdreplay -q
 # To customize prompt, run `p10k configure` or edit ~/dotfiles/.p10k.zsh.
 [[ ! -f ~/dotfiles/.p10k.zsh ]] || source ~/dotfiles/.p10k.zsh
 
-# # Keybindings
+# SSH Agent
+zstyle :omz:plugins:ssh-agent identities id_gh_arch
+
+# Keybindings
 # bindkey -e
 bindkey '^p' history-search-backward
 bindkey '^n' history-search-forward
