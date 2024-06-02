@@ -106,7 +106,7 @@ export ZSH=$HOME/.oh-my-zsh
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
 #
-# plugins=(
+plugins=(
 #   git
 #   git-auto-fetch
 #   git-prompt
@@ -121,7 +121,7 @@ export ZSH=$HOME/.oh-my-zsh
 #   zsh-navigation-tools
 #   zsh-completions
 #   terraform
-# tmux
+tmux
 #   npm
 #   docker-compose
 #   kubectl
@@ -131,10 +131,10 @@ export ZSH=$HOME/.oh-my-zsh
 #   colored-man-pages
 #   debian
 #   rust
-# )
+)
 
 # ZSH_TMUX_AUTOSTART=true
-# ZSH_TMUX_DEFAULT_SESSION_NAME="arch-0-default"
+ZSH_TMUX_DEFAULT_SESSION_NAME="arch-0-default"
 
 # Add in snippets
 zinit snippet OMZP::git
