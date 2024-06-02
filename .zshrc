@@ -237,6 +237,9 @@ alias ls=eza
 alias cat=bat
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
+alias zja="zj a --index"                                                                                                                                                                                                                                                     │
+alias zjac="zj a -c"                                                                                                                                                                                                                                                         │
+alias zjda="zj da"
 # alias z=j
 export TF_LOG=debug
 export NVIM_LOG_FILE=/home/erfi/.config
