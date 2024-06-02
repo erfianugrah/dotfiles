@@ -15,12 +15,12 @@ config.initial_cols = 160
 -- Cursor
 config.default_cursor_style = "BlinkingBar"
 
--- FPS
-config.animation_fps = 120
-
--- GPU Acceleration
-config.front_end = "WebGpu"
-config.webgpu_preferred_adapter = gpus[1]
+-- -- FPS
+-- config.animation_fps = 120
+--
+-- -- GPU Acceleration
+-- config.front_end = "WebGpu"
+-- config.webgpu_preferred_adapter = gpus[1]
 
 --Scrollback
 config.scrollback_lines = 10000
@@ -40,7 +40,7 @@ wezterm.on("update-right-status", function(window, pane)
 end)
 
 -- Tmux alternative
-config.leader = { key = "q", mods = "CTRL", timeout_milliseconds = 2000 }
+config.leader = { key = "A", mods = "CTRL", timeout_milliseconds = 2000 }
 config.keys = {
 	-- Jump words
 	{
