@@ -106,7 +106,7 @@ export ZSH=$HOME/.oh-my-zsh
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
 #
-# plugins=(
+plugins=(
 #   git
 #   git-auto-fetch
 #   git-prompt
@@ -121,7 +121,7 @@ export ZSH=$HOME/.oh-my-zsh
 #   zsh-navigation-tools
 #   zsh-completions
 #   terraform
-#   tmux
+  tmux
 #   npm
 #   docker-compose
 #   kubectl
@@ -131,10 +131,9 @@ export ZSH=$HOME/.oh-my-zsh
 #   colored-man-pages
 #   debian
 #   rust
-# )
+)
 
-# ZSH_TMUX_AUTOSTART=true
-# ZSH_TMUX_DEFAULT_SESSION_NAME="default"
+
 
 # Add in snippets
 zinit snippet OMZP::git
@@ -149,7 +148,7 @@ zinit snippet OMZP::kubectl
 zinit snippet OMZP::kubectx
 zinit snippet OMZP::command-not-found
 zinit snippet OMZP::terraform
-zinit snippet OMZP::tmux
+# zinit snippet OMZP::tmux
 zinit snippet OMZP::npm
 # zinit snippet OMZP::docker-compose
 # zinit snippet OMZP::docker
@@ -166,6 +165,9 @@ zinit cdreplay -q
 
 # To customize prompt, run `p10k configure` or edit ~/dotfiles/.p10k.zsh.
 [[ ! -f ~/dotfiles/.p10k.zsh ]] || source ~/dotfiles/.p10k.zsh
+
+# ZSH_TMUX_AUTOSTART=true
+ZSH_TMUX_DEFAULT_SESSION_NAME="wsl-default"
 
 # # Keybindings
 # bindkey -e
