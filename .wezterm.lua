@@ -15,12 +15,12 @@ config.initial_cols = 160
 -- Cursor
 config.default_cursor_style = "BlinkingBar"
 
--- FPS
-config.animation_fps = 120
-
--- GPU Acceleration
-config.front_end = "WebGpu"
-config.webgpu_preferred_adapter = gpus[1]
+-- -- FPS
+-- config.animation_fps = 120
+--
+-- -- GPU Acceleration
+-- config.front_end = "WebGpu"
+-- config.webgpu_preferred_adapter = gpus[1]
 
 --Scrollback
 config.scrollback_lines = 10000
