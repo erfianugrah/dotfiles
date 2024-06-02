@@ -40,7 +40,7 @@ wezterm.on("update-right-status", function(window, pane)
 end)
 
 -- Tmux alternative
-config.leader = { key = "q", mods = "CTRL", timeout_milliseconds = 2000 }
+config.leader = { key = "A", mods = "CTRL", timeout_milliseconds = 2000 }
 config.keys = {
 	-- Jump words
 	{
@@ -178,6 +178,7 @@ config.keys = {
 		mods = "LEADER",
 		action = act.ActivatePaneDirection("Down"),
 	},
+	{ key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") },
 	-- Keybind for launch_menu
 	{ mods = "ALT", key = "L", action = wezterm.action.ShowLauncher },
 }
