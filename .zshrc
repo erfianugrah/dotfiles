@@ -106,7 +106,7 @@ export ZSH=$HOME/.oh-my-zsh
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
 #
-plugins=(
+# plugins=(
 #   git
 #   git-auto-fetch
 #   git-prompt
@@ -121,7 +121,7 @@ plugins=(
 #   zsh-navigation-tools
 #   zsh-completions
 #   terraform
-tmux
+# tmux
 #   npm
 #   docker-compose
 #   kubectl
@@ -131,10 +131,9 @@ tmux
 #   colored-man-pages
 #   debian
 #   rust
-)
+# )
 
-# ZSH_TMUX_AUTOSTART=true
-ZSH_TMUX_DEFAULT_SESSION_NAME="arch-0-default"
+
 
 # Add in snippets
 zinit snippet OMZP::git
@@ -149,7 +148,7 @@ zinit snippet OMZP::kubectl
 zinit snippet OMZP::kubectx
 zinit snippet OMZP::command-not-found
 zinit snippet OMZP::terraform
-# zinit snippet OMZP::tmux
+zinit snippet OMZP::tmux
 zinit snippet OMZP::npm
 zinit snippet OMZP::docker-compose
 zinit snippet OMZP::docker
@@ -171,6 +170,9 @@ zinit cdreplay -q
 # SSH Agent
 zstyle :omz:plugins:ssh-agent identities id_gh_arch
 
+# TMUX
+# ZSH_TMUX_AUTOSTART=true
+ZSH_TMUX_DEFAULT_SESSION_NAME="arch-0-default"
 # Keybindings
 # bindkey -e
 bindkey '^p' history-search-backward
