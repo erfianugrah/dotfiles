@@ -24,3 +24,13 @@ themes {
 
 	}
 }
+// keybinds clear-defaults=true {
+// 	tmux {
+//		bind "Ctrl a" { Write 2; SwitchToMode "Normal"; } 
+//	}
+//
+//	shared_except "tmux" "locked" {
+//		bind "Ctrl a" { SwitchToMode "Tmux"; }
+//	}
+//}
+
