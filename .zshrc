@@ -9,7 +9,7 @@ fi
 
 # eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 # If you come from bash you might have to change your $PATH.
-export PATH=$PATH:$HOME/go/bin
+export PATH=$PATH:$HOME/go/bin:$HOME/.bun
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
 # export PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program\ Files/Git/mingw64/bin:$HOME/.local/bin:$HOME/.bun/bin:$PATH
 
@@ -279,3 +279,6 @@ fi
 
 eval "$(fzf --zsh)"
 eval "$(zoxide init zsh)"
+
+# bun completions
+[ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"

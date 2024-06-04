@@ -7,10 +7,15 @@ pacman -S --needed git base-devel && git clone https://aur.archlinux.org/yay-bin
 ```sh
 xargs sudo pacman -S --noconfirm --needed < pacman_packages.txt
 ```
+#### Docker
+```sh
+https://github.com/docker/buildx?tab=readme-ov-file#linux-packages
+docker buildx create --name mybuilder --bootstrap --use
+```
 #### Install Meslo Nerd Font
 
 ```sh
-sudo pacman -S ttf-iosvekatern-nerd
+sudo pacman -S ttf-iosvekaterm-nerd
 ```
 
 #### Vim and Neovim setup
