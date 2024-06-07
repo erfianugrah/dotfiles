@@ -191,11 +191,13 @@ end
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- Paste Action
+	table.insert(config.keys, { key = "v", mods = "CTRL", action = wezterm.action.Nop })
 	-- config.keys = {
-	-- 	-- paste from the clipboard
-	-- 	{ key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") },
-	-- 	-- paste from the primary selection
-	-- 	{ key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
+	-- 	{ key = "v", mods = "CTRL", action = wezterm.action.Nop },
+	-- 	-- -- paste from the clipboard
+	-- 	-- { key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") },
+	-- 	-- -- paste from the primary selection
+	-- 	-- { key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
 	-- }
 	-- GPU
 	config.front_end = "WebGpu"
