@@ -270,5 +270,11 @@ fi
 #   fi
 # fi
 
+# if [[ -n $TMUX ]]; then
+#   while IFS= read -r line; do
+#     export "$line"
+#   done < <(tmux show-environment | grep -v '^-' | sed 's/^/export /')
+# fi
+#
 eval "$(fzf --zsh)"
 eval "$(zoxide init zsh)"
