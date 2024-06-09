@@ -67,3 +67,6 @@ age-keygen -o key.txt
 ```markdown
 brew install bitwarden-cli
 ```
+
+##### [functions.zsh](functions.zsh)
+Make sure to run before running `tmux` so that the env variables can be set and persisted across from shell
