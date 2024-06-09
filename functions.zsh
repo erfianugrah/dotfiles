@@ -126,10 +126,10 @@ load_from_bitwarden_and_set_env() {
     echo "Failed to retrieve $item_name from Bitwarden." >&2
     return 1
   fi
-
+  
   # Set the environment variable
   export "$env_var_name=$item_value"
-
+  
   # Recheck if the environment variable is set using Zsh compatible method
   if [[ -z ${(P)env_var_name} ]]; then
     echo "Failed to set environment variable for $item_name." >&2
@@ -158,7 +158,7 @@ load_sops_age_keys() {
 
   # Concatenate the keys with a newline and set them as a single environment variable
   export SOPS_AGE_KEYS="${public_key}\n${secret_key}"
-
+  
   # Recheck if the environment variable is set
   if [[ -z $SOPS_AGE_KEYS ]]; then
     echo "Failed to set SOPS_AGE_KEYS environment variable." >&2
@@ -191,7 +191,6 @@ load_bw() {
   load_from_bitwarden_and_set_env "CLOUDFLARE_ACCESS_OLLAMA_ID" "CLOUDFLARE_ACCESS_OLLAMA_ID"
   load_from_bitwarden_and_set_env "CLOUDFLARE_ACCESS_OLLAMA_SECRET" "CLOUDFLARE_ACCESS_OLLAMA_SECRET"
   load_from_bitwarden_and_set_env "CARGO_ROOT_KEY" "CARGO_REGISTRY_TOKEN"
-  load_from_bitwarden_and_set_env "GITHUB_PAT_ARCH" "GITHUB_TOKEN"
   load_sops_age_keys
 }
 
@@ -202,3 +201,5 @@ load_wrangler_token() {
 p10k_colours() {
   for i in {0..255}; do print -Pn "%K{$i}  %k%F{$i}${(l:3::0:)i}%f " ${${(M)$((i%6)):#3}:+$'\n'}; done
 }
+
+
