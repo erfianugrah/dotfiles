@@ -3,7 +3,7 @@ local wezterm = require("wezterm")
 local mux = wezterm.mux
 -- This will hold the configuration.
 local config = wezterm.config_builder()
-local gpus = wezterm.gui.enumerate_gpus()
+-- local gpus = wezterm.gui.enumerate_gpus()
 local act = wezterm.action
 -- Theme
 config.color_scheme = "lovelace"
@@ -13,14 +13,14 @@ config.initial_rows = 40
 config.initial_cols = 160
 
 -- Cursor
-config.default_cursor_style = "BlinkingBar"
+-- config.default_cursor_style = "BlinkingBar"
 
--- -- FPS
+-- FPS
 config.animation_fps = 120
---
--- -- GPU Acceleration
-config.front_end = "WebGpu"
-config.webgpu_preferred_adapter = gpus[1]
+
+-- GPU Acceleration
+-- config.front_end = "WebGpu"
+-- config.webgpu_preferred_adapter = gpus[1]
 
 --Scrollback
 config.scrollback_lines = 10000
@@ -201,8 +201,8 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- 	-- { key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
 	-- }
 	-- GPU
-	config.front_end = "WebGpu"
-	config.webgpu_preferred_adapter = gpus[1]
+	-- config.front_end = "WebGpu"
+	-- config.webgpu_preferred_adapter = gpus[1]
 
 	-- WSL
 	config.default_domain = "WSL:Ubuntu"
