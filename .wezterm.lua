@@ -40,7 +40,7 @@ wezterm.on("update-right-status", function(window, pane)
 end)
 
 -- Tmux alternative
-config.leader = { key = "A", mods = "CTRL", timeout_milliseconds = 2000 }
+config.leader = { key = "A", mods = "CTRL" }
 config.keys = {
 	-- Jump words
 	{
