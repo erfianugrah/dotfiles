@@ -133,8 +133,6 @@ plugins=(
 #   rust
 )
 
-
-
 # Add in snippets
 zinit snippet OMZP::git
 zinit snippet OMZP::git-auto-fetch
@@ -168,7 +166,7 @@ zinit cdreplay -q
 
 # ZSH_TMUX_AUTOSTART=true
 ZSH_TMUX_DEFAULT_SESSION_NAME="wsl-default"
-
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 # # Keybindings
 # bindkey -e
 bindkey '^p' history-search-backward
