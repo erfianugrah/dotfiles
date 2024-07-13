@@ -34,7 +34,7 @@ zinit light zsh-users/zsh-completions
 zinit light zsh-users/zsh-autosuggestions
 zinit light zsh-users/zsh-history-substring-search
 zinit light zdharma-continuum/fast-syntax-highlighting
-
+zinit light atuinsh/atuin
 # zinit light marlonrichert/zsh-autocomplete
 # # Path to your oh-my-zsh installation.
 export ZSH=$HOME/.oh-my-zsh
@@ -279,3 +279,7 @@ eval "$(zoxide init zsh)"
 
 # bun completions
 [ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"
+
+. "$HOME/.atuin/bin/env"
+
+eval "$(atuin init zsh)"
