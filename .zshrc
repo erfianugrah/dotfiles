@@ -146,6 +146,7 @@ zinit snippet OMZP::kubectl
 zinit snippet OMZP::kubectx
 zinit snippet OMZP::command-not-found
 zinit snippet OMZP::terraform
+zinit snippet OMZP::opentofu
 # zinit snippet OMZP::tmux
 zinit snippet OMZP::npm
 # zinit snippet OMZP::docker-compose
