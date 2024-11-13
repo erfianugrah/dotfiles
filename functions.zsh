@@ -210,3 +210,63 @@ yy() {
 	fi
 	rm -f -- "$tmp"
 }
+fix_file_limits() {
+    local YELLOW="\033[1;33m"
+    local GREEN="\033[1;32m"
+    local RESET="\033[0m"
+    
+    # Print current limits
+    print "${YELLOW}Current file descriptor limits:${RESET}"
+    print "Soft limit: $(ulimit -Sn)"
+    print "Hard limit: $(ulimit -Hn)"
+
+    # Check current open files for the current user
+    print "\n${YELLOW}Current open files for your user:${RESET}"
+    lsof -u $USER | wc -l
+
+    # System-wide file descriptor usage
+    print "\n${YELLOW}System-wide file descriptor usage:${RESET}"
+    print "Current open files: $(cat /proc/sys/fs/file-nr | cut -f1)"
+    print "Maximum open files: $(cat /proc/sys/fs/file-max)"
+
+    # Ask to increase limits
+    print "\n${YELLOW}Would you like to increase the file descriptor limits? (y/N)${RESET}"
+    read "response?> "
+    
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        # Backup existing limits file if it exists
+        if [[ -f /etc/security/limits.conf ]]; then
+            sudo cp /etc/security/limits.conf /etc/security/limits.conf.backup
+        fi
+        
+        print "${YELLOW}Setting new file descriptor limits...${RESET}"
+        
+        # Add new limits to /etc/security/limits.conf
+        print "* soft nofile 65536" | sudo tee -a /etc/security/limits.conf
+        print "* hard nofile 65536" | sudo tee -a /etc/security/limits.conf
+        print "root soft nofile 65536" | sudo tee -a /etc/security/limits.conf
+        print "root hard nofile 65536" | sudo tee -a /etc/security/limits.conf
+        
+        # Set current session limits
+        ulimit -n 65536
+        
+        print "\n${GREEN}New limits have been set.${RESET}"
+        print "${YELLOW}Please note: You'll need to log out and log back in for permanent changes to take effect.${RESET}"
+    fi
+
+    # Quick fix for current session
+    print "\n${YELLOW}Would you like to temporarily increase limits for current session? (y/N)${RESET}"
+    read "response?> "
+    
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        ulimit -n 65536
+        print "${GREEN}Current session limits increased to 65536${RESET}"
+    fi
+
+    print "\n${YELLOW}To verify the current limits, run:${RESET}"
+    print "ulimit -Sn  # Shows soft limit"
+    print "ulimit -Hn  # Shows hard limit"
+}
+
+# Optional: Add command alias
+alias fixfiles='fix_file_limits'

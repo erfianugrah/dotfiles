@@ -284,3 +284,4 @@ eval "$(zoxide init zsh)"
 . "$HOME/.atuin/bin/env"
 
 eval "$(atuin init zsh --disable-up-arrow)"
+. "/home/erfi/.deno/env"
