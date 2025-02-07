@@ -199,6 +199,7 @@ load_cf_work(){
   load_from_bitwarden_and_set_env "CF_WORK_EMAIL" "CLOUDFLARE_EMAIL"
   load_from_bitwarden_and_set_env "AWS_SECRET_ACCESS_KEY" "AWS_SECRET_ACCESS_KEY"
   load_from_bitwarden_and_set_env "AWS_ACCESS_KEY_ID" "AWS_ACCESS_KEY_ID"
+  load_from_bitwarden_and_set_env "PAPIREPO_API_KEY" "PAPIREPO_API_KEY"
 }
 
 load_wrangler_token() {
