@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Files to check for sensitive content
+SENSITIVE_PATTERNS="\.(tfvars|tfstate|yaml|yml|json|env|ini)$"
+
+# Function to check if a file is encrypted using SOPS
+is_encrypted() {
+    grep -q "^sops_" "$1" || grep -q "ENC\[AES256" "$1"
+}
+
+# Check files
+UNENCRYPTED_FILES=""
+while IFS= read -r file; do
+    # Skip if file doesn't exist (e.g. deleted files)
+    [ -f "$file" ] || continue
+    
+    if ! is_encrypted "$file"; then
+        UNENCRYPTED_FILES="$UNENCRYPTED_FILES$file\n"
+    fi
+done < <(git diff --cached --name-only | grep -E "$SENSITIVE_PATTERNS" || true)
+
+if [ -n "$UNENCRYPTED_FILES" ]; then
+    echo "⚠️  Error: These files must be encrypted before committing:"
+    echo -e "$UNENCRYPTED_FILES"
+    echo 
+    echo "Please encrypt them first:"
+    echo "- For Terraform files: encrypt_tf"
+    echo "- For K8s secrets: encrypt_k3s_secret <file>"
+    echo "- For other files: encrypt <file>"
+    echo
+    echo "Then try adding and committing again."
+    exit 1
+fi
+
+exit 0
+EOF
