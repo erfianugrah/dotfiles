@@ -3,6 +3,7 @@
 	version = HTTP/2
 [init]
 	defaultBranch = main
+	templateDir = /home/erfi/.git-template
 [credential "https://dev.azure.com"]
 	useHttpPath = true
 [credential]
