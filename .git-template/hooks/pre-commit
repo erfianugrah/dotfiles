@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Check for exception flag
+if [ -f ".allow-unencrypted" ]; then
+    exit 0
+fi
+
 # Files to check for sensitive content
 SENSITIVE_PATTERNS="\.(tfvars|tfstate|yaml|yml|json|env|ini)$"
 
@@ -20,17 +25,20 @@ while IFS= read -r file; do
 done < <(git diff --cached --name-only | grep -E "$SENSITIVE_PATTERNS" || true)
 
 if [ -n "$UNENCRYPTED_FILES" ]; then
-    echo "⚠️  Error: These files must be encrypted before committing:"
+    echo "🚫 ERROR: Cannot commit unencrypted sensitive files:"
     echo -e "$UNENCRYPTED_FILES"
     echo 
-    echo "Please encrypt them first:"
+    echo "Please remove these files from staging:"
+    echo "  git restore --staged <file>"
+    echo
+    echo "Then encrypt them before adding again:"
     echo "- For Terraform files: encrypt_tf"
     echo "- For K8s secrets: encrypt_k3s_secret <file>"
     echo "- For other files: encrypt <file>"
     echo
-    echo "Then try adding and committing again."
+    echo "⚠️  To disable this check for this repository, create a .allow-unencrypted file"
+    echo "⚠️  WARNING: Your Git history could contain unencrypted versions if you don't unstage first!"
     exit 1
 fi
 
 exit 0
-EOF
