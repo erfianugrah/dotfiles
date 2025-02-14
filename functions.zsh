@@ -348,6 +348,7 @@ load_cf_work() {
         "AWS_SECRET_ACCESS_KEY|AWS_SECRET_ACCESS_KEY"
         "AWS_ACCESS_KEY_ID|AWS_ACCESS_KEY_ID"
         "PAPIREPO_API_KEY|PAPIREPO_API_KEY"
+        "CLOUDLET_API_KEY|CLOUDLET_API_KEY"
     )
 
     # Extract unique items and fetch in bulk
@@ -387,6 +388,14 @@ load_cf_work() {
 
 load_wrangler_token() {
     load_from_bitwarden_and_set_env "CLOUDFLARE_WRANGLER_TOKEN" "CLOUDFLARE_API_TOKEN"
+}
+load_ingka_gh(){
+    eval "$(ssh-agent -s)" 
+    ssh-add ~/.ssh/id_ingka_gh
+    git config --local user.name "Erfi Anugrah"
+    git config --local user.email "erfi.anugrah@ingka.com"
+    git config --local user.signingkey EF78DC0E13F5E990 
+    git config --local commit.gpgsign true
 }
 
 unset_bw_vars() {
