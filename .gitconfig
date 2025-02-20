@@ -13,6 +13,10 @@
 	helper = /usr/local/bin/git-credential-manager
 [commit]
 	gpgsign = true
+[user]
+	name = Erfi Anugrah
+	email = erfi.anugrah@gmail.com
+	signingkey = AEF0D6CDEA5FBB1C
 [alias]
 	dsf = diff --color
 [pager]
