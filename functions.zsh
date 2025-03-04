@@ -511,3 +511,23 @@ fix_file_limits() {
 
 # Optional: Add command alias
 alias fixfiles='fix_file_limits'
+
+# Terraform debugging functions
+tf_debug_on() {
+    export TF_LOG=debug
+    echo "Terraform debug logging enabled (TF_LOG=debug)"
+}
+
+tf_debug_off() {
+    unset TF_LOG
+    echo "Terraform debug logging disabled"
+}
+
+# Toggle Terraform debug mode
+tf_debug_toggle() {
+    if [[ -n "$TF_LOG" ]]; then
+        tf_debug_off
+    else
+        tf_debug_on
+    fi
+}

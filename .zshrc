@@ -240,7 +240,7 @@ alias zja="zj a --index"
 alias zjac="zj a -c"                                                                                                                                                                                                                                                         
 alias zjda="zj da"
 # alias z=j
-export TF_LOG=debug
+# TF_LOG is now controlled via tf_debug_* functions
 export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
 # export STARSHIP_CONFIG=/home/erfi/starship.toml
