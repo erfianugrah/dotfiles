@@ -531,3 +531,52 @@ tf_debug_toggle() {
         tf_debug_on
     fi
 }
+
+get_cf_credential() {
+local cred_type=$1
+local cred_name=$2
+
+if [[ -z "$cred_type" ]] || [[ -z "$cred_name" ]]; then
+  echo "Usage: get_cf_credential <type> <name>"
+  echo "Types: token, r2"
+  echo
+  echo "Available tokens:"
+  tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_"))' | sed 's/cloudflare_api_token_//'
+  echo
+  echo "Available R2 credentials:"
+  echo "  access_key_id"
+  echo "  access_key"
+  return 1
+fi
+
+case "$cred_type" in
+  token)
+    local full_token_name="cloudflare_api_token_${cred_name}"
+    local value=$(tofu output -json | jq -r --arg name "$full_token_name" '.[$name].value // "Credential not found"')
+    ;;
+  r2)
+    # For R2 credentials, we need to extract from tfvars since they're input variables
+    case "$cred_name" in
+      access_key_id)
+        local value=$(grep -E "^r2_access_key_id\s*=" secrets.tfvars | sed -E 's/^r2_access_key_id\s*=\s*"(.*)"/\1/')
+        ;;
+      access_key)
+        local value=$(grep -E "^r2_access_key\s*=" secrets.tfvars | sed -E 's/^r2_access_key\s*=\s*"(.*)"/\1/')
+        ;;
+      *)
+        local value="Invalid R2 credential name. Use 'access_key_id' or 'access_key'"
+        ;;
+    esac
+    ;;
+  *)
+    local value="Invalid credential type. Use 'token' or 'r2'"
+    ;;
+esac
+
+if [[ "$value" == "Credential not found" || -z "$value" ]]; then
+  echo "Error: Credential not found"
+  return 1
+fi
+
+echo "$value"
+}

@@ -46,5 +46,5 @@
 	useUnicodeRuler = false
 	markEmptyLines = false
 
-[url "git@github.com:ingka-group-digital"]
-	insteadOf = https://github.com/ingka-group-digital/
+; [url "git@github.com:ingka-group-digital"]
+; 	insteadOf = https://github.com/ingka-group-digital/
