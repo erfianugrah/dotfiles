@@ -532,51 +532,127 @@ tf_debug_toggle() {
     fi
 }
 
+# Cloudflare credentials retrieval script for use after 'tofu apply'
+
 get_cf_credential() {
-local cred_type=$1
-local cred_name=$2
+  local cred_type=$1
+  local cred_name=$2
+  local show_value=${3:-true}  # Default to showing the value
+  
+  # If no arguments are provided, show usage and available credentials
+  if [[ -z "$cred_type" ]]; then
+    echo "Usage: get_cf_credential <type> <name> [show_value]"
+    echo "Types: token, s3, all"
+    echo "show_value: true (default) or false"
+    echo
+    echo "Available tokens:"
+    tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)' | sed 's/cloudflare_api_token_//'
+    echo
+    echo "Available S3 credentials tokens:"
+    tofu output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | sed 's/cloudflare_api_token_//; s/_s3_credentials//'
+    return 0
+  fi
 
-if [[ -z "$cred_type" ]] || [[ -z "$cred_name" ]]; then
-  echo "Usage: get_cf_credential <type> <name>"
-  echo "Types: token, r2"
-  echo
-  echo "Available tokens:"
-  tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_"))' | sed 's/cloudflare_api_token_//'
-  echo
-  echo "Available R2 credentials:"
-  echo "  access_key_id"
-  echo "  access_key"
-  return 1
-fi
-
-case "$cred_type" in
-  token)
-    local full_token_name="cloudflare_api_token_${cred_name}"
-    local value=$(tofu output -json | jq -r --arg name "$full_token_name" '.[$name].value // "Credential not found"')
-    ;;
-  r2)
-    # For R2 credentials, we need to extract from tfvars since they're input variables
-    case "$cred_name" in
-      access_key_id)
-        local value=$(grep -E "^r2_access_key_id\s*=" secrets.tfvars | sed -E 's/^r2_access_key_id\s*=\s*"(.*)"/\1/')
-        ;;
-      access_key)
-        local value=$(grep -E "^r2_access_key\s*=" secrets.tfvars | sed -E 's/^r2_access_key\s*=\s*"(.*)"/\1/')
-        ;;
-      *)
-        local value="Invalid R2 credential name. Use 'access_key_id' or 'access_key'"
-        ;;
-    esac
-    ;;
-  *)
-    local value="Invalid credential type. Use 'token' or 'r2'"
-    ;;
-esac
-
-if [[ "$value" == "Credential not found" || -z "$value" ]]; then
-  echo "Error: Credential not found"
-  return 1
-fi
-
-echo "$value"
+  case "$cred_type" in
+    token)
+      if [[ -z "$cred_name" ]]; then
+        # List all token names if no specific name is provided
+        echo "Available tokens:"
+        tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)' | sed 's/cloudflare_api_token_//'
+        return 0
+      fi
+      
+      local full_token_name="cloudflare_api_token_${cred_name}"
+      if tofu output -json | jq -e --arg name "$full_token_name" '.[$name]' > /dev/null 2>&1; then
+        local value=$(tofu output -json | jq -r --arg name "$full_token_name" '.[$name].value')
+        [[ "$show_value" == "true" ]] && echo "$value" || echo "Token value retrieved (hidden)"
+      else
+        echo "Error: Token '$cred_name' not found" >&2
+        return 1
+      fi
+      ;;
+      
+    s3)
+      if [[ -z "$cred_name" ]]; then
+        # List all S3 credential tokens if no specific name is provided
+        echo "Available S3 credentials:"
+        tofu output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | sed 's/cloudflare_api_token_//; s/_s3_credentials//'
+        return 0
+      fi
+      
+      # Try the exact name with s3_credentials suffix
+      local full_cred_name="cloudflare_api_token_${cred_name}_s3_credentials"
+      
+      # If that doesn't exist, try to find if there's any match ending with the name
+      if ! tofu output -json | jq -e --arg name "$full_cred_name" '.[$name]' > /dev/null 2>&1; then
+        # Try to find a matching s3 credential output
+        local matching_cred=$(tofu output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | grep -E "${cred_name}")
+        
+        if [[ -n "$matching_cred" ]]; then
+          full_cred_name="$matching_cred"
+        else
+          echo "Error: S3 credentials for token '$cred_name' not found" >&2
+          return 1
+        fi
+      fi
+      
+      echo "S3 credentials for '${full_cred_name/cloudflare_api_token_/}':"
+      local access_key_id=$(tofu output -json | jq -r --arg name "$full_cred_name" '.[$name].value.access_key_id')
+      local secret_key=$(tofu output -json | jq -r --arg name "$full_cred_name" '.[$name].value.secret_access_key')
+      
+      echo "Access Key ID: $access_key_id"
+      if [[ "$show_value" == "true" ]]; then
+        echo "Secret Access Key: $secret_key"
+      else
+        echo "Secret Access Key: [hidden]"
+      fi
+      ;;
+      
+    all)
+      # Display all tokens and their values
+      echo "=== API Tokens ==="
+      echo ""
+      
+      local tokens=($(tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)'))
+      for token_name in $tokens; do
+        local simple_name=${token_name#cloudflare_api_token_}
+        echo "Token: $simple_name"
+        if [[ "$show_value" == "true" ]]; then
+          echo "Value: $(tofu output -json | jq -r --arg name "$token_name" '.[$name].value')"
+        else
+          echo "Value: [hidden]"
+        fi
+        echo ""
+      done
+      
+      echo "=== S3-Compatible Credentials ==="
+      echo ""
+      
+      local s3_creds=($(tofu output -json | jq -r 'keys[] | select(contains("s3_credentials"))'))
+      for cred_name in $s3_creds; do
+        local simple_name=${cred_name#cloudflare_api_token_}
+        simple_name=${simple_name%_s3_credentials}
+        
+        echo "For token: $simple_name"
+        echo "Access Key ID: $(tofu output -json | jq -r --arg name "$cred_name" '.[$name].value.access_key_id')"
+        if [[ "$show_value" == "true" ]]; then
+          echo "Secret Access Key: $(tofu output -json | jq -r --arg name "$cred_name" '.[$name].value.secret_access_key')"
+        else
+          echo "Secret Access Key: [hidden]"
+        fi
+        echo ""
+      done
+      ;;
+      
+    *)
+      echo "Error: Invalid credential type '$cred_type'. Use 'token', 's3', or 'all'" >&2
+      return 1
+      ;;
+  esac
 }
+
+# Allow script to be sourced without executing function
+if [[ "${ZSH_EVAL_CONTEXT:-}" == "toplevel" || "${BASH_SOURCE[0]:-}" == "${0:-}" ]]; then
+  get_cf_credential "$@"
+fi
+
