@@ -542,7 +542,7 @@ get_cf_credential() {
   # If no arguments are provided, show usage and available credentials
   if [[ -z "$cred_type" ]]; then
     echo "Usage: get_cf_credential <type> <name> [show_value]"
-    echo "Types: token, s3, all"
+    echo "Types: token, s3, output, all"
     echo "show_value: true (default) or false"
     echo
     echo "Available tokens:"
@@ -550,6 +550,9 @@ get_cf_credential() {
     echo
     echo "Available S3 credentials tokens:"
     tofu output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | sed 's/cloudflare_api_token_//; s/_s3_credentials//'
+    echo
+    echo "Available outputs:"
+    tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort
     return 0
   fi
 
@@ -607,6 +610,39 @@ get_cf_credential() {
         echo "Secret Access Key: [hidden]"
       fi
       ;;
+    
+    output)
+      if [[ -z "$cred_name" ]]; then
+        # List all general outputs if no specific name is provided
+        echo "Available outputs:"
+        tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort
+        return 0
+      fi
+      
+      if tofu output -json | jq -e --arg name "$cred_name" '.[$name]' > /dev/null 2>&1; then
+        if [[ "$show_value" == "true" ]]; then
+          # Attempt to extract the value, handling different types of outputs
+          local is_sensitive=$(tofu output -json | jq -r --arg name "$cred_name" '.[$name].sensitive')
+          local value_type=$(tofu output -json | jq -r --arg name "$cred_name" 'if .[$name].value | type == "object" then "object" else "simple" end')
+          
+          echo "Output: $cred_name"
+          echo "Sensitive: $is_sensitive"
+          
+          if [[ "$value_type" == "object" ]]; then
+            echo "Value (object):"
+            tofu output -json | jq --arg name "$cred_name" '.[$name].value'
+          else
+            echo "Value: $(tofu output -json | jq -r --arg name "$cred_name" '.[$name].value')"
+          fi
+        else
+          echo "Output: $cred_name"
+          echo "Value: [hidden]"
+        fi
+      else
+        echo "Error: Output '$cred_name' not found" >&2
+        return 1
+      fi
+      ;;
       
     all)
       # Display all tokens and their values
@@ -642,10 +678,33 @@ get_cf_credential() {
         fi
         echo ""
       done
+      
+      echo "=== Other Outputs ==="
+      echo ""
+      
+      local outputs=($(tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort))
+      for output_name in $outputs; do
+        echo "Output: $output_name"
+        local is_sensitive=$(tofu output -json | jq -r --arg name "$output_name" '.[$name].sensitive')
+        echo "Sensitive: $is_sensitive"
+        
+        if [[ "$show_value" == "true" ]]; then
+          # Check if the output is a complex object
+          if tofu output -json | jq -e --arg name "$output_name" '.[$name].value | type == "object"' > /dev/null 2>&1; then
+            echo "Value (object):"
+            tofu output -json | jq --arg name "$output_name" '.[$name].value'
+          else
+            echo "Value: $(tofu output -json | jq -r --arg name "$output_name" '.[$name].value')"
+          fi
+        else
+          echo "Value: [hidden]"
+        fi
+        echo ""
+      done
       ;;
       
     *)
-      echo "Error: Invalid credential type '$cred_type'. Use 'token', 's3', or 'all'" >&2
+      echo "Error: Invalid credential type '$cred_type'. Use 'token', 's3', 'output', or 'all'" >&2
       return 1
       ;;
   esac
