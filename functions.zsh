@@ -532,12 +532,28 @@ tf_debug_toggle() {
     fi
 }
 
-# Cloudflare credentials retrieval script for use after 'tofu apply'
+# Cloudflare credentials retrieval script for use after 'tofu apply' or 'terraform apply'
 
 get_cf_credential() {
   local cred_type=$1
   local cred_name=$2
   local show_value=${3:-true}  # Default to showing the value
+  
+  # Determine which command to use (terraform or tofu)
+  local tf_cmd="tofu"
+  
+  # Check if we're in a git repo with a .terraform directory
+  if [[ -d ".terraform" ]]; then
+    # Look for terraform init state file for Terraform
+    if [[ -f ".terraform/terraform.tfstate" ]]; then
+      # Check if terraform binary exists
+      if command -v terraform &> /dev/null; then
+        tf_cmd="terraform"
+      fi
+    fi
+  fi
+
+  echo "Using $tf_cmd command"
   
   # If no arguments are provided, show usage and available credentials
   if [[ -z "$cred_type" ]]; then
@@ -546,13 +562,13 @@ get_cf_credential() {
     echo "show_value: true (default) or false"
     echo
     echo "Available tokens:"
-    tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)' | sed 's/cloudflare_api_token_//'
+    $tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)' | sed 's/cloudflare_api_token_//'
     echo
     echo "Available S3 credentials tokens:"
-    tofu output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | sed 's/cloudflare_api_token_//; s/_s3_credentials//'
+    $tf_cmd output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | sed 's/cloudflare_api_token_//; s/_s3_credentials//'
     echo
     echo "Available outputs:"
-    tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort
+    $tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort
     return 0
   fi
 
@@ -561,13 +577,13 @@ get_cf_credential() {
       if [[ -z "$cred_name" ]]; then
         # List all token names if no specific name is provided
         echo "Available tokens:"
-        tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)' | sed 's/cloudflare_api_token_//'
+        $tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)' | sed 's/cloudflare_api_token_//'
         return 0
       fi
       
       local full_token_name="cloudflare_api_token_${cred_name}"
-      if tofu output -json | jq -e --arg name "$full_token_name" '.[$name]' > /dev/null 2>&1; then
-        local value=$(tofu output -json | jq -r --arg name "$full_token_name" '.[$name].value')
+      if $tf_cmd output -json | jq -e --arg name "$full_token_name" '.[$name]' > /dev/null 2>&1; then
+        local value=$($tf_cmd output -json | jq -r --arg name "$full_token_name" '.[$name].value')
         [[ "$show_value" == "true" ]] && echo "$value" || echo "Token value retrieved (hidden)"
       else
         echo "Error: Token '$cred_name' not found" >&2
@@ -579,7 +595,7 @@ get_cf_credential() {
       if [[ -z "$cred_name" ]]; then
         # List all S3 credential tokens if no specific name is provided
         echo "Available S3 credentials:"
-        tofu output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | sed 's/cloudflare_api_token_//; s/_s3_credentials//'
+        $tf_cmd output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | sed 's/cloudflare_api_token_//; s/_s3_credentials//'
         return 0
       fi
       
@@ -587,9 +603,9 @@ get_cf_credential() {
       local full_cred_name="cloudflare_api_token_${cred_name}_s3_credentials"
       
       # If that doesn't exist, try to find if there's any match ending with the name
-      if ! tofu output -json | jq -e --arg name "$full_cred_name" '.[$name]' > /dev/null 2>&1; then
+      if ! $tf_cmd output -json | jq -e --arg name "$full_cred_name" '.[$name]' > /dev/null 2>&1; then
         # Try to find a matching s3 credential output
-        local matching_cred=$(tofu output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | grep -E "${cred_name}")
+        local matching_cred=$($tf_cmd output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | grep -E "${cred_name}")
         
         if [[ -n "$matching_cred" ]]; then
           full_cred_name="$matching_cred"
@@ -600,8 +616,8 @@ get_cf_credential() {
       fi
       
       echo "S3 credentials for '${full_cred_name/cloudflare_api_token_/}':"
-      local access_key_id=$(tofu output -json | jq -r --arg name "$full_cred_name" '.[$name].value.access_key_id')
-      local secret_key=$(tofu output -json | jq -r --arg name "$full_cred_name" '.[$name].value.secret_access_key')
+      local access_key_id=$($tf_cmd output -json | jq -r --arg name "$full_cred_name" '.[$name].value.access_key_id')
+      local secret_key=$($tf_cmd output -json | jq -r --arg name "$full_cred_name" '.[$name].value.secret_access_key')
       
       echo "Access Key ID: $access_key_id"
       if [[ "$show_value" == "true" ]]; then
@@ -615,24 +631,24 @@ get_cf_credential() {
       if [[ -z "$cred_name" ]]; then
         # List all general outputs if no specific name is provided
         echo "Available outputs:"
-        tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort
+        $tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort
         return 0
       fi
       
-      if tofu output -json | jq -e --arg name "$cred_name" '.[$name]' > /dev/null 2>&1; then
+      if $tf_cmd output -json | jq -e --arg name "$cred_name" '.[$name]' > /dev/null 2>&1; then
         if [[ "$show_value" == "true" ]]; then
           # Attempt to extract the value, handling different types of outputs
-          local is_sensitive=$(tofu output -json | jq -r --arg name "$cred_name" '.[$name].sensitive')
-          local value_type=$(tofu output -json | jq -r --arg name "$cred_name" 'if .[$name].value | type == "object" then "object" else "simple" end')
+          local is_sensitive=$($tf_cmd output -json | jq -r --arg name "$cred_name" '.[$name].sensitive')
+          local value_type=$($tf_cmd output -json | jq -r --arg name "$cred_name" 'if .[$name].value | type == "object" then "object" else "simple" end')
           
           echo "Output: $cred_name"
           echo "Sensitive: $is_sensitive"
           
           if [[ "$value_type" == "object" ]]; then
             echo "Value (object):"
-            tofu output -json | jq --arg name "$cred_name" '.[$name].value'
+            $tf_cmd output -json | jq --arg name "$cred_name" '.[$name].value'
           else
-            echo "Value: $(tofu output -json | jq -r --arg name "$cred_name" '.[$name].value')"
+            echo "Value: $($tf_cmd output -json | jq -r --arg name "$cred_name" '.[$name].value')"
           fi
         else
           echo "Output: $cred_name"
@@ -649,12 +665,12 @@ get_cf_credential() {
       echo "=== API Tokens ==="
       echo ""
       
-      local tokens=($(tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)'))
+      local tokens=($($tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)'))
       for token_name in $tokens; do
         local simple_name=${token_name#cloudflare_api_token_}
         echo "Token: $simple_name"
         if [[ "$show_value" == "true" ]]; then
-          echo "Value: $(tofu output -json | jq -r --arg name "$token_name" '.[$name].value')"
+          echo "Value: $($tf_cmd output -json | jq -r --arg name "$token_name" '.[$name].value')"
         else
           echo "Value: [hidden]"
         fi
@@ -664,15 +680,15 @@ get_cf_credential() {
       echo "=== S3-Compatible Credentials ==="
       echo ""
       
-      local s3_creds=($(tofu output -json | jq -r 'keys[] | select(contains("s3_credentials"))'))
+      local s3_creds=($($tf_cmd output -json | jq -r 'keys[] | select(contains("s3_credentials"))'))
       for cred_name in $s3_creds; do
         local simple_name=${cred_name#cloudflare_api_token_}
         simple_name=${simple_name%_s3_credentials}
         
         echo "For token: $simple_name"
-        echo "Access Key ID: $(tofu output -json | jq -r --arg name "$cred_name" '.[$name].value.access_key_id')"
+        echo "Access Key ID: $($tf_cmd output -json | jq -r --arg name "$cred_name" '.[$name].value.access_key_id')"
         if [[ "$show_value" == "true" ]]; then
-          echo "Secret Access Key: $(tofu output -json | jq -r --arg name "$cred_name" '.[$name].value.secret_access_key')"
+          echo "Secret Access Key: $($tf_cmd output -json | jq -r --arg name "$cred_name" '.[$name].value.secret_access_key')"
         else
           echo "Secret Access Key: [hidden]"
         fi
@@ -682,19 +698,19 @@ get_cf_credential() {
       echo "=== Other Outputs ==="
       echo ""
       
-      local outputs=($(tofu output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort))
+      local outputs=($($tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort))
       for output_name in $outputs; do
         echo "Output: $output_name"
-        local is_sensitive=$(tofu output -json | jq -r --arg name "$output_name" '.[$name].sensitive')
+        local is_sensitive=$($tf_cmd output -json | jq -r --arg name "$output_name" '.[$name].sensitive')
         echo "Sensitive: $is_sensitive"
         
         if [[ "$show_value" == "true" ]]; then
           # Check if the output is a complex object
-          if tofu output -json | jq -e --arg name "$output_name" '.[$name].value | type == "object"' > /dev/null 2>&1; then
+          if $tf_cmd output -json | jq -e --arg name "$output_name" '.[$name].value | type == "object"' > /dev/null 2>&1; then
             echo "Value (object):"
-            tofu output -json | jq --arg name "$output_name" '.[$name].value'
+            $tf_cmd output -json | jq --arg name "$output_name" '.[$name].value'
           else
-            echo "Value: $(tofu output -json | jq -r --arg name "$output_name" '.[$name].value')"
+            echo "Value: $($tf_cmd output -json | jq -r --arg name "$output_name" '.[$name].value')"
           fi
         else
           echo "Value: [hidden]"
