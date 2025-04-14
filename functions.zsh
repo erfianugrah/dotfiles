@@ -747,7 +747,7 @@ cf_permissions() {
       command="tofu"
       ;;
     *)
-      echo "Usage: cf_permissions [terraform|tf|tofu|t] [account|zone|user|r2|all]"
+      echo "Usage: cf_permissions [terraform|tf|tofu|t] [account|zone|user|r2|roles|all]"
       return 1
       ;;
   esac
@@ -759,8 +759,8 @@ cf_permissions() {
   fi
   
   # Validate category
-  if [[ "$category" != "account" && "$category" != "zone" && "$category" != "user" && "$category" != "r2" && "$category" != "all" ]]; then
-    echo "Usage: cf_permissions [terraform|tf|tofu|t] [account|zone|user|r2|all]"
+  if [[ "$category" != "account" && "$category" != "zone" && "$category" != "user" && "$category" != "r2" && "$category" != "roles" && "$category" != "all" ]]; then
+    echo "Usage: cf_permissions [terraform|tf|tofu|t] [account|zone|user|r2|roles|all]"
     return 1
   fi
   
@@ -774,6 +774,10 @@ cf_permissions() {
     $command console <<< "keys(data.cloudflare_api_token_permission_groups.all.user)"
     echo "\n=== R2 PERMISSIONS ==="
     $command console <<< "keys(data.cloudflare_api_token_permission_groups.all.r2)"
+    echo "\n=== ACCOUNT ROLES ==="
+    $command console <<< "data.cloudflare_account_roles.account_roles.roles"
+  elif [[ "$category" == "roles" ]]; then
+    $command console <<< "data.cloudflare_account_roles.account_roles.roles"
   else
     $command console <<< "keys(data.cloudflare_api_token_permission_groups.all.$category)"
   fi
