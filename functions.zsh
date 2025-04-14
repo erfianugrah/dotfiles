@@ -734,18 +734,33 @@ if [[ "${ZSH_EVAL_CONTEXT:-}" == "toplevel" || "${BASH_SOURCE[0]:-}" == "${0:-}"
 fi
 
 cf_permissions() {
-  local command=$1
+  local input_command=$1
   local category=$2
+  local command=""
   
-  # Validate command (tf or tofu)
-  if [[ "$command" != "tf" && "$command" != "tofu" ]]; then
-    echo "Usage: cf_permissions [tf|tofu] [account|zone|user|r2|all]"
+  # Map input to actual command
+  case "$input_command" in
+    terraform|tf)
+      command="terraform"
+      ;;
+    tofu|t)
+      command="tofu"
+      ;;
+    *)
+      echo "Usage: cf_permissions [terraform|tf|tofu|t] [account|zone|user|r2|all]"
+      return 1
+      ;;
+  esac
+  
+  # Check if the command exists
+  if ! command -v $command &> /dev/null; then
+    echo "Error: Command '$command' not found. Please ensure it is installed and in your PATH."
     return 1
   fi
   
   # Validate category
   if [[ "$category" != "account" && "$category" != "zone" && "$category" != "user" && "$category" != "r2" && "$category" != "all" ]]; then
-    echo "Usage: cf_permissions [tf|tofu] [account|zone|user|r2|all]"
+    echo "Usage: cf_permissions [terraform|tf|tofu|t] [account|zone|user|r2|all]"
     return 1
   fi
   
@@ -763,11 +778,3 @@ cf_permissions() {
     $command console <<< "keys(data.cloudflare_api_token_permission_groups.all.$category)"
   fi
 }
-
-# Add alias for convenience
-alias cfp="cf_permissions"
-
-# Print usage instructions
-echo "Function 'cf_permissions' created."
-echo "Usage: cf_permissions [tf|tofu] [account|zone|user|r2|all]"
-echo "Or use the shorter alias: cfp [tf|tofu] [account|zone|user|r2|all]"
