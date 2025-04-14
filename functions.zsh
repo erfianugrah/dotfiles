@@ -733,3 +733,41 @@ if [[ "${ZSH_EVAL_CONTEXT:-}" == "toplevel" || "${BASH_SOURCE[0]:-}" == "${0:-}"
   get_cf_credential "$@"
 fi
 
+cf_permissions() {
+  local command=$1
+  local category=$2
+  
+  # Validate command (tf or tofu)
+  if [[ "$command" != "tf" && "$command" != "tofu" ]]; then
+    echo "Usage: cf_permissions [tf|tofu] [account|zone|user|r2|all]"
+    return 1
+  fi
+  
+  # Validate category
+  if [[ "$category" != "account" && "$category" != "zone" && "$category" != "user" && "$category" != "r2" && "$category" != "all" ]]; then
+    echo "Usage: cf_permissions [tf|tofu] [account|zone|user|r2|all]"
+    return 1
+  fi
+  
+  # Show permissions based on category
+  if [[ "$category" == "all" ]]; then
+    echo "=== ACCOUNT PERMISSIONS ==="
+    $command console <<< "keys(data.cloudflare_api_token_permission_groups.all.account)"
+    echo "\n=== ZONE PERMISSIONS ==="
+    $command console <<< "keys(data.cloudflare_api_token_permission_groups.all.zone)"
+    echo "\n=== USER PERMISSIONS ==="
+    $command console <<< "keys(data.cloudflare_api_token_permission_groups.all.user)"
+    echo "\n=== R2 PERMISSIONS ==="
+    $command console <<< "keys(data.cloudflare_api_token_permission_groups.all.r2)"
+  else
+    $command console <<< "keys(data.cloudflare_api_token_permission_groups.all.$category)"
+  fi
+}
+
+# Add alias for convenience
+alias cfp="cf_permissions"
+
+# Print usage instructions
+echo "Function 'cf_permissions' created."
+echo "Usage: cf_permissions [tf|tofu] [account|zone|user|r2|all]"
+echo "Or use the shorter alias: cfp [tf|tofu] [account|zone|user|r2|all]"
