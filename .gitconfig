@@ -4,6 +4,8 @@
 [init]
 	defaultBranch = main
 	templateDir = /home/erfi/.git-template
+[push]
+    autoSetupRemote = true
 [credential "https://dev.azure.com"]
 	useHttpPath = true
 [credential]
@@ -45,6 +47,17 @@
 	stripLeadingSymbols = false
 	useUnicodeRuler = false
 	markEmptyLines = false
+[core]
+    pager = delta
 
+[interactive]
+    diffFilter = delta --color-only
+
+[delta]
+    navigate = true  # use n and N to move between diff sections
+    dark = true      # or light = true, or omit for auto-detection
+
+[merge]
+    conflictstyle = zdiff3
 ; [url "git@github.com:ingka-group-digital"]
 ; 	insteadOf = https://github.com/ingka-group-digital/
