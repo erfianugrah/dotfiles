@@ -47,7 +47,10 @@ xargs brew install < brew_packages_list.txt
 ##### opentofu and Terraform
 
 ```sh
-brew install opentofu terraform
+brew install opentofu
+brew tap hashicorp/tap
+brew install hashicorp/tap/terraform
+
 ```
 ##### Atuin
 

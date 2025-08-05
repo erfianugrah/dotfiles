@@ -15,6 +15,7 @@ berkeley-db
 berkeley-db@5
 binutils
 bison
+bitwarden-cli
 bpytop
 brotli
 btop
@@ -87,11 +88,11 @@ go
 gobject-introspection
 gperf
 gpgme
+gpgmepp
 gping
 graphene
 graphite2
 gsettings-desktop-schemas
-gstreamer
 gtk+3
 gtk4
 gtop
@@ -154,6 +155,8 @@ libmicrohttpd
 libmng
 libmpc
 libnghttp2
+libnghttp3
+libngtcp2
 libnice
 libnsl
 libogg
@@ -255,7 +258,6 @@ neofetch
 neovim
 nettle
 node
-node@16
 npth
 nspr
 nss
@@ -269,7 +271,6 @@ openjdk
 openjdk@11
 openjpeg
 openldap
-openssl@1.1
 openssl@3
 opentofu
 opus
@@ -296,7 +297,6 @@ py3cairo
 pycparser
 pygobject3
 python@3.13
-qt
 rav1e
 readline
 ripgrep
@@ -308,6 +308,7 @@ scc
 sdl2
 sevenzip
 shared-mime-info
+simdjson
 snappy
 speex
 speexdsp
@@ -323,15 +324,12 @@ svt-av1
 systemd
 taglib
 tcl-tk
-terraform
-terraform-ls
 tesseract
 texinfo
 texlive
 tflint
 thefuck
 theora
-tldr
 tmux
 tre-command
 tree-sitter
@@ -361,12 +359,12 @@ xh
 xinput
 xkbcomp
 xkeyboard-config
-xkeyboardconfig
 xorg-server
 xorgproto
 xsel
 xvid
 xz
+yarn
 yazi
 z3
 zellij
