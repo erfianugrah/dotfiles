@@ -1,9 +1,14 @@
- ### Setup
+### Setup
 #### Install zsh with brew or apt or bash
+
+:::note
+Before running `stow .` on the dotfiles, make sure all binaries are installed first
+:::
 
 ```sh
 brew install zsh
 sudo apt-get install zsh
+sudo apt-get install stow
 sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
 bash -c "$(curl --fail --show-error --silent --location https://raw.githubusercontent.com/zdharma-continuum/zinit/HEAD/scripts/install.sh)"
 ```
@@ -93,6 +98,13 @@ chmod +x /usr/local/bin/sops
 
 ```sh
 brew install bitwarden-cli
+```
+
+##### bun and deno
+
+```sh
+curl -fsSL https://bun.sh/install | bash
+curl -fsSL https://deno.land/install.sh | sh
 ```
 
 ##### [functions.zsh](functions.zsh)
