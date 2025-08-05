@@ -48,6 +48,9 @@ brew install opentofu terraform
 ```markdown
 brew install tmux
 git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
+tmux source ~/.tmux.conf
+`prefix` + I (capital i)
+
 ```
 ##### age
 
@@ -57,11 +60,16 @@ brew install age
 ##### sops, a secrets manager plugin
 
 ```markdown
-curl -LO https://github.com/getsops/sops/releases/download/v3.8.1/sops-v3.8.1.linux.amd64
-mv sops-v3.8.1.linux.amd64 /usr/local/bin/sops
+# Download the binary
+curl -LO https://github.com/getsops/sops/releases/download/v3.10.2/sops-v3.10.2.linux.amd64
+
+# Move the binary in to your PATH
+mv sops-v3.10.2.linux.amd64 /usr/local/bin/sops
+
+# Make the binary executable
 chmod +x /usr/local/bin/sops
-age-keygen -o key.txt
 ```
+
 ##### bitwarden-cli, a CLI for accessing the Bitwarden password manager
 
 ```markdown

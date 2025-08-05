@@ -18,7 +18,6 @@ bison
 bpytop
 brotli
 btop
-bun
 bzip2
 c-ares
 ca-certificates
@@ -119,7 +118,6 @@ jpeg-xl
 jq
 json-glib
 k9s
-kdash
 kompose
 krb5
 kubelogin
@@ -297,14 +295,6 @@ pulseaudio
 py3cairo
 pycparser
 pygobject3
-python-charset-normalizer
-python-idna
-python-packaging
-python-requests
-python-setuptools
-python-urllib3
-python@3.11
-python@3.12
 python@3.13
 qt
 rav1e
