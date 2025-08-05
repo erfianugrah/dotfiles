@@ -1,3 +1,6 @@
 .kube
 .cache
 .oh-my-zsh
+.config/nvim
+.config/Bitwarden CLI
+.config/fish
