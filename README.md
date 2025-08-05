@@ -1,9 +1,8 @@
 ### Setup
 #### Install zsh with brew or apt or bash
 
-:::note
+## Note
 Before running `stow .` on the dotfiles, make sure all binaries are installed first
-:::
 
 ```sh
 brew install zsh
