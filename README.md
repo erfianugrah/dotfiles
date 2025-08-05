@@ -9,26 +9,26 @@ sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/i
 #### Install powerlevel10k theme and set it as the default theme
 
 ```markdown
-git clone https://github.com/romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerlevel10k
+git clone git@github.com:romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerlevel10k
 ZSH_THEME="powerlevel10k/powerlevel10k"
 ```
 #### Install Meslo Nerd Font
 
-Download from `https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.0/Meslo.zip`
+Download from `git@github.com:ryanoasis/nerd-fonts/releases/download/v3.2.0/Meslo.zip`
 
 #### Useful plugins
 
 ```markdown
-git clone https://github.com/zsh-users/zsh-completions ${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions
-git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+git clone git@github.com:zsh-users/zsh-completions ${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions
+git clone git@github.com:zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+git clone git@github.com:zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
 curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash
 ```
 #### Vim and Neovim setup
 
 ```markdown
 brew install neovim vim
-git clone https://github.com/erfianugrah/kickstart.nvim.git "${XDG_CONFIG_HOME:-$HOME/.config}"/nvim
+git clone git@github.com:erfianugrah/kickstart.nvim.git "${XDG_CONFIG_HOME:-$HOME/.config}"/nvim
 ```
 #### Homebrew package manager setup and install additional packages
 
@@ -47,7 +47,7 @@ brew install opentofu terraform
 
 ```markdown
 brew install tmux
-git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
+git clone git@github.com:tmux-plugins/tpm ~/.tmux/plugins/tpm
 tmux source ~/.tmux.conf
 `prefix` + I (capital i)
 
@@ -61,7 +61,7 @@ brew install age
 
 ```markdown
 # Download the binary
-curl -LO https://github.com/getsops/sops/releases/download/v3.10.2/sops-v3.10.2.linux.amd64
+curl -LO https://github.com:getsops/sops/releases/download/v3.10.2/sops-v3.10.2.linux.amd64
 
 # Move the binary in to your PATH
 mv sops-v3.10.2.linux.amd64 /usr/local/bin/sops
