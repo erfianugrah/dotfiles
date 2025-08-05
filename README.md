@@ -29,6 +29,7 @@ curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | 
 ```markdown
 brew install neovim vim
 git clone git@github.com:erfianugrah/kickstart.nvim.git "${XDG_CONFIG_HOME:-$HOME/.config}"/nvim
+git checkout windows
 ```
 #### Homebrew package manager setup and install additional packages
 
