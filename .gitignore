@@ -1,6 +1,8 @@
 .kube
 .cache
 .oh-my-zsh
-.config/nvim
-.config/Bitwarden CLI
-.config/fish
+.config/
+!.config/atuin
+.ssh/id*
+.ssh/known_hosts*
+
