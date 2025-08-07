@@ -16,7 +16,7 @@
 [user]
 	name = Erfi Anugrah
 	email = erfi.anugrah@gmail.com
-	signingkey = 219ED73E2F0A4DAE
+	signingkey = E551327EB8D73B71
 [alias]
 	dsf = diff --color
 [core]
