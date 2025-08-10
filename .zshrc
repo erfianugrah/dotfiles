@@ -3,9 +3,9 @@ export GPG_TTY=$(tty)
 # Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
 # Initialization code that may require console input (password prompts, [y/n]
 # confirmations, etc.) must go above this block; everything else may go below.
-if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
-  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
-fi
+# if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+#   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+# fi
 
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 # If you come from bash you might have to change your $PATH.
@@ -25,7 +25,7 @@ fi
 source "${ZINIT_HOME}/zinit.zsh"
 
 # Add in Powerlevel10k
-zinit ice depth=1; zinit light romkatv/powerlevel10k
+# zinit ice depth=1; zinit light romkatv/powerlevel10k
 
 # Add in zsh plugins
 zinit light Aloxaf/fzf-tab
@@ -162,9 +162,6 @@ zinit snippet OMZP::colored-man-pages
 autoload -Uz compinit && compinit
 zinit cdreplay -q
 
-# To customize prompt, run `p10k configure` or edit ~/dotfiles/.p10k.zsh.
-[[ ! -f ~/dotfiles/.p10k.zsh ]] || source ~/dotfiles/.p10k.zsh
-
 # ZSH_TMUX_AUTOSTART=true
 ZSH_TMUX_DEFAULT_SESSION_NAME="wsl-default"
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)
@@ -236,15 +233,15 @@ alias ls=eza
 alias cat=bat
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
-alias zja="zj a --index"                                                                                                                                                                                                                                                     
-alias zjac="zj a -c"                                                                                                                                                                                                                                                         
+alias zja="zj a --index"
+alias zjac="zj a -c"
 alias zjda="zj da"
 # alias z=j
 # TF_LOG is now controlled via tf_debug_* functions
 export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
-# export STARSHIP_CONFIG=/home/erfi/starship.toml
-# export STARSHIP_CACHE=/home/erfi/.starship/cache
+export STARSHIP_CONFIG=/home/erfi/starship.toml
+export STARSHIP_CACHE=/home/erfi/.starship/cache
 source ~/dotfiles/functions.zsh
 source ~/dotfiles/wezterm.sh
 
@@ -284,7 +281,9 @@ eval "$(zoxide init zsh)"
 . "$HOME/.atuin/bin/env"
 
 eval "$(atuin init zsh --disable-up-arrow)"
+
 . "/home/erfi/.deno/env"
+
 # pnpm
 export PNPM_HOME="/home/erfi/.local/share/pnpm"
 case ":$PATH:" in
@@ -294,7 +293,8 @@ esac
 # pnpm end
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+# [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 # Generated for envman. Do not edit.
 [ -s "$HOME/.config/envman/load.sh" ] && source "$HOME/.config/envman/load.sh"
+eval "$(starship init zsh)"
