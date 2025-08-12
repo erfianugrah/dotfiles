@@ -783,3 +783,102 @@ cf_permissions() {
     $command console <<< "keys(data.cloudflare_api_token_permission_groups.all.$category)"
   fi
 }
+
+#!/bin/zsh
+
+# Function to update and upgrade Ubuntu and Homebrew packages
+update_all() {
+    echo "🔄 Starting system update process..."
+    echo "=================================="
+    
+    # Check if running on Ubuntu/Debian (apt available)
+    if command -v apt &> /dev/null; then
+        echo "📦 Updating Ubuntu packages..."
+        echo "----------------------------------"
+        
+        # Update package lists
+        if sudo apt update; then
+            echo "✅ Package lists updated"
+        else
+            echo "❌ Failed to update package lists"
+            return 1
+        fi
+        
+        # Upgrade packages
+        if sudo apt upgrade -y; then
+            echo "✅ Packages upgraded"
+        else
+            echo "❌ Failed to upgrade packages"
+            return 1
+        fi
+        
+        # Remove unnecessary packages
+        if sudo apt autoremove -y; then
+            echo "✅ Unnecessary packages removed"
+        else
+            echo "⚠️  Warning: Failed to remove unnecessary packages"
+        fi
+        
+        # Clean package cache
+        if sudo apt autoclean; then
+            echo "✅ Package cache cleaned"
+        else
+            echo "⚠️  Warning: Failed to clean package cache"
+        fi
+        
+        echo "✅ Ubuntu packages updated successfully!"
+        echo ""
+    else
+        echo "ℹ️  apt not found - skipping Ubuntu updates"
+        echo ""
+    fi
+    
+    # Check if Homebrew is installed
+    if command -v brew &> /dev/null; then
+        echo "🍺 Updating Homebrew packages..."
+        echo "----------------------------------"
+        
+        # Update Homebrew itself
+        if brew update; then
+            echo "✅ Homebrew updated"
+        else
+            echo "❌ Failed to update Homebrew"
+            return 1
+        fi
+        
+        # Upgrade all installed packages
+        if brew upgrade; then
+            echo "✅ Packages upgraded"
+        else
+            echo "❌ Failed to upgrade packages"
+            return 1
+        fi
+        
+        # Clean up old versions
+        if brew cleanup; then
+            echo "✅ Old versions cleaned up"
+        else
+            echo "⚠️  Warning: Failed to clean up old versions"
+        fi
+        
+        # Check for issues
+        echo "🔍 Running Homebrew diagnostics..."
+        if brew doctor; then
+            echo "✅ Homebrew diagnostics passed"
+        else
+            echo "⚠️  Warning: Homebrew diagnostics found issues"
+        fi
+        
+        echo "✅ Homebrew packages updated successfully!"
+        echo ""
+    else
+        echo "ℹ️  Homebrew not found - skipping Homebrew updates"
+        echo ""
+    fi
+    
+    echo "🎉 All available updates completed!"
+    echo "=================================="
+}
+
+# Optional: Create an alias for shorter command
+alias upall='update_all'
