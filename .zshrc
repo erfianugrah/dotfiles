@@ -248,7 +248,7 @@ export STARSHIP_CONFIG=/home/erfi/starship.toml
 export STARSHIP_CACHE=/home/erfi/.starship/cache
 source ~/dotfiles/functions.zsh
 source ~/dotfiles/wezterm.sh
-
+#
 # Attempt to set EDITOR to vim, nano, then code, in that order of preference
 if command -v nvim &> /dev/null; then
   export EDITOR='nvim'

@@ -68,6 +68,48 @@ decrypt() {
     fi
 }
 
+encrypt_all() {
+    if [ -z "$(ls -A .)" ]; then
+        echo "Error: Directory is empty" >&2
+        return 1
+    fi
+
+    find . -type f -print0 | while IFS= read -r -d $'\0' file; do
+        if [[ "$(basename "$file")" == "encrypt_script.sh" ]]; then
+            echo "Skipping encryption of the script itself: $file"
+            continue
+        fi
+
+        echo "Encrypting file: $file"
+        if ! encrypt "$file"; then
+            echo "Error: Encryption failed for $file" >&2
+            # Decide if you want to continue or exit on error
+            # return 1
+        fi
+    done
+}
+
+decrypt_all() {
+    if [ -z "$(ls -A .)" ]; then
+        echo "Error: Directory is empty" >&2
+        return 1
+    fi
+
+    find . -type f -print0 | while IFS= read -r -d $'\0' file; do
+        if [[ "$(basename "$file")" == "encrypt_script.sh" ]]; then
+            echo "Skipping decryption of the script itself: $file"
+            continue
+        fi
+
+        echo "Decrypting file: $file"
+        if ! decrypt "$file"; then
+            echo "Error: Decryption failed for $file" >&2
+            # Decide if you want to continue or exit on error
+            # return 1
+        fi
+    done
+
+}
 encrypt_tf() {
     local files=("secrets.tfvars" "terraform.tfstate" "terraform.tfstate.backup")
     
