@@ -1,4 +1,4 @@
-.kube
+.kube/cache
 .cache
 .oh-my-zsh
 .config/
