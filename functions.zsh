@@ -346,6 +346,7 @@ load_bw() {
         "CARGO_ROOT_KEY|CARGO_REGISTRY_TOKEN"
         "AWS_SECRET_ACCESS_KEY_ERFI|AWS_SECRET_ACCESS_KEY"
         "AWS_ACCESS_KEY_ID_ERFI|AWS_ACCESS_KEY_ID"
+	"AUTHENTIK_TOKEN|AUTHENTIK_TOKEN"
     )
 
     # Extract unique item names for bulk fetch
