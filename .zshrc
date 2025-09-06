@@ -8,10 +8,12 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+# eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
-export PATH=$HOME/go/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program\ Files/Git/mingw64/bin:$HOME/.local/bin:$HOME/.bun/bin:/usr/local/go/bin:$PATH
+# export PATH=$HOME/go/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program\ Files/Git/mingw64/bin:$HOME/.local/bin:$HOME/.bun/bin:/usr/local/go/bin:$PATH
+
+export PATH=$HOME/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program\ Files/Git/mingw64/bin:$HOME/.local/bin:$HOME/.bun/bin:/usr/local/go/bin:$PATH
 
 # Set the directory we want to store zinit and plugins
 ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
@@ -204,7 +206,6 @@ source $ZSH/oh-my-zsh.sh
 
 # export MANPATH="/usr/local/man:$MANPATH"
 # You may need to manually set your language environment
-# export LANG=en_US.UTF-8
 
 # Preferred editor for local and remote sessions
 # if [[ -n $SSH_CONNECTION ]]; then
@@ -300,3 +301,5 @@ esac
 # Generated for envman. Do not edit.
 [ -s "$HOME/.config/envman/load.sh" ] && source "$HOME/.config/envman/load.sh"
 # eval "$(starship init zsh)"
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
