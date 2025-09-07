@@ -1,0 +1,4 @@
+google-chrome
+kubelogin
+yay
+yay-debug
