@@ -205,7 +205,7 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 	-- config.webgpu_preferred_adapter = gpus[1]
 
 	-- WSL
-	config.default_domain = "WSL:Ubuntu-22.04"
+	config.default_domain = "WSL:archlinux"
 	config.default_cwd = "/home/erfi"
 	config.launch_menu = {
 		{
