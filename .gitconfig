@@ -45,9 +45,3 @@
 	conflictstyle = diff3
 ; [url "git@github.com:ingka-group-digital"]
 ; 	insteadOf = https://github.com/ingka-group-digital/
-[credential "https://github.com"]
-	helper = 
-	helper = !/home/linuxbrew/.linuxbrew/bin/gh auth git-credential
-[credential "https://gist.github.com"]
-	helper = 
-	helper = !/home/linuxbrew/.linuxbrew/bin/gh auth git-credential
