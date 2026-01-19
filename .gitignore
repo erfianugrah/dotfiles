@@ -3,6 +3,7 @@
 .oh-my-zsh
 .config/
 !.config/atuin
+!.config/opencode
 .ssh/id*
 .ssh/known_hosts*
 
