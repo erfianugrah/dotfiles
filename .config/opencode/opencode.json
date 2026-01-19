@@ -5,6 +5,32 @@
       "type": "remote",
       "url": "https://docs.mcp.cloudflare.com/mcp",
       "enabled": true
+    },
+    "mermaid": {
+      "command": "npx",
+      "args": ["-y", "@peng-shawn/mermaid-mcp-server"],
+      "env": {
+        "CONTENT_IMAGE_SUPPORTED": "false"
+      },
+      "enabled": true
+    },
+    "21st-magic": {
+      "command": "npx",
+      "args": ["-y", "@21st-dev/magic@latest"],
+      "env": {
+        "API_KEY": "${21ST_DEV_API_KEY}"
+      },
+      "enabled": false
+    },
+    "typescript": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-typescript"],
+      "enabled": true
+    },
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-fetch"],
+      "enabled": true
     }
   }
 }
