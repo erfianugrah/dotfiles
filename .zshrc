@@ -241,6 +241,7 @@ alias c=cargo
 alias zja="zj a --index"
 alias zjac="zj a -c"
 alias zjda="zj da"
+alias s=sentry-cli
 # alias z=j
 # TF_LOG is now controlled via tf_debug_* functions
 export NVIM_LOG_FILE=/home/erfi/.config
@@ -303,3 +304,6 @@ esac
 # eval "$(starship init zsh)"
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
+
+# opencode
+export PATH=/home/erfi/.opencode/bin:$PATH
