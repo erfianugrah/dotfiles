@@ -6,30 +6,32 @@
       "url": "https://docs.mcp.cloudflare.com/mcp",
       "enabled": true
     },
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true
+    },
+    "gh_grep": {
+      "type": "remote",
+      "url": "https://mcp.grep.app",
+      "enabled": true
+    },
     "mermaid": {
-      "command": "npx",
-      "args": ["-y", "@peng-shawn/mermaid-mcp-server"],
-      "env": {
+      "type": "local",
+      "command": ["npx", "-y", "@peng-shawn/mermaid-mcp-server"],
+      "environment": {
         "CONTENT_IMAGE_SUPPORTED": "false"
       },
       "enabled": true
     },
-    "21st-magic": {
-      "command": "npx",
-      "args": ["-y", "@21st-dev/magic@latest"],
-      "env": {
-        "API_KEY": "${21ST_DEV_API_KEY}"
-      },
-      "enabled": false
-    },
-    "typescript": {
-      "command": "npx",
-      "args": ["-y", "@anthropic/mcp-server-typescript"],
+    "terraform": {
+      "type": "local",
+      "command": ["npx", "-y", "terraform-mcp-server"],
       "enabled": true
     },
-    "fetch": {
-      "command": "npx",
-      "args": ["-y", "@anthropic/mcp-server-fetch"],
+    "shadcn": {
+      "type": "local",
+      "command": ["npx", "-y", "shadcn-ui-mcp-server"],
       "enabled": true
     }
   }
