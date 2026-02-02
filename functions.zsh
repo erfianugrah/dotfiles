@@ -50,7 +50,7 @@ encrypt() {
             return 1
         fi
         
-        find "$dir" -type f -print0 | while IFS= read -r -d $'\0' file; do
+        find "$dir" -type f -not -path '*/.git/*' -not -path '*/.git' -print0 | while IFS= read -r -d $'\0' file; do
             echo "Encrypting file: $file"
             if ! sops --encrypt --age "$public_key" --in-place "$file"; then
                 echo "Error: Encryption failed for $file" >&2
@@ -82,7 +82,7 @@ decrypt() {
             return 1
         fi
         
-        find "$dir" -type f -print0 | while IFS= read -r -d $'\0' file; do
+        find "$dir" -type f -not -path '*/.git/*' -not -path '*/.git' -print0 | while IFS= read -r -d $'\0' file; do
             echo "Decrypting file: $file"
             if ! sops --decrypt --in-place "$file"; then
                 echo "Error: Decryption failed for $file" >&2
@@ -109,7 +109,7 @@ encrypt_all() {
         return 1
     fi
 
-    find . -type f -print0 | while IFS= read -r -d $'\0' file; do
+    find . -type f -not -path './.git/*' -not -path './.git' -print0 | while IFS= read -r -d $'\0' file; do
         if [[ "$(basename "$file")" == "encrypt_script.sh" ]]; then
             echo "Skipping encryption of the script itself: $file"
             continue
@@ -130,7 +130,7 @@ decrypt_all() {
         return 1
     fi
 
-    find . -type f -print0 | while IFS= read -r -d $'\0' file; do
+    find . -type f -not -path './.git/*' -not -path './.git' -print0 | while IFS= read -r -d $'\0' file; do
         if [[ "$(basename "$file")" == "encrypt_script.sh" ]]; then
             echo "Skipping decryption of the script itself: $file"
             continue
