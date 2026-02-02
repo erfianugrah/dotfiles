@@ -71,14 +71,32 @@ encrypt() {
 }
 
 decrypt() {
+    SOPS_AGE_KEY=$(echo -e "$SOPS_AGE_KEYS" | tail -n 1)
+    export SOPS_AGE_KEY
+
+    # If argument is a directory, decrypt all files in it
+    if [[ -d "$1" ]]; then
+        local dir="$1"
+        if [[ -z "$(ls -A "$dir")" ]]; then
+            echo "Error: Directory $dir is empty" >&2
+            return 1
+        fi
+        
+        find "$dir" -type f -print0 | while IFS= read -r -d $'\0' file; do
+            echo "Decrypting file: $file"
+            if ! sops --decrypt --in-place "$file"; then
+                echo "Error: Decryption failed for $file" >&2
+            fi
+        done
+        return 0
+    fi
+
     if [[ ! -f "$1" ]]; then
         echo "Error: File $1 does not exist" >&2
         return 1
     fi
 
-    SOPS_AGE_KEY=$(echo -e "$SOPS_AGE_KEYS" | tail -n 1)
-    export SOPS_AGE_KEY
-    
+    echo "Decrypting file: $1"
     if ! sops --decrypt --in-place "$1"; then
         echo "Error: Decryption failed for $1" >&2
         return 1
