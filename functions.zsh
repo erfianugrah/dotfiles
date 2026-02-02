@@ -42,6 +42,23 @@ encrypt() {
         return 1
     fi
 
+    # If argument is a directory, encrypt all files in it
+    if [[ -d "$1" ]]; then
+        local dir="$1"
+        if [[ -z "$(ls -A "$dir")" ]]; then
+            echo "Error: Directory $dir is empty" >&2
+            return 1
+        fi
+        
+        find "$dir" -type f -print0 | while IFS= read -r -d $'\0' file; do
+            echo "Encrypting file: $file"
+            if ! sops --encrypt --age "$public_key" --in-place "$file"; then
+                echo "Error: Encryption failed for $file" >&2
+            fi
+        done
+        return 0
+    fi
+
     if [[ ! -f "$1" ]]; then
         echo "Error: File $1 does not exist" >&2
         return 1
