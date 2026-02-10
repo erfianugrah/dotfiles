@@ -33,6 +33,18 @@
       "type": "local",
       "command": ["npx", "-y", "shadcn-ui-mcp-server"],
       "enabled": true
+    },
+    "supabase": {
+      "type": "remote",
+      "url": "https://mcp.supabase.com/mcp",
+      "enabled": true,
+      "oauth": {}
+    },
+    "vercel": {
+      "type": "remote",
+      "url": "https://mcp.vercel.com",
+      "enabled": true,
+      "oauth": {}
     }
   }
 }

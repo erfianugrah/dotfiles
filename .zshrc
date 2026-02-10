@@ -242,6 +242,7 @@ alias zja="zj a --index"
 alias zjac="zj a -c"
 alias zjda="zj da"
 alias s=sentry-cli
+alias sb=supabase
 # alias z=j
 # TF_LOG is now controlled via tf_debug_* functions
 export NVIM_LOG_FILE=/home/erfi/.config
@@ -307,3 +308,4 @@ export LC_ALL=C.UTF-8
 
 # opencode
 export PATH=/home/erfi/.opencode/bin:$PATH
+export OPENCODE_DISABLE_PRUNE=true
