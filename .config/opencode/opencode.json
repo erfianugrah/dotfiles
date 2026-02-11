@@ -8,8 +8,9 @@
     },
     "context7": {
       "type": "remote",
-      "url": "https://mcp.context7.com/mcp",
-      "enabled": true
+      "url": "https://mcp.context7.com/mcp/oauth",
+      "enabled": true,
+      "oauth": {}
     },
     "gh_grep": {
       "type": "remote",
