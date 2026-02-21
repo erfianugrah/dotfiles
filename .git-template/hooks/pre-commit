@@ -2,78 +2,132 @@
 
 # Pre-commit hook: prevent committing unencrypted secrets.
 #
-# Two-tier check:
-#   1. Files that MUST be encrypted (always contain secrets by nature):
-#      .env, .tfvars, .tfstate, .ini — blocked unless SOPS-encrypted.
-#   2. Files that MAY contain secrets (.yaml, .yml, .json):
-#      Only blocked if they contain secret-like values AND are not SOPS-encrypted.
+# Detects SOPS encryption (age, KMS, PGP) and raw age-encrypted files.
 #
-# Skip entirely with: .allow-unencrypted in repo root.
+# Checks:
+#   1. .env, .tfvars, .tfstate — MUST be encrypted
+#   2. .yaml, .yml, .json — only flagged if they contain secret-like values
+#
+# .sops.yaml integration:
+#   Files matching path_regex creation_rules are checked for SOPS encryption.
+#
+# Exceptions:
+#   .allow-unencrypted         — skip ALL checks for this repo
+#   .allow-unencrypted-paths   — one glob pattern per line; matching files skip
 
-# Check for exception flag
+set -euo pipefail
+
+# ── Exceptions ───────────────────────────────────────────────────────────────
+
 if [ -f ".allow-unencrypted" ]; then
     exit 0
 fi
 
-# File extensions that ALWAYS require encryption
-ALWAYS_ENCRYPT="\.(env|tfvars|tfstate|ini)$"
+ALLOW_PATHS=()
+if [ -f ".allow-unencrypted-paths" ]; then
+    while IFS= read -r line; do
+        line="${line%%#*}"
+        line="$(echo "$line" | xargs)" 2>/dev/null || true
+        [ -n "$line" ] && ALLOW_PATHS+=("$line")
+    done < .allow-unencrypted-paths
+fi
 
-# File extensions that only require encryption if they contain secret-like content
-MAYBE_ENCRYPT="\.(yaml|yml|json)$"
+is_path_allowed() {
+    for pattern in "${ALLOW_PATHS[@]+"${ALLOW_PATHS[@]}"}"; do
+        # shellcheck disable=SC2254
+        case "$1" in $pattern) return 0 ;; esac
+    done
+    return 1
+}
 
-# Patterns that indicate a file contains actual secrets (case-insensitive)
-# Matches: password: value, secret_key = value, api_token: "value", etc.
-# Excludes: env var references like ${VAR}, {$VAR}, $VAR, or empty/placeholder values
-SECRET_CONTENT_PATTERNS='(password|secret|token|api_key|private_key|credentials?|client_secret|encryption_key)["\x27]?\s*[:=]\s*["\x27]?[a-zA-Z0-9+/=_\-]{8,}'
+# ── Encryption detection ─────────────────────────────────────────────────────
 
-# Check if a file is encrypted using SOPS
 is_encrypted() {
-    grep -q "^sops_" "$1" || grep -q "ENC\[AES256" "$1"
+    local file="$1"
+    # SOPS encrypted values (all formats)
+    grep -q "ENC\[AES256_GCM," "$file" 2>/dev/null && return 0
+    # SOPS dotenv metadata (sops_age__*, sops_mac, etc.)
+    grep -q "^sops_" "$file" 2>/dev/null && return 0
+    # SOPS YAML/JSON metadata
+    grep -q "^sops:" "$file" 2>/dev/null && return 0
+    grep -q '"sops"' "$file" 2>/dev/null && return 0
+    # Raw age encryption
+    head -1 "$file" 2>/dev/null | grep -q "^-----BEGIN AGE ENCRYPTED FILE-----$" && return 0
+    return 1
 }
 
-# Check if a file contains secret-like content (not env var references)
+# ── Secret content detection ─────────────────────────────────────────────────
+
+SECRET_PATTERNS='(password|secret|token|api_key|private_key|credentials?|client_secret|encryption_key|access_key)["\x27]?\s*[:=]\s*["\x27]?[a-zA-Z0-9+/=_\-]{8,}'
+
 has_secrets() {
-    # Match secret patterns but exclude lines that are env var references
-    grep -iEq "$SECRET_CONTENT_PATTERNS" "$1" 2>/dev/null || return 1
-    # Ensure the match isn't just an env var reference like ${SECRET} or {$SECRET}
-    grep -iE "$SECRET_CONTENT_PATTERNS" "$1" 2>/dev/null \
+    grep -iEq "$SECRET_PATTERNS" "$1" 2>/dev/null || return 1
+    # Exclude env var references like ${VAR}, {$VAR}, $VAR
+    grep -iE "$SECRET_PATTERNS" "$1" 2>/dev/null \
         | grep -vE '[\$]\{|{\$|\$[A-Z_]+' \
-        | grep -iEq "$SECRET_CONTENT_PATTERNS" 2>/dev/null
+        | grep -iEq "$SECRET_PATTERNS" 2>/dev/null
 }
 
-UNENCRYPTED_FILES=""
+# ── .sops.yaml integration ──────────────────────────────────────────────────
+
+SOPS_RULES=()
+if [ -f ".sops.yaml" ]; then
+    while IFS= read -r regex; do
+        [ -n "$regex" ] && SOPS_RULES+=("$regex")
+    done < <(grep 'path_regex:' .sops.yaml 2>/dev/null | sed 's/.*path_regex:\s*//' | tr -d "'\"")
+fi
+
+matches_sops_rules() {
+    for rule in "${SOPS_RULES[@]+"${SOPS_RULES[@]}"}"; do
+        echo "$1" | grep -qE "$rule" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+BLOCKED=""
 
 while IFS= read -r file; do
     [ -f "$file" ] || continue
+    is_path_allowed "$file" && continue
 
-    if echo "$file" | grep -qE "$ALWAYS_ENCRYPT"; then
-        # Tier 1: must be encrypted
-        if ! is_encrypted "$file"; then
-            UNENCRYPTED_FILES="$UNENCRYPTED_FILES$file\n"
-        fi
-    elif echo "$file" | grep -qE "$MAYBE_ENCRYPT"; then
-        # Tier 2: only flag if it has secret-like content and isn't encrypted
+    # .env, .tfvars, .tfstate — must be encrypted
+    if echo "$file" | grep -qE '\.(env|tfvars)$' || echo "$file" | grep -qE '\.tfstate(\.backup)?$'; then
+        is_encrypted "$file" || BLOCKED="$BLOCKED  $file\n"
+        continue
+    fi
+
+    # .sops.yaml creation_rules — must be SOPS-encrypted
+    if matches_sops_rules "$file"; then
+        is_encrypted "$file" || BLOCKED="$BLOCKED  $file (matched .sops.yaml rule)\n"
+        continue
+    fi
+
+    # .yaml, .yml, .json — only if they contain secrets
+    if echo "$file" | grep -qE '\.(yaml|yml|json)$'; then
         if has_secrets "$file" && ! is_encrypted "$file"; then
-            UNENCRYPTED_FILES="$UNENCRYPTED_FILES$file\n"
+            BLOCKED="$BLOCKED  $file\n"
         fi
     fi
 done < <(git diff --cached --name-only 2>/dev/null || true)
 
-if [ -n "$UNENCRYPTED_FILES" ]; then
-    echo "🚫 ERROR: Cannot commit unencrypted sensitive files:"
-    echo -e "$UNENCRYPTED_FILES"
-    echo
-    echo "Please remove these files from staging:"
-    echo "  git restore --staged <file>"
-    echo
-    echo "Then encrypt them before adding again:"
-    echo "- For Terraform files: encrypt_tf"
-    echo "- For K8s secrets: encrypt_k3s_secret <file>"
-    echo "- For other files: encrypt <file>"
-    echo
-    echo "⚠️  To disable this check for this repository, create a .allow-unencrypted file"
-    echo "⚠️  WARNING: Your Git history could contain unencrypted versions if you don't unstage first!"
-    exit 1
+# ── Output ───────────────────────────────────────────────────────────────────
+
+RC=0
+
+if [ -n "$BLOCKED" ]; then
+    echo "🚫 Unencrypted sensitive files:"
+    echo -e "$BLOCKED"
+    echo "Encrypt with:  sops --encrypt --in-place <file>"
+    echo ""
+    RC=1
 fi
 
-exit 0
+if [ $RC -ne 0 ]; then
+    echo "Skip repo:   touch .allow-unencrypted"
+    echo "Skip paths:  add globs to .allow-unencrypted-paths"
+    echo ""
+fi
+
+exit $RC
