@@ -1,33 +1,68 @@
 #!/bin/bash
 
+# Pre-commit hook: prevent committing unencrypted secrets.
+#
+# Two-tier check:
+#   1. Files that MUST be encrypted (always contain secrets by nature):
+#      .env, .tfvars, .tfstate, .ini — blocked unless SOPS-encrypted.
+#   2. Files that MAY contain secrets (.yaml, .yml, .json):
+#      Only blocked if they contain secret-like values AND are not SOPS-encrypted.
+#
+# Skip entirely with: .allow-unencrypted in repo root.
+
 # Check for exception flag
 if [ -f ".allow-unencrypted" ]; then
     exit 0
 fi
 
-# Files to check for sensitive content
-SENSITIVE_PATTERNS="\.(tfvars|tfstate|yaml|yml|json|env|ini)$"
+# File extensions that ALWAYS require encryption
+ALWAYS_ENCRYPT="\.(env|tfvars|tfstate|ini)$"
 
-# Function to check if a file is encrypted using SOPS
+# File extensions that only require encryption if they contain secret-like content
+MAYBE_ENCRYPT="\.(yaml|yml|json)$"
+
+# Patterns that indicate a file contains actual secrets (case-insensitive)
+# Matches: password: value, secret_key = value, api_token: "value", etc.
+# Excludes: env var references like ${VAR}, {$VAR}, $VAR, or empty/placeholder values
+SECRET_CONTENT_PATTERNS='(password|secret|token|api_key|private_key|credentials?|client_secret|encryption_key)["\x27]?\s*[:=]\s*["\x27]?[a-zA-Z0-9+/=_\-]{8,}'
+
+# Check if a file is encrypted using SOPS
 is_encrypted() {
     grep -q "^sops_" "$1" || grep -q "ENC\[AES256" "$1"
 }
 
-# Check files
+# Check if a file contains secret-like content (not env var references)
+has_secrets() {
+    # Match secret patterns but exclude lines that are env var references
+    grep -iEq "$SECRET_CONTENT_PATTERNS" "$1" 2>/dev/null || return 1
+    # Ensure the match isn't just an env var reference like ${SECRET} or {$SECRET}
+    grep -iE "$SECRET_CONTENT_PATTERNS" "$1" 2>/dev/null \
+        | grep -vE '[\$]\{|{\$|\$[A-Z_]+' \
+        | grep -iEq "$SECRET_CONTENT_PATTERNS" 2>/dev/null
+}
+
 UNENCRYPTED_FILES=""
+
 while IFS= read -r file; do
-    # Skip if file doesn't exist (e.g. deleted files)
     [ -f "$file" ] || continue
-    
-    if ! is_encrypted "$file"; then
-        UNENCRYPTED_FILES="$UNENCRYPTED_FILES$file\n"
+
+    if echo "$file" | grep -qE "$ALWAYS_ENCRYPT"; then
+        # Tier 1: must be encrypted
+        if ! is_encrypted "$file"; then
+            UNENCRYPTED_FILES="$UNENCRYPTED_FILES$file\n"
+        fi
+    elif echo "$file" | grep -qE "$MAYBE_ENCRYPT"; then
+        # Tier 2: only flag if it has secret-like content and isn't encrypted
+        if has_secrets "$file" && ! is_encrypted "$file"; then
+            UNENCRYPTED_FILES="$UNENCRYPTED_FILES$file\n"
+        fi
     fi
-done < <(git diff --cached --name-only | grep -E "$SENSITIVE_PATTERNS" || true)
+done < <(git diff --cached --name-only 2>/dev/null || true)
 
 if [ -n "$UNENCRYPTED_FILES" ]; then
     echo "🚫 ERROR: Cannot commit unencrypted sensitive files:"
     echo -e "$UNENCRYPTED_FILES"
-    echo 
+    echo
     echo "Please remove these files from staging:"
     echo "  git restore --staged <file>"
     echo
