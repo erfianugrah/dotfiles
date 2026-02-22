@@ -97,7 +97,44 @@ chmod +x /usr/local/bin/sops
 
 ```sh
 brew install bitwarden-cli
+bw login
 ```
+
+##### bw-serve setup (one-time, after `stow .`)
+
+Secrets are managed via `bw serve`, a local REST API that runs as a systemd
+user service on `127.0.0.1:8087`. The service file is stowed automatically
+from `.config/systemd/user/bw-serve.service`.
+
+```sh
+# After stow . — tell systemd about the new service and enable it
+systemctl --user daemon-reload
+systemctl --user enable bw-serve.service
+```
+
+##### Daily usage
+
+```sh
+# Once after login/reboot — unlocks vault and starts the bw serve daemon
+bw_serve_start
+
+# In each shell/tmux pane where you need secrets — exports env vars
+load_bw            # personal secrets
+load_cf_work       # work secrets
+load_wrangler_token
+
+# Useful commands
+bw_serve_status    # check if the API is running
+bw_serve_stop      # stop the daemon and clear session
+unset_bw_vars      # wipe exported env vars from current shell
+```
+
+`bw_serve_start` unlocks the vault once — after that, `load_bw` in any shell
+is just a fast `curl` to localhost with no password prompt. The service
+survives terminal/tmux restarts. After a reboot, run `bw_serve_start` again.
+
+If you run `load_bw` without starting the service first, it will auto-start
+and prompt you to unlock.
 
 ##### bun and deno
 
@@ -107,4 +144,6 @@ curl -fsSL https://deno.land/install.sh | sh
 ```
 
 ##### [functions.zsh](functions.zsh)
-Make sure to run before running `tmux` so that the env variables can be set and persisted across from shell
+Contains SOPS/Age encryption helpers, Bitwarden API accessors, Cloudflare
+credential retrieval, and system utilities. See the bw-serve section above
+for secrets management usage.

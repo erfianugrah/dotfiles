@@ -1,9 +1,11 @@
 .kube/cache
 .cache
 .oh-my-zsh
-.config/
+.config/*
 !.config/atuin
 !.config/opencode
+!.config/systemd
+.config/systemd/user/*.wants
 .ssh/id*
 .ssh/known_hosts*
 
