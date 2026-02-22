@@ -234,7 +234,22 @@ _bw_get() {
 # bw serve lifecycle management
 # ---------------------------------------------------------------------------
 
+# Spinner for visual feedback during waits
+_bw_spinner() {
+    local pid=$1
+    local msg="${2:-Working}"
+    local spin='|/-\'
+    local i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        printf "\r  %s %s" "${spin:i++%4:1}" "$msg" >&2
+        sleep 0.15
+    done
+    printf "\r" >&2
+}
+
 bw_serve_start() {
+    echo "[bw-serve] Unlocking Bitwarden vault..."
+
     # Unlock vault and get session key
     local session
     local max_retries=3
@@ -245,50 +260,84 @@ bw_serve_start() {
         if [[ -n "$session" ]]; then
             break
         fi
-        echo "Unlock attempt failed. Please try again." >&2
+        echo "[bw-serve] Unlock attempt $((retries + 1))/$max_retries failed." >&2
         ((retries++))
     done
 
     if [[ -z "$session" ]]; then
-        echo "Failed to unlock Bitwarden vault after $max_retries attempts." >&2
+        echo "[bw-serve] Failed to unlock vault after $max_retries attempts." >&2
         return 1
     fi
+    echo "[bw-serve] Vault unlocked."
+
+    # Sync vault to pull latest changes from server
+    echo "[bw-serve] Syncing vault..."
+    BW_SESSION="$session" bw sync 2>/dev/null && \
+        echo "[bw-serve] Vault synced." || \
+        echo "[bw-serve] Sync failed (non-fatal, using local cache)." >&2
 
     # Write session to runtime dir (mode 600, readable only by current user)
     local session_file="${XDG_RUNTIME_DIR:-/tmp}/bw-session.env"
     echo "BW_SESSION=$session" > "$session_file"
     chmod 600 "$session_file"
+    echo "[bw-serve] Session written to $session_file"
 
-    # (Re)start the systemd service
+    # Reset failed state if any, then (re)start the systemd service
+    systemctl --user reset-failed bw-serve.service 2>/dev/null
     systemctl --user restart bw-serve.service
+    echo "[bw-serve] systemd service restarted, waiting for API..."
 
-    # Wait for the API to become available
+    # Wait for the API to become available with spinner
     local wait=0
+    local max_wait=20
     while ! _bw_serve_ok; do
         ((wait++))
-        if (( wait > 15 )); then
-            echo "bw serve failed to start within 15 seconds." >&2
+        if (( wait > max_wait )); then
+            echo "" >&2
+            echo "[bw-serve] Failed to start within ${max_wait}s. Checking logs:" >&2
+            journalctl --user -u bw-serve.service --no-pager -n 5 >&2
             return 1
         fi
+        printf "\r  [%2d/%ds] Waiting for bw serve..." "$wait" "$max_wait" >&2
         sleep 1
     done
-    echo "Bitwarden API running on ${BW_SERVE_ADDR}"
+    printf "\r%*s\r" 50 "" >&2
+    echo "[bw-serve] API running on ${BW_SERVE_ADDR}"
 }
 
 bw_serve_stop() {
+    echo "[bw-serve] Stopping service..."
     systemctl --user stop bw-serve.service
     rm -f "${XDG_RUNTIME_DIR:-/tmp}/bw-session.env"
     clear_bw_cache
-    echo "Bitwarden API stopped and session cleared."
+    echo "[bw-serve] Stopped and session cleared."
 }
 
 bw_serve_status() {
     if _bw_serve_ok; then
-        echo "bw serve is running on ${BW_SERVE_ADDR}"
+        echo "[bw-serve] Running on ${BW_SERVE_ADDR}"
         systemctl --user status bw-serve.service --no-pager
     else
-        echo "bw serve is not reachable on ${BW_SERVE_ADDR}"
+        echo "[bw-serve] Not reachable on ${BW_SERVE_ADDR}"
+        echo "[bw-serve] Recent logs:"
+        journalctl --user -u bw-serve.service --no-pager -n 5 2>/dev/null
     fi
+}
+
+bw_serve_sync() {
+    local session_file="${XDG_RUNTIME_DIR:-/tmp}/bw-session.env"
+    if [[ ! -f "$session_file" ]]; then
+        echo "[bw-serve] No active session. Run bw_serve_start first." >&2
+        return 1
+    fi
+    source "$session_file"
+    echo "[bw-serve] Syncing vault..."
+    BW_SESSION="$BW_SESSION" bw sync && echo "[bw-serve] Vault synced." || {
+        echo "[bw-serve] Sync failed." >&2
+        return 1
+    }
+    # Clear local cache so next _bw_get fetches fresh values
+    clear_bw_cache
 }
 
 # ---------------------------------------------------------------------------
@@ -308,9 +357,14 @@ clear_bw_cache() {
 # Generic loader: takes an array of "bw_item_name|ENV_VAR_NAME" pairs
 _bw_load_items() {
     local items=("$@")
+    local total=${#items[@]}
+    local current=0
+    local loaded=0
+    local skipped=0
+    local failed=0
 
     if ! _bw_serve_ok; then
-        echo "bw serve is not running. Starting it now..." >&2
+        echo "[bw] Service not running, starting..." >&2
         bw_serve_start || return 1
     fi
 
@@ -318,23 +372,29 @@ _bw_load_items() {
         local bw_name=${item%|*}
         local env_name=${item#*|}
         local val
+        ((current++))
+
+        printf "\r  [%d/%d] Loading %-40s" "$current" "$total" "$env_name" >&2
 
         val=$(_bw_get "$bw_name") || {
-            echo "Failed to load $bw_name" >&2
+            ((failed++))
             continue
         }
 
         # Only export if unset or changed
         if [[ -z "${(P)env_name}" ]]; then
             export "$env_name=$val"
-            echo "Set $env_name"
+            ((loaded++))
         elif [[ "${(P)env_name}" != "$val" ]]; then
             export "$env_name=$val"
-            echo "Updated $env_name"
+            ((loaded++))
         else
-            echo "Skipping $env_name - value unchanged"
+            ((skipped++))
         fi
     done
+
+    printf "\r%*s\r" 60 "" >&2
+    echo "[bw] Done: $loaded loaded, $skipped unchanged, $failed failed (of $total)"
 }
 
 load_sops_age_keys() {

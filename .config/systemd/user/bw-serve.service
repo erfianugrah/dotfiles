@@ -13,10 +13,7 @@ RestartSec=10
 
 # Hardening
 NoNewPrivileges=true
-ProtectHome=read-only
-ProtectSystem=strict
 PrivateTmp=true
-ReadWritePaths=%h/.config/Bitwarden CLI
 
 [Install]
 WantedBy=default.target
