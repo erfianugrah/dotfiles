@@ -176,203 +176,193 @@ ansible_update() {
    ansible-playbook -i my-playbooks/inventory.yml my-playbooks/update.yml --ask-become-pass
 }
 
-declare -A BW_CACHE
-BW_CACHE_DURATION=60  # Cache duration in seconds
+# ---------------------------------------------------------------------------
+# Bitwarden Serve API — core accessor layer
+# ---------------------------------------------------------------------------
+# Instead of bulk-exporting secrets via `bw list items`, we query the local
+# bw serve REST API (127.0.0.1:8087). Run `bw_serve_start` once after login.
+# ---------------------------------------------------------------------------
 
-unlock_bw_if_locked() {
-    if [[ -z $BW_SESSION ]]; then
-        echo 'bw locked - unlocking into a new session' >&2
-        local max_retries=3
-        local retries=0
+BW_SERVE_PORT="${BW_SERVE_PORT:-8087}"
+BW_SERVE_ADDR="http://127.0.0.1:${BW_SERVE_PORT}"
 
-        while [[ $retries -lt $max_retries ]]; do
-            export BW_SESSION="$(bw unlock --raw)"
-            
-            if [[ -z $BW_SESSION ]]; then
-                echo "Unlock attempt failed. Please try again." >&2
-                ((retries++))
-                
-                if [[ $retries -eq $max_retries ]]; then
-                    echo "Failed to set BW_SESSION environment variable after $max_retries attempts." >&2
-                    return 1
-                fi
-            else
-                echo "BW_SESSION set successfully."
-                return 0
-            fi
-        done
-    fi
-    return 0
+declare -A _BW_CACHE _BW_CACHE_TS
+_BW_CACHE_TTL=300  # 5 minute in-memory cache
+
+# Check if bw serve is reachable
+_bw_serve_ok() {
+    curl -sf "${BW_SERVE_ADDR}/status" >/dev/null 2>&1
 }
 
-fetch_items() {
-    local current_time=$(date +%s)
-    local items_to_fetch=("$@")
-    
-    unlock_bw_if_locked || return 1
-    
-    echo "Fetching items: ${items_to_fetch[*]}"
-    
-    # Construct jq filter for the requested items
-    local jq_filter='.[] | select(.name == "'
-    jq_filter+=$(printf '%s" or .name == "' "${items_to_fetch[@]}")
-    jq_filter+='")'
+# Fetch a single item's .notes field from bw serve by exact name
+_bw_api_get_note() {
+    local item_name="$1"
+    local response
+    response=$(curl -sf "${BW_SERVE_ADDR}/list/object/items?search=${item_name}") || {
+        echo "bw serve not reachable on ${BW_SERVE_ADDR}. Run bw_serve_start first." >&2
+        return 1
+    }
+    echo "$response" | jq -r \
+        --arg name "$item_name" \
+        '.data.data[] | select(.name == $name) | .notes // empty' | head -1
+}
 
-    # Fetch requested items in bulk
-    local items=$(bw list items --session $BW_SESSION | jq -c "$jq_filter")
-    if [[ -z $items ]]; then
-        echo "Failed to fetch items from Bitwarden." >&2
+# Cached accessor — returns the note value, fetching only if cache is stale
+_bw_get() {
+    local item_name="$1"
+    local now=$(date +%s)
+
+    if [[ -n "${_BW_CACHE[$item_name]}" ]] && \
+       (( now - ${_BW_CACHE_TS[$item_name]:-0} < _BW_CACHE_TTL )); then
+        echo "${_BW_CACHE[$item_name]}"
+        return 0
+    fi
+
+    local val
+    val=$(_bw_api_get_note "$item_name") || return 1
+    if [[ -z "$val" ]]; then
+        echo "No value found for '$item_name' in Bitwarden." >&2
         return 1
     fi
 
-    echo "Successfully fetched items from Bitwarden."
+    _BW_CACHE[$item_name]="$val"
+    _BW_CACHE_TS[$item_name]="$now"
+    echo "$val"
+}
 
-    echo "$items" | while read -r item; do
-        [[ -z $item ]] && continue
-        local name=$(echo "$item" | jq -r '.name')
-        local value=$(echo "$item" | jq -r '.notes')
-        if [[ -n $name && -n $value && $value != "null" ]]; then
-            BW_CACHE[$name]="${current_time}|${value}"
-            echo "Cached item: $name"
+# ---------------------------------------------------------------------------
+# bw serve lifecycle management
+# ---------------------------------------------------------------------------
+
+bw_serve_start() {
+    # Unlock vault and get session key
+    local session
+    local max_retries=3
+    local retries=0
+
+    while (( retries < max_retries )); do
+        session=$(bw unlock --raw)
+        if [[ -n "$session" ]]; then
+            break
+        fi
+        echo "Unlock attempt failed. Please try again." >&2
+        ((retries++))
+    done
+
+    if [[ -z "$session" ]]; then
+        echo "Failed to unlock Bitwarden vault after $max_retries attempts." >&2
+        return 1
+    fi
+
+    # Write session to runtime dir (mode 600, readable only by current user)
+    local session_file="${XDG_RUNTIME_DIR:-/tmp}/bw-session.env"
+    echo "BW_SESSION=$session" > "$session_file"
+    chmod 600 "$session_file"
+
+    # (Re)start the systemd service
+    systemctl --user restart bw-serve.service
+
+    # Wait for the API to become available
+    local wait=0
+    while ! _bw_serve_ok; do
+        ((wait++))
+        if (( wait > 15 )); then
+            echo "bw serve failed to start within 15 seconds." >&2
+            return 1
+        fi
+        sleep 1
+    done
+    echo "Bitwarden API running on ${BW_SERVE_ADDR}"
+}
+
+bw_serve_stop() {
+    systemctl --user stop bw-serve.service
+    rm -f "${XDG_RUNTIME_DIR:-/tmp}/bw-session.env"
+    clear_bw_cache
+    echo "Bitwarden API stopped and session cleared."
+}
+
+bw_serve_status() {
+    if _bw_serve_ok; then
+        echo "bw serve is running on ${BW_SERVE_ADDR}"
+        systemctl --user status bw-serve.service --no-pager
+    else
+        echo "bw serve is not reachable on ${BW_SERVE_ADDR}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Cache management
+# ---------------------------------------------------------------------------
+
+clear_bw_cache() {
+    _BW_CACHE=()
+    _BW_CACHE_TS=()
+    echo "Bitwarden in-memory cache cleared."
+}
+
+# ---------------------------------------------------------------------------
+# Environment loaders (Pattern B — bulk export via bw serve)
+# ---------------------------------------------------------------------------
+
+# Generic loader: takes an array of "bw_item_name|ENV_VAR_NAME" pairs
+_bw_load_items() {
+    local items=("$@")
+
+    if ! _bw_serve_ok; then
+        echo "bw serve is not running. Starting it now..." >&2
+        bw_serve_start || return 1
+    fi
+
+    for item in "${items[@]}"; do
+        local bw_name=${item%|*}
+        local env_name=${item#*|}
+        local val
+
+        val=$(_bw_get "$bw_name") || {
+            echo "Failed to load $bw_name" >&2
+            continue
+        }
+
+        # Only export if unset or changed
+        if [[ -z "${(P)env_name}" ]]; then
+            export "$env_name=$val"
+            echo "Set $env_name"
+        elif [[ "${(P)env_name}" != "$val" ]]; then
+            export "$env_name=$val"
+            echo "Updated $env_name"
+        else
+            echo "Skipping $env_name - value unchanged"
         fi
     done
 }
 
-load_from_bitwarden_and_set_env() {
-    local item_name="$1"
-    local env_var_name="$2"
-    local current_time=$(date +%s)
+load_sops_age_keys() {
+    echo "Loading SOPS Age keys"
 
-    echo "Loading $item_name into $env_var_name"
+    local public_key secret_key
+    public_key=$(_bw_get "SOPS_AGE_PUB_KEY") || {
+        echo "Failed to retrieve SOPS Age public key." >&2
+        return 1
+    }
+    secret_key=$(_bw_get "SOPS_AGE_SECRET_KEY") || {
+        echo "Failed to retrieve SOPS Age secret key." >&2
+        return 1
+    }
 
-    # Check if env var is already set
-    if [[ -n ${(P)env_var_name} ]]; then
-        # Get the cached value
-        if [[ -n ${BW_CACHE[$item_name]} ]]; then
-            local cached_value=$(echo ${BW_CACHE[$item_name]} | cut -d'|' -f2)
-            if [[ ${(P)env_var_name} == "$cached_value" ]]; then
-                echo "$env_var_name already set with correct value, skipping."
-                return 0
-            fi
-        fi
-    fi
-
-    # Check cache first
-    if [[ -n ${BW_CACHE[$item_name]} ]]; then
-        local cache_time=$(echo ${BW_CACHE[$item_name]} | cut -d'|' -f1)
-        if (( current_time - cache_time < BW_CACHE_DURATION )); then
-            local value=$(echo ${BW_CACHE[$item_name]} | cut -d'|' -f2)
-            export "$env_var_name=$value"
-            echo "Set $env_var_name from cache."
-            return 0
-        fi
-    fi
-
-    # Fetch single item if not in cache or expired
-    fetch_items "$item_name" || return 1
-
-    # Set env var from updated cache
-    if [[ -n ${BW_CACHE[$item_name]} ]]; then
-        local value=$(echo ${BW_CACHE[$item_name]} | cut -d'|' -f2)
-        export "$env_var_name=$value"
-        echo "Set $env_var_name successfully."
+    local combined="${public_key}\n${secret_key}"
+    if [[ "$SOPS_AGE_KEYS" == "$combined" ]]; then
+        echo "SOPS_AGE_KEYS already set with correct values, skipping."
         return 0
     fi
 
-    echo "No item found containing '$item_name'" >&2
-    return 1
-}
-
-load_sops_age_keys() {
-    if [[ -n $SOPS_AGE_KEYS ]]; then
-        echo "SOPS_AGE_KEYS is already set, checking if values match..."
-        local current_public_key=""
-        local current_secret_key=""
-        
-        if [[ -n ${BW_CACHE["SOPS_AGE_PUB_KEY"]} && -n ${BW_CACHE["SOPS_AGE_SECRET_KEY"]} ]]; then
-            current_public_key=$(echo ${BW_CACHE["SOPS_AGE_PUB_KEY"]} | cut -d'|' -f2)
-            current_secret_key=$(echo ${BW_CACHE["SOPS_AGE_SECRET_KEY"]} | cut -d'|' -f2)
-            local current_keys="${current_public_key}\n${current_secret_key}"
-            
-            if [[ "$SOPS_AGE_KEYS" == "$current_keys" ]]; then
-                echo "SOPS_AGE_KEYS already contains correct values, skipping."
-                return 0
-            fi
-        fi
-        echo "SOPS_AGE_KEYS values differ, updating..."
-    fi
-
-    echo "Loading SOPS Age keys"
-    local current_time=$(date +%s)
-    local need_fetch=0
-    local public_key=""
-    local secret_key=""
-
-    # Check cache for both keys
-    if [[ -n ${BW_CACHE["SOPS_AGE_PUB_KEY"]} && -n ${BW_CACHE["SOPS_AGE_SECRET_KEY"]} ]]; then
-        local pub_cache_time=$(echo ${BW_CACHE["SOPS_AGE_PUB_KEY"]} | cut -d'|' -f1)
-        local secret_cache_time=$(echo ${BW_CACHE["SOPS_AGE_SECRET_KEY"]} | cut -d'|' -f1)
-        
-        if (( current_time - pub_cache_time < BW_CACHE_DURATION && 
-              current_time - secret_cache_time < BW_CACHE_DURATION )); then
-            public_key=$(echo ${BW_CACHE["SOPS_AGE_PUB_KEY"]} | cut -d'|' -f2)
-            secret_key=$(echo ${BW_CACHE["SOPS_AGE_SECRET_KEY"]} | cut -d'|' -f2)
-            echo "Got SOPS keys from cache."
-        else
-            need_fetch=1
-        fi
-    else
-        need_fetch=1
-    fi
-
-    # Fetch both keys together if either is missing or expired
-    if (( need_fetch == 1 )); then
-        echo "Fetching SOPS keys from Bitwarden"
-        unlock_bw_if_locked || return 1
-        
-        # Single bw list call for both keys
-        local sops_keys=$(bw list items --session $BW_SESSION | jq -r '.[] | select(.name | test("SOPS_AGE_.*_KEY")) | {name: .name, notes: .notes}')
-        
-        while IFS= read -r key_info; do
-            [[ -z $key_info ]] && continue
-            local name=$(echo "$key_info" | jq -r '.name')
-            local value=$(echo "$key_info" | jq -r '.notes')
-            
-            if [[ $name == "SOPS_AGE_PUB_KEY" ]]; then
-                public_key=$value
-                BW_CACHE[$name]="${current_time}|${value}"
-                echo "Got public key"
-            elif [[ $name == "SOPS_AGE_SECRET_KEY" ]]; then
-                secret_key=$value
-                BW_CACHE[$name]="${current_time}|${value}"
-                echo "Got secret key"
-            fi
-        done < <(echo "$sops_keys" | jq -c '.')
-    fi
-
-    if [[ -z $public_key || $public_key == "null" || -z $secret_key || $secret_key == "null" ]]; then
-        echo "Failed to retrieve SOPS Age keys from Bitwarden." >&2
-        return 1
-    fi
-
-    export SOPS_AGE_KEYS="${public_key}\n${secret_key}"
+    export SOPS_AGE_KEYS="$combined"
     echo "SOPS_AGE_KEYS set successfully"
-    return 0
-}
-
-clear_bw_cache() {
-    unset BW_CACHE
-    declare -A BW_CACHE
-    echo "Bitwarden cache cleared."
 }
 
 load_bw() {
     local items=(
         "CLOUDFLARE_EMAIL|CLOUDFLARE_EMAIL"
-        # "CLOUDFLARE_EMAIL|GIT_AUTHOR_EMAIL"
-        # "CLOUDFLARE_EMAIL|GIT_COMMITTER_EMAIL"
-        # "MY_NAME|GIT_AUTHOR_NAME"
-        # "MY_NAME|GIT_COMMITTER_NAME"
         "CLOUDFLARE_ACCOUNT_ID|CLOUDFLARE_ACCOUNT_ID"
         "CLOUDFLARE_ZONE_ID|CLOUDFLARE_ZONE_ID"
         "CLOUDFLARE_API_KEY|CLOUDFLARE_API_KEY"
@@ -381,45 +371,12 @@ load_bw() {
         "CARGO_ROOT_KEY|CARGO_REGISTRY_TOKEN"
         "AWS_SECRET_ACCESS_KEY_ERFI|AWS_SECRET_ACCESS_KEY"
         "AWS_ACCESS_KEY_ID_ERFI|AWS_ACCESS_KEY_ID"
-	"AUTHENTIK_TOKEN|AUTHENTIK_TOKEN"
-	"CLOUDFLARE_TOKEN|CLOUDFLARE_TOKEN"
-	"IPINFO_TOKEN|IPINFO_TOKEN"
+        "AUTHENTIK_TOKEN|AUTHENTIK_TOKEN"
+        "CLOUDFLARE_TOKEN|CLOUDFLARE_TOKEN"
+        "IPINFO_TOKEN|IPINFO_TOKEN"
     )
 
-    # Extract unique item names for bulk fetch
-    local unique_items=()
-    for item in "${items[@]}"; do
-        local item_name=${item%|*}
-        if [[ ! " ${unique_items[@]} " =~ " ${item_name} " ]]; then
-            unique_items+=("$item_name")
-        fi
-    done
-
-    # Bulk fetch all unique items
-    fetch_items "${unique_items[@]}"
-
-    # Set environment variables from cache
-    for item in "${items[@]}"; do
-        local item_name=${item%|*}
-        local env_var=${item#*|}
-        
-        # Get the cached value
-        local cached_value=""
-        if [[ -n ${BW_CACHE[$item_name]} ]]; then
-            cached_value=$(echo ${BW_CACHE[$item_name]} | cut -d'|' -f2)
-        fi
-        
-        # Only set if the environment variable doesn't exist or has a different value
-        if [[ -z ${(P)env_var} ]]; then
-            load_from_bitwarden_and_set_env "$item_name" "$env_var"
-        elif [[ ${(P)env_var} != "$cached_value" ]]; then
-            echo "Updating $env_var with new value"
-            load_from_bitwarden_and_set_env "$item_name" "$env_var"
-        else
-            echo "Skipping $env_var - value unchanged"
-        fi
-    done
-
+    _bw_load_items "${items[@]}"
     load_sops_age_keys
 }
 
@@ -434,50 +391,17 @@ load_cf_work() {
         "CLOUDLET_API_KEY|CLOUDLET_API_KEY"
     )
 
-    # Extract unique items and fetch in bulk
-    local unique_items=()
-    for item in "${items[@]}"; do
-        local item_name=${item%|*}
-        if [[ ! " ${unique_items[@]} " =~ " ${item_name} " ]]; then
-            unique_items+=("$item_name")
-        fi
-    done
-
-    # Bulk fetch all unique items
-    fetch_items "${unique_items[@]}"
-
-    # Set environment variables from cache
-    for item in "${items[@]}"; do
-        local item_name=${item%|*}
-        local env_var=${item#*|}
-        
-        # Get the cached value
-        local cached_value=""
-        if [[ -n ${BW_CACHE[$item_name]} ]]; then
-            cached_value=$(echo ${BW_CACHE[$item_name]} | cut -d'|' -f2)
-        fi
-        
-        # Only set if the environment variable doesn't exist or has a different value
-        if [[ -z ${(P)env_var} ]]; then
-            load_from_bitwarden_and_set_env "$item_name" "$env_var"
-        elif [[ ${(P)env_var} != "$cached_value" ]]; then
-            echo "Updating $env_var with new value"
-            load_from_bitwarden_and_set_env "$item_name" "$env_var"
-        else
-            echo "Skipping $env_var - value unchanged"
-        fi
-    done
+    _bw_load_items "${items[@]}"
 }
 
 load_wrangler_token() {
-    load_from_bitwarden_and_set_env "CLOUDFLARE_WRANGLER_TOKEN" "CLOUDFLARE_API_TOKEN"
+    _bw_load_items "CLOUDFLARE_WRANGLER_TOKEN|CLOUDFLARE_API_TOKEN"
 }
+
 load_ingka_gh(){
-    # eval "$(ssh-agent -s)" 
-    # ssh-add ~/.ssh/id_ingka_gh
     git config --local user.name "Erfi Anugrah"
     git config --local user.email "erfi.anugrah@ingka.com"
-    git config --local user.signingkey EF78DC0E13F5E990 
+    git config --local user.signingkey EF78DC0E13F5E990
     git config --local commit.gpgsign true
 }
 
@@ -495,20 +419,25 @@ unset_bw_vars() {
     unset CLOUDFLARE_ACCESS_OLLAMA_SECRET
     unset CARGO_REGISTRY_TOKEN
     unset SOPS_AGE_KEYS
-    unset BW_SESSION
-    
+
     # Also unset cf_work variables
     unset AWS_SECRET_ACCESS_KEY
     unset AWS_ACCESS_KEY_ID
     unset PAPIREPO_API_KEY
-    
+    unset CLOUDLET_API_KEY
+
     # Unset wrangler token
     unset CLOUDFLARE_API_TOKEN
+
+    # Unset authentik / ipinfo
+    unset AUTHENTIK_TOKEN
+    unset CLOUDFLARE_TOKEN
+    unset IPINFO_TOKEN
 
     # Clear the cache
     clear_bw_cache
 
-    echo "All Bitwarden-loaded environment variables have been unset"
+    echo "All Bitwarden-loaded environment variables have been unset."
 }
 
 tx_switch() {
