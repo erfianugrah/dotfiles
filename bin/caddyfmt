@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Minimal Caddyfile formatter (stdin/stdout).
+
+Replicates the core behavior of `caddy fmt`:
+- Normalize indentation to tabs based on brace depth
+- Opening brace stays on the same line
+- Closing brace on its own line at parent depth
+- Strip trailing whitespace
+- Ensure single trailing newline
+
+Handles Caddy placeholders like {$ENV}, {http.request.uri}, {args[0]}
+which should NOT affect indentation depth.
+"""
+
+import re
+import sys
+
+# Matches Caddy placeholders: {$VAR}, {env.VAR}, {http.request.uri}, {args[0]}, etc.
+# These contain dots, $, alphanumerics, underscores, brackets — never just whitespace/newlines.
+PLACEHOLDER_RE = re.compile(r"\{[\$\w][\w.\-\[\]$:]*\}")
+
+
+def count_braces(line: str) -> tuple[int, int]:
+    """Count structural { and } in a line, ignoring placeholders and comments."""
+    if line.startswith("#"):
+        return 0, 0
+
+    # Replace all placeholders with inert text so their braces don't count
+    cleaned = PLACEHOLDER_RE.sub("_", line)
+
+    in_quote = False
+    opens = 0
+    closes = 0
+    for ch in cleaned:
+        if ch == '"':
+            in_quote = not in_quote
+        elif not in_quote:
+            if ch == "{":
+                opens += 1
+            elif ch == "}":
+                closes += 1
+    return opens, closes
+
+
+def fmt(src: str) -> str:
+    lines = src.splitlines()
+    out: list[str] = []
+    depth = 0
+
+    for raw in lines:
+        stripped = raw.strip()
+
+        # Empty lines pass through
+        if not stripped:
+            out.append("")
+            continue
+
+        opens, closes = count_braces(stripped)
+
+        # Lines starting with } decrease depth before indenting
+        # (only count the leading }, not all closes on the line)
+        if stripped.startswith("}"):
+            depth = max(depth - 1, 0)
+            # The leading } is now accounted for in depth;
+            # remaining closes on this line are handled below
+            remaining_closes = closes - 1
+        else:
+            remaining_closes = closes
+
+        out.append("\t" * depth + stripped)
+
+        # Adjust depth for next line
+        depth = depth + opens - remaining_closes
+        depth = max(depth, 0)
+
+    # Ensure single trailing newline
+    result = "\n".join(out).rstrip("\n") + "\n"
+    return result
+
+
+if __name__ == "__main__":
+    sys.stdout.write(fmt(sys.stdin.read()))
