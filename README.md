@@ -4,6 +4,12 @@
 ## Note
 Before running `stow .` on the dotfiles, make sure all binaries are installed first
 
+### `.stow-local-ignore`
+Files and directories listed in `.stow-local-ignore` are excluded from
+symlinking into `~`. Notably, `.git` must be ignored — otherwise Stow
+symlinks `~/.git` → `dotfiles/.git`, which makes the entire home directory
+appear as a git repository (e.g. shell prompts show a branch name in `~`).
+
 ```sh
 brew install zsh
 sudo apt-get install zsh
