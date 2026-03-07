@@ -149,7 +149,120 @@ curl -fsSL https://bun.sh/install | bash
 curl -fsSL https://deno.land/install.sh | sh
 ```
 
-##### [functions.zsh](functions.zsh)
-Contains SOPS/Age encryption helpers, Bitwarden API accessors, Cloudflare
-credential retrieval, and system utilities. See the bw-serve section above
-for secrets management usage.
+---
+
+## [`functions.zsh`](functions.zsh)
+
+All shell functions sourced into every zsh session. Grouped by category below.
+
+### SOPS / Age encryption
+
+Encrypt and decrypt files in-place using SOPS with Age keys. Requires
+`SOPS_AGE_KEYS` to be set (use `load_sops_age_keys` or `load_bw`).
+
+| Function | Description |
+|---|---|
+| `encrypt <file\|dir>` | Encrypt a file or all files in a directory with SOPS/Age |
+| `decrypt <file\|dir>` | Decrypt a file or all files in a directory |
+| `encrypt_all` | Encrypt every file in the current directory |
+| `decrypt_all` | Decrypt every file in the current directory |
+| `encrypt_k3s_secret <file>` | Encrypt a K8s Secret YAML (only `data`/`stringData` fields) |
+| `decrypt_k3s_secret <file>` | Decrypt a K8s Secret YAML |
+| `encrypt_tf` | Encrypt all Terraform/OpenTofu sensitive files in cwd (`secrets.tfvars`, `terraform.tfvars`, `blueprint-export.yaml`, `*.tfstate*`) |
+| `decrypt_tf` | Decrypt the same set of files |
+
+### Bitwarden Serve API
+
+Local REST API (`bw serve`) running as a systemd user service. Functions use
+an in-memory cache (5 min TTL) to avoid repeated HTTP calls.
+
+| Function | Description |
+|---|---|
+| `bw_serve_start` | Unlock vault, sync, start the systemd service, wait for API |
+| `bw_serve_stop` | Stop service, clear session file and cache |
+| `bw_serve_status` | Check if API is reachable, show systemd status |
+| `bw_serve_sync` | Sync vault from Bitwarden server, clear local cache |
+| `clear_bw_cache` | Flush the in-memory key-value cache |
+
+### Environment loaders
+
+Load secrets from Bitwarden into env vars for the current shell. Each loader
+defines a mapping of `"bw_item_name|ENV_VAR_NAME"` pairs.
+
+| Function | What it loads |
+|---|---|
+| `load_bw` | Personal secrets (Cloudflare, AWS, Authentik, SOPS Age keys, etc.) |
+| `load_cf_work` | Work Cloudflare/AWS credentials |
+| `load_wrangler_token` | Cloudflare Wrangler API token |
+| `load_sops_age_keys` | SOPS Age public + secret key into `SOPS_AGE_KEYS` |
+| `unset_bw_vars` | Unset all env vars that could have been set by the loaders above |
+
+### Terraform / OpenTofu
+
+#### `tf_out` -- output accessor
+
+Generic, project-agnostic accessor for `tofu output` / `terraform output`.
+Auto-detects the IaC tool. Supports fuzzy name matching, nested key
+extraction, clipboard copy, env export, and more.
+
+```sh
+# Browse & extract
+tf_out                              # summary of all outputs
+tf_out <name>                       # show single output with metadata
+tf_out <name> <key>                 # extract a key from an object output
+tf_out <name> <key.subkey>          # dot-path nested extraction
+tf_out <name> <key> <subkey>        # multi-arg nested extraction
+
+# Listing & filtering
+tf_out --list                       # output names only
+tf_out --sensitive                  # sensitivity & type matrix
+tf_out --search <pattern>           # regex search output names
+tf_out --type <type>                # filter by value type (string/object/array/number/boolean)
+tf_out --count                      # count outputs by type and sensitivity
+
+# Data formats
+tf_out --json [name]                # full JSON (all or single output)
+tf_out --raw <name> [key]           # raw value for piping (no labels/colors)
+tf_out --table <name>               # render object as aligned key=value table
+tf_out --keys <name>                # list keys of an object output
+
+# Actions
+tf_out --copy <name> [key]          # copy value to clipboard (wl-copy/xclip/pbcopy)
+tf_out --env <name> [PREFIX]        # export object keys as PREFIX_KEY=value env vars
+tf_out --diff <name>                # diff output vs last state backup
+```
+
+Fuzzy matching: `tf_out grafana` resolves to `oauth2_grafana` when
+unambiguous. Ambiguous matches list candidates.
+
+#### Other Terraform helpers
+
+| Function | Description |
+|---|---|
+| `tf_debug_on` | Set `TF_LOG=debug` |
+| `tf_debug_off` | Unset `TF_LOG` |
+| `tf_debug_toggle` | Toggle debug logging on/off |
+| `cf_permissions <tf\|tofu> <category>` | Query Cloudflare permission groups via `tofu console` (categories: `account`, `zone`, `user`, `r2`, `roles`, `all`) |
+
+### Ansible
+
+| Function | Description |
+|---|---|
+| `ansible_on` | Power on hosts via playbook |
+| `ansible_off` | Shut down hosts via playbook |
+| `ansible_update` | Run update playbook on all hosts |
+
+### tmux
+
+| Function | Description |
+|---|---|
+| `tx_switch [name]` | Create and switch to a new tmux session (default: `default`) |
+
+### Navigation & shell utilities
+
+| Function | Description |
+|---|---|
+| `yy` | Open yazi file manager; cd into its last directory on exit |
+| `p10k_colours` | Print all 256 terminal colors (for Powerlevel10k theming) |
+| `fix_file_limits` / `fixfiles` | Inspect and optionally raise file descriptor limits |
+| `update_all` / `upall` | Update apt packages and Homebrew packages in one shot |

@@ -146,23 +146,39 @@ decrypt_all() {
 
 }
 encrypt_tf() {
-    local files=("secrets.tfvars" "terraform.tfstate" "terraform.tfstate.backup")
-    
-    for file in "${files[@]}" *.tfstate*; do
+    local named_files=("secrets.tfvars" "terraform.tfvars" "blueprint-export.yaml")
+    local count=0
+
+    for file in "${named_files[@]}" *.tfstate*; do
         if [[ -f "$file" ]]; then
             encrypt "$file" || return 1
+            ((count++))
         fi
     done
+
+    if (( count == 0 )); then
+        echo "No sensitive files found to encrypt." >&2
+        return 1
+    fi
+    echo "Encrypted $count file(s)."
 }
 
 decrypt_tf() {
-    local files=("secrets.tfvars" "terraform.tfstate" "terraform.tfstate.backup")
-    
-    for file in "${files[@]}" *.tfstate*; do
+    local named_files=("secrets.tfvars" "terraform.tfvars" "blueprint-export.yaml")
+    local count=0
+
+    for file in "${named_files[@]}" *.tfstate*; do
         if [[ -f "$file" ]]; then
             decrypt "$file" || return 1
+            ((count++))
         fi
     done
+
+    if (( count == 0 )); then
+        echo "No encrypted files found to decrypt." >&2
+        return 1
+    fi
+    echo "Decrypted $count file(s)."
 }
 ansible_on() {
    ansible-playbook -i my-playbooks/inventory.yml my-playbooks/poweron.yml --ask-become-pass
@@ -458,13 +474,6 @@ load_wrangler_token() {
     _bw_load_items "CLOUDFLARE_WRANGLER_TOKEN|CLOUDFLARE_API_TOKEN"
 }
 
-load_ingka_gh(){
-    git config --local user.name "Erfi Anugrah"
-    git config --local user.email "erfi.anugrah@ingka.com"
-    git config --local user.signingkey EF78DC0E13F5E990
-    git config --local commit.gpgsign true
-}
-
 unset_bw_vars() {
     # Unset all variables that could be set by load_bw
     unset CLOUDFLARE_EMAIL
@@ -604,204 +613,461 @@ tf_debug_toggle() {
     fi
 }
 
-# Cloudflare credentials retrieval script for use after 'tofu apply' or 'terraform apply'
+# ---------------------------------------------------------------------------
+# Generic Terraform/OpenTofu output accessor
+# ---------------------------------------------------------------------------
+# Works with any tofu/terraform project. Detects the IaC tool automatically.
+# Caches `tofu output -json` per invocation to avoid repeated slow calls.
+#
+# Usage:
+#   tf_out                              # list all outputs (summary view)
+#   tf_out <name>                       # show a single output
+#   tf_out <name> <key>                 # extract a key from an object output
+#   tf_out <name> <key> <subkey>        # nested key extraction (dot-path also works)
+#   tf_out --list                       # list output names only
+#   tf_out --sensitive                  # show sensitivity & type for each output
+#   tf_out --raw <name> [key]           # raw value for piping (no labels/colors)
+#   tf_out --json [name]                # full JSON (all outputs or single output)
+#   tf_out --search <pattern>           # grep output names by regex pattern
+#   tf_out --keys <name>                # list keys of an object output
+#   tf_out --type <type>                # filter outputs by value type (string/object/...)
+#   tf_out --diff <name>                # show output value diff vs last state backup
+#   tf_out --env <name> [prefix]        # export object keys as env vars
+#   tf_out --copy <name> [key]          # copy value to clipboard (xclip/wl-copy)
+#   tf_out --table <name>               # render object output as aligned table
+#   tf_out --count                      # count of outputs by type
+# ---------------------------------------------------------------------------
 
-get_cf_credential() {
-  local cred_type=$1
-  local cred_name=$2
-  local show_value=${3:-true}  # Default to showing the value
-  
-  # Determine which command to use (terraform or tofu)
-  local tf_cmd="tofu"
-  
-  # Check if we're in a git repo with a .terraform directory
-  if [[ -d ".terraform" ]]; then
-    # Look for terraform init state file for Terraform
-    if [[ -f ".terraform/terraform.tfstate" ]]; then
-      # Check if terraform binary exists
-      if command -v terraform &> /dev/null; then
-        tf_cmd="terraform"
-      fi
-    fi
+_tf_detect_cmd() {
+  if [[ -d ".terraform" && -f ".terraform/terraform.tfstate" ]] && command -v terraform &>/dev/null; then
+    echo "terraform"
+  elif command -v tofu &>/dev/null; then
+    echo "tofu"
+  elif command -v terraform &>/dev/null; then
+    echo "terraform"
+  else
+    echo "Error: Neither tofu nor terraform found in PATH" >&2
+    return 1
   fi
+}
 
-  echo "Using $tf_cmd command"
-  
-  # If no arguments are provided, show usage and available credentials
-  if [[ -z "$cred_type" ]]; then
-    echo "Usage: get_cf_credential <type> <name> [show_value]"
-    echo "Types: token, s3, output, all"
-    echo "show_value: true (default) or false"
-    echo
-    echo "Available tokens:"
-    $tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)' | sed 's/cloudflare_api_token_//'
-    echo
-    echo "Available S3 credentials tokens:"
-    $tf_cmd output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | sed 's/cloudflare_api_token_//; s/_s3_credentials//'
-    echo
-    echo "Available outputs:"
-    $tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort
+# Resolve an output name: exact match first, then fuzzy, with --raw support
+_tf_resolve_name() {
+  local all_json="$1" name="$2"
+
+  # Exact match
+  if echo "$all_json" | jq -e --arg n "$name" '.[$n]' >/dev/null 2>&1; then
+    echo "$name"
     return 0
   fi
 
-  case "$cred_type" in
-    token)
-      if [[ -z "$cred_name" ]]; then
-        # List all token names if no specific name is provided
-        echo "Available tokens:"
-        $tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)' | sed 's/cloudflare_api_token_//'
-        return 0
-      fi
-      
-      local full_token_name="cloudflare_api_token_${cred_name}"
-      if $tf_cmd output -json | jq -e --arg name "$full_token_name" '.[$name]' > /dev/null 2>&1; then
-        local value=$($tf_cmd output -json | jq -r --arg name "$full_token_name" '.[$name].value')
-        [[ "$show_value" == "true" ]] && echo "$value" || echo "Token value retrieved (hidden)"
+  # Fuzzy match
+  local matches
+  matches=$(echo "$all_json" | jq -r 'keys[]' | grep -iE "$name")
+  if [[ -z "$matches" ]]; then
+    echo "Error: Output '$name' not found" >&2
+    echo "Available: $(echo "$all_json" | jq -r 'keys[]' | tr '\n' ', ' | sed 's/,$//')" >&2
+    return 1
+  fi
+
+  local match_count
+  match_count=$(echo "$matches" | wc -l)
+  if [[ $match_count -eq 1 ]]; then
+    echo "$matches"
+    return 0
+  fi
+
+  echo "Error: '$name' is ambiguous. Matches:" >&2
+  echo "$matches" | sed 's/^/  /' >&2
+  return 1
+}
+
+# Extract a value by dot-path or positional key args from JSON
+# e.g., _tf_jq_path "value" "client_id"    => .value.client_id
+# e.g., _tf_jq_path "value" "a.b.c"        => .value.a.b.c  (dot-path)
+_tf_extract_value() {
+  local json="$1" output_name="$2"
+  shift 2
+  local keys=("$@")
+
+  local base
+  base=$(echo "$json" | jq --arg n "$output_name" '.[$n].value')
+
+  if [[ ${#keys[@]} -eq 0 ]]; then
+    echo "$base"
+    return 0
+  fi
+
+  # Support dot-path in first key: "a.b.c" => ["a","b","c"]
+  local path_expr=".value"
+  for key in "${keys[@]}"; do
+    # Split on dots
+    local IFS='.'
+    local parts=($key)
+    for part in "${parts[@]}"; do
+      path_expr="${path_expr}.${part}"
+    done
+  done
+
+  local result
+  result=$(echo "$json" | jq -r --arg n "$output_name" ".[\$n]${path_expr} // empty")
+
+  if [[ -z "$result" ]]; then
+    # Show available keys at the level that failed
+    echo "Error: Path '${keys[*]}' not found in output '$output_name'" >&2
+    local val_type
+    val_type=$(echo "$json" | jq -r --arg n "$output_name" '.[$n].value | type')
+    if [[ "$val_type" == "object" ]]; then
+      echo "Available keys: $(echo "$json" | jq -r --arg n "$output_name" '.[$n].value | keys[]' | tr '\n' ', ' | sed 's/,$//')" >&2
+    fi
+    return 1
+  fi
+
+  echo "$result"
+}
+
+# Copy to clipboard (auto-detect wayland vs X11)
+_tf_clipboard() {
+  local val="$1"
+  if command -v wl-copy &>/dev/null; then
+    echo -n "$val" | wl-copy
+    echo "Copied to clipboard (wl-copy)"
+  elif command -v xclip &>/dev/null; then
+    echo -n "$val" | xclip -selection clipboard
+    echo "Copied to clipboard (xclip)"
+  elif command -v pbcopy &>/dev/null; then
+    echo -n "$val" | pbcopy
+    echo "Copied to clipboard (pbcopy)"
+  else
+    echo "Error: No clipboard tool found (install wl-copy, xclip, or pbcopy)" >&2
+    return 1
+  fi
+}
+
+tf_out() {
+  local tf_cmd
+  tf_cmd=$(_tf_detect_cmd) || return 1
+
+  # Fetch all outputs once
+  local all_json
+  all_json=$($tf_cmd output -json 2>/dev/null)
+  if [[ $? -ne 0 || -z "$all_json" || "$all_json" == "{}" ]]; then
+    if [[ ! -d ".terraform" ]]; then
+      echo "Error: Not in a terraform/tofu project directory (no .terraform/)" >&2
+      return 1
+    fi
+    echo "No outputs found. Run '$tf_cmd apply' first." >&2
+    return 1
+  fi
+
+  local output_count
+  output_count=$(echo "$all_json" | jq 'length')
+
+  case "${1:-}" in
+    --help|-h)
+      cat <<'HELP'
+Usage: tf_out [command] [args...]
+
+Browse & extract:
+  tf_out                              List all outputs (summary)
+  tf_out <name>                       Show single output with metadata
+  tf_out <name> <key>                 Extract key from object output
+  tf_out <name> <key.subkey>          Dot-path nested extraction
+  tf_out <name> <key> <subkey>        Multi-arg nested extraction
+
+Listing & filtering:
+  tf_out --list                       Output names only
+  tf_out --sensitive                  Sensitivity & type matrix
+  tf_out --search <pattern>           Regex search output names
+  tf_out --type <type>                Filter by value type (string/object/array/number/boolean)
+  tf_out --count                      Count outputs by type
+
+Data formats:
+  tf_out --json [name]                Full JSON (all or single output)
+  tf_out --raw <name> [key]           Raw value for piping (no labels)
+  tf_out --table <name>               Render object as aligned key=value table
+  tf_out --keys <name>                List keys of an object output
+
+Actions:
+  tf_out --copy <name> [key]          Copy value to clipboard
+  tf_out --env <name> [PREFIX]        Export object keys as PREFIX_KEY=value env vars
+  tf_out --diff <name>                Diff output vs last state backup
+
+Fuzzy matching: partial names auto-resolve when unambiguous.
+HELP
+      echo ""
+      echo "Using: $tf_cmd ($output_count outputs in $(basename "$PWD"))"
+      return 0
+      ;;
+
+    --list)
+      echo "$all_json" | jq -r 'keys[]' | sort
+      return 0
+      ;;
+
+    --json)
+      if [[ -n "${2:-}" ]]; then
+        local name
+        name=$(_tf_resolve_name "$all_json" "$2") || return 1
+        echo "$all_json" | jq --arg n "$name" '.[$n]'
       else
-        echo "Error: Token '$cred_name' not found" >&2
+        echo "$all_json" | jq '.'
+      fi
+      return 0
+      ;;
+
+    --sensitive)
+      {
+        printf "%s\t%s\t%s\n" "OUTPUT" "SENSITIVE" "TYPE"
+        printf "%s\t%s\t%s\n" "------" "---------" "----"
+        echo "$all_json" | jq -r '
+          to_entries | sort_by(.key)[] |
+          "\(.key)\t\(if .value.sensitive then "yes" else "no" end)\t\(.value.value | type)"
+        '
+      } | column -t -s $'\t'
+      return 0
+      ;;
+
+    --search)
+      local pattern="${2:?Error: --search requires a pattern}"
+      local results
+      results=$(echo "$all_json" | jq -r --arg p "$pattern" '
+        to_entries[]
+        | select(.key | test($p; "i"))
+        | "\(.key)\t\(.value.value | type)\t\(if .value.sensitive then " [sensitive]" else "" end)"
+      ' | sort)
+      if [[ -z "$results" ]]; then
+        echo "No outputs matching '$pattern'" >&2
         return 1
       fi
+      echo "$results" | while IFS=$'\t' read -r k typ sens; do
+        printf "  %-40s %s%s\n" "$k" "$typ" "$sens"
+      done
+      return 0
       ;;
-      
-    s3)
-      if [[ -z "$cred_name" ]]; then
-        # List all S3 credential tokens if no specific name is provided
-        echo "Available S3 credentials:"
-        $tf_cmd output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | sed 's/cloudflare_api_token_//; s/_s3_credentials//'
-        return 0
-      fi
-      
-      # Try the exact name with s3_credentials suffix
-      local full_cred_name="cloudflare_api_token_${cred_name}_s3_credentials"
-      
-      # If that doesn't exist, try to find if there's any match ending with the name
-      if ! $tf_cmd output -json | jq -e --arg name "$full_cred_name" '.[$name]' > /dev/null 2>&1; then
-        # Try to find a matching s3 credential output
-        local matching_cred=$($tf_cmd output -json | jq -r 'keys[] | select(contains("s3_credentials"))' | grep -E "${cred_name}")
-        
-        if [[ -n "$matching_cred" ]]; then
-          full_cred_name="$matching_cred"
-        else
-          echo "Error: S3 credentials for token '$cred_name' not found" >&2
-          return 1
-        fi
-      fi
-      
-      echo "S3 credentials for '${full_cred_name/cloudflare_api_token_/}':"
-      local access_key_id=$($tf_cmd output -json | jq -r --arg name "$full_cred_name" '.[$name].value.access_key_id')
-      local secret_key=$($tf_cmd output -json | jq -r --arg name "$full_cred_name" '.[$name].value.secret_access_key')
-      
-      echo "Access Key ID: $access_key_id"
-      if [[ "$show_value" == "true" ]]; then
-        echo "Secret Access Key: $secret_key"
-      else
-        echo "Secret Access Key: [hidden]"
-      fi
+
+    --type)
+      local target_type="${2:?Error: --type requires a type (string/object/array/number/boolean)}"
+      echo "$all_json" | jq -r --arg t "$target_type" 'to_entries[] | select(.value.value | type == $t) | .key' | sort
+      return 0
       ;;
-    
-    output)
-      if [[ -z "$cred_name" ]]; then
-        # List all general outputs if no specific name is provided
-        echo "Available outputs:"
-        $tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort
-        return 0
-      fi
-      
-      if $tf_cmd output -json | jq -e --arg name "$cred_name" '.[$name]' > /dev/null 2>&1; then
-        if [[ "$show_value" == "true" ]]; then
-          # Attempt to extract the value, handling different types of outputs
-          local is_sensitive=$($tf_cmd output -json | jq -r --arg name "$cred_name" '.[$name].sensitive')
-          local value_type=$($tf_cmd output -json | jq -r --arg name "$cred_name" 'if .[$name].value | type == "object" then "object" else "simple" end')
-          
-          echo "Output: $cred_name"
-          echo "Sensitive: $is_sensitive"
-          
-          if [[ "$value_type" == "object" ]]; then
-            echo "Value (object):"
-            $tf_cmd output -json | jq --arg name "$cred_name" '.[$name].value'
-          else
-            echo "Value: $($tf_cmd output -json | jq -r --arg name "$cred_name" '.[$name].value')"
-          fi
-        else
-          echo "Output: $cred_name"
-          echo "Value: [hidden]"
-        fi
-      else
-        echo "Error: Output '$cred_name' not found" >&2
+
+    --count)
+      echo "Outputs by type ($output_count total):"
+      echo "$all_json" | jq -r '[to_entries[].value.value | type] | group_by(.) | map({type: .[0], count: length}) | sort_by(.type)[] | "  \(.type): \(.count)"'
+      local sens_count
+      sens_count=$(echo "$all_json" | jq '[to_entries[].value | select(.sensitive)] | length')
+      echo "  ---"
+      echo "  sensitive: $sens_count"
+      echo "  public: $((output_count - sens_count))"
+      return 0
+      ;;
+
+    --keys)
+      local name
+      name=$(_tf_resolve_name "$all_json" "${2:?Error: --keys requires an output name}") || return 1
+      local val_type
+      val_type=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | type')
+      if [[ "$val_type" != "object" ]]; then
+        echo "Error: Output '$name' is a $val_type, not an object" >&2
         return 1
       fi
+      echo "$all_json" | jq -r --arg n "$name" '.[$n].value | keys[]'
+      return 0
       ;;
-      
-    all)
-      # Display all tokens and their values
-      echo "=== API Tokens ==="
-      echo ""
-      
-      local tokens=($($tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_")) | select(contains("s3_credentials") | not)'))
-      for token_name in $tokens; do
-        local simple_name=${token_name#cloudflare_api_token_}
-        echo "Token: $simple_name"
-        if [[ "$show_value" == "true" ]]; then
-          echo "Value: $($tf_cmd output -json | jq -r --arg name "$token_name" '.[$name].value')"
-        else
-          echo "Value: [hidden]"
-        fi
-        echo ""
+
+    --table)
+      local name
+      name=$(_tf_resolve_name "$all_json" "${2:?Error: --table requires an output name}") || return 1
+      local val_type
+      val_type=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | type')
+      if [[ "$val_type" != "object" ]]; then
+        echo "Error: Output '$name' is a $val_type, not an object" >&2
+        return 1
+      fi
+      echo "$name:"
+      echo "$all_json" | jq -r --arg n "$name" '
+        .[$n].value | to_entries[] |
+        "\(.key)\t\(if (.value | type) == "object" or (.value | type) == "array" then (.value | tojson) else (.value | tostring) end)"
+      ' | while IFS=$'\t' read -r k v; do
+        printf "  %-30s %s\n" "$k" "$v"
       done
-      
-      echo "=== S3-Compatible Credentials ==="
-      echo ""
-      
-      local s3_creds=($($tf_cmd output -json | jq -r 'keys[] | select(contains("s3_credentials"))'))
-      for cred_name in $s3_creds; do
-        local simple_name=${cred_name#cloudflare_api_token_}
-        simple_name=${simple_name%_s3_credentials}
-        
-        echo "For token: $simple_name"
-        echo "Access Key ID: $($tf_cmd output -json | jq -r --arg name "$cred_name" '.[$name].value.access_key_id')"
-        if [[ "$show_value" == "true" ]]; then
-          echo "Secret Access Key: $($tf_cmd output -json | jq -r --arg name "$cred_name" '.[$name].value.secret_access_key')"
-        else
-          echo "Secret Access Key: [hidden]"
-        fi
-        echo ""
-      done
-      
-      echo "=== Other Outputs ==="
-      echo ""
-      
-      local outputs=($($tf_cmd output -json | jq -r 'keys[] | select(startswith("cloudflare_api_token_") | not)' | sort))
-      for output_name in $outputs; do
-        echo "Output: $output_name"
-        local is_sensitive=$($tf_cmd output -json | jq -r --arg name "$output_name" '.[$name].sensitive')
-        echo "Sensitive: $is_sensitive"
-        
-        if [[ "$show_value" == "true" ]]; then
-          # Check if the output is a complex object
-          if $tf_cmd output -json | jq -e --arg name "$output_name" '.[$name].value | type == "object"' > /dev/null 2>&1; then
-            echo "Value (object):"
-            $tf_cmd output -json | jq --arg name "$output_name" '.[$name].value'
-          else
-            echo "Value: $($tf_cmd output -json | jq -r --arg name "$output_name" '.[$name].value')"
-          fi
-        else
-          echo "Value: [hidden]"
-        fi
-        echo ""
-      done
+      return 0
       ;;
-      
-    *)
-      echo "Error: Invalid credential type '$cred_type'. Use 'token', 's3', 'output', or 'all'" >&2
+
+    --raw)
+      local name
+      name=$(_tf_resolve_name "$all_json" "${2:?Error: --raw requires an output name}") || return 1
+      shift 2
+      if [[ $# -eq 0 ]]; then
+        # No key args — output raw value directly
+        local val_type
+        val_type=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | type')
+        if [[ "$val_type" == "object" || "$val_type" == "array" ]]; then
+          echo "$all_json" | jq --arg n "$name" '.[$n].value'
+        else
+          echo "$all_json" | jq -r --arg n "$name" '.[$n].value'
+        fi
+      else
+        _tf_extract_value "$all_json" "$name" "$@"
+      fi
+      return $?
+      ;;
+
+    --copy)
+      local name
+      name=$(_tf_resolve_name "$all_json" "${2:?Error: --copy requires an output name}") || return 1
+      shift 2
+      local val
+      val=$(_tf_extract_value "$all_json" "$name" "$@") || return 1
+      # If it's JSON, compact it for clipboard
+      if [[ "$val" == "{"* || "$val" == "["* ]]; then
+        val=$(echo "$val" | jq -c '.')
+      fi
+      _tf_clipboard "$val"
+      return 0
+      ;;
+
+    --env)
+      local name
+      name=$(_tf_resolve_name "$all_json" "${2:?Error: --env requires an output name}") || return 1
+      local prefix="${3:-}"
+      local val_type
+      val_type=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | type')
+      if [[ "$val_type" != "object" ]]; then
+        # For non-object, export as single var
+        local env_var_name="${prefix:-$(echo "$name" | tr '[:lower:]-' '[:upper:]_')}"
+        local env_val
+        env_val=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value')
+        export "$env_var_name=$env_val"
+        echo "export $env_var_name=***"
+        return 0
+      fi
+      # For objects, build export commands via jq then eval them
+      local env_lines
+      if [[ -n "$prefix" ]]; then
+        env_lines=$(echo "$all_json" | jq -r --arg n "$name" --arg p "$prefix" '
+          .[$n].value | to_entries[] |
+          "\($p)_\(.key | gsub("-";"_") | ascii_upcase)=\(.value | tostring)"
+        ')
+      else
+        env_lines=$(echo "$all_json" | jq -r --arg n "$name" '
+          .[$n].value | to_entries[] |
+          "\(.key | gsub("-";"_") | ascii_upcase)=\(.value | tostring)"
+        ')
+      fi
+      echo "$env_lines" | while IFS='=' read -r env_k env_v; do
+        export "$env_k=$env_v"
+        echo "export $env_k=***"
+      done
+      return 0
+      ;;
+
+    --diff)
+      local name
+      name=$(_tf_resolve_name "$all_json" "${2:?Error: --diff requires an output name}") || return 1
+      local backup="terraform.tfstate.backup"
+      if [[ ! -f "$backup" ]]; then
+        echo "Error: No state backup found ($backup)" >&2
+        return 1
+      fi
+      local old_val new_val
+      old_val=$($tf_cmd show -json "$backup" 2>/dev/null | jq --arg n "$name" '.values.outputs[$n].value // "not present"' 2>/dev/null)
+      new_val=$(echo "$all_json" | jq --arg n "$name" '.[$n].value')
+      if [[ "$old_val" == "$new_val" ]]; then
+        echo "No change for '$name'"
+      else
+        echo "--- backup"
+        echo "+++ current"
+        diff --color=auto <(echo "$old_val" | jq -S '.') <(echo "$new_val" | jq -S '.') 2>/dev/null || {
+          echo "Old: $old_val"
+          echo "New: $new_val"
+        }
+      fi
+      return 0
+      ;;
+
+    --*)
+      echo "Error: Unknown flag '$1'. Try 'tf_out --help'" >&2
       return 1
       ;;
   esac
-}
 
-# Allow script to be sourced without executing function
-if [[ "${ZSH_EVAL_CONTEXT:-}" == "toplevel" || "${BASH_SOURCE[0]:-}" == "${0:-}" ]]; then
-  get_cf_credential "$@"
-fi
+  # --- Single output by name (with optional key extraction) ---
+  if [[ -n "${1:-}" ]]; then
+    local name
+    name=$(_tf_resolve_name "$all_json" "$1") || return 1
+    shift
+
+    local sensitive val_type
+    sensitive=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].sensitive')
+    val_type=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | type')
+
+    # If extra args, treat as key extraction
+    if [[ $# -gt 0 ]]; then
+      if [[ "$val_type" != "object" ]]; then
+        echo "Error: Output '$name' is a $val_type, cannot extract key '$1'" >&2
+        return 1
+      fi
+      _tf_extract_value "$all_json" "$name" "$@"
+      return $?
+    fi
+
+    # Display full output with metadata
+    echo "Output: $name"
+    echo "Type: $val_type"
+    [[ "$sensitive" == "true" ]] && echo "Sensitive: yes"
+
+    case "$val_type" in
+      object)
+        local key_count
+        key_count=$(echo "$all_json" | jq --arg n "$name" '.[$n].value | keys | length')
+        echo "Keys ($key_count): $(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | keys | join(", ")')"
+        echo ""
+        echo "$all_json" | jq -C --arg n "$name" '.[$n].value'
+        ;;
+      array)
+        local arr_len
+        arr_len=$(echo "$all_json" | jq --arg n "$name" '.[$n].value | length')
+        echo "Length: $arr_len"
+        echo ""
+        echo "$all_json" | jq -C --arg n "$name" '.[$n].value'
+        ;;
+      *)
+        echo "Value: $(echo "$all_json" | jq -r --arg n "$name" '.[$n].value')"
+        ;;
+    esac
+    return 0
+  fi
+
+  # --- No args: summary listing ---
+  echo "Outputs ($output_count total, via $tf_cmd, project: $(basename "$PWD")):"
+  echo ""
+
+  # Use jq to build the entire summary in one pass (avoids subshell variable issues)
+  echo "$all_json" | jq -r '
+    to_entries | sort_by(.key) | to_entries[] |
+    .value as $entry |
+    $entry.key as $name |
+    $entry.value.sensitive as $sens |
+    ($entry.value.value | type) as $typ |
+    if $sens then
+      if $typ == "object" then
+        "  \($name)\t[sensitive, \($typ): \($entry.value.value | keys | join(", "))]"
+      else
+        "  \($name)\t[sensitive, \($typ)]"
+      end
+    elif $typ == "object" then
+      "  \($name)\t{\($entry.value.value | keys | join(", "))}"
+    elif $typ == "array" then
+      "  \($name)\t[array, \($entry.value.value | length) items]"
+    else
+      "  \($name)\t\($entry.value.value | tostring | if length > 60 then .[:57] + "..." else . end)"
+    end
+  ' | while IFS=$'\t' read -r col1 col2; do
+    printf "%-42s %s\n" "$col1" "$col2"
+  done
+}
 
 cf_permissions() {
   local input_command=$1
