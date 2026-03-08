@@ -151,11 +151,26 @@ curl -fsSL https://deno.land/install.sh | sh
 
 ---
 
-## [`functions.zsh`](functions.zsh)
+## Shell functions
 
-All shell functions sourced into every zsh session. Grouped by category below.
+`functions.zsh` is a thin loader that sources modular scripts from
+`functions.d/`. Each module is self-contained and can be loaded independently.
 
-### SOPS / Age encryption
+```
+functions.zsh              # loader — sources everything below
+functions.d/
+  crypto.zsh               # SOPS/Age encrypt & decrypt
+  bitwarden.zsh            # bw serve API, cache, env loaders
+  terraform.zsh            # tf_out, debug toggles, cf_permissions
+  misc.zsh                 # ansible, tmux, yazi, p10k helpers
+  system.zsh               # update_all, fix_file_limits
+```
+
+The loader resolves its own real path (`${0:A:h}`), so sourcing via the stow
+symlink at `~/functions.zsh` works identically to sourcing
+`~/dotfiles/functions.zsh` directly.
+
+### `crypto.zsh` — SOPS / Age encryption
 
 Encrypt and decrypt files in-place using SOPS with Age keys. Requires
 `SOPS_AGE_KEYS` to be set (use `load_sops_age_keys` or `load_bw`).
@@ -168,10 +183,10 @@ Encrypt and decrypt files in-place using SOPS with Age keys. Requires
 | `decrypt_all` | Decrypt every file in the current directory |
 | `encrypt_k3s_secret <file>` | Encrypt a K8s Secret YAML (only `data`/`stringData` fields) |
 | `decrypt_k3s_secret <file>` | Decrypt a K8s Secret YAML |
-| `encrypt_tf` | Encrypt all Terraform/OpenTofu sensitive files in cwd (`secrets.tfvars`, `terraform.tfvars`, `blueprint-export.yaml`, `*.tfstate*`) |
+| `encrypt_tf` | Encrypt Terraform/OpenTofu sensitive files (`secrets.tfvars`, `terraform.tfvars`, `blueprint-export.yaml`, `*.tfstate*`) |
 | `decrypt_tf` | Decrypt the same set of files |
 
-### Bitwarden Serve API
+### `bitwarden.zsh` — Bitwarden Serve API
 
 Local REST API (`bw serve`) running as a systemd user service. Functions use
 an in-memory cache (5 min TTL) to avoid repeated HTTP calls.
@@ -184,7 +199,7 @@ an in-memory cache (5 min TTL) to avoid repeated HTTP calls.
 | `bw_serve_sync` | Sync vault from Bitwarden server, clear local cache |
 | `clear_bw_cache` | Flush the in-memory key-value cache |
 
-### Environment loaders
+#### Environment loaders
 
 Load secrets from Bitwarden into env vars for the current shell. Each loader
 defines a mapping of `"bw_item_name|ENV_VAR_NAME"` pairs.
@@ -197,43 +212,60 @@ defines a mapping of `"bw_item_name|ENV_VAR_NAME"` pairs.
 | `load_sops_age_keys` | SOPS Age public + secret key into `SOPS_AGE_KEYS` |
 | `unset_bw_vars` | Unset all env vars that could have been set by the loaders above |
 
-### Terraform / OpenTofu
+### `terraform.zsh` — Terraform / OpenTofu
 
-#### `tf_out` -- output accessor
+#### `tf_out` — output accessor
 
 Generic, project-agnostic accessor for `tofu output` / `terraform output`.
 Auto-detects the IaC tool. Supports fuzzy name matching, nested key
-extraction, clipboard copy, env export, and more.
+extraction, clipboard copy, env export, fzf interactive picker, and
+category-based grouping.
+
+Output JSON is cached to a per-project tmpfile (TTL: 5 min, configurable via
+`_TF_CACHE_TTL`). Cache files are `chmod 600` inside a `700` directory under
+`$XDG_RUNTIME_DIR` and cleaned up automatically on shell exit via `zshexit`
+hook.
 
 ```sh
 # Browse & extract
-tf_out                              # summary of all outputs
+tf_out                              # grouped, color-coded summary
 tf_out <name>                       # show single output with metadata
 tf_out <name> <key>                 # extract a key from an object output
 tf_out <name> <key.subkey>          # dot-path nested extraction
-tf_out <name> <key> <subkey>        # multi-arg nested extraction
+
+# Interactive
+tf_out -i  | --pick                 # fzf picker with preview and ctrl-y copy
 
 # Listing & filtering
-tf_out --list                       # output names only
-tf_out --sensitive                  # sensitivity & type matrix
-tf_out --search <pattern>           # regex search output names
-tf_out --type <type>                # filter by value type (string/object/array/number/boolean)
-tf_out --count                      # count outputs by type and sensitivity
+tf_out -l  | --list                 # output names only
+tf_out -s  | --sensitive            # sensitivity & type matrix
+tf_out -f  | --search <pattern>     # regex search output names
+tf_out -y  | --type <type>          # filter by value type (string/object/array/number/boolean)
+tf_out -n  | --count                # count outputs by type and sensitivity
+tf_out -T  | --tokens               # show API token outputs only
+tf_out -S  | --s3                   # show S3 credential outputs only
 
 # Data formats
-tf_out --json [name]                # full JSON (all or single output)
-tf_out --raw <name> [key]           # raw value for piping (no labels/colors)
-tf_out --table <name>               # render object as aligned key=value table
-tf_out --keys <name>                # list keys of an object output
+tf_out -j  | --json [name]          # full JSON (all or single output)
+tf_out -r  | --raw <name> [key]     # raw value for piping (no labels/colors)
+tf_out -t  | --table <name>         # render object as aligned key=value table
+tf_out -k  | --keys <name>          # list keys of an object output
 
 # Actions
-tf_out --copy <name> [key]          # copy value to clipboard (wl-copy/xclip/pbcopy)
-tf_out --env <name> [PREFIX]        # export object keys as PREFIX_KEY=value env vars
-tf_out --diff <name>                # diff output vs last state backup
+tf_out -c  | --copy <name> [key]    # copy value to clipboard (wl-copy/xclip/pbcopy)
+tf_out -e  | --env <name> [PREFIX]  # export object keys as PREFIX_KEY=value env vars
+tf_out -d  | --diff <name>          # diff output vs last state backup
+
+# Cache
+tf_out -F  | --flush                # clear cached output for current project
 ```
 
 Fuzzy matching: `tf_out grafana` resolves to `oauth2_grafana` when
 unambiguous. Ambiguous matches list candidates.
+
+The default (no args) view groups outputs into categories — API Tokens, S3
+Credentials, Objects, Arrays, Values — each color-coded with sensitive
+outputs marked.
 
 #### Other Terraform helpers
 
@@ -244,25 +276,20 @@ unambiguous. Ambiguous matches list candidates.
 | `tf_debug_toggle` | Toggle debug logging on/off |
 | `cf_permissions <tf\|tofu> <category>` | Query Cloudflare permission groups via `tofu console` (categories: `account`, `zone`, `user`, `r2`, `roles`, `all`) |
 
-### Ansible
+### `misc.zsh` — Ansible, tmux, utilities
 
 | Function | Description |
 |---|---|
 | `ansible_on` | Power on hosts via playbook |
 | `ansible_off` | Shut down hosts via playbook |
 | `ansible_update` | Run update playbook on all hosts |
-
-### tmux
-
-| Function | Description |
-|---|---|
 | `tx_switch [name]` | Create and switch to a new tmux session (default: `default`) |
-
-### Navigation & shell utilities
-
-| Function | Description |
-|---|---|
 | `yy` | Open yazi file manager; cd into its last directory on exit |
 | `p10k_colours` | Print all 256 terminal colors (for Powerlevel10k theming) |
-| `fix_file_limits` / `fixfiles` | Inspect and optionally raise file descriptor limits |
+
+### `system.zsh` — System maintenance
+
+| Function | Description |
+|---|---|
+| `fix_file_limits` / `fixfiles` | Inspect and optionally raise file descriptor limits (idempotent) |
 | `update_all` / `upall` | Update apt packages and Homebrew packages in one shot |
