@@ -161,7 +161,60 @@ _tf_clipboard() {
 # All cache files are cleaned up on shell exit via a trap.
 
 _TF_CACHE_TTL="${_TF_CACHE_TTL:-300}"  # 5 minutes default
-_TF_CACHE_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/tf_out_cache.$$"
+_TF_CACHE_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/tf_out_cache"
+
+# fzf-tab preview for tf_out completions
+# Uses stable cache dir (no PID) so the preview subprocess can find files.
+# Written as a heredoc into a temp script at source time to avoid quoting hell.
+_tf_fzf_preview_script="${_TF_CACHE_DIR}/.preview.sh"
+mkdir -p "$_TF_CACHE_DIR" && chmod 700 "$_TF_CACHE_DIR"
+cat > "$_tf_fzf_preview_script" <<'PREVIEW_EOF'
+#!/usr/bin/env zsh
+PREVIEW_EOF
+cat >> "$_tf_fzf_preview_script" <<PREVIEW_EOF
+_cache_dir="${_TF_CACHE_DIR}"
+PREVIEW_EOF
+cat >> "$_tf_fzf_preview_script" <<'PREVIEW_EOF'
+f="${_cache_dir}/$(printf '%s' "$PWD" | md5sum | cut -d' ' -f1).json"
+if [[ $word == --* ]]; then
+  case $word in
+    --help) printf "Show full help text (-h)";;
+    --list) printf "List output names (-l)";;
+    --sensitive) printf "Sensitivity matrix (-s)";;
+    --raw) printf "Raw value, pipe-friendly (-r)\n\ntf_out --raw <name> [key]";;
+    --json) printf "Full JSON output (-j)\n\ntf_out --json [name]";;
+    --search) printf "Regex search names (-f)\n\ntf_out --search <pattern>";;
+    --keys) printf "List object keys (-k)\n\ntf_out --keys <name>";;
+    --type) printf "Filter by type (-y)\n\ntf_out --type <type>";;
+    --diff) printf "Diff vs backup state (-d)\n\ntf_out --diff <name>";;
+    --env) printf "Export as env vars (-e)\n\ntf_out --env <name> [PREFIX]";;
+    --copy) printf "Copy to clipboard (-c)\n\ntf_out --copy <name> [key]";;
+    --table) printf "Object as table (-t)\n\ntf_out --table <name>";;
+    --count) printf "Count by type (-n)";;
+    --tokens) printf "API token outputs (-T)";;
+    --s3) printf "S3 credential outputs (-S)";;
+    --flush) printf "Clear cache (-F)";;
+    --pick) printf "Interactive fzf picker (-i)";;
+  esac
+elif [[ -f "$f" ]]; then
+  # Show metadata header, then value (redacted if sensitive)
+  jq -C --arg n "$word" '
+    .[$n] // empty |
+    if .sensitive then
+      {type, sensitive} +
+      (if (.value | type) == "object" then {keys: (.value | keys)}
+       elif (.value | type) == "array" then {length: (.value | length)}
+       else {value: "[redacted]"}
+       end)
+    else . end
+  ' < "$f"
+fi
+PREVIEW_EOF
+chmod 700 "$_tf_fzf_preview_script"
+
+zstyle ':fzf-tab:complete:tf_out:*' fzf-preview "source $_tf_fzf_preview_script"
+zstyle ':fzf-tab:complete:tf_out:*' fzf-preview-window 'right:50%:wrap'
+unset _tf_fzf_preview_script
 
 # Track our cache dir for cleanup
 _tf_cache_init() {
@@ -171,9 +224,11 @@ _tf_cache_init() {
   fi
 }
 
-# Cleanup: remove our cache dir on shell exit
+# Cleanup: remove stale cache files on shell exit (shared dir, so don't nuke it)
 _tf_cache_cleanup() {
-  [[ -d "$_TF_CACHE_DIR" ]] && rm -rf "$_TF_CACHE_DIR"
+  [[ -d "$_TF_CACHE_DIR" ]] && find "$_TF_CACHE_DIR" -name '*.json' -mmin +10 -delete 2>/dev/null
+  # Remove dir if empty
+  rmdir "$_TF_CACHE_DIR" 2>/dev/null
 }
 
 # Register cleanup via zshexit hook (additive — won't clobber existing traps)
@@ -627,7 +682,7 @@ HELP
   local cat_colors=("token:$c_yellow" "s3:$c_magenta" "object:$c_cyan" "array:$c_blue" "scalar:$c_green")
 
   # Declare loop variables once outside to avoid zsh's typeset re-declaration printing
-  local cat_entries cat_label cat_color entry_count
+  local cat_entries cat_label cat_color entry_count max_w sens_marker
 
   for cat_id in token s3 object array scalar; do
     cat_entries=$(echo "$categorized" | awk -F'\t' -v c="$cat_id" '$1 == c')
@@ -645,11 +700,10 @@ HELP
     printf "${c_bold}${cat_color}%s${c_reset} ${c_dim}(%s)${c_reset}\n" "$cat_label" "$entry_count"
 
     # Compute max name width for this category (+ 2 for padding)
-    local max_w
     max_w=$(echo "$cat_entries" | awk -F'\t' '{l=length($2); if(l>m) m=l} END{print m+2}')
 
     echo "$cat_entries" | while IFS=$'\t' read -r _cat _name _sens _typ _desc; do
-      local sens_marker=""
+      sens_marker=""
       [[ "$_sens" == "true" ]] && sens_marker="${c_red}*${c_reset}"
 
       printf "  ${cat_color}%-${max_w}s${c_reset} ${c_dim}%s${c_reset}%b\n" \
@@ -692,11 +746,11 @@ _tf_grouped_list() {
   printf "${c_bold}${color}%s outputs${c_reset} ${c_dim}(%s)${c_reset}\n\n" "${(C)filter}" "$entry_count"
 
   # Compute max name width dynamically (+ 2 for padding)
-  local max_w
+  local max_w sens_marker
   max_w=$(echo "$entries" | awk -F'\t' '{l=length($1); if(l>m) m=l} END{print m+2}')
 
   echo "$entries" | while IFS=$'\t' read -r _name _sens _typ _desc; do
-    local sens_marker=""
+    sens_marker=""
     [[ "$_sens" == "sensitive" ]] && sens_marker=" ${c_dim}[sensitive]${c_reset}"
     printf "  ${color}%-${max_w}s${c_reset} ${c_dim}%s${c_reset}%b\n" "$_name" "$_desc" "$sens_marker"
   done
@@ -756,6 +810,91 @@ cf_permissions() {
 # Zsh completions for tf_out
 # ---------------------------------------------------------------------------
 
+# Helper: fzf-tab preview for tf_out completions
+# Called as: _tf_out_fzf_preview <word>
+# where <word> is the output name or flag being hovered
+_tf_out_fzf_preview() {
+  local word="$1"
+
+  # For flags, show description
+  if [[ "$word" == --* ]]; then
+    case "$word" in
+      --help)      echo "Show full help text\nShort: -h" ;;
+      --list)      echo "List all output names, one per line\nShort: -l" ;;
+      --sensitive) echo "Show sensitivity and type matrix\nShort: -s" ;;
+      --raw)       echo "Raw value with no labels or colors\nPipe-friendly\nShort: -r\n\nUsage: tf_out --raw <name> [key]" ;;
+      --json)      echo "Full JSON output\nShort: -j\n\nUsage: tf_out --json [name]" ;;
+      --search)    echo "Regex search across output names\nShort: -f\n\nUsage: tf_out --search <pattern>" ;;
+      --keys)      echo "List keys of an object output\nShort: -k\n\nUsage: tf_out --keys <name>" ;;
+      --type)      echo "Filter outputs by value type\nShort: -y\n\nUsage: tf_out --type <string|object|array|number|boolean>" ;;
+      --diff)      echo "Diff current value vs backup state\nShort: -d\n\nUsage: tf_out --diff <name>" ;;
+      --env)       echo "Export object keys as env vars\nShort: -e\n\nUsage: tf_out --env <name> [PREFIX]" ;;
+      --copy)      echo "Copy value to system clipboard\nShort: -c\n\nUsage: tf_out --copy <name> [key]" ;;
+      --table)     echo "Render object as aligned table\nShort: -t\n\nUsage: tf_out --table <name>" ;;
+      --count)     echo "Count outputs grouped by type\nShort: -n" ;;
+      --tokens)    echo "Show API token outputs only\nShort: -T" ;;
+      --s3)        echo "Show S3 credential outputs only\nShort: -S" ;;
+      --flush)     echo "Clear cached output for current project\nShort: -F" ;;
+      --pick)      echo "Interactive fzf picker with preview\nShort: -i" ;;
+      *)           echo "$word" ;;
+    esac
+    return
+  fi
+
+  # For output names, show details from cache
+  local cache_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/tf_out_cache"
+  local cache_key cache_file json_data
+  cache_key=$(printf '%s' "$PWD" | md5sum | cut -d' ' -f1)
+  cache_file="${cache_dir}/${cache_key}.json"
+
+  if [[ -f "$cache_file" ]]; then
+    json_data=$(<"$cache_file")
+  else
+    return
+  fi
+
+  local name="$word"
+  local exists
+  exists=$(echo "$json_data" | jq -e --arg n "$name" '.[$n]' 2>/dev/null) || return
+
+  local typ sens
+  typ=$(echo "$json_data" | jq -r --arg n "$name" '.[$n].value | type')
+  sens=$(echo "$json_data" | jq -r --arg n "$name" '.[$n].sensitive')
+
+  printf "\033[1m%s\033[0m\n" "$name"
+  printf "\033[2mType:\033[0m      %s\n" "$typ"
+  [[ "$sens" == "true" ]] && printf "\033[2mSensitive:\033[0m \033[31myes\033[0m\n" || printf "\033[2mSensitive:\033[0m no\n"
+
+  case "$typ" in
+    object)
+      local key_count
+      key_count=$(echo "$json_data" | jq --arg n "$name" '.[$n].value | keys | length')
+      printf "\033[2mKeys (%s):\033[0m\n" "$key_count"
+      echo "$json_data" | jq -r --arg n "$name" '.[$n].value | keys[] | "  " + .'
+      if [[ "$sens" != "true" ]]; then
+        printf "\n\033[2mValue:\033[0m\n"
+        echo "$json_data" | jq -C --arg n "$name" '.[$n].value'
+      fi
+      ;;
+    array)
+      local arr_len
+      arr_len=$(echo "$json_data" | jq --arg n "$name" '.[$n].value | length')
+      printf "\033[2mLength:\033[0m    %s items\n" "$arr_len"
+      if [[ "$sens" != "true" ]]; then
+        printf "\n\033[2mValue:\033[0m\n"
+        echo "$json_data" | jq -C --arg n "$name" '.[$n].value'
+      fi
+      ;;
+    *)
+      if [[ "$sens" != "true" ]]; then
+        printf "\033[2mValue:\033[0m     %s\n" "$(echo "$json_data" | jq -r --arg n "$name" '.[$n].value')"
+      else
+        printf "\033[2mValue:\033[0m     \033[31m[redacted]\033[0m\n"
+      fi
+      ;;
+  esac
+}
+
 # Helper: get cached or live output JSON for completions
 _tf_out_get_json() {
   local tf_cmd cache_dir cache_key cache_file
@@ -768,7 +907,7 @@ _tf_out_get_json() {
     return 1
   fi
 
-  cache_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/tf_out_cache.$$"
+  cache_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/tf_out_cache"
   cache_key=$(printf '%s' "$PWD" | md5sum | cut -d' ' -f1)
   cache_file="${cache_dir}/${cache_key}.json"
 
@@ -784,29 +923,23 @@ _tf_out_complete_outputs() {
   local json_data
   json_data=$(_tf_out_get_json)
   if [[ -n "$json_data" && "$json_data" != "{}" ]]; then
-    local -a names descs
-    local name typ sens
-    # Color codes for type badges
-    local c_str=$'\033[33m' c_obj=$'\033[36m' c_arr=$'\033[34m'
-    local c_num=$'\033[32m' c_bool=$'\033[35m'
-    local c_red=$'\033[31m' c_dim=$'\033[2m' c_reset=$'\033[0m'
-
+    local -a names dscr
+    local name typ sens label
+    local max_w=0
     while IFS=$'\t' read -r name typ sens; do
       names+=("$name")
-      local tc
-      case "$typ" in
-        string)  tc="$c_str" ;;
-        object)  tc="$c_obj" ;;
-        array)   tc="$c_arr" ;;
-        number)  tc="$c_num" ;;
-        boolean) tc="$c_bool" ;;
-        *)       tc="$c_dim" ;;
-      esac
-      local badge="${tc}${typ}${c_reset}"
-      [[ "$sens" == "true" ]] && badge+="  ${c_red}sensitive${c_reset}"
-      descs+=("$name:${badge}")
+      (( ${#name} > max_w )) && max_w=${#name}
     done < <(echo "$json_data" | jq -r 'to_entries | sort_by(.key)[] | "\(.key)\t\(.value.value | type)\t\(.value.sensitive)"')
-    (( ${#names} )) && compadd -d descs -l -- "${names[@]}"
+
+    # Second pass: build display strings with aligned columns
+    local i=0
+    while IFS=$'\t' read -r name typ sens; do
+      (( i++ ))
+      label="$(printf "%-$(( max_w + 2 ))s %s" "$name" "$typ")"
+      [[ "$sens" == "true" ]] && label+=" *"
+      dscr+=("$label")
+    done < <(echo "$json_data" | jq -r 'to_entries | sort_by(.key)[] | "\(.key)\t\(.value.value | type)\t\(.value.sensitive)"')
+    (( ${#names} )) && compadd -d dscr -- "${names[@]}"
   fi
 }
 
@@ -816,30 +949,28 @@ _tf_out() {
     local curword="${words[CURRENT]}"
 
     if [[ "$curword" == -* ]]; then
-      # Only show flags (long form with descriptions, no short duplicates)
-      local -a flag_names flag_descs
-      local c_flag=$'\033[33m' c_short=$'\033[2;36m' c_desc=$'\033[0m' c_r=$'\033[0m'
+      local -a flag_names flag_dscr
       flag_names=(--help --list --sensitive --raw --json --search --keys --type --diff --env --copy --table --count --tokens --s3 --flush --pick)
-      flag_descs=(
-        "--help:${c_desc}show help ${c_short}-h${c_r}"
-        "--list:${c_desc}list output names ${c_short}-l${c_r}"
-        "--sensitive:${c_desc}sensitivity matrix ${c_short}-s${c_r}"
-        "--raw:${c_desc}raw value, pipe-friendly ${c_short}-r${c_r}"
-        "--json:${c_desc}full JSON output ${c_short}-j${c_r}"
-        "--search:${c_desc}regex search names ${c_short}-f${c_r}"
-        "--keys:${c_desc}list object keys ${c_short}-k${c_r}"
-        "--type:${c_desc}filter by type ${c_short}-y${c_r}"
-        "--diff:${c_desc}diff vs backup state ${c_short}-d${c_r}"
-        "--env:${c_desc}export as env vars ${c_short}-e${c_r}"
-        "--copy:${c_desc}copy to clipboard ${c_short}-c${c_r}"
-        "--table:${c_desc}object as table ${c_short}-t${c_r}"
-        "--count:${c_desc}count by type ${c_short}-n${c_r}"
-        "--tokens:${c_desc}API token outputs ${c_short}-T${c_r}"
-        "--s3:${c_desc}S3 credential outputs ${c_short}-S${c_r}"
-        "--flush:${c_desc}clear cache ${c_short}-F${c_r}"
-        "--pick:${c_desc}interactive fzf picker ${c_short}-i${c_r}"
+      flag_dscr=(
+        "--help        show help (-h)"
+        "--list        list output names (-l)"
+        "--sensitive   sensitivity matrix (-s)"
+        "--raw         raw value, pipe-friendly (-r)"
+        "--json        full JSON output (-j)"
+        "--search      regex search names (-f)"
+        "--keys        list object keys (-k)"
+        "--type        filter by type (-y)"
+        "--diff        diff vs backup state (-d)"
+        "--env         export as env vars (-e)"
+        "--copy        copy to clipboard (-c)"
+        "--table       object as table (-t)"
+        "--count       count by type (-n)"
+        "--tokens      API token outputs (-T)"
+        "--s3          S3 credential outputs (-S)"
+        "--flush       clear cache (-F)"
+        "--pick        interactive fzf picker (-i)"
       )
-      compadd -d flag_descs -l -- "${flag_names[@]}"
+      compadd -d flag_dscr -- "${flag_names[@]}"
     else
       # Only show output names (no flags cluttering the list)
       _tf_out_complete_outputs

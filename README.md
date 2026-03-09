@@ -265,7 +265,19 @@ unambiguous. Ambiguous matches list candidates.
 
 The default (no args) view groups outputs into categories — API Tokens, S3
 Credentials, Objects, Arrays, Values — each color-coded with sensitive
-outputs marked.
+outputs marked. Column widths adapt dynamically to the longest name.
+
+#### Tab completion
+
+`tf_out` has full zsh tab completion (works with fzf-tab):
+
+- `tf_out <TAB>` — output names with type and sensitivity info
+- `tf_out -<TAB>` — flags with descriptions
+- `tf_out --keys <TAB>` — output names
+- `tf_out <name> <TAB>` — object keys (if the output is an object)
+- **Preview pane** — hovering shows metadata, keys for objects, and
+  values for non-sensitive outputs (sensitive values are redacted)
+- **ctrl-y** accepts the selection (same as enter)
 
 #### Other Terraform helpers
 
@@ -289,7 +301,11 @@ outputs marked.
 
 ### `system.zsh` — System maintenance
 
+OS-aware — detects the platform and package manager at source time
+(`apt`, `dnf`, `pacman`, `zypper`, `brew`). Also picks up Flatpak and Snap
+if installed.
+
 | Function | Description |
 |---|---|
-| `fix_file_limits` / `fixfiles` | Inspect and optionally raise file descriptor limits (idempotent) |
-| `update_all` / `upall` | Update apt packages and Homebrew packages in one shot |
+| `fix_file_limits` / `fixfiles` | Inspect and optionally raise file descriptor limits (Linux: `limits.conf` + sysctl, macOS: `launchctl` + LaunchDaemon) |
+| `update_all` / `upall` | Update all detected package managers (apt, dnf, pacman + AUR, zypper, brew, flatpak, snap) |
