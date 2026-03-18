@@ -71,17 +71,17 @@ _tf_resolve_name() {
   local all_json="$1" name="$2"
 
   # Exact match
-  if echo "$all_json" | jq -e --arg n "$name" '.[$n]' >/dev/null 2>&1; then
+  if jq -e --arg n "$name" '.[$n]' <<< "$all_json" >/dev/null 2>&1; then
     echo "$name"
     return 0
   fi
 
   # Fuzzy match
   local matches
-  matches=$(echo "$all_json" | jq -r 'keys[]' | grep -iE "$name")
+  matches=$(jq -r 'keys[]' <<< "$all_json" | grep -iE "$name")
   if [[ -z "$matches" ]]; then
     echo "Error: Output '$name' not found" >&2
-    echo "Available: $(echo "$all_json" | jq -r 'keys[]' | tr '\n' ', ' | sed 's/,$//')" >&2
+    echo "Available: $(jq -r 'keys[]' <<< "$all_json" | tr '\n' ', ' | sed 's/,$//')" >&2
     return 1
   fi
 
@@ -104,7 +104,7 @@ _tf_extract_value() {
   local keys=("$@")
 
   local base
-  base=$(echo "$json" | jq --arg n "$output_name" '.[$n].value')
+  base=$(jq --arg n "$output_name" '.[$n].value' <<< "$json")
 
   if [[ ${#keys[@]} -eq 0 ]]; then
     echo "$base"
@@ -122,14 +122,14 @@ _tf_extract_value() {
   done
 
   local result
-  result=$(echo "$json" | jq -r --arg n "$output_name" ".[\$n]${path_expr} // empty")
+  result=$(jq -r --arg n "$output_name" ".[\$n]${path_expr} // empty" <<< "$json")
 
   if [[ -z "$result" ]]; then
     echo "Error: Path '${keys[*]}' not found in output '$output_name'" >&2
     local val_type
-    val_type=$(echo "$json" | jq -r --arg n "$output_name" '.[$n].value | type')
+    val_type=$(jq -r --arg n "$output_name" '.[$n].value | type' <<< "$json")
     if [[ "$val_type" == "object" ]]; then
-      echo "Available keys: $(echo "$json" | jq -r --arg n "$output_name" '.[$n].value | keys[]' | tr '\n' ', ' | sed 's/,$//')" >&2
+      echo "Available keys: $(jq -r --arg n "$output_name" '.[$n].value | keys[]' <<< "$json" | tr '\n' ', ' | sed 's/,$//')" >&2
     fi
     return 1
   fi
@@ -268,7 +268,7 @@ _tf_cache_get() {
 
   # Write cache (mode 600 — sensitive data; set before write to avoid TOCTOU)
   install -m 600 /dev/null "$cache_file"
-  echo "$_tf_cached_json" > "$cache_file"
+  printf '%s\n' "$_tf_cached_json" > "$cache_file"
   return 0
 }
 
@@ -312,7 +312,7 @@ tf_out() {
   fi
 
   local output_count
-  output_count=$(echo "$all_json" | jq 'length')
+  output_count=$(jq 'length' <<< "$all_json")
 
   # Colors
   local c_reset='\033[0m' c_bold='\033[1m' c_dim='\033[2m'
@@ -366,7 +366,7 @@ HELP
       ;;
 
     --list|-l)
-      echo "$all_json" | jq -r 'keys[]' | sort
+      jq -r 'keys[]' <<< "$all_json" | sort
       return 0
       ;;
 
@@ -374,9 +374,9 @@ HELP
       if [[ -n "${2:-}" ]]; then
         local name
         name=$(_tf_resolve_name "$all_json" "$2") || return 1
-        echo "$all_json" | jq --arg n "$name" '.[$n]'
+        jq --arg n "$name" '.[$n]' <<< "$all_json"
       else
-        echo "$all_json" | jq '.'
+        jq '.' <<< "$all_json"
       fi
       return 0
       ;;
@@ -385,10 +385,10 @@ HELP
       {
         printf "%s\t%s\t%s\n" "OUTPUT" "SENSITIVE" "TYPE"
         printf "%s\t%s\t%s\n" "------" "---------" "----"
-        echo "$all_json" | jq -r '
+        jq -r '
           to_entries | sort_by(.key)[] |
           "\(.key)\t\(if .value.sensitive then "yes" else "no" end)\t\(.value.value | type)"
-        '
+        ' <<< "$all_json"
       } | column -t -s $'\t'
       return 0
       ;;
@@ -396,11 +396,11 @@ HELP
     --search|-f)
       local pattern="${2:?Error: --search requires a pattern}"
       local results
-      results=$(echo "$all_json" | jq -r --arg p "$pattern" '
+      results=$(jq -r --arg p "$pattern" '
         to_entries[]
         | select(.key | test($p; "i"))
         | "\(.key)\t\(.value.value | type)\t\(if .value.sensitive then " [sensitive]" else "" end)"
-      ' | sort)
+      ' <<< "$all_json" | sort)
       if [[ -z "$results" ]]; then
         echo "No outputs matching '$pattern'" >&2
         return 1
@@ -415,15 +415,15 @@ HELP
 
     --type|-y)
       local target_type="${2:?Error: --type requires a type (string/object/array/number/boolean)}"
-      echo "$all_json" | jq -r --arg t "$target_type" 'to_entries[] | select(.value.value | type == $t) | .key' | sort
+      jq -r --arg t "$target_type" 'to_entries[] | select(.value.value | type == $t) | .key' <<< "$all_json" | sort
       return 0
       ;;
 
     --count|-n)
       echo "Outputs by type ($output_count total):"
-      echo "$all_json" | jq -r '[to_entries[].value.value | type] | group_by(.) | map({type: .[0], count: length}) | sort_by(.type)[] | "  \(.type): \(.count)"'
+      jq -r '[to_entries[].value.value | type] | group_by(.) | map({type: .[0], count: length}) | sort_by(.type)[] | "  \(.type): \(.count)"' <<< "$all_json"
       local sens_count
-      sens_count=$(echo "$all_json" | jq '[to_entries[].value | select(.sensitive)] | length')
+      sens_count=$(jq '[to_entries[].value | select(.sensitive)] | length' <<< "$all_json")
       echo "  ---"
       echo "  sensitive: $sens_count"
       echo "  public: $((output_count - sens_count))"
@@ -434,12 +434,12 @@ HELP
       local name
       name=$(_tf_resolve_name "$all_json" "${2:?Error: --keys requires an output name}") || return 1
       local val_type
-      val_type=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | type')
+      val_type=$(jq -r --arg n "$name" '.[$n].value | type' <<< "$all_json")
       if [[ "$val_type" != "object" ]]; then
         echo "Error: Output '$name' is a $val_type, not an object" >&2
         return 1
       fi
-      echo "$all_json" | jq -r --arg n "$name" '.[$n].value | keys[]'
+      jq -r --arg n "$name" '.[$n].value | keys[]' <<< "$all_json"
       return 0
       ;;
 
@@ -447,16 +447,16 @@ HELP
       local name
       name=$(_tf_resolve_name "$all_json" "${2:?Error: --table requires an output name}") || return 1
       local val_type
-      val_type=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | type')
+      val_type=$(jq -r --arg n "$name" '.[$n].value | type' <<< "$all_json")
       if [[ "$val_type" != "object" ]]; then
         echo "Error: Output '$name' is a $val_type, not an object" >&2
         return 1
       fi
       echo "$name:"
-      echo "$all_json" | jq -r --arg n "$name" '
+      jq -r --arg n "$name" '
         .[$n].value | to_entries[] |
         "\(.key)\t\(if (.value | type) == "object" or (.value | type) == "array" then (.value | tojson) else (.value | tostring) end)"
-      ' | while IFS=$'\t' read -r k v; do
+      ' <<< "$all_json" | while IFS=$'\t' read -r k v; do
         printf "  %-30s %s\n" "$k" "$v"
       done
       return 0
@@ -468,11 +468,11 @@ HELP
       shift 2
       if [[ $# -eq 0 ]]; then
         local val_type
-        val_type=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | type')
+        val_type=$(jq -r --arg n "$name" '.[$n].value | type' <<< "$all_json")
         if [[ "$val_type" == "object" || "$val_type" == "array" ]]; then
-          echo "$all_json" | jq --arg n "$name" '.[$n].value'
+          jq --arg n "$name" '.[$n].value' <<< "$all_json"
         else
-          echo "$all_json" | jq -r --arg n "$name" '.[$n].value'
+          jq -r --arg n "$name" '.[$n].value' <<< "$all_json"
         fi
       else
         _tf_extract_value "$all_json" "$name" "$@"
@@ -487,7 +487,7 @@ HELP
       local val
       val=$(_tf_extract_value "$all_json" "$name" "$@") || return 1
       if [[ "$val" == "{"* || "$val" == "["* ]]; then
-        val=$(echo "$val" | jq -c '.')
+        val=$(jq -c '.' <<< "$val")
       fi
       _tf_clipboard "$val"
       return 0
@@ -498,26 +498,26 @@ HELP
       name=$(_tf_resolve_name "$all_json" "${2:?Error: --env requires an output name}") || return 1
       local prefix="${3:-}"
       local val_type
-      val_type=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | type')
+      val_type=$(jq -r --arg n "$name" '.[$n].value | type' <<< "$all_json")
       if [[ "$val_type" != "object" ]]; then
         local env_var_name="${prefix:-$(echo "$name" | tr '[:lower:]-' '[:upper:]_')}"
         local env_val
-        env_val=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value')
+        env_val=$(jq -r --arg n "$name" '.[$n].value' <<< "$all_json")
         export "$env_var_name=$env_val"
         echo "export $env_var_name=***"
         return 0
       fi
       local env_lines
       if [[ -n "$prefix" ]]; then
-        env_lines=$(echo "$all_json" | jq -r --arg n "$name" --arg p "$prefix" '
+        env_lines=$(jq -r --arg n "$name" --arg p "$prefix" '
           .[$n].value | to_entries[] |
           "\($p)_\(.key | gsub("-";"_") | ascii_upcase)=\(.value | tostring)"
-        ')
+        ' <<< "$all_json")
       else
-        env_lines=$(echo "$all_json" | jq -r --arg n "$name" '
+        env_lines=$(jq -r --arg n "$name" '
           .[$n].value | to_entries[] |
           "\(.key | gsub("-";"_") | ascii_upcase)=\(.value | tostring)"
-        ')
+        ' <<< "$all_json")
       fi
       # Use array + for loop instead of pipe|while to avoid subshell (exports would be lost)
       local -a lines=("${(@f)env_lines}")
@@ -541,13 +541,13 @@ HELP
       fi
       local old_val new_val
       old_val=$($tf_cmd show -json "$backup" 2>/dev/null | jq --arg n "$name" '.values.outputs[$n].value // "not present"' 2>/dev/null)
-      new_val=$(echo "$all_json" | jq --arg n "$name" '.[$n].value')
+      new_val=$(jq --arg n "$name" '.[$n].value' <<< "$all_json")
       if [[ "$old_val" == "$new_val" ]]; then
         echo "No change for '$name'"
       else
         echo "--- backup"
         echo "+++ current"
-        diff --color=auto <(echo "$old_val" | jq -S '.') <(echo "$new_val" | jq -S '.') 2>/dev/null || {
+        diff --color=auto <(jq -S '.' <<< "$old_val") <(jq -S '.' <<< "$new_val") 2>/dev/null || {
           echo "Old: $old_val"
           echo "New: $new_val"
         }
@@ -574,12 +574,12 @@ HELP
       local fzf_tmp
       fzf_tmp=$(mktemp)
       chmod 600 "$fzf_tmp"
-      echo "$all_json" > "$fzf_tmp"
+      printf '%s\n' "$all_json" > "$fzf_tmp"
       local selected
-      selected=$(echo "$all_json" | jq -r '
+      selected=$(jq -r '
         to_entries | sort_by(.key)[] |
         "\(.key)\t\(.value.value | type)\t\(if .value.sensitive then "sensitive" else "public" end)"
-      ' | column -t -s $'\t' | fzf \
+      ' <<< "$all_json" | column -t -s $'\t' | fzf \
           --header="Select output (enter=view, ctrl-y=copy, ctrl-c=cancel)" \
           --preview-window=right:50%:wrap \
           --preview="jq -C --arg n {1} '.[\$n]' < '$fzf_tmp'" \
@@ -607,8 +607,8 @@ HELP
     shift
 
     local sensitive val_type
-    sensitive=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].sensitive')
-    val_type=$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | type')
+    sensitive=$(jq -r --arg n "$name" '.[$n].sensitive' <<< "$all_json")
+    val_type=$(jq -r --arg n "$name" '.[$n].value | type' <<< "$all_json")
 
     # If extra args, treat as key extraction
     if [[ $# -gt 0 ]]; then
@@ -628,20 +628,20 @@ HELP
     case "$val_type" in
       object)
         local key_count
-        key_count=$(echo "$all_json" | jq --arg n "$name" '.[$n].value | keys | length')
-        printf "${c_dim}Keys (%s):${c_reset} %s\n" "$key_count" "$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value | keys | join(", ")')"
+        key_count=$(jq --arg n "$name" '.[$n].value | keys | length' <<< "$all_json")
+        printf "${c_dim}Keys (%s):${c_reset} %s\n" "$key_count" "$(jq -r --arg n "$name" '.[$n].value | keys | join(", ")' <<< "$all_json")"
         echo ""
-        echo "$all_json" | jq -C --arg n "$name" '.[$n].value'
+        jq -C --arg n "$name" '.[$n].value' <<< "$all_json"
         ;;
       array)
         local arr_len
-        arr_len=$(echo "$all_json" | jq --arg n "$name" '.[$n].value | length')
+        arr_len=$(jq --arg n "$name" '.[$n].value | length' <<< "$all_json")
         printf "${c_dim}Length:${c_reset} %s\n" "$arr_len"
         echo ""
-        echo "$all_json" | jq -C --arg n "$name" '.[$n].value'
+        jq -C --arg n "$name" '.[$n].value' <<< "$all_json"
         ;;
       *)
-        printf "${c_green}Value:${c_reset} %s\n" "$(echo "$all_json" | jq -r --arg n "$name" '.[$n].value')"
+        printf "${c_green}Value:${c_reset} %s\n" "$(jq -r --arg n "$name" '.[$n].value' <<< "$all_json")"
         ;;
     esac
     return 0
@@ -653,7 +653,7 @@ HELP
 
   # Categorize outputs via jq (single pass), then render each group
   local categorized
-  categorized=$(echo "$all_json" | jq -r '
+  categorized=$(jq -r '
     to_entries | sort_by(.key)[] |
     .key as $name | .value.sensitive as $sens | (.value.value | type) as $typ |
     (if ($name | test("_s3_credentials$"; "i")) then "s3"
@@ -676,7 +676,7 @@ HELP
         (.value | tostring | if length > 50 then .[:47] + "..." else . end)
       end
     )"
-  ')
+  ' <<< "$all_json")
 
   local cat_labels=("token:API Tokens" "s3:S3 Credentials" "object:Objects" "array:Arrays" "scalar:Values")
   local cat_colors=("token:$c_yellow" "s3:$c_magenta" "object:$c_cyan" "array:$c_blue" "scalar:$c_green")
@@ -726,7 +726,7 @@ _tf_grouped_list() {
   esac
 
   local entries
-  entries=$(echo "$all_json" | jq -r --arg p "$pattern" "
+  entries=$(jq -r --arg p "$pattern" "
     to_entries | sort_by(.key)[]
     | select(.key | $pattern)
     | \"\(.key)\t\(if .value.sensitive then \"sensitive\" else \"public\" end)\t\(.value.value | type)\t\(
@@ -734,7 +734,7 @@ _tf_grouped_list() {
         elif .value.sensitive then \"[sensitive \(.value.value | type)]\"
         else (.value.value | tostring | if length > 50 then .[:47] + \"...\" else . end)
         end)\"
-  ")
+  " <<< "$all_json")
 
   if [[ -z "$entries" ]]; then
     echo "No ${filter} outputs found." >&2
@@ -855,11 +855,11 @@ _tf_out_fzf_preview() {
 
   local name="$word"
   local exists
-  exists=$(echo "$json_data" | jq -e --arg n "$name" '.[$n]' 2>/dev/null) || return
+  exists=$(jq -e --arg n "$name" '.[$n]' <<< "$json_data" 2>/dev/null) || return
 
   local typ sens
-  typ=$(echo "$json_data" | jq -r --arg n "$name" '.[$n].value | type')
-  sens=$(echo "$json_data" | jq -r --arg n "$name" '.[$n].sensitive')
+  typ=$(jq -r --arg n "$name" '.[$n].value | type' <<< "$json_data")
+  sens=$(jq -r --arg n "$name" '.[$n].sensitive' <<< "$json_data")
 
   printf "\033[1m%s\033[0m\n" "$name"
   printf "\033[2mType:\033[0m      %s\n" "$typ"
@@ -868,26 +868,26 @@ _tf_out_fzf_preview() {
   case "$typ" in
     object)
       local key_count
-      key_count=$(echo "$json_data" | jq --arg n "$name" '.[$n].value | keys | length')
+      key_count=$(jq --arg n "$name" '.[$n].value | keys | length' <<< "$json_data")
       printf "\033[2mKeys (%s):\033[0m\n" "$key_count"
-      echo "$json_data" | jq -r --arg n "$name" '.[$n].value | keys[] | "  " + .'
+      jq -r --arg n "$name" '.[$n].value | keys[] | "  " + .' <<< "$json_data"
       if [[ "$sens" != "true" ]]; then
         printf "\n\033[2mValue:\033[0m\n"
-        echo "$json_data" | jq -C --arg n "$name" '.[$n].value'
+        jq -C --arg n "$name" '.[$n].value' <<< "$json_data"
       fi
       ;;
     array)
       local arr_len
-      arr_len=$(echo "$json_data" | jq --arg n "$name" '.[$n].value | length')
+      arr_len=$(jq --arg n "$name" '.[$n].value | length' <<< "$json_data")
       printf "\033[2mLength:\033[0m    %s items\n" "$arr_len"
       if [[ "$sens" != "true" ]]; then
         printf "\n\033[2mValue:\033[0m\n"
-        echo "$json_data" | jq -C --arg n "$name" '.[$n].value'
+        jq -C --arg n "$name" '.[$n].value' <<< "$json_data"
       fi
       ;;
     *)
       if [[ "$sens" != "true" ]]; then
-        printf "\033[2mValue:\033[0m     %s\n" "$(echo "$json_data" | jq -r --arg n "$name" '.[$n].value')"
+        printf "\033[2mValue:\033[0m     %s\n" "$(jq -r --arg n "$name" '.[$n].value' <<< "$json_data")"
       else
         printf "\033[2mValue:\033[0m     \033[31m[redacted]\033[0m\n"
       fi
@@ -929,7 +929,7 @@ _tf_out_complete_outputs() {
     while IFS=$'\t' read -r name typ sens; do
       names+=("$name")
       (( ${#name} > max_w )) && max_w=${#name}
-    done < <(echo "$json_data" | jq -r 'to_entries | sort_by(.key)[] | "\(.key)\t\(.value.value | type)\t\(.value.sensitive)"')
+    done < <(jq -r 'to_entries | sort_by(.key)[] | "\(.key)\t\(.value.value | type)\t\(.value.sensitive)"' <<< "$json_data")
 
     # Second pass: build display strings with aligned columns
     local i=0
@@ -938,7 +938,7 @@ _tf_out_complete_outputs() {
       label="$(printf "%-$(( max_w + 2 ))s %s" "$name" "$typ")"
       [[ "$sens" == "true" ]] && label+=" *"
       dscr+=("$label")
-    done < <(echo "$json_data" | jq -r 'to_entries | sort_by(.key)[] | "\(.key)\t\(.value.value | type)\t\(.value.sensitive)"')
+    done < <(jq -r 'to_entries | sort_by(.key)[] | "\(.key)\t\(.value.value | type)\t\(.value.sensitive)"' <<< "$json_data")
     (( ${#names} )) && compadd -d dscr -- "${names[@]}"
   fi
 }
@@ -1001,10 +1001,10 @@ _tf_out() {
         json_data=$(_tf_out_get_json)
         if [[ -n "$json_data" && "$json_data" != "{}" ]]; then
           local val_type
-          val_type=$(echo "$json_data" | jq -r --arg n "$first_arg" '.[$n].value | type' 2>/dev/null)
+          val_type=$(jq -r --arg n "$first_arg" '.[$n].value | type' <<< "$json_data" 2>/dev/null)
           if [[ "$val_type" == "object" ]]; then
             local -a keys
-            keys=("${(@f)$(echo "$json_data" | jq -r --arg n "$first_arg" '.[$n].value | keys[]' 2>/dev/null)}")
+            keys=("${(@f)$(jq -r --arg n "$first_arg" '.[$n].value | keys[]' <<< "$json_data" 2>/dev/null)}")
             (( ${#keys} )) && compadd -- "${keys[@]}"
           fi
         fi
