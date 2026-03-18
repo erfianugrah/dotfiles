@@ -2,6 +2,10 @@
 # Ansible shortcuts
 # ---------------------------------------------------------------------------
 
+time_now() {
+    date -u +"%Y-%m-%dT%H:%M:%S.%3NZ"
+}
+
 ansible_on() {
    ansible-playbook -i my-playbooks/inventory.yml my-playbooks/poweron.yml --ask-become-pass
 }
