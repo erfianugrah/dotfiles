@@ -75,6 +75,7 @@ encrypt() {
         echo "Error: Encryption failed for $1" >&2
         return 1
     fi
+    echo "Encrypted: $1"
 }
 
 _is_sops_encrypted() {
@@ -124,6 +125,7 @@ decrypt() {
         echo "Error: Decryption failed for $1" >&2
         return 1
     fi
+    echo "Decrypted: $1"
 }
 
 encrypt_all() {
@@ -165,7 +167,15 @@ encrypt_tf() {
     local named_files=("secrets.tfvars" "terraform.tfvars" "blueprint-export.yaml")
     local count=0
 
-    for file in "${named_files[@]}" *.tfstate*; do
+    for file in "${named_files[@]}"; do
+        if [[ -f "$file" ]]; then
+            encrypt "$file" || return 1
+            ((count++))
+        fi
+    done
+
+    # Glob separately — use (N) nullglob qualifier to avoid error when no matches
+    for file in *.tfstate*(N); do
         if [[ -f "$file" ]]; then
             encrypt "$file" || return 1
             ((count++))
@@ -183,7 +193,15 @@ decrypt_tf() {
     local named_files=("secrets.tfvars" "terraform.tfvars" "blueprint-export.yaml")
     local count=0
 
-    for file in "${named_files[@]}" *.tfstate*; do
+    for file in "${named_files[@]}"; do
+        if [[ -f "$file" ]]; then
+            decrypt "$file" || return 1
+            ((count++))
+        fi
+    done
+
+    # Glob separately — use (N) nullglob qualifier to avoid error when no matches
+    for file in *.tfstate*(N); do
         if [[ -f "$file" ]]; then
             decrypt "$file" || return 1
             ((count++))
