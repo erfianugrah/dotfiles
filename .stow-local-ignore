@@ -6,3 +6,7 @@ yay_list.txt
 .config/nvim
 .config/fish
 .config/Bitwarden CLI
+.config/opencode/node_modules
+.config/opencode/package-lock.json
+.config/opencode/bun.lock
+.config/opencode/.gitignore
