@@ -2,7 +2,6 @@ import { z } from "zod"
 
 const SSH_HOST = "docs@docs.erfi.io"
 const SSH_PORT = "2222"
-
 const MAX_RESULT_CHARS = 16_000
 
 function sq(s: string): string {
@@ -39,8 +38,8 @@ async function ssh(command: string): Promise<string> {
 
 export const search = {
   description:
-    "Search documentation by title and summary. Searches a pre-built index (~1MB) " +
-    "instead of grepping 300MB of files — returns path, title, and summary for each match. " +
+    "Search documentation by title and summary for astro, aws, cloudflare, cloudflare-blog, erfi-personal-blog, erfi-technical-blog, flyio, mcp, nextjs, postgres, rust-book, supabase, supabase-blog, tailwindcss, vercel, vercel-blog, vercel-changelog. " +
+    "Searches a pre-built index instead of scanning all files. " +
     "Use this FIRST to find relevant docs, then docs_read or docs_grep to get content.",
   args: {
     query: z.string().describe("Text to search for in titles and summaries"),
