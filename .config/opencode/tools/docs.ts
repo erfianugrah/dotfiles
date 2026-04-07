@@ -92,6 +92,19 @@ export const grep = {
   },
 }
 
+export const summary = {
+  description:
+    "Get the structure/outline of a documentation file — headings and section names. " +
+    "Use this before docs_grep to find the right section to read, saving tokens.",
+  args: {
+    path: z.string().describe("File path (e.g. /docs/supabase/guides/auth.md)"),
+  },
+  async execute(args: { path: string }) {
+    const p = safePath(args.path)
+    return ssh(`grep '^#' '${sq(p)}'`)
+  },
+}
+
 export const sources = {
   description: "List all available documentation sources and their file counts.",
   args: {},
