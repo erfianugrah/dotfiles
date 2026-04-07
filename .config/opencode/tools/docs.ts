@@ -1,11 +1,33 @@
 import { tool } from "@opencode-ai/plugin"
 
-const SSH_OPTS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 const SSH_HOST = "docs@docs.erfi.io"
 const SSH_PORT = "2222"
 
+/**
+ * Sanitise a string for safe use inside single quotes in a shell command.
+ * Replaces single quotes with the shell-safe sequence: '\''
+ * This prevents shell injection via user-controlled args.
+ */
+function sq(s: string): string {
+  return s.replace(/'/g, "'\\''")
+}
+
+/**
+ * Validate a file path to prevent directory traversal outside /docs/.
+ */
+function safePath(p: string): string {
+  // Ensure path starts with /docs/
+  const cleaned = p.replace(/\.\./g, "").replace(/\/\//g, "/")
+  if (!cleaned.startsWith("/docs/")) {
+    return `/docs/${cleaned.replace(/^\/+/, "")}`
+  }
+  return cleaned
+}
+
 async function ssh(command: string): Promise<string> {
-  const result = await Bun.$`ssh ${SSH_OPTS.split(" ")} -p ${SSH_PORT} ${SSH_HOST} ${command}`.text()
+  const result =
+    await Bun.$`ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p ${SSH_PORT} ${SSH_HOST} ${command}`
+      .text()
   return result.trim()
 }
 
@@ -32,9 +54,9 @@ export const search = tool({
       .describe("Maximum number of results to return (default: 20)"),
   },
   async execute(args) {
-    const dir = args.source ? `/docs/${args.source}/` : "/docs/"
+    const dir = args.source ? safePath(`/docs/${sq(args.source)}/`) : "/docs/"
     const limit = args.maxResults ?? 20
-    return ssh(`grep -rl '${args.query}' ${dir} | head -${limit}`)
+    return ssh(`grep -rl '${sq(args.query)}' '${dir}' | head -${limit}`)
   },
 })
 
@@ -53,10 +75,11 @@ export const read = tool({
       .describe("Only read the first N lines (for large files). Omit for full file."),
   },
   async execute(args) {
+    const p = safePath(args.path)
     if (args.lines) {
-      return ssh(`head -${args.lines} '${args.path}'`)
+      return ssh(`head -${Math.abs(Math.floor(args.lines))} '${sq(p)}'`)
     }
-    return ssh(`cat '${args.path}'`)
+    return ssh(`cat '${sq(p)}'`)
   },
 })
 
@@ -79,9 +102,9 @@ export const find = tool({
       .describe("Maximum number of results (default: 30)"),
   },
   async execute(args) {
-    const dir = args.source ? `/docs/${args.source}/` : "/docs/"
+    const dir = args.source ? safePath(`/docs/${sq(args.source)}/`) : "/docs/"
     const limit = args.maxResults ?? 30
-    return ssh(`find ${dir} -name '${args.pattern}' -type f | head -${limit}`)
+    return ssh(`find '${dir}' -name '${sq(args.pattern)}' -type f | head -${limit}`)
   },
 })
 
@@ -101,8 +124,9 @@ export const grep = tool({
       .describe("Number of context lines around each match (default: 3)"),
   },
   async execute(args) {
-    const ctx = args.context ?? 3
-    return ssh(`grep -A${ctx} '${args.query}' '${args.path}' | head -100`)
+    const ctx = Math.abs(Math.floor(args.context ?? 3))
+    const p = safePath(args.path)
+    return ssh(`grep -A${ctx} '${sq(args.query)}' '${sq(p)}' | head -100`)
   },
 })
 
