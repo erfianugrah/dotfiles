@@ -3,6 +3,18 @@ import { z } from "zod"
 const SSH_HOST = "docs@docs.erfi.io"
 const SSH_PORT = "2222"
 
+/**
+ * Max characters to return from any single tool call.
+ * Informed by Claude Code's context management:
+ * - Per-tool result cap is 50K chars, oversized gets a 2KB preview
+ * - p99 output is ~5K tokens (~20K chars)
+ * - Microcompaction evicts the largest results first
+ *
+ * 16K chars (~4K tokens) is a good budget — large enough to be useful,
+ * small enough to avoid triggering compaction.
+ */
+const MAX_RESULT_CHARS = 16_000
+
 function sq(s: string): string {
   return s.replace(/'/g, "'\\''")
 }
@@ -13,6 +25,20 @@ function safePath(p: string): string {
     return `/docs/${cleaned.replace(/^\/+/, "")}`
   }
   return cleaned
+}
+
+/**
+ * Cap output and add a truncation notice if needed.
+ * Mirrors Claude Code's pattern: oversized results get a preview + pointer.
+ */
+function capOutput(text: string, path?: string): string {
+  if (text.length <= MAX_RESULT_CHARS) return text
+  const truncated = text.slice(0, MAX_RESULT_CHARS)
+  const remaining = text.length - MAX_RESULT_CHARS
+  const hint = path
+    ? `\n\n[truncated ${remaining} chars — use docs_read with lines parameter or docs_summary to read specific sections of ${path}]`
+    : `\n\n[truncated ${remaining} chars — narrow your query or add a line limit]`
+  return truncated + hint
 }
 
 async function ssh(command: string): Promise<string> {
@@ -29,7 +55,7 @@ export const search = {
   description:
     "Search documentation for Supabase, Cloudflare, Vercel, PostgreSQL, and AWS. " +
     "Returns file paths matching the query. Use this to find relevant docs before reading them. " +
-    "Sources: supabase, cloudflare, cloudflare-blog, vercel, vercel-blog, vercel-changelog, postgres, aws.",
+    "Sources: supabase, cloudflare, cloudflare-blog, supabase-blog, vercel, vercel-blog, vercel-changelog, postgres, aws.",
   args: {
     query: z.string().describe("Text pattern to search for (grep regex)"),
     source: z
@@ -47,18 +73,25 @@ export const search = {
 
 export const read = {
   description:
-    "Read a documentation file from the docs server. " +
-    "Pass a path from docs_search results, or construct one like /docs/supabase/guides/auth.md",
+    "Read a documentation file. For large files, use docs_summary first to see " +
+    "the headings, then read with a line limit to get only the section you need.",
   args: {
     path: z.string().describe("File path (e.g. /docs/supabase/guides/auth.md)"),
     lines: z.number().optional().describe("Only read first N lines. Omit for full file."),
+    offset: z.number().optional().describe("Start reading from this line number (1-indexed)."),
   },
-  async execute(args: { path: string; lines?: number }) {
+  async execute(args: { path: string; lines?: number; offset?: number }) {
     const p = safePath(args.path)
-    if (args.lines) {
-      return ssh(`head -${Math.abs(Math.floor(args.lines))} '${sq(p)}'`)
+    let cmd: string
+    if (args.offset && args.lines) {
+      cmd = `sed -n '${Math.max(1, Math.floor(args.offset))},${Math.floor(args.offset) + Math.floor(args.lines) - 1}p' '${sq(p)}'`
+    } else if (args.lines) {
+      cmd = `head -${Math.abs(Math.floor(args.lines))} '${sq(p)}'`
+    } else {
+      cmd = `cat '${sq(p)}'`
     }
-    return ssh(`cat '${sq(p)}'`)
+    const result = await ssh(cmd)
+    return capOutput(result, args.path)
   },
 }
 
@@ -88,7 +121,8 @@ export const grep = {
   async execute(args: { query: string; path: string; context?: number }) {
     const ctx = Math.abs(Math.floor(args.context ?? 3))
     const p = safePath(args.path)
-    return ssh(`grep -A${ctx} '${sq(args.query)}' '${sq(p)}' | head -100`)
+    const result = await ssh(`grep -A${ctx} '${sq(args.query)}' '${sq(p)}' | head -100`)
+    return capOutput(result, args.path)
   },
 }
 
@@ -101,7 +135,9 @@ export const summary = {
   },
   async execute(args: { path: string }) {
     const p = safePath(args.path)
-    return ssh(`grep '^#' '${sq(p)}'`)
+    const headings = await ssh(`grep '^#' '${sq(p)}'`)
+    const lineCount = await ssh(`wc -l < '${sq(p)}'`)
+    return `${lineCount.trim()} lines\n\n${headings}`
   },
 }
 
