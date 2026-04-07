@@ -1,33 +1,5 @@
-## Docs over SSH
+## Documentation
 
-Documentation, blogs, and changelogs for Supabase, Cloudflare, Vercel, PostgreSQL, and AWS are served over SSH at `docs.erfi.io`. Use standard Unix tools to search and read them.
+Before implementing features for Supabase, Cloudflare, Vercel, PostgreSQL, or AWS, use the `docs_*` tools to check the latest documentation. These tools search 26,000+ doc pages, blog posts, and changelogs served at `docs.erfi.io`.
 
-```bash
-# List available doc sets
-ssh -p 2222 docs@docs.erfi.io "ls /docs/"
-# → supabase  cloudflare  cloudflare-blog  vercel  vercel-blog  vercel-changelog  postgres  aws
-
-# Search across all docs
-ssh -p 2222 docs@docs.erfi.io "grep -rl 'RLS' /docs/"
-
-# Read a specific guide
-ssh -p 2222 docs@docs.erfi.io "cat /docs/supabase/guides/auth.md"
-ssh -p 2222 docs@docs.erfi.io "cat /docs/cloudflare/argo-smart-routing.md"
-ssh -p 2222 docs@docs.erfi.io "head -50 /docs/aws/lambda/latest/dg/welcome.md"
-
-# Find docs by path
-ssh -p 2222 docs@docs.erfi.io "find /docs/vercel -name '*.md' | head -20"
-ssh -p 2222 docs@docs.erfi.io "find /docs/postgres -name '*.md' -path '*index*'"
-
-# Search with context
-ssh -p 2222 docs@docs.erfi.io "grep -A5 'partial index' /docs/postgres/indexes-partial.md"
-
-# Search blogs for recent features
-ssh -p 2222 docs@docs.erfi.io "grep -rl 'Workers' /docs/cloudflare-blog/ | head -5"
-ssh -p 2222 docs@docs.erfi.io "grep -rl 'Next.js' /docs/vercel-blog/ | head -5"
-```
-
-All docs live under `/docs/{source}/` as markdown files.
-Use grep, find, cat, head, tail, and wc to search and read them.
-
-For SSH options, add `-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR` to suppress host key warnings.
+Use `docs_search` to find relevant files, then `docs_read` to read them. Use `docs_grep` for searching with context. Use `docs_find` to discover files by name pattern. Use `docs_sources` to see all available doc sets.
