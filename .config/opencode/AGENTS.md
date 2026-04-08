@@ -1,108 +1,41 @@
 ## Documentation
 
-A docs server at `docs.erfi.io` serves 29,000+ documentation pages across 18 sources as searchable markdown files over SSH. Always check docs before implementing features, debugging issues, or answering questions about these technologies.
+A docs server at `docs.erfi.io` serves 29030+ documentation pages across 18 sources as searchable markdown files over SSH. Always check docs before implementing features, debugging issues, or answering questions about these technologies.
 
-### SSH connection
-
-All commands use: `ssh -p 2222 docs@docs.erfi.io "<command>"`
-
-To suppress host key warnings (recommended for automation), add these SSH options:
-`-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR`
-
-Or add to `~/.ssh/config`:
-
-```
-Host docs.erfi.io
-  User docs
-  Port 2222
-  StrictHostKeyChecking no
-  UserKnownHostsFile /dev/null
-  LogLevel ERROR
-```
+**You have custom docs tools installed. Always use `docs_search`, `docs_read`, `docs_grep`, `docs_find`, `docs_summary`, and `docs_sources` instead of raw SSH commands.** Do not use `ssh` or `Bash` to access the docs server directly — the custom tools handle SSH, output capping, and structured parsing automatically.
 
 ### Available sources
 
 astro, aws, cloudflare, cloudflare-blog, cloudflare-changelog, erfi-personal-blog, erfi-technical-blog, flyio, mcp, nextjs, postgres, rust-book, supabase, supabase-blog, tailwindcss, vercel, vercel-blog, vercel-changelog
-
-All docs live under `/docs/{source}/` as markdown files.
 
 ### Recommended workflow
 
 Use a **search -> summary -> targeted read** pattern to minimise token usage:
 
 1. **Search** the index to find relevant files:
-   ```bash
-   ssh -p 2222 docs@docs.erfi.io "rg -i 'RLS policies' /docs/_index.tsv"
-   ```
+   `docs_search(query="RLS policies", source="postgres")`
 
 2. **Get the outline** of a promising file:
-   ```bash
-   ssh -p 2222 docs@docs.erfi.io "rg '^#' /docs/supabase/guides/auth.md"
-   ```
+   `docs_summary(path="/docs/postgres/row-security.md")`
 
 3. **Read only the section you need** (e.g. lines 45-80):
-   ```bash
-   ssh -p 2222 docs@docs.erfi.io "bat --plain --paging=never --color=never --line-range=45:80 /docs/supabase/guides/auth.md"
-   ```
+   `docs_read(path="/docs/postgres/row-security.md", offset=45, lines=35)`
 
-### Available tools
+### Tool reference
 
-| Tool | Purpose | Example |
-|------|---------|---------|
-| `rg` (ripgrep) | Fast regex search across files | `rg -i 'pattern' /docs/supabase/` |
-| `rg --json` | Structured search with exact line numbers | `rg --json 'auth' /docs/supabase/` |
-| `grep` | Basic text search | `grep -rl 'query' /docs/` |
-| `bat` | Read files with line numbers | `bat --plain --paging=never /docs/file.md` |
-| `bat --line-range` | Read specific line ranges | `bat --plain --paging=never --line-range=10:50 /docs/file.md` |
-| `cat` | Read entire files (no line numbers) | `cat /docs/file.md` |
-| `head`/`tail` | Read start/end of files | `head -30 /docs/file.md` |
-| `find` | Find files by name pattern | `find /docs/aws -name '*lambda*'` |
-| `tree` | Browse directory structure | `tree /docs/cloudflare/ -L 2` |
-| `wc` | Count lines/words/files | `find /docs/vercel -name '*.md' \| wc -l` |
-| `less` | Page through large files (interactive) | `less /docs/file.md` |
-
-### Common patterns
-
-```bash
-# Search across ALL docs for a topic
-ssh -p 2222 docs@docs.erfi.io "rg -il 'edge functions' /docs/"
-
-# Search within a specific source
-ssh -p 2222 docs@docs.erfi.io "rg -i 'deploy' /docs/cloudflare/"
-
-# Search with context lines around matches
-ssh -p 2222 docs@docs.erfi.io "rg -i -C3 'CREATE POLICY' /docs/postgres/"
-
-# Get structured JSON results with exact line numbers
-ssh -p 2222 docs@docs.erfi.io "rg --json 'partial index' /docs/postgres/"
-
-# Browse what's available in a source
-ssh -p 2222 docs@docs.erfi.io "tree /docs/nextjs/ -L 2"
-
-# Read a file with line numbers for precise references
-ssh -p 2222 docs@docs.erfi.io "bat --plain --paging=never --color=never /docs/postgres/indexes.md"
-
-# Read only lines 10-40 of a file
-ssh -p 2222 docs@docs.erfi.io "bat --plain --paging=never --color=never --line-range=10:40 /docs/postgres/indexes.md"
-
-# Search the pre-built index (fastest -- searches titles and summaries)
-ssh -p 2222 docs@docs.erfi.io "rg -i 'authentication' /docs/_index.tsv | head -10"
-
-# Search index filtered to one source
-ssh -p 2222 docs@docs.erfi.io "rg -i 'auth' /docs/_index.tsv | rg '^supabase/'"
-
-# Get all headings in a file (document outline)
-ssh -p 2222 docs@docs.erfi.io "rg '^#' /docs/supabase/guides/auth.md"
-
-# Pipe and combine commands
-ssh -p 2222 docs@docs.erfi.io "rg -il 'cron' /docs/ | head -5 | while read f; do echo \"--- \$f ---\"; head -3 \"\$f\"; done"
-```
+| Tool | Purpose | When to use |
+|------|---------|-------------|
+| `docs_search` | Search titles+summaries across all sources | First step — find relevant files fast (~1MB index) |
+| `docs_summary` | Get headings/outline of a file | Before reading — find the right section |
+| `docs_read` | Read a file or line range | After summary — read only what you need |
+| `docs_grep` | Regex search with context lines (rg --json) | When you need to find content within files |
+| `docs_find` | Find files by name pattern | When you know part of the filename |
+| `docs_sources` | List all sources with file counts | When you need to know what's available |
 
 ### Performance tips
 
-- **Search the index first**: `rg -i 'query' /docs/_index.tsv` searches titles+summaries (~1MB) instead of all docs (~300MB).
-- **Use `rg` over `grep`**: ripgrep is 10-50x faster for large directory searches.
-- **Limit output**: Pipe through `head -N` when searching broadly to avoid overwhelming context.
-- **Use `--line-range`**: Read specific sections instead of entire files (30 lines ~120 tokens vs 500 lines ~2K tokens).
-- **Use `-l` for file lists**: `rg -il 'pattern'` returns only filenames, not content.
-- **Get structure first**: `rg '^#' /docs/file.md` shows headings before reading full file.
+- **Search the index first**: `docs_search` searches titles+summaries (~1MB) instead of all docs (~300MB).
+- **Use `docs_summary` before `docs_read`**: Get headings first to find the right line range.
+- **Use offset+lines**: `docs_read(path="...", offset=45, lines=35)` reads 35 lines starting at line 45 (~140 tokens vs ~2K for the full file).
+- **Use `docs_grep` with a source path**: `docs_grep(query="RLS", path="/docs/postgres/")` is faster than searching all docs.
+- **Use the `source` parameter**: `docs_search(query="auth", source="supabase")` filters to one source.
