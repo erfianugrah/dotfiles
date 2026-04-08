@@ -245,9 +245,10 @@ alias zjac="zj a -c"
 alias zjda="zj da"
 alias s=sentry-cli
 alias sb=supabase
+alias pgpasteriser="export \$(grep -v \"^#\" ~/pastebin/.env | xargs) && pgcli \$PASTERISER_DB_URL"
 # alias z=j
 # TF_LOG is now controlled via tf_debug_* functions
-export NVIM_LOG_FILE=/home/erfi/.config
+# export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
 export STARSHIP_CONFIG=/home/erfi/starship.toml
 export STARSHIP_CACHE=/home/erfi/.starship/cache
