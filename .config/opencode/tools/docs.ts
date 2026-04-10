@@ -92,14 +92,14 @@ function formatRgMatches(matches: RgMatch[]): string {
 
 export const search = {
   description:
-    "Search documentation by title and summary for astro, aws, cloudflare, cloudflare-blog, cloudflare-changelog, erfi-personal-blog, erfi-technical-blog, flyio, mcp, nextjs, postgres, rust-book, supabase, supabase-blog, tailwindcss, vercel, vercel-blog, vercel-changelog. Searches a pre-built index instead of scanning all files. Use this FIRST to find relevant docs, then docs_read or docs_grep to get content.",
+    "Search documentation by title and summary. Searches a pre-built index instead of scanning all files. Use this FIRST to find relevant docs, then docs_read or docs_grep to get content.",
 
   args: {
-    query: z.string().describe("Text to search for in titles and summaries"),
+    query: z.string().describe("Search text"),
     source: z
       .string()
       .optional()
-      .describe("Limit to a source (e.g. 'supabase', 'cloudflare', 'aws'). Omit to search all."),
+      .describe("Filter to source (e.g. 'supabase', 'aws'). Omit for all."),
     maxResults: z.number().optional().describe("Max results (default: 15)"),
   },
   async execute(args: { query: string; source?: string; maxResults?: number }) {
@@ -111,12 +111,11 @@ export const search = {
 
 export const read = {
   description:
-    "Read a documentation file. For large files, use docs_summary first to see " +
-    "the headings, then read with offset/limit to get only the section you need.",
+    "Read a documentation file. For large files, use docs_summary first to see the headings, then read with offset/limit to get only the section you need.",
   args: {
     path: z.string().describe("File path (e.g. /docs/supabase/guides/auth.md)"),
-    lines: z.number().optional().describe("Only read N lines. Omit for full file."),
-    offset: z.number().optional().describe("Start reading from this line number (1-indexed)."),
+    lines: z.number().optional().describe("Read N lines. Omit for full file."),
+    offset: z.number().optional().describe("Start line (1-indexed)."),
   },
   async execute(args: { path: string; lines?: number; offset?: number }) {
     const p = safePath(args.path)
@@ -142,8 +141,8 @@ export const read = {
 export const find = {
   description: "Find documentation files by name or path pattern.",
   args: {
-    pattern: z.string().describe("File name pattern (e.g. '*.md', '*auth*', '*lambda*')"),
-    source: z.string().optional().describe("Limit to a source (e.g. 'supabase', 'aws')"),
+    pattern: z.string().describe("Glob pattern (e.g. '*.md', '*auth*')"),
+    source: z.string().optional().describe("Filter to source (e.g. 'supabase', 'aws')"),
     maxResults: z.number().optional().describe("Max results (default: 30)"),
   },
   async execute(args: { pattern: string; source?: string; maxResults?: number }) {
@@ -159,9 +158,9 @@ export const grep = {
     "Returns structured results with file paths and exact line numbers. " +
     "More detailed than docs_search — shows actual content around matches.",
   args: {
-    query: z.string().describe("Text pattern to search for (regex supported)"),
-    path: z.string().describe("File or directory to search (e.g. /docs/postgres/)"),
-    context: z.number().optional().describe("Context lines around each match (default: 3)"),
+    query: z.string().describe("Regex pattern to search for"),
+    path: z.string().describe("File or dir path (e.g. /docs/postgres/)"),
+    context: z.number().optional().describe("Context lines per match (default: 3)"),
   },
   async execute(args: { query: string; path: string; context?: number }) {
     const ctx = Math.abs(Math.floor(args.context ?? 3))
@@ -191,7 +190,7 @@ export const grep = {
 export const summary = {
   description:
     "Get the structure/outline of a documentation file — headings and section names. " +
-    "Use this before docs_grep to find the right section to read, saving tokens.",
+    "Use this before docs_read to find the right section to read, saving tokens.",
   args: {
     path: z.string().describe("File path (e.g. /docs/supabase/guides/auth.md)"),
   },
