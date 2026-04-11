@@ -12,8 +12,8 @@ if [[ ! -d "$_FUNCTIONS_D" ]]; then
   return 1
 fi
 
-# Load order matters: crypto has no deps, bitwarden depends on nothing shell-wise,
-# terraform and system are independent, misc is lightweight utilities.
+# Load order matters: system first (sets _SYS_OS/_SYS_PKG used by other modules),
+# then crypto, bitwarden (uses _SYS_OS), terraform, misc.
 _fn_modules=(system crypto bitwarden terraform misc)
 
 for _fn_mod in "${_fn_modules[@]}"; do
