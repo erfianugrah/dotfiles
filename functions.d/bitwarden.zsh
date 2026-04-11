@@ -51,42 +51,39 @@ _bw_serve_ok() {
 
 # Fetch a single item's .notes field from bw serve by exact name
 _bw_api_get_note() {
-    setopt localoptions noxtrace noverbose
-    local item_name="$1"
-    local encoded_name
+    emulate -L zsh
+    local item_name=$1 encoded_name response
     encoded_name=$(printf '%s' "$item_name" | jq -sRr @uri)
-    local response
     response=$(curl -sf "${BW_SERVE_ADDR}/list/object/items?search=${encoded_name}") || {
-        echo "bw serve not reachable on ${BW_SERVE_ADDR}. Run bw_serve_start first." >&2
+        print -u2 "bw serve not reachable on ${BW_SERVE_ADDR}. Run bw_serve_start first."
         return 1
     }
-    echo "$response" | jq -r \
+    print -r -- "$response" | jq -r \
         --arg name "$item_name" \
         '.data.data[] | select(.name == $name) | .notes // empty' | head -1
 }
 
 # Cached accessor — returns the note value, fetching only if cache is stale
 _bw_get() {
-    setopt localoptions noxtrace noverbose
-    local item_name="$1"
-    local now=$(date +%s)
+    emulate -L zsh
+    local item_name=$1 now val
+    now=$(date +%s)
 
     if [[ -n "${_BW_CACHE[$item_name]}" ]] && \
        (( now - ${_BW_CACHE_TS[$item_name]:-0} < _BW_CACHE_TTL )); then
-        echo "${_BW_CACHE[$item_name]}"
+        print -r -- "${_BW_CACHE[$item_name]}"
         return 0
     fi
 
-    local val
     val=$(_bw_api_get_note "$item_name") || return 1
     if [[ -z "$val" ]]; then
-        echo "No value found for '$item_name' in Bitwarden." >&2
+        print -u2 "No value found for '$item_name' in Bitwarden."
         return 1
     fi
 
-    _BW_CACHE[$item_name]="$val"
-    _BW_CACHE_TS[$item_name]="$now"
-    echo "$val"
+    _BW_CACHE[$item_name]=$val
+    _BW_CACHE_TS[$item_name]=$now
+    print -r -- "$val"
 }
 
 # ---------------------------------------------------------------------------
@@ -213,51 +210,46 @@ clear_bw_cache() {
 # Environment loaders (Pattern B — bulk export via bw serve)
 # ---------------------------------------------------------------------------
 
-# Mask a secret value: first 4 + ... + last 4
+# Mask a secret: first 4 + ... + last 4
 _bw_mask() {
-    setopt localoptions noxtrace noverbose
-    local val="$1" len=${#1}
+    emulate -L zsh
+    local len=${#1}
     if (( len <= 8 )); then
-        echo "${val:0:2}...${val: -2}"
+        print -r -- "${1:0:2}...${1: -2}"
     else
-        echo "${val:0:4}...${val: -4}"
+        print -r -- "${1:0:4}...${1: -4}"
     fi
 }
 
 # Generic loader: takes an array of "bw_item_name|ENV_VAR_NAME" pairs
 _bw_load_items() {
-    setopt localoptions noxtrace noverbose
-    local items=("$@")
-    local total=${#items[@]}
-    local current=0
-    local loaded=0
-    local skipped=0
-    local failed=0
+    emulate -L zsh
+    setopt typeset_silent
+
+    local -a items=("$@")
+    local total=${#items[@]} current=0 loaded=0 skipped=0 failed=0
+    local bw_name env_name val masked
 
     if ! _bw_serve_ok; then
-        echo "[bw] Service not running, starting..." >&2
+        print -u2 "[bw] Service not running, starting..."
         bw_serve_start || return 1
     fi
 
     for item in "${items[@]}"; do
-        local bw_name=${item%|*}
-        local env_name=${item#*|}
-        local val
+        bw_name=${item%|*}
+        env_name=${item#*|}
         ((current++))
 
         val=$(_bw_get "$bw_name") || {
-            printf "  [%2d/%d] %-35s FAILED\n" "$current" "$total" "$env_name" >&2
+            print -u2 -f "  [%2d/%d] %-35s %s\n" "$current" "$total" "$env_name" "FAILED"
             ((failed++))
             continue
         }
 
-        printf "  [%2d/%d] %-35s %s\n" "$current" "$total" "$env_name" "$(_bw_mask "$val")" >&2
+        masked=$(_bw_mask "$val")
+        print -u2 -f "  [%2d/%d] %-35s %s\n" "$current" "$total" "$env_name" "$masked"
 
-        # Only export if unset or changed
-        if [[ -z "${(P)env_name}" ]]; then
-            export "$env_name=$val"
-            ((loaded++))
-        elif [[ "${(P)env_name}" != "$val" ]]; then
+        if [[ -z "${(P)env_name}" || "${(P)env_name}" != "$val" ]]; then
             export "$env_name=$val"
             ((loaded++))
         else
@@ -265,31 +257,32 @@ _bw_load_items() {
         fi
     done
 
-    echo "[bw] Done: $loaded loaded, $skipped unchanged, $failed failed (of $total)"
+    print "[bw] Done: $loaded loaded, $skipped unchanged, $failed failed (of $total)"
 }
 
 load_sops_age_keys() {
-    setopt localoptions noxtrace noverbose
-    echo "Loading SOPS Age keys"
+    emulate -L zsh
+    setopt typeset_silent
+    print "Loading SOPS Age keys"
 
-    local public_key secret_key
+    local public_key secret_key combined
     public_key=$(_bw_get "SOPS_AGE_PUB_KEY") || {
-        echo "Failed to retrieve SOPS Age public key." >&2
+        print -u2 "Failed to retrieve SOPS Age public key."
         return 1
     }
     secret_key=$(_bw_get "SOPS_AGE_SECRET_KEY") || {
-        echo "Failed to retrieve SOPS Age secret key." >&2
+        print -u2 "Failed to retrieve SOPS Age secret key."
         return 1
     }
 
-    local combined="${public_key}\n${secret_key}"
+    combined="${public_key}\n${secret_key}"
     if [[ "$SOPS_AGE_KEYS" == "$combined" ]]; then
-        echo "SOPS_AGE_KEYS already set with correct values, skipping."
+        print "SOPS_AGE_KEYS already set with correct values, skipping."
         return 0
     fi
 
     export SOPS_AGE_KEYS="$combined"
-    echo "SOPS_AGE_KEYS set successfully"
+    print "SOPS_AGE_KEYS set successfully"
 }
 
 load_bw() {
