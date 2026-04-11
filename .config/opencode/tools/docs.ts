@@ -2,7 +2,7 @@ import { z } from "zod"
 
 const SSH_HOST = "docs@docs.erfi.io"
 const SSH_PORT = "2222"
-const MAX_RESULT_CHARS = 16_000
+const MAX_RESULT_CHARS = 51_200
 
 // ─── Helpers ───────────────────────────────────────────────────────
 
