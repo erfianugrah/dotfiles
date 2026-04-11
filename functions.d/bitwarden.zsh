@@ -11,6 +11,39 @@ BW_SERVE_ADDR="http://127.0.0.1:${BW_SERVE_PORT}"
 declare -A _BW_CACHE _BW_CACHE_TS
 _BW_CACHE_TTL=300  # 5 minute in-memory cache
 
+# ---------------------------------------------------------------------------
+# Secret mappings — single source of truth
+# Format: "bw_item_name|ENV_VAR_NAME"
+# Add new secrets here. load_bw and unset_bw_vars both read from these.
+# ---------------------------------------------------------------------------
+_BW_SECRETS=(
+    "CLOUDFLARE_EMAIL|CLOUDFLARE_EMAIL"
+    "CLOUDFLARE_ACCOUNT_ID|CLOUDFLARE_ACCOUNT_ID"
+    "CLOUDFLARE_ZONE_ID|CLOUDFLARE_ZONE_ID"
+    "CLOUDFLARE_API_KEY|CLOUDFLARE_API_KEY"
+    "CLOUDFLARE_ACCESS_OLLAMA_ID|CLOUDFLARE_ACCESS_OLLAMA_ID"
+    "CLOUDFLARE_ACCESS_OLLAMA_SECRET|CLOUDFLARE_ACCESS_OLLAMA_SECRET"
+    "CARGO_ROOT_KEY|CARGO_REGISTRY_TOKEN"
+    "AWS_SECRET_ACCESS_KEY_ERFI|AWS_SECRET_ACCESS_KEY"
+    "AWS_ACCESS_KEY_ID_ERFI|AWS_ACCESS_KEY_ID"
+    "AUTHENTIK_TOKEN|AUTHENTIK_TOKEN"
+    "CLOUDFLARE_TOKEN|CLOUDFLARE_TOKEN"
+    "IPINFO_TOKEN|IPINFO_TOKEN"
+    "COMPOSER_API_KEY|COMPOSER_API_KEY"
+)
+
+_BW_WRANGLER_SECRETS=(
+    "CLOUDFLARE_WRANGLER_TOKEN|CLOUDFLARE_API_TOKEN"
+)
+
+# Vars not in _BW_SECRETS but still cleaned up by unset_bw_vars (legacy / special)
+_BW_EXTRA_UNSET=(
+    GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL
+    GIT_AUTHOR_NAME GIT_COMMITTER_NAME
+    PAPIREPO_API_KEY CLOUDLET_API_KEY
+    SOPS_AGE_KEYS
+)
+
 # Check if bw serve is reachable
 _bw_serve_ok() {
     curl -sf "${BW_SERVE_ADDR}/status" >/dev/null 2>&1
@@ -217,7 +250,7 @@ _bw_load_items() {
         fi
     done
 
-    printf "\r%*s\r" 60 "" >&2
+    printf "\r%*s\n" 60 "" >&2
     echo "[bw] Done: $loaded loaded, $skipped unchanged, $failed failed (of $total)"
 }
 
@@ -245,61 +278,28 @@ load_sops_age_keys() {
 }
 
 load_bw() {
-    local items=(
-        "CLOUDFLARE_EMAIL|CLOUDFLARE_EMAIL"
-        "CLOUDFLARE_ACCOUNT_ID|CLOUDFLARE_ACCOUNT_ID"
-        "CLOUDFLARE_ZONE_ID|CLOUDFLARE_ZONE_ID"
-        "CLOUDFLARE_API_KEY|CLOUDFLARE_API_KEY"
-        "CLOUDFLARE_ACCESS_OLLAMA_ID|CLOUDFLARE_ACCESS_OLLAMA_ID"
-        "CLOUDFLARE_ACCESS_OLLAMA_SECRET|CLOUDFLARE_ACCESS_OLLAMA_SECRET"
-        "CARGO_ROOT_KEY|CARGO_REGISTRY_TOKEN"
-        "AWS_SECRET_ACCESS_KEY_ERFI|AWS_SECRET_ACCESS_KEY"
-        "AWS_ACCESS_KEY_ID_ERFI|AWS_ACCESS_KEY_ID"
-        "AUTHENTIK_TOKEN|AUTHENTIK_TOKEN"
-        "CLOUDFLARE_TOKEN|CLOUDFLARE_TOKEN"
-        "IPINFO_TOKEN|IPINFO_TOKEN"
-        "COMPOSER_API_KEY|COMPOSER_API_KEY"
-    )
-
-    _bw_load_items "${items[@]}"
+    _bw_load_items "${_BW_SECRETS[@]}"
     load_sops_age_keys
 }
 
 load_wrangler_token() {
-    _bw_load_items "CLOUDFLARE_WRANGLER_TOKEN|CLOUDFLARE_API_TOKEN"
+    _bw_load_items "${_BW_WRANGLER_SECRETS[@]}"
 }
 
 unset_bw_vars() {
-    # Unset all variables that could be set by load_bw
-    unset CLOUDFLARE_EMAIL
-    unset GIT_AUTHOR_EMAIL
-    unset GIT_COMMITTER_EMAIL
-    unset GIT_AUTHOR_NAME
-    unset GIT_COMMITTER_NAME
-    unset CLOUDFLARE_ACCOUNT_ID
-    unset CLOUDFLARE_ZONE_ID
-    unset CLOUDFLARE_API_KEY
-    unset CLOUDFLARE_ACCESS_OLLAMA_ID
-    unset CLOUDFLARE_ACCESS_OLLAMA_SECRET
-    unset CARGO_REGISTRY_TOKEN
-    unset SOPS_AGE_KEYS
+    local item env_name
 
-    # Also unset cf_work variables
-    unset AWS_SECRET_ACCESS_KEY
-    unset AWS_ACCESS_KEY_ID
-    unset PAPIREPO_API_KEY
-    unset CLOUDLET_API_KEY
+    # Unset all vars from secret mappings
+    for item in "${_BW_SECRETS[@]}" "${_BW_WRANGLER_SECRETS[@]}"; do
+        env_name=${item#*|}
+        unset "$env_name"
+    done
 
-    # Unset wrangler token
-    unset CLOUDFLARE_API_TOKEN
+    # Unset legacy/special vars not in mappings
+    for env_name in "${_BW_EXTRA_UNSET[@]}"; do
+        unset "$env_name"
+    done
 
-    # Unset authentik / ipinfo
-    unset AUTHENTIK_TOKEN
-    unset CLOUDFLARE_TOKEN
-    unset IPINFO_TOKEN
-
-    # Clear the cache
     clear_bw_cache
-
     echo "All Bitwarden-loaded environment variables have been unset."
 }
