@@ -5,7 +5,7 @@
 time_now() {
     if command -v gdate &>/dev/null; then
         gdate -u +"%Y-%m-%dT%H:%M:%S.%3NZ"
-    elif date -u +"%3N" &>/dev/null 2>&1; then
+    elif [[ "$(date -u +%3N 2>/dev/null)" =~ ^[0-9]+$ ]]; then
         date -u +"%Y-%m-%dT%H:%M:%S.%3NZ"
     else
         date -u +"%Y-%m-%dT%H:%M:%S.000Z"
