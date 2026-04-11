@@ -55,9 +55,20 @@ supabase <group> <command> --help
 
 Version check: `supabase --version`. Changelogs: [CLI docs](https://supabase.com/docs/reference/cli/introduction), [GitHub releases](https://github.com/supabase/cli/releases).
 
-## MCP Server
+## Docs Access
 
-Setup: [MCP setup guide](https://supabase.com/docs/guides/getting-started/mcp).
+Before implementing, find relevant docs. Priority:
+
+1. `docs_search(query="...", source="supabase")` or `docs_grep` — docs-ssh has full Supabase docs + API specs
+2. `docs_read(path="/docs/supabase-api/api/overview.md")` — Management API endpoints
+3. `docs_read(path="/docs/supabase-auth-api/api/overview.md")` — Auth API endpoints
+4. Web search for Supabase topics when docs-ssh doesn't cover it
+
+## MCP Server (optional, per-project)
+
+Supabase MCP disabled by default. Enable per-project when you need action tools (`execute_sql`, `get_advisors`, project management). Docs are already in docs-ssh.
+
+Setup if needed: [MCP setup guide](https://supabase.com/docs/guides/getting-started/mcp).
 
 **Troubleshooting connection:**
 
@@ -65,23 +76,15 @@ Setup: [MCP setup guide](https://supabase.com/docs/guides/getting-started/mcp).
 2. Check `.mcp.json` in project root. Missing? Create with URL `https://mcp.supabase.com/mcp`.
 3. Server reachable + config correct but no tools? User needs OAuth auth flow in agent → browser → reload session.
 
-## Docs Access
-
-Before implementing, find relevant docs. Priority:
-
-1. MCP `search_docs` tool (preferred — returns snippets directly)
-2. Fetch docs as markdown — append `.md` to URL path
-3. Web search for Supabase topics
-
 ## Schema Changes
 
-**Use `execute_sql` (MCP) or `supabase db query` (CLI) for schema changes.** Run SQL directly, no migration history entries. Iterate freely, generate clean migration when ready.
+**Use `execute_sql` (MCP, if enabled) or `supabase db query` (CLI) for schema changes.** Run SQL directly, no migration history entries. Iterate freely, generate clean migration when ready.
 
 Do NOT use `apply_migration` for local schema changes — writes migration history entry every call. Can't iterate. `supabase db diff`/`supabase db pull` produce empty/conflicting diffs.
 
 **Commit workflow:**
 
-1. Run advisors → `supabase db advisors` (CLI v2.81.3+) or MCP `get_advisors`. Fix issues.
+1. Run advisors → `supabase db advisors` (CLI v2.81.3+) or MCP `get_advisors` (if enabled). Fix issues.
 2. Review Security Checklist if changes involve views/fns/triggers/storage.
 3. Generate migration → `supabase db pull <descriptive-name> --local --yes`
 4. Verify → `supabase migration list --local`
