@@ -13,7 +13,7 @@ blur = true
 [font]
 normal.family = 'IosevkaTerm NF'
 bold.family = 'IosevkaTerm NF'
-italic.family = 'IosevkaTerma NF'
+italic.family = 'IosevkaTerm NF'
 bold_italic.family = 'IosevkaTerm NF'
 size = 12
 
@@ -55,5 +55,4 @@ osc52 = 'CopyPaste'
 hide_when_typing = true
 
 [debug]
-persistent_logging = true
-log_level = 'debug'
+log_level = 'warn'

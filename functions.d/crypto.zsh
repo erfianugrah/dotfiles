@@ -4,7 +4,7 @@
 
 encrypt_k3s_secret() {
     local public_key
-    public_key=$(echo "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
+    public_key=$(print -r -- "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
     
     if [[ -z "$public_key" ]]; then
         echo "Error: Failed to extract public key from SOPS_AGE_KEYS" >&2
@@ -28,7 +28,7 @@ decrypt_k3s_secret() {
         return 1
     fi
 
-    SOPS_AGE_KEY=$(echo -e "$SOPS_AGE_KEYS" | tail -n 1)
+    SOPS_AGE_KEY=$(print -r -- "$SOPS_AGE_KEYS" | tail -n 1)
     export SOPS_AGE_KEY
     
     if ! sops --decrypt --encrypted-regex '^(data|stringData)$' --in-place "$1"; then
@@ -38,8 +38,13 @@ decrypt_k3s_secret() {
 }
 
 encrypt() {
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: encrypt <file|directory>" >&2
+        return 1
+    fi
+
     local public_key
-    public_key=$(echo "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
+    public_key=$(print -r -- "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
     
     if [[ -z "$public_key" ]]; then
         echo "Error: Failed to extract public key from SOPS_AGE_KEYS" >&2
@@ -93,7 +98,12 @@ _is_sops_encrypted() {
 }
 
 decrypt() {
-    SOPS_AGE_KEY=$(echo -e "$SOPS_AGE_KEYS" | tail -n 1)
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: decrypt <file|directory>" >&2
+        return 1
+    fi
+
+    SOPS_AGE_KEY=$(print -r -- "$SOPS_AGE_KEYS" | tail -n 1)
     export SOPS_AGE_KEY
 
     # If argument is a directory, decrypt all files in it
@@ -130,7 +140,7 @@ decrypt() {
 
 encrypt_all() {
     local public_key
-    public_key=$(echo "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
+    public_key=$(print -r -- "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
     
     if [[ -z "$public_key" ]]; then
         echo "Error: Failed to extract public key from SOPS_AGE_KEYS" >&2
@@ -149,7 +159,7 @@ encrypt_all() {
 }
 
 decrypt_all() {
-    SOPS_AGE_KEY=$(echo -e "$SOPS_AGE_KEYS" | tail -n 1)
+    SOPS_AGE_KEY=$(print -r -- "$SOPS_AGE_KEYS" | tail -n 1)
     export SOPS_AGE_KEY
 
     for file in *; do

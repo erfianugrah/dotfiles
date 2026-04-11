@@ -54,7 +54,7 @@ tf_debug_toggle() {
 # --- Helpers --------------------------------------------------------------
 
 _tf_detect_cmd() {
-  if [[ -d ".terraform" && -f ".terraform/terraform.tfstate" ]] && command -v terraform &>/dev/null; then
+  if [[ -d ".terraform" ]] && command -v terraform &>/dev/null; then
     echo "terraform"
   elif command -v tofu &>/dev/null; then
     echo "tofu"
@@ -163,6 +163,18 @@ _tf_clipboard() {
 _TF_CACHE_TTL="${_TF_CACHE_TTL:-300}"  # 5 minutes default
 _TF_CACHE_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/tf_out_cache"
 
+# Portable md5 hash (GNU md5sum vs macOS md5)
+_tf_md5() {
+  if command -v md5sum &>/dev/null; then
+    printf '%s' "$1" | md5sum | cut -d' ' -f1
+  elif command -v md5 &>/dev/null; then
+    printf '%s' "$1" | md5 -q
+  else
+    # fallback: use the raw string (no hash)
+    printf '%s' "$1" | tr '/' '_'
+  fi
+}
+
 # fzf-tab preview for tf_out completions
 # Uses stable cache dir (no PID) so the preview subprocess can find files.
 # Written as a heredoc into a temp script at source time to avoid quoting hell.
@@ -175,7 +187,7 @@ cat >> "$_tf_fzf_preview_script" <<PREVIEW_EOF
 _cache_dir="${_TF_CACHE_DIR}"
 PREVIEW_EOF
 cat >> "$_tf_fzf_preview_script" <<'PREVIEW_EOF'
-f="${_cache_dir}/$(printf '%s' "$PWD" | md5sum | cut -d' ' -f1).json"
+f="${_cache_dir}/$(printf '%s' "$PWD" | { md5sum 2>/dev/null || md5 -q 2>/dev/null; } | cut -d' ' -f1).json"
 if [[ $word == --* ]]; then
   case $word in
     --help) printf "Show full help text (-h)";;
@@ -248,12 +260,14 @@ _tf_cache_get() {
   # Cache key: hash of the absolute project path
   local project_dir="$PWD"
   local cache_key
-  cache_key=$(printf '%s' "$project_dir" | md5sum | cut -d' ' -f1)
+  cache_key=$(_tf_md5 "$project_dir")
   local cache_file="${_TF_CACHE_DIR}/${cache_key}.json"
 
   # Check if cache is fresh
   if [[ -f "$cache_file" ]]; then
-    local file_age=$(( $(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null) ))
+    local mtime
+    mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null || echo 0)
+    local file_age=$(( $(date +%s) - mtime ))
     if (( file_age < _TF_CACHE_TTL )); then
       _tf_cached_json=$(<"$cache_file")
       return 0
@@ -275,7 +289,7 @@ _tf_cache_get() {
 # Flush cache for the current project directory
 _tf_cache_flush() {
   local cache_key
-  cache_key=$(printf '%s' "$PWD" | md5sum | cut -d' ' -f1)
+  cache_key=$(_tf_md5 "$PWD")
   local cache_file="${_TF_CACHE_DIR}/${cache_key}.json"
   if [[ -f "$cache_file" ]]; then
     rm -f "$cache_file"
@@ -844,7 +858,7 @@ _tf_out_fzf_preview() {
   # For output names, show details from cache
   local cache_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/tf_out_cache"
   local cache_key cache_file json_data
-  cache_key=$(printf '%s' "$PWD" | md5sum | cut -d' ' -f1)
+  cache_key=$(_tf_md5 "$PWD")
   cache_file="${cache_dir}/${cache_key}.json"
 
   if [[ -f "$cache_file" ]]; then
@@ -908,7 +922,7 @@ _tf_out_get_json() {
   fi
 
   cache_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/tf_out_cache"
-  cache_key=$(printf '%s' "$PWD" | md5sum | cut -d' ' -f1)
+  cache_key=$(_tf_md5 "$PWD")
   cache_file="${cache_dir}/${cache_key}.json"
 
   if [[ -f "$cache_file" ]]; then

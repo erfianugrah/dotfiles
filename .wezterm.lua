@@ -24,15 +24,6 @@ config.animation_fps = 120
 
 --Scrollback
 config.scrollback_lines = 10000
-act.SendKey({
-	key = "RightArrow",
-	mods = "CTRL",
-})
-
-act.SendKey({
-	key = "LeftArrow",
-	mods = "CTRL",
-})
 
 -- Switching to relative workspaces
 wezterm.on("update-right-status", function(window, pane)
@@ -206,7 +197,7 @@ if wezterm.target_triple == "x86_64-pc-windows-msvc" then
 
 	-- WSL
 	config.default_domain = "WSL:archlinux"
-	config.default_cwd = "/home/erfi"
+	config.default_cwd = os.getenv("HOME") or "/home/erfi"
 	config.launch_menu = {
 		{
 			label = "PowerShell",
