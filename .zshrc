@@ -40,12 +40,13 @@ zinit light zdharma-continuum/fast-syntax-highlighting
 
 # ---------------------------------------------------------------------------
 # Oh-My-Zsh (tmux plugin loaded via OMZ, everything else via zinit snippets)
+# OMZ snippets via zinit (tmux plugin needs extra conf files created on clone)
 # ---------------------------------------------------------------------------
-export ZSH=$HOME/.oh-my-zsh
-plugins=(tmux)
-source $ZSH/oh-my-zsh.sh
-
-# OMZ snippets via zinit
+zinit ice atclone'
+  print "set -g default-terminal tmux-256color\nsource-file ~/.tmux.conf" > tmux.extra.conf
+  print "set -g default-terminal tmux-256color" > tmux.only.conf
+' atpull'%atclone' nocompile
+zinit snippet OMZP::tmux
 zinit snippet OMZP::git
 zinit snippet OMZP::git-auto-fetch
 zinit snippet OMZP::git-prompt
