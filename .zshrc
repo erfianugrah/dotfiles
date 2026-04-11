@@ -13,7 +13,12 @@ fi
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
 # export PATH=$HOME/go/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program\ Files/Git/mingw64/bin:$HOME/.local/bin:$HOME/.bun/bin:/usr/local/go/bin:$PATH
 
-export PATH=$HOME/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program\ Files/Git/mingw64/bin:$HOME/.local/bin:$HOME/.bun/bin:/usr/local/go/bin:$PATH
+export PATH=$HOME/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:$HOME/.local/bin:$HOME/.bun/bin:/usr/local/go/bin:$PATH
+
+# WSL-specific paths
+if [[ -d /mnt/c ]]; then
+    export PATH=$PATH:/usr/lib/wsl/lib:/mnt/c/Program\ Files/Git/mingw64/bin
+fi
 
 # Set the directory we want to store zinit and plugins
 ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
@@ -143,7 +148,7 @@ plugins=(
 zinit snippet OMZP::git
 zinit snippet OMZP::git-auto-fetch
 zinit snippet OMZP::git-prompt
-zinit snippet OMZP::brew
+(( $+commands[brew] )) && zinit snippet OMZP::brew
 zinit snippet OMZP::ansible
 zinit snippet OMZP::sudo
 zinit snippet OMZP::vscode
@@ -159,7 +164,7 @@ zinit snippet OMZP::npm
 # zinit snippet OMZP::docker
 zinit snippet OMZP::python
 zinit snippet OMZP::gh
-zinit snippet OMZP::debian
+[[ -f /etc/debian_version ]] && zinit snippet OMZP::debian
 zinit snippet OMZP::rust
 zinit snippet OMZP::colored-man-pages
 # zinit snippet OMZP::zsh-interactive-cd
@@ -169,7 +174,7 @@ autoload -Uz compinit && compinit
 zinit cdreplay -q
 
 # ZSH_TMUX_AUTOSTART=true
-ZSH_TMUX_DEFAULT_SESSION_NAME="wsl-default"
+ZSH_TMUX_DEFAULT_SESSION_NAME="${HOST:-default}"
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 # # Keybindings
 # bindkey -e
@@ -250,8 +255,8 @@ alias pgpasteriser="export \$(grep -v \"^#\" ~/pastebin/.env | xargs) && pgcli \
 # TF_LOG is now controlled via tf_debug_* functions
 # export NVIM_LOG_FILE=/home/erfi/.config
 export DOCKER_BUILDKIT=1
-export STARSHIP_CONFIG=/home/erfi/starship.toml
-export STARSHIP_CACHE=/home/erfi/.starship/cache
+export STARSHIP_CONFIG=$HOME/starship.toml
+export STARSHIP_CACHE=$HOME/.starship/cache
 source ~/dotfiles/functions.zsh
 source ~/dotfiles/wezterm.sh
 #
@@ -286,16 +291,16 @@ eval "$(fzf --zsh)"
 eval "$(zoxide init zsh)"
 
 # bun completions
-[ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 
 . "$HOME/.atuin/bin/env"
 
 eval "$(atuin init zsh --disable-up-arrow)"
 
-. "/home/erfi/.deno/env"
+[[ -f "$HOME/.deno/env" ]] && . "$HOME/.deno/env"
 
 # pnpm
-export PNPM_HOME="/home/erfi/.local/share/pnpm"
+export PNPM_HOME="$HOME/.local/share/pnpm"
 case ":$PATH:" in
   *":$PNPM_HOME:"*) ;;
   *) export PATH="$PNPM_HOME:$PATH" ;;
@@ -310,5 +315,5 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
 # opencode
-export PATH=/home/erfi/.opencode/bin:$PATH
+export PATH=$HOME/.opencode/bin:$PATH
 export OPENCODE_DISABLE_PRUNE=true
