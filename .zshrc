@@ -52,7 +52,7 @@ zinit snippet OMZP::kubectx
 zinit snippet OMZP::command-not-found
 zinit snippet OMZP::terraform
 zinit snippet OMZP::opentofu
-zinit snippet OMZP::tmux
+
 zinit snippet OMZP::npm
 zinit snippet OMZP::python
 zinit snippet OMZP::gh
@@ -66,7 +66,6 @@ zinit cdreplay -q
 # ---------------------------------------------------------------------------
 # Shell options
 # ---------------------------------------------------------------------------
-ZSH_TMUX_DEFAULT_SESSION_NAME="${HOST:-default}"
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true
 
