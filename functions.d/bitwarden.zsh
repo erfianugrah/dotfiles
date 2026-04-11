@@ -211,6 +211,16 @@ clear_bw_cache() {
 # Environment loaders (Pattern B — bulk export via bw serve)
 # ---------------------------------------------------------------------------
 
+# Mask a secret value: first 4 + ... + last 4
+_bw_mask() {
+    local val="$1" len=${#1}
+    if (( len <= 8 )); then
+        echo "${val:0:2}...${val: -2}"
+    else
+        echo "${val:0:4}...${val: -4}"
+    fi
+}
+
 # Generic loader: takes an array of "bw_item_name|ENV_VAR_NAME" pairs
 _bw_load_items() {
     local items=("$@")
@@ -231,12 +241,13 @@ _bw_load_items() {
         local val
         ((current++))
 
-        printf "  [%d/%d] Loading %s\n" "$current" "$total" "$env_name" >&2
-
         val=$(_bw_get "$bw_name") || {
+            printf "  [%2d/%d] %-35s FAILED\n" "$current" "$total" "$env_name" >&2
             ((failed++))
             continue
         }
+
+        printf "  [%2d/%d] %-35s %s\n" "$current" "$total" "$env_name" "$(_bw_mask "$val")" >&2
 
         # Only export if unset or changed
         if [[ -z "${(P)env_name}" ]]; then
