@@ -17,13 +17,24 @@ Abbreviate: DB/auth/config/req/res/fn/impl/env/dep/pkg/dir/repo/param/arg.
 
 ## Documentation
 
-Docs server at `docs.erfi.io` — 29030+ pages, 18 sources, searchable markdown over SSH. Check docs before implementing/debugging.
+Docs server at `docs.erfi.io` — 42 sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
 
 **Always use custom `docs_search`, `docs_read`, `docs_grep`, `docs_find`, `docs_summary`, `docs_sources` tools.** No raw `ssh` or `Bash` for docs access.
 
 ### Sources
 
-astro, aws, cloudflare, cloudflare-blog, cloudflare-changelog, erfi-personal-blog, erfi-technical-blog, flyio, mcp, nextjs, postgres, rust-book, supabase, supabase-blog, tailwindcss, vercel, vercel-blog, vercel-changelog
+ansible, astro, aws, bun, caddy, cloudflare, cloudflare-blog, cloudflare-changelog, d2, docker, drizzle, erfi-personal-blog, erfi-technical-blog, flyio, hono, k3s, kubernetes, mcp, mermaid, neovim, nextjs, postgres, python, react, rust-book, shadcn, starlight, supabase, supabase-blog, tailwindcss, traefik, typescript, vercel, vercel-blog, vercel-changelog, zod
+
+### API Reference Sources
+
+OpenAPI specs converted to per-endpoint-group markdown. Each has `api/overview.md` (endpoint index) + `api/{tag}.md` files.
+
+cloudflare-api, docker-api, flyio-api, kubernetes-api, supabase-api, supabase-auth-api
+
+**API lookup pattern:**
+1. `docs_search(query="create zone", source="cloudflare-api")` — find endpoint group
+2. `docs_grep(query="POST /zones", path="/docs/cloudflare-api/")` — find exact endpoint
+3. `docs_read(path="/docs/cloudflare-api/api/zones.md")` — read full endpoint group
 
 ### Workflow: search -> summary -> targeted read
 
@@ -54,3 +65,4 @@ astro, aws, cloudflare, cloudflare-blog, cloudflare-changelog, erfi-personal-blo
 - `offset+lines`: 35 lines = ~140 tokens vs ~2K for full file
 - `docs_grep` with source path: `docs_grep(query="RLS", path="/docs/postgres/")` faster than searching all
 - `source` param: `docs_search(query="auth", source="supabase")` filters to one source
+- API specs: `docs_read(path="/docs/{source}-api/api/overview.md")` for endpoint index
