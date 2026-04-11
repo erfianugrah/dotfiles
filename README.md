@@ -14,15 +14,10 @@ appear as a git repository (e.g. shell prompts show a branch name in `~`).
 brew install zsh
 sudo apt-get install zsh
 sudo apt-get install stow
-sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
 bash -c "$(curl --fail --show-error --silent --location https://raw.githubusercontent.com/zdharma-continuum/zinit/HEAD/scripts/install.sh)"
 ```
-#### Install powerlevel10k theme and set it as the default theme
 
-```sh
-git clone https://github.com/romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerlevel10k
-ZSH_THEME="powerlevel10k/powerlevel10k"
-```
+Zinit auto-installs powerlevel10k and all plugins on first shell launch.
 #### Install Meslo Nerd Font
 
 Download from `https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.0/Meslo.zip`
@@ -37,7 +32,7 @@ curl -sS https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | 
 ```sh
 brew install neovim vim
 git clone https://github.com/erfianugrah/kickstart.nvim.git "${XDG_CONFIG_HOME:-$HOME/.config}"/nvim
-git checkout windows
+git checkout main
 ```
 #### Homebrew package manager setup and install additional packages
 
@@ -126,7 +121,6 @@ bw_serve_start
 
 # In each shell/tmux pane where you need secrets — exports env vars
 load_bw            # personal secrets
-load_cf_work       # work secrets
 load_wrangler_token
 
 # Useful commands

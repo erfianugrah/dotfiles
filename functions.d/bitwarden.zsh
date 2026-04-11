@@ -9,7 +9,7 @@ BW_SERVE_PORT="${BW_SERVE_PORT:-8087}"
 BW_SERVE_ADDR="http://127.0.0.1:${BW_SERVE_PORT}"
 
 typeset -gA _BW_CACHE _BW_CACHE_TS
-_BW_CACHE_TTL=300  # 5 minute in-memory cache
+_BW_CACHE_TTL=300  # 5 minutes in-memory cache
 
 # ---------------------------------------------------------------------------
 # Secret mappings — single source of truth
