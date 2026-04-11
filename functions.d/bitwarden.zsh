@@ -231,7 +231,7 @@ _bw_load_items() {
         local val
         ((current++))
 
-        printf "\r  [%d/%d] Loading %-40s" "$current" "$total" "$env_name" >&2
+        printf "  [%d/%d] Loading %s\n" "$current" "$total" "$env_name" >&2
 
         val=$(_bw_get "$bw_name") || {
             ((failed++))
@@ -250,7 +250,6 @@ _bw_load_items() {
         fi
     done
 
-    printf "\r%*s\n" 60 "" >&2
     echo "[bw] Done: $loaded loaded, $skipped unchanged, $failed failed (of $total)"
 }
 
