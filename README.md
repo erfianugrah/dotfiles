@@ -201,7 +201,6 @@ defines a mapping of `"bw_item_name|ENV_VAR_NAME"` pairs.
 | Function | What it loads |
 |---|---|
 | `load_bw` | Personal secrets (Cloudflare, AWS, Authentik, SOPS Age keys, etc.) |
-| `load_cf_work` | Work Cloudflare/AWS credentials |
 | `load_wrangler_token` | Cloudflare Wrangler API token |
 | `load_sops_age_keys` | SOPS Age public + secret key into `SOPS_AGE_KEYS` |
 | `unset_bw_vars` | Unset all env vars that could have been set by the loaders above |
