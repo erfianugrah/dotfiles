@@ -8,7 +8,7 @@
 BW_SERVE_PORT="${BW_SERVE_PORT:-8087}"
 BW_SERVE_ADDR="http://127.0.0.1:${BW_SERVE_PORT}"
 
-declare -A _BW_CACHE _BW_CACHE_TS
+typeset -gA _BW_CACHE _BW_CACHE_TS
 _BW_CACHE_TTL=300  # 5 minute in-memory cache
 
 # ---------------------------------------------------------------------------
@@ -90,19 +90,6 @@ _bw_get() {
 # bw serve lifecycle management
 # ---------------------------------------------------------------------------
 
-# Spinner for visual feedback during waits
-_bw_spinner() {
-    local pid=$1
-    local msg="${2:-Working}"
-    local spin='|/-\'
-    local i=0
-    while kill -0 "$pid" 2>/dev/null; do
-        printf "\r  %s %s" "${spin:i++%4:1}" "$msg" >&2
-        sleep 0.15
-    done
-    printf "\r" >&2
-}
-
 bw_serve_start() {
     echo "[bw-serve] Unlocking Bitwarden vault..."
 
@@ -132,10 +119,10 @@ bw_serve_start() {
         echo "[bw-serve] Vault synced." || \
         echo "[bw-serve] Sync failed (non-fatal, using local cache)." >&2
 
-    # Write session to runtime dir (mode 600, readable only by current user)
+    # Write session to runtime dir (mode 600, create-before-write to avoid TOCTOU)
     local session_file="${XDG_RUNTIME_DIR:-/tmp}/bw-session.env"
-    echo "BW_SESSION=$session" > "$session_file"
-    chmod 600 "$session_file"
+    install -m 600 /dev/null "$session_file"
+    print -r -- "BW_SESSION=$session" > "$session_file"
     echo "[bw-serve] Session written to $session_file"
 
     # (Re)start bw serve via platform service manager
@@ -206,7 +193,11 @@ bw_serve_sync() {
         echo "[bw-serve] No active session. Run bw_serve_start first." >&2
         return 1
     fi
-    source "$session_file"
+    BW_SESSION=$(command grep '^BW_SESSION=' "$session_file" | cut -d= -f2-)
+    if [[ -z "$BW_SESSION" ]]; then
+        echo "[bw-serve] Invalid session file." >&2
+        return 1
+    fi
     echo "[bw-serve] Syncing vault..."
     BW_SESSION="$BW_SESSION" bw sync && echo "[bw-serve] Vault synced." || {
         echo "[bw-serve] Sync failed." >&2
@@ -295,7 +286,7 @@ load_sops_age_keys() {
         return 1
     }
 
-    combined="${public_key}\n${secret_key}"
+    combined="${public_key}"$'\n'"${secret_key}"
     if [[ "$SOPS_AGE_KEYS" == "$combined" ]]; then
         print "SOPS_AGE_KEYS already set with correct values, skipping."
         return 0

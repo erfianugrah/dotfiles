@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=%t/bw-session.env
 ExecSearchPath=/usr/bin:/usr/sbin:/usr/local/bin:%h/.local/bin:%h/.nix-profile/bin
+# Port must match BW_SERVE_PORT in bitwarden.zsh (default: 8087)
 ExecStart=bw serve --port 8087 --hostname 127.0.0.1
 Restart=on-failure
 RestartSec=10
