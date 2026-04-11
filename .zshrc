@@ -6,6 +6,8 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
+typeset -ga _missing_tools=()
+
 export PATH=$HOME/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:$HOME/.local/bin:$HOME/.bun/bin:/usr/local/go/bin:$PATH
 
 # WSL-specific paths
@@ -106,8 +108,8 @@ alias w=wrangler
 alias cft=cf-terraforming
 alias p=python3
 alias v=nvim
-(( $+commands[eza] )) && alias ls=eza
-(( $+commands[bat] )) && alias cat=bat
+if (( $+commands[eza] )); then alias ls=eza; else _missing_tools+=("eza"); fi
+if (( $+commands[bat] )); then alias cat=bat; else _missing_tools+=("bat"); fi
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
 alias zja="zj a --index"
@@ -138,13 +140,13 @@ elif command -v code &> /dev/null; then
   export EDITOR='code --wait'
 fi
 
-(( $+commands[fzf] )) && eval "$(fzf --zsh)"
-(( $+commands[zoxide] )) && eval "$(zoxide init zsh)"
+if (( $+commands[fzf] )); then eval "$(fzf --zsh)"; else _missing_tools+=("fzf"); fi
+if (( $+commands[zoxide] )); then eval "$(zoxide init zsh)"; else _missing_tools+=("zoxide"); fi
 
 # Tool completions / env
 [ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 [[ -f "$HOME/.atuin/bin/env" ]] && . "$HOME/.atuin/bin/env"
-(( $+commands[atuin] )) && eval "$(atuin init zsh --disable-up-arrow)"
+if (( $+commands[atuin] )); then eval "$(atuin init zsh --disable-up-arrow)"; else _missing_tools+=("atuin"); fi
 [[ -f "$HOME/.deno/env" ]] && . "$HOME/.deno/env"
 
 # pnpm
@@ -159,3 +161,9 @@ esac
 # opencode
 export PATH=$HOME/.opencode/bin:$PATH
 export OPENCODE_DISABLE_PRUNE=true
+
+# Warn about missing tools (once, non-blocking)
+if (( ${#_missing_tools} )); then
+  print -P "%F{yellow}[dotfiles]%f missing tools: ${(j:, :)_missing_tools} — install for full shell experience"
+fi
+unset _missing_tools
