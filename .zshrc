@@ -38,7 +38,14 @@ zinit light zsh-users/zsh-autosuggestions
 zinit light zsh-users/zsh-history-substring-search
 zinit light zdharma-continuum/fast-syntax-highlighting
 
-# OMZ snippets (loaded individually via zinit, no oh-my-zsh.sh needed)
+# ---------------------------------------------------------------------------
+# Oh-My-Zsh (tmux plugin loaded via OMZ, everything else via zinit snippets)
+# ---------------------------------------------------------------------------
+export ZSH=$HOME/.oh-my-zsh
+plugins=(tmux)
+source $ZSH/oh-my-zsh.sh
+
+# OMZ snippets via zinit
 zinit snippet OMZP::git
 zinit snippet OMZP::git-auto-fetch
 zinit snippet OMZP::git-prompt
@@ -52,7 +59,6 @@ zinit snippet OMZP::kubectx
 zinit snippet OMZP::command-not-found
 zinit snippet OMZP::terraform
 zinit snippet OMZP::opentofu
-
 zinit snippet OMZP::npm
 zinit snippet OMZP::python
 zinit snippet OMZP::gh
@@ -66,6 +72,7 @@ zinit cdreplay -q
 # ---------------------------------------------------------------------------
 # Shell options
 # ---------------------------------------------------------------------------
+ZSH_TMUX_DEFAULT_SESSION_NAME="${HOST:-default}"
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true
 
