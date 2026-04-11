@@ -106,8 +106,8 @@ alias w=wrangler
 alias cft=cf-terraforming
 alias p=python3
 alias v=nvim
-alias ls=eza
-alias cat=bat
+(( $+commands[eza] )) && alias ls=eza
+(( $+commands[bat] )) && alias cat=bat
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
 alias zja="zj a --index"
@@ -121,8 +121,6 @@ alias pgpasteriser='(export $(grep -v "^#" ~/pastebin/.env | xargs) && pgcli $PA
 # Environment
 # ---------------------------------------------------------------------------
 export DOCKER_BUILDKIT=1
-export STARSHIP_CONFIG=$HOME/starship.toml
-export STARSHIP_CACHE=$HOME/.starship/cache
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
@@ -140,13 +138,13 @@ elif command -v code &> /dev/null; then
   export EDITOR='code --wait'
 fi
 
-eval "$(fzf --zsh)"
-eval "$(zoxide init zsh)"
+(( $+commands[fzf] )) && eval "$(fzf --zsh)"
+(( $+commands[zoxide] )) && eval "$(zoxide init zsh)"
 
 # Tool completions / env
 [ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 [[ -f "$HOME/.atuin/bin/env" ]] && . "$HOME/.atuin/bin/env"
-eval "$(atuin init zsh --disable-up-arrow)"
+(( $+commands[atuin] )) && eval "$(atuin init zsh --disable-up-arrow)"
 [[ -f "$HOME/.deno/env" ]] && . "$HOME/.deno/env"
 
 # pnpm
