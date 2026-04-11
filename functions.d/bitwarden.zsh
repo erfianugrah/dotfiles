@@ -51,6 +51,7 @@ _bw_serve_ok() {
 
 # Fetch a single item's .notes field from bw serve by exact name
 _bw_api_get_note() {
+    setopt localoptions noxtrace noverbose
     local item_name="$1"
     local encoded_name
     encoded_name=$(printf '%s' "$item_name" | jq -sRr @uri)
@@ -66,6 +67,7 @@ _bw_api_get_note() {
 
 # Cached accessor — returns the note value, fetching only if cache is stale
 _bw_get() {
+    setopt localoptions noxtrace noverbose
     local item_name="$1"
     local now=$(date +%s)
 
@@ -213,6 +215,7 @@ clear_bw_cache() {
 
 # Mask a secret value: first 4 + ... + last 4
 _bw_mask() {
+    setopt localoptions noxtrace noverbose
     local val="$1" len=${#1}
     if (( len <= 8 )); then
         echo "${val:0:2}...${val: -2}"
@@ -223,6 +226,7 @@ _bw_mask() {
 
 # Generic loader: takes an array of "bw_item_name|ENV_VAR_NAME" pairs
 _bw_load_items() {
+    setopt localoptions noxtrace noverbose
     local items=("$@")
     local total=${#items[@]}
     local current=0
@@ -265,6 +269,7 @@ _bw_load_items() {
 }
 
 load_sops_age_keys() {
+    setopt localoptions noxtrace noverbose
     echo "Loading SOPS Age keys"
 
     local public_key secret_key
