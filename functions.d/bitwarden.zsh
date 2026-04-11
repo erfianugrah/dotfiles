@@ -258,24 +258,11 @@ load_bw() {
         "AUTHENTIK_TOKEN|AUTHENTIK_TOKEN"
         "CLOUDFLARE_TOKEN|CLOUDFLARE_TOKEN"
         "IPINFO_TOKEN|IPINFO_TOKEN"
+        "COMPOSER_API_KEY|COMPOSER_API_KEY"
     )
 
     _bw_load_items "${items[@]}"
     load_sops_age_keys
-}
-
-load_cf_work() {
-    local items=(
-        "CF_WORK_API_KEY|CLOUDFLARE_API_KEY"
-        "CF_WORK_EMAIL|CLOUDFLARE_EMAIL"
-        "ONEWEB_CLOUDFLARE_ACCOUNT_ID|CLOUDFLARE_ACCOUNT_ID"
-        "AWS_SECRET_ACCESS_KEY|AWS_SECRET_ACCESS_KEY"
-        "AWS_ACCESS_KEY_ID|AWS_ACCESS_KEY_ID"
-        "PAPIREPO_API_KEY|PAPIREPO_API_KEY"
-        "CLOUDLET_API_KEY|CLOUDLET_API_KEY"
-    )
-
-    _bw_load_items "${items[@]}"
 }
 
 load_wrangler_token() {
