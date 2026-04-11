@@ -35,7 +35,6 @@ zinit light zsh-users/zsh-completions
 zinit light zsh-users/zsh-autosuggestions
 zinit light zsh-users/zsh-history-substring-search
 zinit light zdharma-continuum/fast-syntax-highlighting
-zinit light atuinsh/atuin
 
 # OMZ snippets (loaded individually via zinit, no oh-my-zsh.sh needed)
 zinit snippet OMZP::git

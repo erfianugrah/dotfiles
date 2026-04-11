@@ -1,5 +1,5 @@
 # Starship Configuration - P10k Pure Theme (Single Line)
-# Place this file at ~/.config/starship.toml
+# Loaded via STARSHIP_CONFIG=$HOME/starship.toml in .zshrc
 
 # Global prompt configuration
 add_newline = false

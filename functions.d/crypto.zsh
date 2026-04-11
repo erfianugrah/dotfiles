@@ -83,20 +83,6 @@ encrypt() {
     echo "Encrypted: $1"
 }
 
-_is_sops_encrypted() {
-    local file="$1"
-    [[ -f "$file" ]] || return 1
-    # Check for sops markers in the first few lines (YAML/JSON)
-    if head -5 "$file" | grep -qE '"sops"|sops_|encrypted_regex|lastmodified|mac:' 2>/dev/null; then
-        return 0
-    fi
-    # Fallback: check if it's a JSON file with a .sops key
-    if jq -e '.sops' "$file" >/dev/null 2>&1; then
-        return 0
-    fi
-    return 1
-}
-
 decrypt() {
     if [[ -z "${1:-}" ]]; then
         echo "Usage: decrypt <file|directory>" >&2
