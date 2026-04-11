@@ -3,7 +3,7 @@
 	version = HTTP/2
 [init]
 	defaultBranch = main
-	templateDir = /home/erfi/.git-template
+	templateDir = ~/.git-template
 [push]
 	autoSetupRemote = true
 [credential "https://dev.azure.com"]

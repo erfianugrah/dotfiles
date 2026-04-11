@@ -138,20 +138,30 @@ bw_serve_start() {
     chmod 600 "$session_file"
     echo "[bw-serve] Session written to $session_file"
 
-    # Reset failed state if any, then (re)start the systemd service
-    systemctl --user reset-failed bw-serve.service 2>/dev/null
-    systemctl --user restart bw-serve.service
-    echo "[bw-serve] systemd service restarted, waiting for API..."
+    # (Re)start bw serve via platform service manager
+    if [[ "$_SYS_OS" == "macos" ]]; then
+        # Kill any existing bw serve, then start fresh
+        pkill -f "bw serve" 2>/dev/null
+        BW_SESSION="$session" nohup bw serve --port "$BW_SERVE_PORT" --hostname 127.0.0.1 \
+            >/dev/null 2>&1 &
+        echo "[bw-serve] started in background (pid $!), waiting for API..."
+    else
+        systemctl --user reset-failed bw-serve.service 2>/dev/null
+        systemctl --user restart bw-serve.service
+        echo "[bw-serve] systemd service restarted, waiting for API..."
+    fi
 
-    # Wait for the API to become available with spinner
+    # Wait for the API to become available
     local wait=0
     local max_wait=20
     while ! _bw_serve_ok; do
         ((wait++))
         if (( wait > max_wait )); then
             echo "" >&2
-            echo "[bw-serve] Failed to start within ${max_wait}s. Checking logs:" >&2
-            journalctl --user -u bw-serve.service --no-pager -n 5 >&2
+            echo "[bw-serve] Failed to start within ${max_wait}s." >&2
+            if [[ "$_SYS_OS" != "macos" ]]; then
+                journalctl --user -u bw-serve.service --no-pager -n 5 >&2
+            fi
             return 1
         fi
         printf "\r  [%2d/%ds] Waiting for bw serve..." "$wait" "$max_wait" >&2
@@ -163,7 +173,11 @@ bw_serve_start() {
 
 bw_serve_stop() {
     echo "[bw-serve] Stopping service..."
-    systemctl --user stop bw-serve.service
+    if [[ "$_SYS_OS" == "macos" ]]; then
+        pkill -f "bw serve" 2>/dev/null
+    else
+        systemctl --user stop bw-serve.service
+    fi
     rm -f "${XDG_RUNTIME_DIR:-/tmp}/bw-session.env"
     clear_bw_cache
     echo "[bw-serve] Stopped and session cleared."
@@ -172,11 +186,17 @@ bw_serve_stop() {
 bw_serve_status() {
     if _bw_serve_ok; then
         echo "[bw-serve] Running on ${BW_SERVE_ADDR}"
-        systemctl --user status bw-serve.service --no-pager
+        if [[ "$_SYS_OS" == "macos" ]]; then
+            pgrep -fl "bw serve" 2>/dev/null
+        else
+            systemctl --user status bw-serve.service --no-pager
+        fi
     else
         echo "[bw-serve] Not reachable on ${BW_SERVE_ADDR}"
-        echo "[bw-serve] Recent logs:"
-        journalctl --user -u bw-serve.service --no-pager -n 5 2>/dev/null
+        if [[ "$_SYS_OS" != "macos" ]]; then
+            echo "[bw-serve] Recent logs:"
+            journalctl --user -u bw-serve.service --no-pager -n 5 2>/dev/null
+        fi
     fi
 }
 

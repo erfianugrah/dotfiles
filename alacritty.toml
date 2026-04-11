@@ -1,8 +1,7 @@
 [env]
 TERM = 'xterm-256color'
 
-[shell]
-program = 'ubuntu'
+# [shell] — uses default login shell on all platforms
 
 [window]
 padding.x = 5

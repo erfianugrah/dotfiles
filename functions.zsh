@@ -14,7 +14,7 @@ fi
 
 # Load order matters: crypto has no deps, bitwarden depends on nothing shell-wise,
 # terraform and system are independent, misc is lightweight utilities.
-_fn_modules=(crypto bitwarden terraform misc system)
+_fn_modules=(system crypto bitwarden terraform misc)
 
 for _fn_mod in "${_fn_modules[@]}"; do
   if [[ -f "${_FUNCTIONS_D}/${_fn_mod}.zsh" ]]; then

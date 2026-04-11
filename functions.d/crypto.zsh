@@ -4,7 +4,7 @@
 
 encrypt_k3s_secret() {
     local public_key
-    public_key=$(echo "$SOPS_AGE_KEYS" | grep -oP "public key: \K([A-Za-z0-9]+)" || true)
+    public_key=$(echo "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
     
     if [[ -z "$public_key" ]]; then
         echo "Error: Failed to extract public key from SOPS_AGE_KEYS" >&2
@@ -39,7 +39,7 @@ decrypt_k3s_secret() {
 
 encrypt() {
     local public_key
-    public_key=$(echo "$SOPS_AGE_KEYS" | grep -oP "public key: \K([A-Za-z0-9]+)" || true)
+    public_key=$(echo "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
     
     if [[ -z "$public_key" ]]; then
         echo "Error: Failed to extract public key from SOPS_AGE_KEYS" >&2
@@ -130,7 +130,7 @@ decrypt() {
 
 encrypt_all() {
     local public_key
-    public_key=$(echo "$SOPS_AGE_KEYS" | grep -oP "public key: \K([A-Za-z0-9]+)" || true)
+    public_key=$(echo "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
     
     if [[ -z "$public_key" ]]; then
         echo "Error: Failed to extract public key from SOPS_AGE_KEYS" >&2
