@@ -4,9 +4,9 @@
 
 typeset -gi _T_PASS=0 _T_FAIL=0 _T_SKIP=0
 
-_t_pass() { (( _T_PASS++ )); print "  [PASS] $1"; }
-_t_fail() { (( _T_FAIL++ )); print "  [FAIL] $1"; }
-_t_skip() { (( _T_SKIP++ )); print "  [SKIP] $1"; }
+_t_pass() { (( ++_T_PASS )); print "  [PASS] $1"; }
+_t_fail() { (( ++_T_FAIL )); print "  [FAIL] $1"; }
+_t_skip() { (( ++_T_SKIP )); print "  [SKIP] $1"; }
 
 # Assert command exists
 _t_cmd() {
