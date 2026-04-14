@@ -1,0 +1,14 @@
+# Go tools (cross-platform, installed via go install)
+# Install with: go install <pkg>@latest
+# Update with: save_packages
+github.com/caddyserver/caddy/v2/cmd/caddy
+github.com/caddyserver/xcaddy/cmd/xcaddy
+github.com/cilium/ebpf/cmd/bpf2go
+github.com/goreleaser/goreleaser/v2
+github.com/securego/gosec/v2/cmd/gosec
+github.com/tsenart/vegeta
+go.k6.io/k6
+golang.org/x/tools/cmd/goimports
+golang.org/x/tools/go/analysis/passes/fieldalignment/cmd/fieldalignment
+golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
+golang.org/x/vuln/cmd/govulncheck

@@ -1,0 +1,5 @@
+# Deno tools (cross-platform)
+# Install with: deno install -gArf <url>
+# Update with: save_packages
+# format: name=install_specifier
+deployctl=jsr:@deno/deployctl

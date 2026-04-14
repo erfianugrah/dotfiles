@@ -214,13 +214,13 @@ update_all() {
     if command -v paccache &>/dev/null; then
       sudo paccache -r -k2 && _update_ok "cache cleanup" || _update_warn "cache cleanup"
     fi
-    # If yay/paru is available, update AUR too
-    if command -v yay &>/dev/null; then
-      _update_header "yay (AUR)"
-      yay -Sua --noconfirm && _update_ok "AUR upgrade" || _update_warn "AUR upgrade"
-    elif command -v paru &>/dev/null; then
+    # If paru/yay is available, update AUR too
+    if command -v paru &>/dev/null; then
       _update_header "paru (AUR)"
       paru -Sua --noconfirm && _update_ok "AUR upgrade" || _update_warn "AUR upgrade"
+    elif command -v yay &>/dev/null; then
+      _update_header "yay (AUR)"
+      yay -Sua --noconfirm && _update_ok "AUR upgrade" || _update_warn "AUR upgrade"
     fi
   fi
 

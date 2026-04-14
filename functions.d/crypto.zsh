@@ -2,14 +2,31 @@
 # Encryption / Decryption — SOPS + Age
 # ---------------------------------------------------------------------------
 
-encrypt_k3s_secret() {
-    local public_key
-    public_key=$(print -r -- "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
-    
-    if [[ -z "$public_key" ]]; then
+# Extract Age private key from SOPS_AGE_KEYS (explicit match, not tail -n 1)
+_sops_age_private_key() {
+    local key
+    key=$(print -r -- "$SOPS_AGE_KEYS" | grep '^AGE-SECRET-KEY-' | head -1)
+    if [[ -z "$key" ]]; then
+        echo "Error: No AGE-SECRET-KEY found in SOPS_AGE_KEYS" >&2
+        return 1
+    fi
+    print -r -- "$key"
+}
+
+# Extract Age public key from SOPS_AGE_KEYS
+_sops_age_public_key() {
+    local key
+    key=$(print -r -- "$SOPS_AGE_KEYS" | grep -oE 'age1[a-z0-9]+' | head -1)
+    if [[ -z "$key" ]]; then
         echo "Error: Failed to extract public key from SOPS_AGE_KEYS" >&2
         return 1
     fi
+    print -r -- "$key"
+}
+
+encrypt_k3s_secret() {
+    local public_key
+    public_key=$(_sops_age_public_key) || return 1
 
     if [[ ! -f "$1" ]]; then
         echo "Error: File $1 does not exist" >&2
@@ -28,13 +45,14 @@ decrypt_k3s_secret() {
         return 1
     fi
 
-    SOPS_AGE_KEY=$(print -r -- "$SOPS_AGE_KEYS" | tail -n 1)
-    export SOPS_AGE_KEY
-    
-    if ! sops --decrypt --encrypted-regex '^(data|stringData)$' --in-place "$1"; then
+    local age_key
+    age_key=$(_sops_age_private_key) || return 1
+
+    # Inline env: SOPS_AGE_KEY only exists for duration of sops command
+    SOPS_AGE_KEY="$age_key" sops --decrypt --encrypted-regex '^(data|stringData)$' --in-place "$1" || {
         echo "Error: Decryption failed for $1" >&2
         return 1
-    fi
+    }
 }
 
 encrypt() {
@@ -44,12 +62,7 @@ encrypt() {
     fi
 
     local public_key
-    public_key=$(print -r -- "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
-    
-    if [[ -z "$public_key" ]]; then
-        echo "Error: Failed to extract public key from SOPS_AGE_KEYS" >&2
-        return 1
-    fi
+    public_key=$(_sops_age_public_key) || return 1
 
     # If argument is a directory, encrypt all files in it
     if [[ -d "$1" ]]; then
@@ -89,8 +102,8 @@ decrypt() {
         return 1
     fi
 
-    SOPS_AGE_KEY=$(print -r -- "$SOPS_AGE_KEYS" | tail -n 1)
-    export SOPS_AGE_KEY
+    local age_key
+    age_key=$(_sops_age_private_key) || return 1
 
     # If argument is a directory, decrypt all files in it
     if [[ -d "$1" ]]; then
@@ -103,10 +116,10 @@ decrypt() {
         for file in "$dir"/*; do
             if [[ -f "$file" ]]; then
                 echo "Decrypting: $file"
-                if ! sops --decrypt --in-place "$file"; then
+                SOPS_AGE_KEY="$age_key" sops --decrypt --in-place "$file" || {
                     echo "Error: Decryption failed for $file" >&2
                     return 1
-                fi
+                }
             fi
         done
         return 0
@@ -117,47 +130,16 @@ decrypt() {
         return 1
     fi
 
-    if ! sops --decrypt --in-place "$1"; then
+    SOPS_AGE_KEY="$age_key" sops --decrypt --in-place "$1" || {
         echo "Error: Decryption failed for $1" >&2
         return 1
-    fi
+    }
     echo "Decrypted: $1"
 }
 
-encrypt_all() {
-    local public_key
-    public_key=$(print -r -- "$SOPS_AGE_KEYS" | sed -n 's/.*public key: \([A-Za-z0-9]*\).*/\1/p' | head -1)
-    
-    if [[ -z "$public_key" ]]; then
-        echo "Error: Failed to extract public key from SOPS_AGE_KEYS" >&2
-        return 1
-    fi
-
-    for file in *; do
-        if [[ -f "$file" ]]; then
-            echo "Encrypting: $file"
-            if ! sops --encrypt --age "$public_key" --in-place "$file"; then
-                echo "Error: Encryption failed for $file" >&2
-                return 1
-            fi
-        fi
-    done
-}
-
-decrypt_all() {
-    SOPS_AGE_KEY=$(print -r -- "$SOPS_AGE_KEYS" | tail -n 1)
-    export SOPS_AGE_KEY
-
-    for file in *; do
-        if [[ -f "$file" ]]; then
-            echo "Decrypting: $file"
-            if ! sops --decrypt --in-place "$file"; then
-                echo "Error: Decryption failed for $file" >&2
-                return 1
-            fi
-        fi
-    done
-}
+# encrypt_all / decrypt_all — operate on current directory
+encrypt_all() { encrypt .; }
+decrypt_all() { decrypt .; }
 
 encrypt_tf() {
     local named_files=("secrets.tfvars" "terraform.tfvars" "blueprint-export.yaml")

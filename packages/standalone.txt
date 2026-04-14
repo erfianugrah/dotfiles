@@ -1,0 +1,12 @@
+# Standalone tools (binary downloads to ~/.local/bin)
+# These have platform-specific install methods.
+# On macOS most are available via brew (added to brew.txt).
+# On Arch some are in AUR; otherwise use the install commands below.
+#
+# format: name=install_command
+#
+cosign=go install github.com/sigstore/cosign/v2/cmd/cosign@latest
+d2=curl -fsSL https://d2lang.com/install.sh | sh -s --
+sql-formatter=npm install -g sql-formatter
+syft=curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b ~/.local/bin
+trivy=curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b ~/.local/bin

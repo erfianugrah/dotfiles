@@ -95,11 +95,6 @@ config.keys = {
 			end),
 		}),
 	},
-	-- {
-	-- 	key = "r",
-	-- 	mods = "LEADER",
-	-- 	action = mux.rename_workspace(mux.get_active_workspace()),
-	-- },
 	-- splitting panes
 	{
 		mods = "LEADER",
@@ -181,23 +176,9 @@ for i = 1, 8 do
 end
 -- Windows
 if wezterm.target_triple == "x86_64-pc-windows-msvc" then
-	-- Paste Action
-	-- table.insert(config.keys, { key = "v", mods = "CTRL", action = wezterm.action.Nop })
-	-- table.insert(config.keys, { key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") })
-	-- config.keys = {
-	-- 	{ key = "v", mods = "CTRL", action = wezterm.action.Nop },
-	-- 	-- -- paste from the clipboard
-	-- 	-- { key = "V", mods = "CTRL", action = act.PasteFrom("Clipboard") },
-	-- 	-- -- paste from the primary selection
-	-- 	-- { key = "V", mods = "CTRL", action = act.PasteFrom("PrimarySelection") },
-	-- }
-	-- GPU
-	-- config.front_end = "WebGpu"
-	-- config.webgpu_preferred_adapter = gpus[1]
-
 	-- WSL
 	config.default_domain = "WSL:archlinux"
-	config.default_cwd = os.getenv("HOME") or "/home/erfi"
+	config.default_cwd = os.getenv("HOME") or os.getenv("USERPROFILE")
 	config.launch_menu = {
 		{
 			label = "PowerShell",

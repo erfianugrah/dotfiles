@@ -12,16 +12,18 @@ time_now() {
     fi
 }
 
+ANSIBLE_PLAYBOOK_DIR="${ANSIBLE_PLAYBOOK_DIR:-$HOME/my-playbooks}"
+
 ansible_on() {
-   ansible-playbook -i my-playbooks/inventory.yml my-playbooks/poweron.yml --ask-become-pass
+   ansible-playbook -i "${ANSIBLE_PLAYBOOK_DIR}/inventory.yml" "${ANSIBLE_PLAYBOOK_DIR}/poweron.yml" --ask-become-pass
 }
 
 ansible_off() {
-   ansible-playbook -i my-playbooks/inventory.yml my-playbooks/shutdown.yml --ask-become-pass
+   ansible-playbook -i "${ANSIBLE_PLAYBOOK_DIR}/inventory.yml" "${ANSIBLE_PLAYBOOK_DIR}/shutdown.yml" --ask-become-pass
 }
 
 ansible_update() {
-   ansible-playbook -i my-playbooks/inventory.yml my-playbooks/update.yml --ask-become-pass
+   ansible-playbook -i "${ANSIBLE_PLAYBOOK_DIR}/inventory.yml" "${ANSIBLE_PLAYBOOK_DIR}/update.yml" --ask-become-pass
 }
 
 # ---------------------------------------------------------------------------

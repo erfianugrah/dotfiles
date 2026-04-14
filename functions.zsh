@@ -14,7 +14,7 @@ fi
 
 # Load order matters: system first (sets _SYS_OS/_SYS_PKG used by other modules),
 # then crypto, bitwarden (uses _SYS_OS), terraform, misc.
-_fn_modules=(system crypto bitwarden terraform misc)
+_fn_modules=(system crypto bitwarden terraform misc packages)
 
 for _fn_mod in "${_fn_modules[@]}"; do
   if [[ -f "${_FUNCTIONS_D}/${_fn_mod}.zsh" ]]; then

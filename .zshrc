@@ -124,7 +124,7 @@ alias zjac="zj a -c"
 alias zjda="zj da"
 alias s=sentry-cli
 alias sb=supabase
-alias pgpasteriser='(export $(grep -v "^#" ~/pastebin/.env | xargs) && pgcli $PASTERISER_DB_URL)'
+alias pgpasteriser='(set -a; source ~/pastebin/.env; set +a; pgcli "$PASTERISER_DB_URL")'
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -151,10 +151,10 @@ if (( $+commands[fzf] )); then eval "$(fzf --zsh)"; else _missing_tools+=("fzf")
 if (( $+commands[zoxide] )); then eval "$(zoxide init zsh)"; else _missing_tools+=("zoxide"); fi
 
 # Tool completions / env
-[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
-[[ -f "$HOME/.atuin/bin/env" ]] && . "$HOME/.atuin/bin/env"
+[[ -s "$HOME/.bun/_bun" ]] && source "$HOME/.bun/_bun"
+[[ -f "$HOME/.atuin/bin/env" ]] && source "$HOME/.atuin/bin/env"
 if (( $+commands[atuin] )); then eval "$(atuin init zsh --disable-up-arrow)"; else _missing_tools+=("atuin"); fi
-[[ -f "$HOME/.deno/env" ]] && . "$HOME/.deno/env"
+[[ -f "$HOME/.deno/env" ]] && source "$HOME/.deno/env"
 
 # pnpm
 export PNPM_HOME="$HOME/.local/share/pnpm"
@@ -163,7 +163,7 @@ case ":$PATH:" in
   *) export PATH="$PNPM_HOME:$PATH" ;;
 esac
 
-[ -s "$HOME/.config/envman/load.sh" ] && source "$HOME/.config/envman/load.sh"
+[[ -s "$HOME/.config/envman/load.sh" ]] && source "$HOME/.config/envman/load.sh"
 
 # opencode
 export PATH=$HOME/.opencode/bin:$PATH

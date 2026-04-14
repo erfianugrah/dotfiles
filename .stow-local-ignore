@@ -3,6 +3,7 @@ README.md
 brew_packages_list.txt
 pacman_list.txt
 yay_list.txt
+packages
 .config/nvim
 .config/fish
 .config/Bitwarden CLI

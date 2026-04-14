@@ -1,0 +1,11 @@
+# pip user packages (cross-platform)
+# Install with: pip install --user -r <this-file>
+# Update with: save_packages
+boto3
+colorama
+docutils
+git-filter-repo
+maxminddb
+pandas
+rsa
+scikit-learn
