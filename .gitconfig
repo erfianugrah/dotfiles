@@ -43,3 +43,9 @@
 	dark = true
 [merge]
 	conflictstyle = diff3
+[pull]
+	rebase = true
+[rerere]
+	enabled = true
+[fetch]
+	prune = true

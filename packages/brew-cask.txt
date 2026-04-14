@@ -1,0 +1,4 @@
+# macOS Homebrew casks (GUI apps)
+# Update with: save_packages
+cloudflare-warp
+google-chrome

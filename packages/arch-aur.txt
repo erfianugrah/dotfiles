@@ -1,0 +1,17 @@
+# Arch Linux AUR packages (paru)
+# Generated from: pacman -Qqem | sort
+# Update with: save_packages
+asn-git
+asnmap
+cloudflare-warp-bin
+flyctl-bin
+google-chrome
+ipinfo-cli
+ipinfo-cli-debug
+kubelogin
+paru
+paru-debug
+supabase-bin
+tcptraceroute
+vercel
+wslu

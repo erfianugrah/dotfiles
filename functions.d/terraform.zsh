@@ -247,8 +247,6 @@ _tf_cache_cleanup() {
 if [[ -z "$_TF_CACHE_TRAP_SET" ]]; then
   autoload -Uz add-zsh-hook
   add-zsh-hook zshexit _tf_cache_cleanup
-  # Also handle TERM/INT for non-clean exits
-  trap '_tf_cache_cleanup' HUP TERM INT
   _TF_CACHE_TRAP_SET=1
 fi
 
@@ -740,7 +738,7 @@ _tf_grouped_list() {
   esac
 
   local entries
-  entries=$(jq -r --arg p "$pattern" "
+  entries=$(jq -r "
     to_entries | sort_by(.key)[]
     | select(.key | $pattern)
     | \"\(.key)\t\(if .value.sensitive then \"sensitive\" else \"public\" end)\t\(.value.value | type)\t\(

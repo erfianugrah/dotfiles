@@ -7,6 +7,7 @@
 
 BW_SERVE_PORT="${BW_SERVE_PORT:-8087}"
 BW_SERVE_ADDR="http://127.0.0.1:${BW_SERVE_PORT}"
+_BW_SESSION_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 
 typeset -gA _BW_CACHE _BW_CACHE_TS
 _BW_CACHE_TTL=300  # 5 minutes in-memory cache
@@ -120,7 +121,7 @@ bw_serve_start() {
         echo "[bw-serve] Sync failed (non-fatal, using local cache)." >&2
 
     # Write session to runtime dir (mode 600, create-before-write to avoid TOCTOU)
-    local session_file="${XDG_RUNTIME_DIR:-/tmp}/bw-session.env"
+    local session_file="${_BW_SESSION_DIR}/bw-session.env"
     install -m 600 /dev/null "$session_file"
     print -r -- "BW_SESSION=$session" > "$session_file"
     echo "[bw-serve] Session written to $session_file"
@@ -128,7 +129,7 @@ bw_serve_start() {
     # (Re)start bw serve via platform service manager
     if [[ "$_SYS_OS" == "macos" ]]; then
         # Kill any existing bw serve, then start fresh
-        pkill -f "bw serve" 2>/dev/null
+        pkill -f "bw serve --port ${BW_SERVE_PORT}" 2>/dev/null
         BW_SESSION="$session" nohup bw serve --port "$BW_SERVE_PORT" --hostname 127.0.0.1 \
             >/dev/null 2>&1 &
         echo "[bw-serve] started in background (pid $!), waiting for API..."
@@ -161,11 +162,11 @@ bw_serve_start() {
 bw_serve_stop() {
     echo "[bw-serve] Stopping service..."
     if [[ "$_SYS_OS" == "macos" ]]; then
-        pkill -f "bw serve" 2>/dev/null
+        pkill -f "bw serve --port ${BW_SERVE_PORT}" 2>/dev/null
     else
         systemctl --user stop bw-serve.service
     fi
-    rm -f "${XDG_RUNTIME_DIR:-/tmp}/bw-session.env"
+    rm -f "${_BW_SESSION_DIR}/bw-session.env"
     clear_bw_cache
     echo "[bw-serve] Stopped and session cleared."
 }
@@ -188,7 +189,7 @@ bw_serve_status() {
 }
 
 bw_serve_sync() {
-    local session_file="${XDG_RUNTIME_DIR:-/tmp}/bw-session.env"
+    local session_file="${_BW_SESSION_DIR}/bw-session.env"
     if [[ ! -f "$session_file" ]]; then
         echo "[bw-serve] No active session. Run bw_serve_start first." >&2
         return 1

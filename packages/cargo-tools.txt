@@ -1,0 +1,6 @@
+# Cargo crates (cross-platform, installed via cargo install)
+# Install with: cargo install <crate>
+# Update with: save_packages
+presenterm
+sqruff
+tree-sitter-cli

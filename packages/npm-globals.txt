@@ -1,0 +1,8 @@
+# npm global packages (cross-platform)
+# Install with: npm install -g <pkg>
+# Update with: save_packages
+@anthropic-ai/claude-code
+@google/gemini-cli
+@openai/codex
+vercel
+wrangler
