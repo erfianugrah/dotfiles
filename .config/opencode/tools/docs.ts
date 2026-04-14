@@ -33,8 +33,21 @@ async function ssh(command: string): Promise<string> {
     ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-p", SSH_PORT, SSH_HOST, command],
     { stdout: "pipe", stderr: "pipe" },
   )
-  const text = await new Response(proc.stdout).text()
-  await proc.exited
+  const [text, errText] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  const exitCode = await proc.exited
+  // SSH connection failure (exit 255)
+  if (exitCode === 255) {
+    return `[error] SSH connection failed: ${errText.trim() || "connection refused or timed out"}`
+  }
+  // Remote command error: non-zero exit + empty stdout + stderr message.
+  // Catches: find on nonexistent dir, cat on directory, rg on missing path.
+  // Does NOT trigger for rg "no matches" (exit 1 but empty stderr).
+  if (exitCode !== 0 && !text.trim() && errText.trim()) {
+    return `[error] ${errText.trim()}`
+  }
   return text.trim()
 }
 
@@ -105,7 +118,11 @@ export const search = {
   async execute(args: { query: string; source?: string; maxResults?: number }) {
     const limit = args.maxResults ?? 15
     const filter = args.source ? `| rg '^${sq(args.source)}/'` : ""
-    return ssh(`rg -i '${sq(args.query)}' /docs/_index.tsv ${filter} | head -${limit}`)
+    const pipeline = `rg -i '${sq(args.query)}' /docs/_index.tsv ${filter}`
+    const result = await ssh(
+      `total=$(${pipeline} | wc -l); ${pipeline} | head -${limit}; [ "$total" -gt ${limit} ] && echo "[showing ${limit} of $total results — refine query or add source filter]"`
+    )
+    return result
   },
 }
 
@@ -129,8 +146,9 @@ export const read = {
     } else if (args.lines) {
       cmd = `head -${Math.abs(Math.floor(args.lines))} '${sq(p)}'`
     } else {
-      // bat --plain gives us line numbers without decorations; fall back to cat
-      cmd = `bat --plain --paging=never --color=never --style=numbers '${sq(p)}' 2>/dev/null || cat '${sq(p)}'`
+      // bat with line numbers for precise offset references; --decorations=always
+      // forces numbers even when stdout is not a TTY (SSH pipe mode).
+      cmd = `bat --decorations=always --paging=never --color=never --style=numbers '${sq(p)}' 2>/dev/null || cat '${sq(p)}'`
     }
 
     const result = await ssh(cmd)
@@ -166,22 +184,27 @@ export const grep = {
     const ctx = Math.abs(Math.floor(args.context ?? 3))
     const p = safePath(args.path)
 
-    // Try rg --json first for structured output with exact positions
-    const jsonResult = await ssh(
-      `rg -i --json -C${ctx} '${sq(args.query)}' '${sq(p)}' | head -500`
-    )
+    // Count total matches in parallel with fetching results
+    const [jsonResult, countResult] = await Promise.all([
+      // Try rg --json first for structured output with exact positions
+      ssh(`rg -i --json -C${ctx} '${sq(args.query)}' '${sq(p)}' | head -500`),
+      // Total match count (sum across files)
+      ssh(`rg -ic '${sq(args.query)}' '${sq(p)}' 2>/dev/null | awk -F: '{s+=$NF}END{print s+0}'`),
+    ])
+    const total = parseInt(countResult) || 0
 
     if (jsonResult) {
       const matches = parseRgJson(jsonResult)
       if (matches.length > 0) {
         const formatted = formatRgMatches(matches)
-        return capOutput(`${matches.length} matches\n\n${formatted}`, args.path)
+        const countNote = total > matches.length ? ` (showing ${matches.length} of ${total})` : ""
+        return capOutput(`${matches.length}${countNote} matches\n\n${formatted}`, args.path)
       }
     }
 
     // Fallback to plain rg if --json produced no parseable output
     const plainResult = await ssh(
-      `rg -i -C${ctx} '${sq(args.query)}' '${sq(p)}' | head -100`
+      `rg -in -C${ctx} '${sq(args.query)}' '${sq(p)}' | head -100`
     )
     return capOutput(plainResult, args.path)
   },
@@ -196,7 +219,7 @@ export const summary = {
   },
   async execute(args: { path: string }) {
     const p = safePath(args.path)
-    const headings = await ssh(`rg '^#' '${sq(p)}'`)
+    const headings = await ssh(`rg -n '^#' '${sq(p)}'`)
     const lineCount = await ssh(`wc -l < '${sq(p)}'`)
     return `${lineCount.trim()} lines\n\n${headings}`
   },
