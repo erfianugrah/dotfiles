@@ -17,19 +17,19 @@ Abbreviate: DB/auth/config/req/res/fn/impl/env/dep/pkg/dir/repo/param/arg.
 
 ## Documentation
 
-Docs server at `docs.erfi.io` — 42 sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
+Docs server at `docs.erfi.io` — 60 sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
 
 **Always use custom `docs_search`, `docs_read`, `docs_grep`, `docs_find`, `docs_summary`, `docs_sources` tools.** No raw `ssh` or `Bash` for docs access.
 
 ### Sources
 
-ansible, astro, aws, bun, caddy, cloudflare, cloudflare-blog, cloudflare-changelog, d2, docker, drizzle, erfi-personal-blog, erfi-technical-blog, flyio, hono, k3s, kubernetes, mcp, mermaid, neovim, nextjs, postgres, python, react, rust-book, shadcn, starlight, supabase, supabase-blog, tailwindcss, traefik, typescript, vercel, vercel-blog, vercel-changelog, zod
+age, ansible, astro, authentik, aws, bun, caddy, cloudflare, cloudflare-blog, cloudflare-changelog, d2, docker, drizzle, erfi-personal-blog, erfi-technical-blog, flyio, gitea, hono, k3s, keycloak, kubernetes, mcp, mdn, mermaid, neovim, nextjs, ohmyzsh, openid, postgres, powerlevel10k, python, react, rust-book, saml, shadcn, sops, starlight, supabase, supabase-blog, tailwindcss, terraform, tmux, traefik, typescript, vercel, vercel-blog, vercel-changelog, wezterm, zinit, zod, zsh
 
 ### API Reference Sources
 
 OpenAPI specs converted to per-endpoint-group markdown. Each has `api/overview.md` (endpoint index) + `api/{tag}.md` files.
 
-cloudflare-api, docker-api, flyio-api, kubernetes-api, supabase-api, supabase-auth-api
+authentik-api, cloudflare-api, docker-api, flyio-api, gitea-api, keycloak-api, kubernetes-api, supabase-api, supabase-auth-api
 
 **API lookup pattern:**
 1. `docs_search(query="create zone", source="cloudflare-api")` — find endpoint group
@@ -51,7 +51,7 @@ cloudflare-api, docker-api, flyio-api, kubernetes-api, supabase-api, supabase-au
 
 | Tool | Purpose | When |
 |------|---------|------|
-| `docs_search` | Search titles+summaries | First step — find files fast (~1MB index) |
+| `docs_search` | Search titles+summaries | First step — find files fast (index ~15x smaller than raw docs) |
 | `docs_summary` | Headings/outline of file | Before reading — find right section |
 | `docs_read` | Read file or line range | After summary — read only what needed |
 | `docs_grep` | Regex search + context lines | Find content within files |
@@ -60,7 +60,7 @@ cloudflare-api, docker-api, flyio-api, kubernetes-api, supabase-api, supabase-au
 
 ### Token tips
 
-- `docs_search` searches ~1MB index, not ~300MB raw docs
+- `docs_search` searches index (~15x smaller than raw docs)
 - `docs_summary` before `docs_read` — find right line range first
 - `offset+lines`: 35 lines = ~140 tokens vs ~2K for full file
 - `docs_grep` with source path: `docs_grep(query="RLS", path="/docs/postgres/")` faster than searching all
