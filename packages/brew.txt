@@ -99,7 +99,6 @@ vegeta
 vercel-cli
 vim
 wget
-xcaddy
 xh
 xsel
 yarn
