@@ -48,6 +48,16 @@ bin/
 
 .git-template/hooks/pre-commit # global pre-commit: block unencrypted secrets
 wezterm.sh                     # WezTerm shell integration (OSC 7/133)
+
+tests/
+  run-all.sh                   # Docker test matrix runner
+  harness.zsh                  # shared test assertions
+  test-arch.zsh                # Arch Linux test (system + ecosystem)
+  test-steamos.zsh             # Steam Deck test (nix + detection)
+  test-macos.zsh               # macOS simulation (Linuxbrew + validation)
+  Dockerfile.arch              # cached Arch image
+  Dockerfile.steamos           # Arch + Nix + deck markers
+  Dockerfile.macos             # Ubuntu + Linuxbrew
 ```
 
 ## Multi-OS support
@@ -147,6 +157,13 @@ home-manager switch --flake .#deck
 
 Phase 1 installs runtimes (node, go, rust, python, deno). Phase 2 needs
 those runtimes. Phase 3 handles tools with custom install methods.
+
+> **npm globals isolation:** On Arch, npm is installed via pacman and its
+> global prefix is `/usr/lib`. `install_packages npm` automatically redirects
+> globals to `~/.npm-global/` to avoid conflicts with pacman-managed packages
+> on `pacman -Syu`. The `~/.npm-global/bin` is in PATH via `.zshrc`.
+> System npm packages (`bitwarden-cli`, `pnpm`, `yarn`) are always owned by
+> the system package manager.
 
 ```sh
 install_packages             # all three phases
@@ -526,9 +543,9 @@ Auto-detects platform. Supports per-phase and per-ecosystem targeting.
 Files and directories excluded from symlinking into `~`:
 
 - `.git` — prevents `~/.git` symlink (would make `~` look like a repo)
-- `README.md`, package list files (`brew_packages_list.txt`, etc.)
-- `packages/` — data files, not dotfiles
-- `.config/nvim` — managed in a separate repo
+- `README.md`, legacy package lists (`brew_packages_list.txt`, `pacman_list.txt`, `yay_list.txt`)
+- `packages/`, `tests/` — data/test files, not dotfiles
+- `.config/nvim` — managed in a [separate repo](https://github.com/erfianugrah/kickstart.nvim)
 - `.config/opencode/node_modules`, lock files
 
 ## Branches
@@ -542,3 +559,41 @@ Files and directories excluded from symlinking into `~`:
 
 All platform branches track `main` — divergence is handled by the
 cross-platform detection in `system.zsh` rather than branch differences.
+
+## Testing
+
+Docker-based test matrix covering all three platforms:
+
+```sh
+./tests/run-all.sh               # run all platforms
+./tests/run-all.sh arch          # single platform
+./tests/run-all.sh steamos macos # subset
+```
+
+| Test | Base image | What it tests |
+|---|---|---|
+| `arch` | `archlinux:latest` | Full system + ecosystem install, all binaries, crypto, security, config |
+| `steamos` | `archlinux:latest` + Nix | Steam Deck detection, nix home-manager switch, all nix packages |
+| `macos` | `ubuntu:24.04` + Linuxbrew | Brew dispatch, tap handling, list validation, crypto, config |
+
+Arch test caches system packages in a Docker layer — rebuilds only re-run
+ecosystem installs unless `packages/arch-repo.txt` changes.
+
+## Other tools
+
+### `bin/caddyfmt`
+
+Minimal Caddyfile formatter (Python 3, stdin/stdout). Replicates `caddy fmt`:
+normalizes indentation, handles Caddy placeholders (`{$ENV}`,
+`{http.request.uri}`), strips trailing whitespace.
+
+```sh
+caddyfmt < Caddyfile > Caddyfile.formatted
+```
+
+### `wezterm.sh`
+
+WezTerm shell integration (sourced by `.zshrc`). Sets up:
+- OSC 7: report current working directory to terminal
+- OSC 133: semantic prompt zones (command input vs output)
+- User vars for WezTerm's Lua API
