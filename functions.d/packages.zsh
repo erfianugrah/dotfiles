@@ -17,7 +17,7 @@ _PKG_DIR="${_DOTFILES_DIR}/packages"
 _is_steamdeck() {
   [[ -f /etc/steamos-release ]] || \
     [[ "$(cat /etc/hostname 2>/dev/null)" == "steamdeck" ]] || \
-    [[ "$USER" == "deck" && -d /home/deck ]]
+    [[ "${USER:-}" == "deck" && -d /home/deck ]]
 }
 
 _pkg_platform() {
@@ -348,6 +348,20 @@ _pkg_install_npm() {
   local -a pkgs=("${(@f)$(_pkg_read_list "$list")}")
   (( ${#pkgs[@]} )) || return 0
 
+  # Never install npm globals into system dirs (/usr/lib/node_modules).
+  # System npm packages (bitwarden-cli, pnpm, yarn) are owned by pacman/brew.
+  # User npm globals go to ~/.npm-global to avoid conflicts on pacman -Syu.
+  local npm_prefix
+  npm_prefix=$(npm config get prefix 2>/dev/null)
+  if [[ "$npm_prefix" == /usr* ]]; then
+    local user_prefix="$HOME/.npm-global"
+    print "  Redirecting npm globals to ${user_prefix} (system prefix is ${npm_prefix})"
+    mkdir -p "$user_prefix"
+    npm config set prefix "$user_prefix"
+    # Ensure it's in PATH for this session
+    export PATH="${user_prefix}/bin:$PATH"
+  fi
+
   print "\n${BOLD:-}Installing ${#pkgs[@]} npm globals...${RESET:-}"
   npm install -g "${pkgs[@]}" 2>&1 | grep -v 'up to date'
 }
@@ -387,7 +401,9 @@ _pkg_install_pip() {
   print "\n${BOLD:-}Installing pip user packages...${RESET:-}"
   local pip_cmd="pip"
   command -v pip &>/dev/null || pip_cmd="pip3"
-  $pip_cmd install --user -r "$list" 2>&1 | grep -v 'already satisfied'
+  # --break-system-packages needed on Arch/Fedora (PEP 668) for --user installs.
+  # Safe: --user puts packages in ~/.local/lib/python*/site-packages/, not system dirs.
+  $pip_cmd install --user --break-system-packages -r "$list" 2>&1 | grep -v 'already satisfied'
 }
 
 _pkg_install_deno() {

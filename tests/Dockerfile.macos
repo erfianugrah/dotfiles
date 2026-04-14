@@ -1,0 +1,23 @@
+# macOS can't run in Docker — use Ubuntu + Linuxbrew as closest simulation.
+# Tests platform detection, brew list validation, and all cross-platform logic.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq && \
+    apt-get install -y -qq zsh git stow jq curl build-essential sudo locales >/dev/null && \
+    locale-gen en_US.UTF-8 && \
+    useradd -m -s /bin/zsh testuser && \
+    echo 'testuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+
+# Install Linuxbrew as testuser
+USER testuser
+ENV LANG=en_US.UTF-8
+RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
+ENV HOMEBREW_NO_AUTO_UPDATE=1
+
+WORKDIR /home/testuser
+COPY --chown=testuser:testuser . /home/testuser/dotfiles
+RUN cd dotfiles && stow . 2>/dev/null || true
+
+CMD ["zsh", "dotfiles/tests/test-macos.zsh"]

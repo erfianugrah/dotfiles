@@ -1,0 +1,29 @@
+# SteamOS simulation — Determinate Systems nix installer as deck user
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq && \
+    apt-get install -y -qq zsh git stow jq curl xz-utils sudo >/dev/null && \
+    useradd -m -s /bin/zsh deck && \
+    echo 'deck ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && \
+    # Simulate Steam Deck markers
+    echo "steamdeck" > /etc/hostname && \
+    touch /etc/steamos-release
+
+# Install nix as deck user (single-user, like real Steam Deck setup)
+USER deck
+WORKDIR /home/deck
+RUN curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
+    | sh -s -- install linux --no-confirm --init none 2>&1 | tail -5
+
+# Enable flakes
+ENV PATH="/nix/var/nix/profiles/default/bin:/home/deck/.nix-profile/bin:${PATH}" \
+    USER=deck \
+    HOME=/home/deck
+
+# Copy dotfiles + stow
+COPY --chown=deck . /home/deck/dotfiles
+RUN cd dotfiles && stow . 2>/dev/null || true
+
+# Nix daemon must be running for multi-user nix. Docker has no systemd, start manually.
+CMD ["bash", "-c", "sudo /nix/var/nix/profiles/default/bin/nix-daemon & sleep 2 && zsh dotfiles/tests/test-steamos.zsh"]

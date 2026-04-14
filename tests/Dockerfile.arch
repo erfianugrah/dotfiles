@@ -1,0 +1,21 @@
+FROM archlinux:latest
+
+# Layer 1: bootstrap (rarely changes)
+RUN pacman -Syu --noconfirm && \
+    pacman -S --noconfirm --needed zsh git stow jq base-devel sudo && \
+    useradd -m -G wheel -s /bin/zsh testuser && \
+    echo 'testuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+
+# Layer 2: system packages from list (cache-bust only when list changes)
+COPY packages/arch-repo.txt /tmp/arch-repo.txt
+RUN pacman -S --needed --noconfirm \
+    $(grep -v '^\s*#' /tmp/arch-repo.txt | grep -v '^\s*$' | tr '\n' ' ') || true
+
+# Layer 3: dotfiles + stow
+USER testuser
+WORKDIR /home/testuser
+COPY --chown=testuser:testuser . /home/testuser/dotfiles
+RUN cd dotfiles && stow . 2>/dev/null || true
+
+ENV PATH="/home/testuser/.npm-global/bin:/home/testuser/go/bin:/home/testuser/.cargo/bin:/home/testuser/.local/bin:${PATH}"
+CMD ["zsh", "dotfiles/tests/test-arch.zsh"]

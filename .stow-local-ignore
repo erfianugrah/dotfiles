@@ -4,6 +4,7 @@ brew_packages_list.txt
 pacman_list.txt
 yay_list.txt
 packages
+tests
 .config/nvim
 .config/fish
 .config/Bitwarden CLI
