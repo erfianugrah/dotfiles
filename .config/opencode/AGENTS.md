@@ -15,20 +15,20 @@ OpenAPI specs converted to per-endpoint-group markdown. Each has `api/overview.m
 authentik-api, aws-api, cloudflare-api, docker-api, flyio-api, gitea-api, keycloak-api, kubernetes-api, supabase-api, supabase-auth-api
 
 **API lookup pattern:**
-1. `docs_search(query="create zone", source="cloudflare-api")` — find endpoint group
-2. `docs_grep(query="POST /zones", path="/docs/cloudflare-api/")` — find exact endpoint
-3. `docs_read(path="/docs/cloudflare-api/api/zones.md")` — read full endpoint group
+1. `docs_search(query="dns record", source="cloudflare-api")` — find endpoint group
+2. `docs_grep(query="POST.*dns_records", path="/docs/cloudflare-api/")` — find exact endpoint
+3. `docs_read(path="/docs/cloudflare-api/api/dns-records-for-a-zone.md")` — read full endpoint group
 
 ### Workflow: search -> summary -> targeted read
 
 1. **Search** index for relevant files:
-   `docs_search(query="RLS policies", source="postgres")`
+   `docs_search(query="row security", source="postgres")`
 
 2. **Outline** promising file:
-   `docs_summary(path="/docs/postgres/row-security.md")`
+   `docs_summary(path="/docs/postgres/ddl-rowsecurity.md")`
 
-3. **Read only needed section** (e.g. lines 45-80):
-   `docs_read(path="/docs/postgres/row-security.md", offset=45, lines=35)`
+3. **Read only needed section** (e.g. lines 27-61):
+   `docs_read(path="/docs/postgres/ddl-rowsecurity.md", offset=27, lines=35)`
 
 ### Tools
 
