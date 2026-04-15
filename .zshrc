@@ -168,6 +168,7 @@ esac
 # opencode
 export PATH=$HOME/.opencode/bin:$PATH
 export OPENCODE_DISABLE_PRUNE=true
+export OPENCODE_DISABLE_CHANNEL_DB=true
 
 # Warn about missing tools (once, non-blocking)
 if (( ${#_missing_tools} )); then
