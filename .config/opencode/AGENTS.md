@@ -1,35 +1,18 @@
-## Output Rules
-
-Respond terse. All technical substance stay. Only fluff die.
-
-Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). Technical terms exact. Code blocks unchanged. Errors quoted exact.
-
-Pattern: `[thing] [action] [reason]. [next step].`
-
-Not: "Sure! I'd be happy to help you with that. The issue you're experiencing is likely caused by..."
-Yes: "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"
-
-Abbreviate: DB/auth/config/req/res/fn/impl/env/dep/pkg/dir/repo/param/arg.
-
-**Auto-Clarity exceptions:** Drop terse for: security warnings, irreversible action confirmations, multi-step sequences where fragments risk misread, user confused. Resume after clear part done.
-
-**Boundaries:** Code/commits/PRs: write normal syntax. If asked "stop caveman" or "normal mode": revert to standard prose.
-
 ## Documentation
 
-Docs server at `docs.erfi.io` — 60 sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
+Docs server at `docs.erfi.io` — 62 sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
 
 **Always use custom `docs_search`, `docs_read`, `docs_grep`, `docs_find`, `docs_summary`, `docs_sources` tools.** No raw `ssh` or `Bash` for docs access.
 
 ### Sources
 
-age, ansible, astro, authentik, aws, bun, caddy, cloudflare, cloudflare-blog, cloudflare-changelog, d2, docker, drizzle, erfi-personal-blog, erfi-technical-blog, flyio, gitea, hono, k3s, keycloak, kubernetes, mcp, mdn, mermaid, neovim, nextjs, ohmyzsh, openid, postgres, powerlevel10k, python, react, rust-book, saml, shadcn, sops, starlight, supabase, supabase-blog, tailwindcss, terraform, tmux, traefik, typescript, vercel, vercel-blog, vercel-changelog, wezterm, zinit, zod, zsh
+age, ansible, astro, authentik, aws, bun, caddy, cloudflare, cloudflare-blog, cloudflare-changelog, d2, docker, drizzle, erfi-personal-blog, erfi-technical-blog, flyio, gitea, hono, k3s, keycloak, kubernetes, mcp, mdn, mermaid, neovim, nextjs, ohmyzsh, opencode, openid, postgres, powerlevel10k, python, react, rust-book, saml, shadcn, sops, starlight, supabase, supabase-blog, tailwindcss, terraform, tmux, traefik, typescript, vercel, vercel-blog, vercel-changelog, wezterm, zinit, zod, zsh
 
 ### API Reference Sources
 
 OpenAPI specs converted to per-endpoint-group markdown. Each has `api/overview.md` (endpoint index) + `api/{tag}.md` files.
 
-authentik-api, cloudflare-api, docker-api, flyio-api, gitea-api, keycloak-api, kubernetes-api, supabase-api, supabase-auth-api
+authentik-api, aws-api, cloudflare-api, docker-api, flyio-api, gitea-api, keycloak-api, kubernetes-api, supabase-api, supabase-auth-api
 
 **API lookup pattern:**
 1. `docs_search(query="create zone", source="cloudflare-api")` — find endpoint group
@@ -66,3 +49,18 @@ authentik-api, cloudflare-api, docker-api, flyio-api, gitea-api, keycloak-api, k
 - `docs_grep` with source path: `docs_grep(query="RLS", path="/docs/postgres/")` faster than searching all
 - `source` param: `docs_search(query="auth", source="supabase")` filters to one source
 - API specs: `docs_read(path="/docs/{source}-api/api/overview.md")` for endpoint index
+
+### Related source groups
+
+When searching one source, check related sources for cross-referencing:
+
+- **Auth & identity**: supabase, keycloak, authentik, openid, saml
+- **Databases**: postgres, supabase, drizzle
+- **Infrastructure**: docker, kubernetes, k3s, terraform, ansible, flyio
+- **Reverse proxy & networking**: cloudflare, caddy, traefik
+- **Frontend frameworks**: nextjs, react, astro, hono, tailwindcss, shadcn
+- **Languages & runtimes**: typescript, python, rust-book, bun, zod
+- **Cloud platforms**: aws, cloudflare, vercel, flyio
+- **Secrets & encryption**: age, sops
+- **Terminal & editor**: neovim, tmux, wezterm, zsh, ohmyzsh
+- **Docs & diagrams**: mdn, d2, mermaid, starlight, mcp
