@@ -147,6 +147,9 @@ elif command -v code &> /dev/null; then
   export EDITOR='code --wait'
 fi
 
+# Force emacs keymap — zsh auto-switches to vi mode when EDITOR contains vi/nvim
+bindkey -e
+
 if (( $+commands[fzf] )); then eval "$(fzf --zsh)"; else _missing_tools+=("fzf"); fi
 if (( $+commands[zoxide] )); then eval "$(zoxide init zsh)"; else _missing_tools+=("zoxide"); fi
 

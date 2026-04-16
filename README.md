@@ -313,7 +313,7 @@ terminal/tmux restarts. After a reboot, run `bw_serve_start` again.
 
 | Variable | Default | Description |
 |---|---|---|
-| `EDITOR` | `nvim` → `vim` → `nano` → `code` | first available |
+| `EDITOR` | `nvim` → `vim` → `nano` → `code` | first available; `bindkey -e` after to keep standard keybindings (zsh auto-enables vi mode when EDITOR contains `vi`/`nvim`) |
 | `DOCKER_BUILDKIT` | `1` | always on |
 | `LANG` / `LC_ALL` | `C.UTF-8` | |
 | `ANSIBLE_PLAYBOOK_DIR` | `~/my-playbooks` | used by `ansible_on/off/update` |
