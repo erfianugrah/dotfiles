@@ -172,7 +172,7 @@ esac
 export PATH=$HOME/.opencode/bin:$PATH
 export OPENCODE_DISABLE_PRUNE=true
 export OPENCODE_DISABLE_CHANNEL_DB=true
-
+export OPENCODE_ENABLE_EXA=1
 # Warn about missing tools (once, non-blocking)
 if (( ${#_missing_tools} )); then
   print -P "%F{yellow}[dotfiles]%f missing tools: ${(j:, :)_missing_tools} — install for full shell experience"
