@@ -1,12 +1,12 @@
 ## Documentation
 
-Docs server at `docs.erfi.io` — 139 sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
+Docs server at `docs.erfi.io` — 138 sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
 
 **Always use custom `docs_search`, `docs_read`, `docs_grep`, `docs_find`, `docs_summary`, `docs_sources` tools.** No raw `ssh` or `Bash` for docs access.
 
 ### Sources
 
-age, ansible, argocd, astro, authentik, aws, bitwarden, bun, caddy, citus, cloudflare, cloudflare-blog, cloudflare-changelog, cockroachdb, curl, cypress, d2, deno, docker, drizzle, effect, electric, erfi-personal-blog, erfi-technical-blog, eslint, excalidraw, expo, fastapi, flutter, flyio, gitea, github, gitlab, go, grafana, graphql, graphql-spec, helm, hono, htmx, httpie, index-advisor, jest, k3s, keycloak, kubernetes, letsencrypt, mcp, mdn, mermaid, mise, modern-sql, multigres, multigres-dev, neon, neovim, nextjs, nix, ohmyzsh, opencode, openid, opentelemetry, paradedb, patroni, pg-cron, pg-graphql, pg-net, pgbouncer, pglocks, pgpool, pgrx, pgvector, playwright, pnpm, postgis, postgres, postgres-wiki, powerlevel10k, prettier, prisma, prometheus, python, rclone, react, react-native, redis, resend, ripgrep, rspack, rust-book, saml, shadcn, sops, sqlite, sqlstyle, sst, starlight, supabase, supabase-blog, supabase-grafana, supavisor, svelte, tailwindcss, tanstack-form, tanstack-query, tanstack-router, tanstack-table, tauri, terraform, timescaledb, tmux, traefik, turborepo, typescript, use-the-index-luke, valkey, vaultwarden, vercel, vercel-blog, vercel-changelog, vite, vitest, wails, wezterm, wireguard, yugabytedb, zinit, zod, zsh
+age, ansible, argocd, astro, authentik, aws, bitwarden, bun, caddy, citus, cloudflare, cloudflare-blog, cloudflare-changelog, cockroachdb, curl, cypress, d2, deno, docker, drizzle, effect, electric, erfi-personal-blog, erfi-technical-blog, eslint, excalidraw, expo, fastapi, flutter, flyio, gitea, github, gitlab, go, grafana, graphql, graphql-spec, helm, hono, htmx, httpie, index-advisor, jest, k3s, keycloak, kubernetes, letsencrypt, mcp, mdn, mermaid, mise, modern-sql, multigres, multigres-dev, neon, neovim, nextjs, nix, ohmyzsh, opencode, openid, opentelemetry, paradedb, patroni, pg-cron, pg-graphql, pg-net, pgbouncer, pgpool, pgrx, pgvector, playwright, pnpm, postgis, postgres, postgres-wiki, powerlevel10k, prettier, prisma, prometheus, python, rclone, react, react-native, redis, resend, ripgrep, rspack, rust-book, saml, shadcn, sops, sqlite, sqlstyle, sst, starlight, supabase, supabase-blog, supabase-grafana, supavisor, svelte, tailwindcss, tanstack-form, tanstack-query, tanstack-router, tanstack-table, tauri, terraform, timescaledb, tmux, traefik, turborepo, typescript, use-the-index-luke, valkey, vaultwarden, vercel, vercel-blog, vercel-changelog, vite, vitest, wails, wezterm, wireguard, yugabytedb, zinit, zod, zsh
 
 ### API Reference Sources
 
@@ -74,7 +74,7 @@ When searching one source, check related sources for cross-referencing:
 - **Build tools**: vite, vitest, turborepo, rspack, eslint, prettier, pnpm, opencode
 - **CLI tools**: curl, ripgrep, httpie, rclone
 - **Cloud platforms**: supabase, neon, flyio, sst, cloudflare, aws, vercel
-- **Databases & SQL**: supabase, postgres, postgres-wiki, drizzle, prisma, sqlite, redis, valkey, modern-sql, use-the-index-luke, sqlstyle, pglocks
+- **Databases & SQL**: supabase, postgres, postgres-wiki, drizzle, prisma, sqlite, redis, valkey, modern-sql, use-the-index-luke, sqlstyle
 - **Docs & diagrams**: mcp, mdn, d2, mermaid, starlight, excalidraw
 - **Email & services**: resend, letsencrypt
 - **Frontend frameworks**: nextjs, react, astro, hono, tailwindcss, shadcn, svelte, htmx, tanstack-query, tanstack-router, tanstack-table, tanstack-form, effect, fastapi
