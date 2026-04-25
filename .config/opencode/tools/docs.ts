@@ -266,6 +266,9 @@ export const grep = {
     const plainResult = await ssh(
       `rg -in -C${ctx} '${sq(args.query)}' '${sq(p)}' | head -100`
     )
+    if (!plainResult.trim()) {
+      return `[no matches for "${args.query}" in ${args.path}]`
+    }
     return capOutput(plainResult, args.path)
   },
 }
@@ -279,13 +282,14 @@ export const summary = {
   },
   async execute(args: { path: string }) {
     const p = safePath(args.path)
-    // Dispatch both SSH calls concurrently — each is one round-trip,
-    // and they're independent. Saves one RTT vs serial execution.
-    const [headings, lineCount] = await Promise.all([
+    // Dispatch all three SSH calls concurrently — each is one
+    // round-trip and they're independent. Saves two RTTs vs serial.
+    const [headings, lineCount, byteCount] = await Promise.all([
       ssh(`rg -n '^#' '${sq(p)}'`),
       ssh(`wc -l < '${sq(p)}'`),
+      ssh(`wc -c < '${sq(p)}'`),
     ])
-    return `${lineCount.trim()} lines\n\n${headings}`
+    return `${lineCount.trim()} lines, ${byteCount.trim()} bytes\n\n${headings}`
   },
 }
 
