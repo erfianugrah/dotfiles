@@ -11,7 +11,18 @@ function sq(s: string): string {
 }
 
 function safePath(p: string): string {
-  const cleaned = p.replace(/\.\./g, "").replace(/\/\//g, "/")
+  // Strip traversal segments only — ../ and ..\ — not bare '..' which
+  // appears in legitimate filenames (e.g. MDN's do...while/index.md).
+  // Loop until stable so stacked patterns like ....// collapse fully.
+  let cleaned = p
+  let prev: string
+  do {
+    prev = cleaned
+    cleaned = cleaned
+      .replace(/\.\.\//g, "")
+      .replace(/\.\.\\/g, "")
+      .replace(/\/\/+/g, "/")
+  } while (cleaned !== prev)
   if (!cleaned.startsWith("/docs/")) {
     return `/docs/${cleaned.replace(/^\/+/, "")}`
   }
@@ -20,10 +31,16 @@ function safePath(p: string): string {
 
 function capOutput(text: string, path?: string): string {
   if (text.length <= MAX_RESULT_CHARS) return text
-  const truncated = text.slice(0, MAX_RESULT_CHARS)
-  const remaining = text.length - MAX_RESULT_CHARS
+  // Back off one UTF-16 code unit when the cut point lands inside a
+  // surrogate pair. Without this, the caller could receive an orphan
+  // high surrogate (0xD800–0xDBFF) that breaks JSON serialisation.
+  let end = MAX_RESULT_CHARS
+  const lastCode = text.charCodeAt(end - 1)
+  if (lastCode >= 0xD800 && lastCode <= 0xDBFF) end--
+  const truncated = text.slice(0, end)
+  const remaining = text.length - end
   const hint = path
-    ? `\n\n[truncated ${remaining} chars — use docs_read with offset/limit or docs_summary to target specific sections of ${path}]`
+    ? `\n\n[truncated ${remaining} chars — use docs_read with offset/lines or docs_summary to target specific sections of ${path}]`
     : `\n\n[truncated ${remaining} chars — narrow your query or add a line limit]`
   return truncated + hint
 }
@@ -41,6 +58,13 @@ async function ssh(command: string): Promise<string> {
   // SSH connection failure (exit 255)
   if (exitCode === 255) {
     return `[error] SSH connection failed: ${errText.trim() || "connection refused or timed out"}`
+  }
+  // Server-side DOCS_CMD_TIMEOUT kill: timeout(1) exits 124 (or 143 when
+  // the child inherits the SIGTERM status). timeout writes no stderr, so
+  // without this branch the agent would see an empty string and not know
+  // the command was killed.
+  if (exitCode === 124 || exitCode === 143) {
+    return `[error] command timed out on the docs server (DOCS_CMD_TIMEOUT). Narrow the query or split into smaller reads.`
   }
   // Remote command error: non-zero exit + empty stdout + stderr message.
   // Catches: find on nonexistent dir, cat on directory, rg on missing path.
@@ -98,7 +122,17 @@ function formatRgMatches(matches: RgMatch[]): string {
       lines.push(m.path)
       lastPath = m.path
     }
-    lines.push(`  ${m.line}: ${m.text}`)
+    // Wrap the matched substring(s) in **…** so agents see exact match
+    // positions without re-scanning the line. Walk submatches back-to-front
+    // to keep earlier byte indices valid while we splice.
+    let text = m.text
+    if (m.submatches && m.submatches.length > 0) {
+      const sorted = [...m.submatches].sort((a, b) => b.start - a.start)
+      for (const s of sorted) {
+        text = text.slice(0, s.start) + "**" + text.slice(s.start, s.end) + "**" + text.slice(s.end)
+      }
+    }
+    lines.push(`  ${m.line}: ${text}`)
   }
   return lines.join("\n")
 }
@@ -118,37 +152,63 @@ export const search = {
   async execute(args: { query: string; source?: string; maxResults?: number }) {
     const limit = args.maxResults ?? 15
     const filter = args.source ? `| rg '^${sq(args.source)}/'` : ""
-    const pipeline = `rg -i '${sq(args.query)}' /docs/_index.tsv ${filter}`
+    // Single-pass: awk prints the first LIMIT rows as they arrive and
+    // emits a truncation footer at END if there were more. One rg
+    // invocation vs the previous two (count + head).
     const result = await ssh(
-      `total=$(${pipeline} | wc -l); ${pipeline} | head -${limit}; [ "$total" -gt ${limit} ] && echo "[showing ${limit} of $total results — refine query or add source filter]"`
+      `rg -i '${sq(args.query)}' /docs/_index.tsv ${filter} | awk -v lim=${limit} '{ n++; if (n<=lim) print } END { if (n>lim) print "[showing "lim" of "n" results — refine query or add source filter]" }'`
     )
+
+    // Fallback: if index search found nothing, try filename + content search
+    if (!result.trim()) {
+      const dir = args.source ? safePath(`/docs/${sq(args.source)}/`) : "/docs/"
+      // Search filenames first (fast), then content
+      const [fileMatch, contentMatch] = await Promise.all([
+        ssh(`find '${dir}' -type f -iname '*${sq(args.query)}*' | head -${limit}`),
+        ssh(`rg -il '${sq(args.query)}' '${dir}' 2>/dev/null | head -${limit}`),
+      ])
+      const combined = [...new Set([...fileMatch.split("\n"), ...contentMatch.split("\n")].filter(Boolean))]
+      if (combined.length) {
+        return `[no index matches — found via filename/content search]\n${combined.slice(0, limit).join("\n")}`
+      }
+      return `[no results for "${args.query}"${args.source ? ` in ${args.source}` : ""}]`
+    }
+
     return result
   },
 }
 
 export const read = {
   description:
-    "Read a documentation file. For large files, use docs_summary first to see the headings, then read with offset/limit to get only the section you need.",
+    "Read a documentation file. For large files, use docs_summary first to see the headings, then read with offset/lines to get only the section you need.",
   args: {
     path: z.string().describe("File path (e.g. /docs/supabase/guides/auth.md)"),
-    lines: z.number().optional().describe("Read N lines. Omit for full file."),
+    lines: z.number().optional().describe("Read N lines. Omit to read to end of file."),
     offset: z.number().optional().describe("Start line (1-indexed)."),
   },
   async execute(args: { path: string; lines?: number; offset?: number }) {
     const p = safePath(args.path)
     let cmd: string
+    const fullFile = !args.offset && !args.lines
 
-    if (args.offset && args.lines) {
-      // bat --line-range is cleaner than sed -n for offset+limit reads
+    if (args.offset) {
+      // offset set (with or without lines). bat's open-ended range
+      // "--line-range=N:" reads from N to end of file; if lines is set
+      // we compute an explicit end. sed fallback uses the same bounds.
       const start = Math.max(1, Math.floor(args.offset))
-      const end = start + Math.floor(args.lines) - 1
-      cmd = `bat --plain --paging=never --color=never --line-range=${start}:${end} '${sq(p)}' 2>/dev/null || sed -n '${start},${end}p' '${sq(p)}'`
+      if (args.lines) {
+        const end = start + Math.floor(args.lines) - 1
+        cmd = `bat --plain --paging=never --color=never --line-range=${start}:${end} '${sq(p)}' 2>/dev/null || sed -n '${start},${end}p' '${sq(p)}'`
+      } else {
+        cmd = `bat --plain --paging=never --color=never --line-range=${start}: '${sq(p)}' 2>/dev/null || sed -n '${start},$p' '${sq(p)}'`
+      }
     } else if (args.lines) {
       cmd = `head -${Math.abs(Math.floor(args.lines))} '${sq(p)}'`
     } else {
-      // bat with line numbers for precise offset references; --decorations=always
-      // forces numbers even when stdout is not a TTY (SSH pipe mode).
-      cmd = `bat --decorations=always --paging=never --color=never --style=numbers '${sq(p)}' 2>/dev/null || cat '${sq(p)}'`
+      // Full-file read: prepend a one-line scale header so the agent
+      // can see file size at a glance and decide whether to narrow
+      // next time (saves tokens on repeated full reads of big files).
+      cmd = `printf '[file] %s lines, %s bytes\\n\\n' "$(wc -l < '${sq(p)}')" "$(wc -c < '${sq(p)}')"; bat --decorations=always --paging=never --color=never --style=numbers '${sq(p)}' 2>/dev/null || cat '${sq(p)}'`
     }
 
     const result = await ssh(cmd)
@@ -219,18 +279,30 @@ export const summary = {
   },
   async execute(args: { path: string }) {
     const p = safePath(args.path)
-    const headings = await ssh(`rg -n '^#' '${sq(p)}'`)
-    const lineCount = await ssh(`wc -l < '${sq(p)}'`)
+    // Dispatch both SSH calls concurrently — each is one round-trip,
+    // and they're independent. Saves one RTT vs serial execution.
+    const [headings, lineCount] = await Promise.all([
+      ssh(`rg -n '^#' '${sq(p)}'`),
+      ssh(`wc -l < '${sq(p)}'`),
+    ])
     return `${lineCount.trim()} lines\n\n${headings}`
   },
 }
 
 export const sources = {
   description: "List all available documentation sources and their file counts.",
-  args: {},
-  async execute() {
+  args: {
+    filter: z.string().optional().describe("Filter source names (e.g. 'postgres', 'supabase')"),
+  },
+  async execute(args: { filter?: string }) {
+    const filterCmd = args.filter ? ` | rg -i '${sq(args.filter)}'` : ""
+    // Single find → awk group-by source dir. Previously spawned one
+    // find per source (139 subshells on prod) inside a shell for-loop.
+    // -mindepth 2 excludes /docs/_index.tsv and other root-level
+    // metadata files. Sources with 0 files don't appear in the count
+    // map; they're rare in prod but we note the hint anyway.
     return ssh(
-      `for d in /docs/*/; do name=$(basename "$d"); count=$(find "$d" -type f | wc -l); echo "$name: $count files"; done`,
+      `find /docs -mindepth 2 -type f 2>/dev/null | awk -F/ '{c[$3]++} END{for (d in c) printf "%s: %d files\\n", d, c[d]}' | sort${filterCmd}`,
     )
   },
 }
