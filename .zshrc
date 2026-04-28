@@ -178,3 +178,6 @@ if (( ${#_missing_tools} )); then
   print -P "%F{yellow}[dotfiles]%f missing tools: ${(j:, :)_missing_tools} — install for full shell experience"
 fi
 unset _missing_tools
+
+# bun completions
+[ -s "/home/erfi/.bun/_bun" ] && source "/home/erfi/.bun/_bun"

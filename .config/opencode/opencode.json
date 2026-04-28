@@ -1,33 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "autoupdate": false,
-  "provider": {
-    "llama-server": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "llama.cpp (local)",
-      "options": {
-        "baseURL": "http://localhost:11434/v1"
-      },
-      "models": {
-        "gemma-4-31B-it-Q4_K_M": {
-          "name": "Gemma 4 31B Dense (local)",
-          "attachment": true,
-          "modalities": {
-            "input": ["text", "image"],
-            "output": ["text"]
-          }
-        },
-        "gemma-4-26b-a4b-it-Q4_K_M": {
-          "name": "Gemma 4 26B MoE (local)",
-          "attachment": true,
-          "modalities": {
-            "input": ["text", "image"],
-            "output": ["text"]
-          }
-        }
-      }
-    }
-  },
   "mcp": {
     "cloudflare-docs": {
       "type": "remote",
