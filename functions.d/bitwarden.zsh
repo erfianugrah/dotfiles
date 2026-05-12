@@ -248,6 +248,15 @@ _bw_load_items() {
         bw_serve_start || return 1
     fi
 
+    # Always sync first so newly-added vault items are visible. bw serve
+    # caches the local DB and the `?search=...` endpoint silently returns
+    # 0 results for items added since the last sync, which makes _bw_get
+    # fail with "No value found" even though the item is in the web vault.
+    bw_serve_sync >/dev/null 2>&1 || print -u2 "[bw] sync failed, using stale cache"
+    # Sync clears the in-memory cache; ensure we drop it too so the next
+    # _bw_get re-fetches.
+    clear_bw_cache >/dev/null 2>&1
+
     for item in "${items[@]}"; do
         bw_name=${item%|*}
         env_name=${item#*|}
