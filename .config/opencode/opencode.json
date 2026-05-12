@@ -20,7 +20,11 @@
     },
     "mermaid": {
       "type": "local",
-      "command": ["npx", "-y", "@peng-shawn/mermaid-mcp-server"],
+      "command": [
+        "npx",
+        "-y",
+        "@peng-shawn/mermaid-mcp-server"
+      ],
       "environment": {
         "CONTENT_IMAGE_SUPPORTED": "false"
       },
@@ -28,12 +32,20 @@
     },
     "terraform": {
       "type": "local",
-      "command": ["npx", "-y", "terraform-mcp-server"],
+      "command": [
+        "npx",
+        "-y",
+        "terraform-mcp-server"
+      ],
       "enabled": false
     },
     "shadcn": {
       "type": "local",
-      "command": ["npx", "-y", "shadcn-ui-mcp-server"],
+      "command": [
+        "npx",
+        "-y",
+        "shadcn-ui-mcp-server"
+      ],
       "enabled": false
     },
     "supabase": {
@@ -50,7 +62,10 @@
     },
     "whisper": {
       "type": "local",
-      "command": ["python3", "/home/erfi/llm-compose/mcp/whisper-server.py"],
+      "command": [
+        "python3",
+        "/home/erfi/llm-compose/mcp/whisper-server.py"
+      ],
       "environment": {
         "WHISPER_URL": "http://localhost:7860"
       },
@@ -59,11 +74,14 @@
     },
     "research": {
       "type": "local",
-      "command": ["python3", "/home/erfi/research/mcp/research-server.py"],
+      "command": [
+        "python3",
+        "/home/erfi/research/mcp/research-server.py"
+      ],
       "environment": {
-        "SEARXNG_URL": "http://localhost:8888",
-        "CRAWLER_URL": "http://localhost:8889",
-        "OSINT_URL":   "http://localhost:8890"
+        "SEARXNG_URL": "https://searxng.erfi.io",
+        "CRAWLER_URL": "https://crawler.erfi.io",
+        "OSINT_URL":   "https://osint.erfi.io"
       },
       "timeout": 120000,
       "enabled": true
