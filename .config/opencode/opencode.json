@@ -47,6 +47,26 @@
       "url": "https://mcp.vercel.com",
       "enabled": false,
       "oauth": {}
+    },
+    "whisper": {
+      "type": "local",
+      "command": ["python3", "/home/erfi/llm-compose/mcp/whisper-server.py"],
+      "environment": {
+        "WHISPER_URL": "http://localhost:7860"
+      },
+      "timeout": 120000,
+      "enabled": true
+    },
+    "research": {
+      "type": "local",
+      "command": ["python3", "/home/erfi/research/mcp/research-server.py"],
+      "environment": {
+        "SEARXNG_URL": "http://localhost:8888",
+        "CRAWLER_URL": "http://localhost:8889",
+        "OSINT_URL":   "http://localhost:8890"
+      },
+      "timeout": 120000,
+      "enabled": true
     }
   }
 }
