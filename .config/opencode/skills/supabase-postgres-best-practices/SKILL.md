@@ -4,10 +4,10 @@ description: Postgres performance optimization and best practices from Supabase.
 license: MIT
 metadata:
   author: supabase
-  version: "1.2.0"
+  version: "1.3.0"
   organization: Supabase
-  date: May 2026
-  abstract: Postgres performance optimization guide. Rules across 8 categories prioritized by impact. Includes correct/incorrect SQL examples, query plan analysis, performance metrics.
+  date: November 2026
+  abstract: Postgres performance optimization guide. Rules across 8 categories prioritized by impact. Includes correct/incorrect SQL examples, query plan analysis, performance metrics, index-type selection matrix.
 ---
 
 # Postgres Best Practices
@@ -41,11 +41,29 @@ Performance optimization guide for Postgres. Rules across 8 categories, prioriti
 ### Query Performance (CRITICAL)
 - Index FKs + columns in WHERE/JOIN/ORDER BY
 - Partial indexes for filtered queries (`WHERE deleted_at IS NULL`)
-- No `SELECT *` — select needed columns only
-- `EXPLAIN (ANALYZE, BUFFERS)` for slow queries
+- Covering indexes (`INCLUDE (col1, col2)`) enable `Index Only Scan` — skip the heap fetch entirely
+- No `SELECT *` — select needed columns only. Extra cost when rows have large TOASTed columns (`jsonb`, big `text`) — TOAST fetch is a separate read.
+- `EXPLAIN (ANALYZE, BUFFERS)` for slow queries. Big mismatch between estimated and actual rows → run `ANALYZE table_name;` to refresh planner stats.
+- `auto_explain` extension + `auto_explain.log_min_duration = '500ms'` logs slow query plans automatically in production.
 - `EXISTS` over `COUNT` for existence checks
-- No fns on indexed columns in WHERE (prevents index use)
+- No fns on indexed columns in WHERE (prevents index use). Workaround: expression index, e.g. `CREATE INDEX ON users (lower(email));`
 - **Cap string inputs that feed `tsvector` / GIN indexes.** Unbounded `text` columns indexed by GIN bloat the index quickly. Enforce limits at the app layer (Zod `.max(N)`) and/or with a CHECK constraint.
+
+### Index type selection (pick the right access method)
+
+| Pattern | Index type |
+|---|---|
+| `=`, `<`, `>`, `BETWEEN`, prefix `LIKE 'foo%'`, sort | **B-tree** (default) |
+| `WHERE tags @> ARRAY['x']`, array containment/overlap | **GIN** |
+| `WHERE doc @> '{"k":"v"}'::jsonb`, JSON path lookups | **GIN** (`jsonb_path_ops` op class) |
+| `WHERE search @@ to_tsquery(...)` full-text search | **GIN** on the `tsvector` column |
+| `WHERE name ILIKE '%mid%'`, fuzzy match | **GIN** with `pg_trgm` ops |
+| `ORDER BY embedding <-> '[...]'::vector LIMIT k` | **HNSW** (pgvector) — beats ivfflat on recall + build time |
+| Spatial / geometric / range types | **GiST** |
+| Huge append-only time-series table | **BRIN** on the timestamp + range partitioning |
+| Non-overlapping partitions (IPs, quadtree points) | **SP-GiST** |
+
+A trailing `pg_trgm` GIN index makes `ILIKE '%foo%'` index-driven instead of seq-scanning.
 
 ### Connection Management (CRITICAL)
 - Use connection pooling (PgBouncer/Supabase pooler) — no unbounded connections
@@ -67,24 +85,28 @@ Performance optimization guide for Postgres. Rules across 8 categories, prioriti
 ### Schema Design (HIGH)
 - Types: `uuid` for IDs, `timestamptz` over `timestamp`, `text` over `varchar(n)`
 - Prefer `NOT NULL`
-- `GENERATED ALWAYS AS IDENTITY` over `SERIAL`
+- `GENERATED ALWAYS AS IDENTITY` over `SERIAL` — the database owns the value; manual inserts rejected unless explicitly overridden. `SERIAL` lets app code corrupt the sequence by inserting an explicit ID.
 - Normalize to 3NF unless denormalization justified by perf
 - Check constraints for business rules at DB level
+- **JSONB column with huge documents → TOAST.** Any row whose values exceed ~2 KB triggers compression + out-of-line storage in `pg_toast.pg_toast_<oid>`. Fine, but: (a) `SELECT *` on rows with TOASTed columns is more expensive than expected — name the columns you actually need; (b) GIN-indexed JSONB churn bloats both the TOAST table and the GIN index fast — cap row size with `CHECK (octet_length(doc) < 1_000_000)`; (c) when only a few JSON paths are queried, a partial / expression GIN on those paths is leaner than indexing the whole column.
 - **`NOT NULL DEFAULT gen_random_uuid()`** for any secret-token column. Combine with an inverted app-side guard (`if (!storedToken || storedToken !== ownerToken)`) so a future schema drift can't be exploited as defense-in-depth.
 - **Triggers should use `WHEN (OLD.col IS DISTINCT FROM NEW.col)`** for value-change detection, not `UPDATE OF col`. The latter fires on column presence in the SET clause, which means `upsert()` (which sends all columns) triggers on every read-count increment. `IS DISTINCT FROM` is NULL-safe (unlike `<>`) and only fires on actual value change.
+- **Sequences don't reset on `DELETE`.** If you `DELETE FROM users` and re-insert, IDs continue from where they left off (next free `nextval`). Reset explicitly when needed: `ALTER SEQUENCE users_id_seq RESTART WITH 1;`. Almost never desired in production — old IDs may still be referenced in logs, FKs, external systems.
 
 ### Concurrency & Locking (MEDIUM-HIGH)
-- `SELECT ... FOR UPDATE SKIP LOCKED` for queue patterns
+- `SELECT ... FOR UPDATE SKIP LOCKED` for queue patterns — drop-in in-DB replacement for Redis-Streams / RabbitMQ for moderate-throughput job queues. No deadlocks, no waiting; each worker grabs the next available row.
 - **`SELECT ... FOR UPDATE`** (without SKIP LOCKED) for atomic counter-increments and burn-after-reading patterns — exactly-once read semantics:
   ```sql
   -- Inside a SECURITY DEFINER function:
   SELECT * INTO row FROM paste WHERE id = paste_id FOR UPDATE;
   -- check, increment read_count, optional DELETE — all under the row lock
   ```
-- No long transactions holding locks
-- Advisory locks for app-level mutual exclusion
+- **No long transactions holding locks.** They also block autovacuum from reclaiming dead tuples newer than the oldest live snapshot — long idle txn = table bloat. Monitor with `pg_stat_activity`; set `idle_in_transaction_session_timeout`.
+- Advisory locks for app-level mutual exclusion (`pg_advisory_lock(key)`) — cheap, session-scoped, no schema needed
 - `INSERT ... ON CONFLICT DO UPDATE` (upsert) over separate SELECT + INSERT
+- `INSERT ... ON CONFLICT DO NOTHING` for idempotent inserts (event ingestion, dedup) — requires a unique/PK constraint on the conflict target
 - **Catch unique-violation `23505` in the app layer**, translate to typed HTTP 409. Pre-check-then-insert is a TOCTOU race; the second writer hits the constraint and the raw Postgres error message ("duplicate key value violates unique constraint…") propagates as 500 unless you intercept it.
+- **DDL in Postgres is transactional.** Wrap multi-step migrations in `BEGIN…COMMIT`; if the third `ALTER TABLE` fails, the first two roll back. (MySQL does not do this — easy to forget which DB you're targeting.)
 
 ### Data Access Patterns (MEDIUM)
 - Batch inserts: `COPY` or multi-row `INSERT` over individual inserts
@@ -104,10 +126,12 @@ Performance optimization guide for Postgres. Rules across 8 categories, prioriti
 
 ### Monitoring & Diagnostics (LOW-MEDIUM)
 - `pg_stat_statements` for slow query analysis
-- `pg_stat_user_tables` for high sequential scan tables
+- `pg_stat_user_tables` for high sequential scan tables (`seq_scan` >> `idx_scan` → missing index)
 - `pg_stat_bgwriter` for checkpoint tuning
-- `auto_explain` for automatic slow query plan logging
+- `auto_explain` for automatic slow query plan logging — set `log_min_duration = '500ms'`
+- `pg_stat_activity` to find long-running txns + locks (filter `state = 'idle in transaction'`)
 - **pg-cron job health**: `cron.job_run_details` has every run's exit status. Add an external uptime ping or scheduled query that alerts on `status != 'succeeded'` rows in the last hour — pg-cron failures are silent otherwise.
+- **MVCC bloat watch**: `pg_stat_user_tables.n_dead_tup` shows dead tuple count per table. If it climbs faster than autovacuum can clear it, drop the per-table `autovacuum_vacuum_scale_factor` or look for a long-running transaction blocking vacuum.
 
 ### pg-cron expiry / cleanup jobs (HIGH operational impact)
 
@@ -141,10 +165,14 @@ pg-cron picks up the rest on the next cycle. Rows past `expires_at` are not user
 - **3-layer defence-in-depth** when broadcasting from a trigger: filter at the trigger (`IF NEW.visibility = 'public' THEN ...`), curate the payload (whitelist safe fields, never `content`/`delete_token`/`user_id`), and RLS on `realtime.messages` to restrict subscribers to the exact topic. Even if the trigger or schema later regresses, the RLS layer holds.
 
 ### Advanced Features (LOW)
-- `LISTEN` / `NOTIFY` for cross-connection signalling — but PostgREST schema cache reload via `NOTIFY pgrst, 'reload schema'` is the only commonly-used case.
-- `pg_vector` for embedding storage; HNSW index for cosine/inner-product search at scale.
+- `LISTEN` / `NOTIFY` for cross-connection signalling — payload ≤8000 bytes, not durable (lost if no listener), delivered post-COMMIT. PostgREST schema cache reload via `NOTIFY pgrst, 'reload schema'` is the canonical use; Supabase Realtime Broadcast also rides this rail. Don't use it as a durable queue.
+- `pg_vector` for embedding storage; **HNSW index** for cosine/inner-product/L2 search at scale — better speed-recall tradeoff than ivfflat (at the cost of slower build + more memory). Op classes: `vector_cosine_ops` / `vector_l2_ops` / `vector_ip_ops` / `vector_l1_ops`; `halfvec_*` variants for half-precision; `bit_hamming_ops` / `bit_jaccard_ops` for bit vectors. Tune `hnsw.ef_search` (default 40) at query time for recall vs latency.
 - `pg_graphql` for GraphQL-over-Postgres exposed via PostgREST — gated by RLS automatically.
 - Generated columns (`STORED`) for derived tsvector / hash / etc. — keeps the derived value consistent with source columns without app-side coordination.
+- **PostgREST** turns the schema into a REST API automatically. Combined with RLS, deletes ~80% of typical CRUD backend code. Trade-off: complex business logic pushes you toward SQL functions + views, which some teams resist.
+- **Foreign Data Wrappers** (`postgres_fdw`, `mysql_fdw`, `file_fdw`, …) mount external sources as tables for federated queries. Good for read-only joins across systems and gradual migrations; watch `EXPLAIN` to confirm WHERE/JOIN pushdown to the remote side.
+- **BRIN + declarative partitioning** for time-series at scale. Partition `events` by month; BRIN index on `created_at` is tiny and skips entire blocks during range scans. Far cheaper than B-tree on multi-billion-row append-only tables.
+- **Materialized views + `REFRESH MATERIALIZED VIEW CONCURRENTLY`** for expensive dashboard aggregations. Requires a unique index on the view to enable the concurrent refresh (otherwise readers are blocked during refresh).
 
 ## References
 
