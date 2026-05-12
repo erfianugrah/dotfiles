@@ -10,7 +10,27 @@ function sq(s: string): string {
   return s.replace(/'/g, "'\\''")
 }
 
+// Agents frequently call docs_read/docs_summary/docs_grep with
+// 'filePath' (the built-in Read/Edit tool's arg name) instead of
+// 'path'. Accepting both prevents a confusing crash and keeps the
+// agent's flow moving. Prefer 'path' when both are provided.
+function resolvePath(args: { path?: string; filePath?: string }): string {
+  const v = args.path ?? args.filePath
+  if (typeof v !== "string" || v.length === 0) {
+    throw new Error("'path' is required (alias: 'filePath').")
+  }
+  return v
+}
+
 function safePath(p: string): string {
+  // Defensive guard: agents sometimes pass undefined here when they
+  // confuse this tool's 'path' arg with the built-in Read/Edit tools'
+  // 'filePath' arg. Without this, we crash on cleaned.replace(...) with
+  // an opaque "undefined is not an object" error. resolvePath() should
+  // have normalised aliases before we get here; this is the safety net.
+  if (typeof p !== "string" || p.length === 0) {
+    throw new Error("path is required (string). Did you mean to pass 'path' (not 'filePath')?")
+  }
   // Strip traversal segments only — ../ and ..\ — not bare '..' which
   // appears in legitimate filenames (e.g. MDN's do...while/index.md).
   // Loop until stable so stacked patterns like ....// collapse fully.
@@ -182,12 +202,14 @@ export const read = {
   description:
     "Read a documentation file. For large files, use docs_summary first to see the headings, then read with offset/lines to get only the section you need.",
   args: {
-    path: z.string().describe("File path (e.g. /docs/supabase/guides/auth.md)"),
+    path: z.string().optional().describe("File path (e.g. /docs/supabase/guides/auth.md)"),
+    filePath: z.string().optional().describe("Alias for 'path'. Accepted for compatibility with built-in Read tool."),
     lines: z.number().optional().describe("Read N lines. Omit to read to end of file."),
     offset: z.number().optional().describe("Start line (1-indexed)."),
   },
-  async execute(args: { path: string; lines?: number; offset?: number }) {
-    const p = safePath(args.path)
+  async execute(args: { path?: string; filePath?: string; lines?: number; offset?: number }) {
+    const argPath = resolvePath(args)
+    const p = safePath(argPath)
     let cmd: string
     const fullFile = !args.offset && !args.lines
 
@@ -212,7 +234,7 @@ export const read = {
     }
 
     const result = await ssh(cmd)
-    return capOutput(result, args.path)
+    return capOutput(result, argPath)
   },
 }
 
@@ -237,12 +259,14 @@ export const grep = {
     "More detailed than docs_search — shows actual content around matches.",
   args: {
     query: z.string().describe("Regex pattern to search for"),
-    path: z.string().describe("File or dir path (e.g. /docs/postgres/)"),
+    path: z.string().optional().describe("File or dir path (e.g. /docs/postgres/)"),
+    filePath: z.string().optional().describe("Alias for 'path'."),
     context: z.number().optional().describe("Context lines per match (default: 3)"),
   },
-  async execute(args: { query: string; path: string; context?: number }) {
+  async execute(args: { query: string; path?: string; filePath?: string; context?: number }) {
     const ctx = Math.abs(Math.floor(args.context ?? 3))
-    const p = safePath(args.path)
+    const argPath = resolvePath(args)
+    const p = safePath(argPath)
 
     // Count total matches in parallel with fetching results
     const [jsonResult, countResult] = await Promise.all([
@@ -258,7 +282,7 @@ export const grep = {
       if (matches.length > 0) {
         const formatted = formatRgMatches(matches)
         const countNote = total > matches.length ? ` (showing ${matches.length} of ${total})` : ""
-        return capOutput(`${matches.length}${countNote} matches\n\n${formatted}`, args.path)
+        return capOutput(`${matches.length}${countNote} matches\n\n${formatted}`, argPath)
       }
     }
 
@@ -267,9 +291,9 @@ export const grep = {
       `rg -in -C${ctx} '${sq(args.query)}' '${sq(p)}' | head -100`
     )
     if (!plainResult.trim()) {
-      return `[no matches for "${args.query}" in ${args.path}]`
+      return `[no matches for "${args.query}" in ${argPath}]`
     }
-    return capOutput(plainResult, args.path)
+    return capOutput(plainResult, argPath)
   },
 }
 
@@ -278,10 +302,11 @@ export const summary = {
     "Get the structure/outline of a documentation file — headings and section names. " +
     "Use this before docs_read to find the right section to read, saving tokens.",
   args: {
-    path: z.string().describe("File path (e.g. /docs/supabase/guides/auth.md)"),
+    path: z.string().optional().describe("File path (e.g. /docs/supabase/guides/auth.md)"),
+    filePath: z.string().optional().describe("Alias for 'path'."),
   },
-  async execute(args: { path: string }) {
-    const p = safePath(args.path)
+  async execute(args: { path?: string; filePath?: string }) {
+    const p = safePath(resolvePath(args))
     // Dispatch all three SSH calls concurrently — each is one
     // round-trip and they're independent. Saves two RTTs vs serial.
     const [headings, lineCount, byteCount] = await Promise.all([
