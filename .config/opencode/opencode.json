@@ -72,6 +72,33 @@
       "timeout": 120000,
       "enabled": true
     },
+    "comfyui": {
+      "type": "local",
+      "command": [
+        "python3",
+        "/home/erfi/llm-compose/mcp/comfyui-server.py"
+      ],
+      "environment": {
+        "COMFYUI_PROXY_URL": "http://localhost:11434",
+        "COMFYUI_OUTPUT_DIR": "/home/erfi/docker-volumes/comfyui/output"
+      },
+      "timeout": 120000,
+      "enabled": true
+    },
+    "lora-train": {
+      "type": "local",
+      "command": [
+        "python3",
+        "/home/erfi/llm-compose/mcp/train-server.py"
+      ],
+      "environment": {
+        "TRAIN_PROXY_URL": "http://localhost:11434",
+        "TRAIN_OUTPUT_DIR": "/home/erfi/docker-volumes/training-data/output",
+        "LORAS_DIR": "/home/erfi/docker-volumes/comfyui/models/loras"
+      },
+      "timeout": 120000,
+      "enabled": true
+    },
     "research": {
       "type": "local",
       "command": [
