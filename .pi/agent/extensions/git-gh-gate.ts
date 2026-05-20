@@ -1,0 +1,130 @@
+/**
+ * git-gh-gate — confirm before any mutating git/gh command + protect .git
+ * internals from direct writes. Ports the opencode fork's permission gate
+ * (commit 560a2b983) to Pi.
+ *
+ * Two runtime layers of protection (this file) + one config layer (APPEND_SYSTEM.md):
+ *
+ * 1. Bash patterns — every mutating git subcommand (commit, push, reset,
+ *    rebase, merge, revert, tag, checkout, restore, switch, clean, am,
+ *    apply, rm, mv, filter-*, update-ref, config, remote add/remove/set-url,
+ *    submodule, worktree) and every gh mutation (pr, issue, release, repo,
+ *    gist, api, auth, secret, variable, workflow, run) prompts before run.
+ *    Read-only commands stay unblocked.
+ *
+ * 2. .git path protection — write/edit tools on .git internals (COMMIT_EDITMSG,
+ *    hooks, refs, config) prompt. Prevents bypassing the bash gate by editing
+ *    .git files directly.
+ *
+ * The third layer — banning Co-Authored-By trailers, "Generated with..."
+ * footers, and AI-attribution signatures in commit messages and PR bodies —
+ * lives in ~/.pi/agent/APPEND_SYSTEM.md (Pi reads it at startup and appends
+ * to the system prompt). See that file for the prompt content.
+ */
+
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+// ── git/gh bash patterns that require confirmation ─────────────────────────
+// Each pattern matches a command prefix. Tested against the full bash input.
+const GIT_GH_PATTERNS: RegExp[] = [
+  // git mutations
+  /^\s*git\s+commit\b/i,
+  /^\s*git\s+push\b/i,
+  /^\s*git\s+reset\b/i,
+  /^\s*git\s+rebase\b/i,
+  /^\s*git\s+merge\b/i,
+  /^\s*git\s+revert\b/i,
+  /^\s*git\s+cherry-pick\b/i,
+  /^\s*git\s+tag\b/i,
+  /^\s*git\s+branch\s+.*-[dD]\b/i,
+  /^\s*git\s+branch\s+.*--delete\b/i,
+  /^\s*git\s+stash\s+(drop|clear|pop)\b/i,
+  /^\s*git\s+checkout\b/i,
+  /^\s*git\s+restore\b/i,
+  /^\s*git\s+switch\b/i,
+  /^\s*git\s+clean\b/i,
+  /^\s*git\s+am\b/i,
+  /^\s*git\s+apply\b/i,
+  /^\s*git\s+rm\b/i,
+  /^\s*git\s+mv\b/i,
+  /^\s*git\s+filter-(branch|repo)\b/i,
+  /^\s*git\s+update-ref\b/i,
+  /^\s*git\s+config\b/i,
+  /^\s*git\s+remote\s+(add|remove|set-url)\b/i,
+  /^\s*git\s+submodule\b/i,
+  /^\s*git\s+worktree\s+(add|remove)\b/i,
+
+  // gh mutations — PR
+  /^\s*gh\s+pr\s+(create|edit|merge|close|review|comment|ready|reopen)\b/i,
+  // gh mutations — Issue
+  /^\s*gh\s+issue\s+(create|edit|close|comment|reopen)\b/i,
+  // gh mutations — Release
+  /^\s*gh\s+release\s+(create|edit|delete|upload)\b/i,
+  // gh mutations — Repo
+  /^\s*gh\s+repo\s+(create|edit|delete|rename|archive|fork|clone)\b/i,
+  // gh mutations — Gist
+  /^\s*gh\s+gist\s+(create|edit|delete)\b/i,
+  // gh — auth / api / secrets / variables / keys
+  /^\s*gh\s+(api|auth|secret|variable|ssh-key|gpg-key)\b/i,
+  // gh — workflow / run mutations
+  /^\s*gh\s+workflow\s+(run|enable|disable)\b/i,
+  /^\s*gh\s+run\s+(cancel|rerun|delete)\b/i,
+];
+
+// ── .git internal paths that should never be written/edited directly ───────
+const GIT_INTERNAL_PATTERNS: RegExp[] = [/(^|\/)\.git(\/|$)/];
+
+// ── tools that write/edit files we want to gate ────────────────────────────
+const WRITE_TOOLS = new Set(["write", "edit", "apply_patch"]);
+
+function matchesBashGate(command: string): RegExp | undefined {
+  return GIT_GH_PATTERNS.find((p) => p.test(command));
+}
+
+function matchesGitInternal(path: string): boolean {
+  return GIT_INTERNAL_PATTERNS.some((p) => p.test(path));
+}
+
+export default function (pi: ExtensionAPI) {
+  // Block/confirm bash + write/edit tool calls
+  pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName === "bash") {
+      const command = (event.input as { command?: string }).command;
+      if (typeof command !== "string") return undefined;
+      const match = matchesBashGate(command);
+      if (!match) return undefined;
+
+      if (!ctx.hasUI) {
+        return { block: true, reason: `Mutating git/gh command blocked (no UI). Matched: ${match.source}` };
+      }
+
+      const choice = await ctx.ui.select(`⚠️  Mutating git/gh command:\n\n  ${command}\n\nAllow?`, ["Yes", "No"]);
+      if (choice !== "Yes") {
+        return { block: true, reason: "Blocked by user" };
+      }
+      return undefined;
+    }
+
+    if (WRITE_TOOLS.has(event.toolName)) {
+      const filePath = (event.input as { file_path?: string; path?: string }).file_path ??
+                       (event.input as { path?: string }).path;
+      if (typeof filePath !== "string") return undefined;
+      if (!matchesGitInternal(filePath)) return undefined;
+
+      if (!ctx.hasUI) {
+        return { block: true, reason: `Write to .git internals blocked (no UI): ${filePath}` };
+      }
+
+      const choice = await ctx.ui.select(
+        `⚠️  Writing to .git internals:\n\n  ${filePath}\n\nAllow?`,
+        ["Yes", "No"],
+      );
+      if (choice !== "Yes") {
+        return { block: true, reason: "Blocked by user" };
+      }
+      return undefined;
+    }
+
+    return undefined;
+  });
+}

@@ -1,0 +1,82 @@
+{
+  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open — no restart needed. Source of truth for llm-compose model list: ~/llm-compose/models/*.toml",
+  "providers": {
+    "llama-server": {
+      "$comment": "llm-compose proxy on localhost:11434 — auto-swaps GPU between llama.cpp and ComfyUI. Models are llama.cpp via OpenAI-compatible API. apiKey ignored by proxy but Pi requires the field.",
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "apiKey": "llmc",
+      "compat": {
+        "$comment": "llama.cpp's OpenAI server does not implement developer role or reasoning_effort. Disable both at provider level so Pi sends sane requests.",
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        {
+          "id": "gemma4",
+          "name": "Gemma 4 31B Dense — multimodal, vision, thinking",
+          "contextWindow": 65536,
+          "input": ["text", "image"],
+          "reasoning": true,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "qwen3-coder",
+          "name": "Qwen3 Coder 30B — coding, fast, direct",
+          "contextWindow": 131072,
+          "input": ["text"],
+          "reasoning": false,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "qwen3-vl",
+          "name": "Qwen3-VL 2B — vision, image/video description",
+          "contextWindow": 32768,
+          "input": ["text", "image"],
+          "reasoning": false,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "qwen3",
+          "name": "Qwen3 32B Dense — reasoning, tools, thinking",
+          "contextWindow": 40960,
+          "input": ["text"],
+          "reasoning": true,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "qwen36",
+          "name": "Qwen3.6 27B Dense — coding, vision, thinking",
+          "contextWindow": 163840,
+          "input": ["text", "image"],
+          "reasoning": true,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "qwen36-moe",
+          "name": "Qwen3.6 35B MoE — coding, vision, thinking, fast",
+          "contextWindow": 163840,
+          "input": ["text", "image"],
+          "reasoning": true,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "qwen36-moe-uncensored",
+          "name": "Qwen3.6 35B Uncensored — creative, vision, thinking",
+          "contextWindow": 163840,
+          "input": ["text", "image"],
+          "reasoning": true,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "summarizer",
+          "name": "Gemma 4 26B-A4B — 128K context, accurate MoE summarization",
+          "contextWindow": 131072,
+          "input": ["text"],
+          "reasoning": false,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
