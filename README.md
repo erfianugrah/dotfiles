@@ -40,6 +40,10 @@ packages/
 
 bin/
   caddyfmt                     # Caddyfile formatter (Python, stdin/stdout)
+  superpowers-sync             # sync obra/superpowers skills/ into .config/opencode/skills/superpowers/
+                               # → see .config/opencode/skills/superpowers/.sync.json for ref/sha/timestamp
+                               # → opencode fork (erfianugrah/opencode) has built-in conditional injection
+                               # → run with --status, --check, --ref <tag|sha>, --main, or --help
 
 .config/
   atuin/config.toml            # Atuin shell history (self-hosted sync)
