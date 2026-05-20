@@ -1,0 +1,100 @@
+# Pi setup — `~/.pi/agent/`
+
+This directory holds the Pi (pi.dev / earendil-works/pi-coding-agent) configuration
+ported from the opencode fork. Most files are symlinks back to source-of-truth
+locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
+`~/dotfiles/.pi/agent/` (Pi-specific).
+
+## What's here
+
+```
+~/.pi/agent/
+├── AGENTS.md          → ~/dotfiles/.config/opencode/AGENTS.md (shared with opencode)
+├── APPEND_SYSTEM.md   → ~/dotfiles/.pi/agent/APPEND_SYSTEM.md (commit/safety rules)
+├── models.json        → ~/dotfiles/.pi/agent/models.json (llama-server + 8 local models)
+├── skills/            → ~/.config/opencode/skills (zero-copy: 21 skills reused)
+├── extensions/        contains 7 symlinks to ~/dotfiles/.pi/agent/extensions/
+├── prompts/           contains symlinks to ~/dotfiles/.pi/agent/prompts/
+├── auth.json          (NOT tracked — runtime auth state)
+├── sessions/          (NOT tracked — session JSONL files)
+└── memories.json      (NOT tracked — populated by memory extension)
+```
+
+## Extensions
+
+| Extension | Purpose | Maps to opencode fork commit |
+|---|---|---|
+| `git-gh-gate.ts` | Confirms mutating git/gh commands; protects `.git/` from direct writes | 560a2b983 |
+| `oci-tags.ts` | Query OCI registries for image tags | 8cf0f6b87 |
+| `memory.ts` | Cross-session persistent memory + per-turn injection | ffab004ea |
+| `session-search.ts` | Substring search across past Pi sessions | f9f58da11 |
+| `superpowers.ts` | Intent-gated injection of obra/superpowers methodology | f8eedb720 |
+| `local-model-rules.ts` | Per-model rules for gemma/qwen (LaTeX ban, parallelism, anti-loop) | gemma.txt routing |
+| `style-toggle.ts` | `/style` command for terse ↔ socratic output style | 4069bab24 |
+
+## Skills
+
+| Skill | Source | Purpose |
+|---|---|---|
+| `supabase` | dotfiles | Supabase SDK + RLS + Auth patterns |
+| `supabase-postgres-best-practices` | dotfiles | Postgres perf + schema design |
+| `superpowers/` (14 subskills) | obra/superpowers v5.1.0 via `superpowers-sync` | Methodology pack |
+| `whisper` | dotfiles | whisper-transcribe HTTP API on localhost:7860 |
+| `comfyui` | dotfiles | ComfyUI via llm-compose proxy on localhost:11434 |
+| `lora-train` | dotfiles | kohya sd-scripts via proxy on localhost:11434 |
+| `research` | dotfiles | SearXNG + crawler + OSINT toolkit |
+| `gh-search` | dotfiles | GitHub code/issue/PR/repo search via `gh` CLI |
+
+## What's intentionally NOT in this directory
+
+- **Sessions**: per-machine state. Migrated from opencode via `bin/opencode-to-pi-sessions`.
+- **Auth**: `auth.json` is runtime — log in via `pi /login` or env var.
+- **Memories**: `memories.json` is per-machine personal context. Don't sync.
+- **Image compression extension**: deferred. Pi/Anthropic handles up to 5MB images natively; opencode's jsquash compression saves tokens but isn't critical. Add as Pi package when needed.
+
+## Daily workflow
+
+```bash
+pi                          # start interactive TUI
+pi -p "quick question"      # one-shot non-interactive
+
+# Sessions
+pi -r                       # browse migrated + new sessions
+pi -c                       # continue most recent
+
+# Customize
+/style                      # toggle terse ↔ socratic
+/skill:test-driven-development  # explicitly load a skill
+/model                      # switch model
+```
+
+## Migrating new opencode work to Pi
+
+When you create new opencode sessions you want to bring across:
+
+```bash
+~/dotfiles/bin/opencode-to-pi-sessions --db prod    # re-runs, skips existing
+```
+
+## Customising further
+
+Edit the source-of-truth files in `~/dotfiles/.pi/agent/`. Pi hot-reloads:
+
+```
+/reload                     # in TUI, reloads extensions / skills / prompts
+```
+
+## Useful env
+
+```bash
+SUPERPOWERS_OFF=1           # disable superpowers injection
+SUPERPOWERS_BOOTSTRAP=...   # custom using-superpowers SKILL.md path
+PI_OFFLINE=1                # disable startup network checks (update + telemetry)
+PI_SKIP_VERSION_CHECK=1     # only disable the version-check ping
+```
+
+## See also
+
+- Pi docs: `/opt/pi-coding-agent/docs/` (extensions.md, skills.md, models.md, etc.)
+- Pi examples: `/opt/pi-coding-agent/examples/extensions/`
+- Upstream: https://pi.dev / https://github.com/earendil-works/pi

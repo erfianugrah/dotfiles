@@ -75,7 +75,9 @@ const GIT_GH_PATTERNS: RegExp[] = [
 const GIT_INTERNAL_PATTERNS: RegExp[] = [/(^|\/)\.git(\/|$)/];
 
 // ── tools that write/edit files we want to gate ────────────────────────────
-const WRITE_TOOLS = new Set(["write", "edit", "apply_patch"]);
+// Pi's built-in mutating tools: write, edit. (No apply_patch in Pi core.)
+// Custom tools that mutate files should also be added here as you discover them.
+const WRITE_TOOLS = new Set(["write", "edit"]);
 
 function matchesBashGate(command: string): RegExp | undefined {
   return GIT_GH_PATTERNS.find((p) => p.test(command));
@@ -106,8 +108,10 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (WRITE_TOOLS.has(event.toolName)) {
-      const filePath = (event.input as { file_path?: string; path?: string }).file_path ??
-                       (event.input as { path?: string }).path;
+      // Pi's write/edit tools use `path`; fall back to `file_path` for compat
+      // with extensions/skills that emit opencode-style args.
+      const input = event.input as { path?: string; file_path?: string };
+      const filePath = input.path ?? input.file_path;
       if (typeof filePath !== "string") return undefined;
       if (!matchesGitInternal(filePath)) return undefined;
 
