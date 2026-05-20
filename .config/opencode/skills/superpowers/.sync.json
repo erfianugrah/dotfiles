@@ -2,6 +2,11 @@
   "repo": "https://github.com/obra/superpowers",
   "ref": "v5.1.0",
   "sha": "f2cbfbefebbfef77321e4c9abc9e949826bea9d7",
-  "synced_at": "2026-05-20T07:44:49Z",
-  "skill_count": 14
+  "synced_at": "2026-05-20T21:33:41Z",
+  "skill_count": 14,
+  "path_rewrites": {
+    "specs_dir": "docs/specs",
+    "plans_dir": "docs/plans",
+    "applied": true
+  }
 }
