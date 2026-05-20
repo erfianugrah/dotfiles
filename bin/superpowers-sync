@@ -10,9 +10,18 @@
 #   superpowers-sync --help          this help
 #
 # Env:
-#   SUPERPOWERS_REF        override default ref (same as --ref)
-#   SUPERPOWERS_CACHE_DIR  override cache location (default: ~/.cache/superpowers-sync)
-#   SUPERPOWERS_DEST_DIR   override dest location (default: ~/dotfiles/.config/opencode/skills/superpowers)
+#   SUPERPOWERS_REF         override default ref (same as --ref)
+#   SUPERPOWERS_CACHE_DIR   override cache location (default: ~/.cache/superpowers-sync)
+#   SUPERPOWERS_DEST_DIR    override dest location (default: ~/dotfiles/.config/opencode/skills/superpowers)
+#   SUPERPOWERS_SPECS_DIR   project-relative path skills should reference for specs
+#                           (default: docs/specs; upstream default is docs/superpowers/specs)
+#   SUPERPOWERS_PLANS_DIR   project-relative path skills should reference for plans
+#                           (default: docs/plans; upstream default is docs/superpowers/plans)
+#
+# Path rewrite: after rsync, replaces upstream's `docs/superpowers/{specs,plans}/`
+# scaffold paths with first-class `docs/specs/` and `docs/plans/` (configurable).
+# Rationale: tool name shouldn't appear in project tree; specs/plans are first-class
+# project artifacts. Pass SUPERPOWERS_SPECS_DIR=docs/superpowers/specs to disable rewrite.
 #
 # Idempotent. Safe to run anytime. Pulls only when ref differs from current state.
 
@@ -22,6 +31,8 @@ REPO="obra/superpowers"
 CACHE_DIR="${SUPERPOWERS_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/superpowers-sync}"
 DEST_DIR="${SUPERPOWERS_DEST_DIR:-$HOME/dotfiles/.config/opencode/skills/superpowers}"
 REF="${SUPERPOWERS_REF:-latest-tag}"
+SPECS_DIR="${SUPERPOWERS_SPECS_DIR:-docs/specs}"
+PLANS_DIR="${SUPERPOWERS_PLANS_DIR:-docs/plans}"
 
 usage() {
   sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
@@ -124,6 +135,19 @@ mkdir -p "$DEST_DIR"
 log "rsync skills -> $DEST_DIR"
 rsync -a --delete --exclude='.sync.json' "$CACHE_DIR/skills/" "$DEST_DIR/"
 
+# Path rewrite — replace upstream's docs/superpowers/{specs,plans}/ scaffold
+# paths with first-class docs/{specs,plans}/ (or whatever env vars override to).
+# Skipped if both SUPERPOWERS_*_DIR env vars match upstream's defaults.
+PATCHES_APPLIED=0
+if [[ "$SPECS_DIR" != "docs/superpowers/specs" || "$PLANS_DIR" != "docs/superpowers/plans" ]]; then
+  log "rewriting paths: docs/superpowers/specs → $SPECS_DIR, docs/superpowers/plans → $PLANS_DIR"
+  find "$DEST_DIR" -type f -name '*.md' -exec \
+    sed -i \
+      -e "s|docs/superpowers/specs|${SPECS_DIR}|g" \
+      -e "s|docs/superpowers/plans|${PLANS_DIR}|g" {} +
+  PATCHES_APPLIED=1
+fi
+
 # Write sync metadata
 SHA=$(git rev-parse HEAD)
 SHORT_SHA=${SHA:0:10}
@@ -135,7 +159,24 @@ jq -n \
   --arg sha "$SHA" \
   --arg synced_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --argjson skill_count "$SKILL_COUNT" \
-  '{repo: $repo, ref: $ref, sha: $sha, synced_at: $synced_at, skill_count: $skill_count}' \
+  --arg specs_dir "$SPECS_DIR" \
+  --arg plans_dir "$PLANS_DIR" \
+  --argjson patches_applied "$PATCHES_APPLIED" \
+  '{
+    repo: $repo,
+    ref: $ref,
+    sha: $sha,
+    synced_at: $synced_at,
+    skill_count: $skill_count,
+    path_rewrites: {
+      specs_dir: $specs_dir,
+      plans_dir: $plans_dir,
+      applied: ($patches_applied == 1)
+    }
+  }' \
   > "$DEST_DIR/.sync.json"
 
 ok "synced superpowers@$REF ($SHORT_SHA) — $SKILL_COUNT skills"
+if [[ "$PATCHES_APPLIED" == "1" ]]; then
+  ok "path rewrites applied: specs → $SPECS_DIR, plans → $PLANS_DIR"
+fi
