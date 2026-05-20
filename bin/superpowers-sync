@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# superpowers-sync — sync obra/superpowers skills/ into opencode skills dir.
+#
+# Usage:
+#   superpowers-sync                 pull latest v* tag from upstream
+#   superpowers-sync --main          pull main branch (bleeding edge)
+#   superpowers-sync --ref <ref>     pin to specific tag / branch / sha
+#   superpowers-sync --status        show last sync metadata
+#   superpowers-sync --check         compare local vs upstream latest tag
+#   superpowers-sync --help          this help
+#
+# Env:
+#   SUPERPOWERS_REF        override default ref (same as --ref)
+#   SUPERPOWERS_CACHE_DIR  override cache location (default: ~/.cache/superpowers-sync)
+#   SUPERPOWERS_DEST_DIR   override dest location (default: ~/dotfiles/.config/opencode/skills/superpowers)
+#
+# Idempotent. Safe to run anytime. Pulls only when ref differs from current state.
+
+set -euo pipefail
+
+REPO="obra/superpowers"
+CACHE_DIR="${SUPERPOWERS_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/superpowers-sync}"
+DEST_DIR="${SUPERPOWERS_DEST_DIR:-$HOME/dotfiles/.config/opencode/skills/superpowers}"
+REF="${SUPERPOWERS_REF:-latest-tag}"
+
+usage() {
+  sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+  exit 0
+}
+
+log() { printf '\033[1;36m→\033[0m %s\n' "$*"; }
+ok()  { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
+err() { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; }
+
+cmd_status() {
+  if [[ -f "$DEST_DIR/.sync.json" ]]; then
+    jq . "$DEST_DIR/.sync.json"
+  else
+    err "Not synced yet. Run: superpowers-sync"
+    exit 1
+  fi
+}
+
+cmd_check() {
+  if ! [[ -f "$DEST_DIR/.sync.json" ]]; then
+    err "Not synced yet. Run: superpowers-sync"
+    exit 1
+  fi
+  local current_sha upstream_tag upstream_ref upstream_type upstream_sha
+  current_sha=$(jq -r .sha "$DEST_DIR/.sync.json")
+  upstream_tag=$(gh api "repos/$REPO/releases/latest" --jq .tag_name 2>/dev/null \
+              || gh api "repos/$REPO/tags" --jq '.[0].name')
+  # Resolve tag ref to underlying commit (handles annotated tags).
+  upstream_ref=$(gh api "repos/$REPO/git/refs/tags/$upstream_tag")
+  upstream_type=$(echo "$upstream_ref" | jq -r .object.type)
+  if [[ "$upstream_type" == "tag" ]]; then
+    upstream_sha=$(gh api "repos/$REPO/git/tags/$(echo "$upstream_ref" | jq -r .object.sha)" --jq .object.sha)
+  else
+    upstream_sha=$(echo "$upstream_ref" | jq -r .object.sha)
+  fi
+
+  echo "local:    $(jq -r .ref "$DEST_DIR/.sync.json") @ ${current_sha:0:10}"
+  echo "upstream: $upstream_tag @ ${upstream_sha:0:10}"
+
+  if [[ "$current_sha" == "$upstream_sha" ]]; then
+    ok "up to date"
+  else
+    err "out of date — run superpowers-sync to update"
+    exit 2
+  fi
+}
+
+# Parse args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h)   usage ;;
+    --status)    cmd_status; exit 0 ;;
+    --check)     cmd_check;  exit 0 ;;
+    --main)      REF="main"; shift ;;
+    --ref)       REF="${2:?--ref requires a value}"; shift 2 ;;
+    *)           err "unknown arg: $1"; usage ;;
+  esac
+done
+
+# Clone or update cache
+if [[ ! -d "$CACHE_DIR/.git" ]]; then
+  log "cloning $REPO -> $CACHE_DIR"
+  mkdir -p "$(dirname "$CACHE_DIR")"
+  git clone --filter=blob:none "https://github.com/$REPO.git" "$CACHE_DIR" >/dev/null
+fi
+
+cd "$CACHE_DIR"
+log "fetching origin"
+git fetch --tags --quiet origin
+
+# Resolve ref
+if [[ "$REF" == "latest-tag" ]]; then
+  REF=$(git tag --list 'v*' --sort=-v:refname | head -1)
+  if [[ -z "$REF" ]]; then
+    err "no v* tags found in upstream"
+    exit 1
+  fi
+fi
+
+log "checking out $REF"
+# Try as a tag/branch first; fall back to commit sha
+if git rev-parse --verify "$REF^{commit}" >/dev/null 2>&1; then
+  git checkout --quiet "$REF"
+elif git rev-parse --verify "origin/$REF^{commit}" >/dev/null 2>&1; then
+  git checkout --quiet "origin/$REF"
+else
+  err "ref not found: $REF"
+  exit 1
+fi
+
+# Verify skills/ tree present
+if [[ ! -d "$CACHE_DIR/skills" ]]; then
+  err "skills/ not found at $REF"
+  exit 1
+fi
+
+# Sync — preserve .sync.json across runs
+mkdir -p "$DEST_DIR"
+log "rsync skills -> $DEST_DIR"
+rsync -a --delete --exclude='.sync.json' "$CACHE_DIR/skills/" "$DEST_DIR/"
+
+# Write sync metadata
+SHA=$(git rev-parse HEAD)
+SHORT_SHA=${SHA:0:10}
+SKILL_COUNT=$(find "$DEST_DIR" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')
+
+jq -n \
+  --arg repo "https://github.com/$REPO" \
+  --arg ref "$REF" \
+  --arg sha "$SHA" \
+  --arg synced_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson skill_count "$SKILL_COUNT" \
+  '{repo: $repo, ref: $ref, sha: $sha, synced_at: $synced_at, skill_count: $skill_count}' \
+  > "$DEST_DIR/.sync.json"
+
+ok "synced superpowers@$REF ($SHORT_SHA) — $SKILL_COUNT skills"
