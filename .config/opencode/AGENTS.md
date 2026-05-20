@@ -91,3 +91,114 @@ When searching one source, check related sources for cross-referencing:
 - **Supabase ecosystem**: pg-graphql, pg-net, index-advisor, supavisor, supabase-grafana
 - **Terminal & editor**: neovim, tmux, wezterm, zsh, ohmyzsh, zinit, powerlevel10k, mise
 - **Testing**: vitest, jest, playwright, cypress
+
+## General computer use
+
+Tool outputs become next-turn input tokens. Extract, don't dump. Probe before reading.
+
+### Deciding question
+
+- Static file → Read / specialized extractor
+- Command output or stream → bash text utils fine
+
+### Bash text utilities (cat/head/tail/sed/awk)
+
+System prompt forbids these for file ops. They're fine on streams.
+
+**Correct uses**:
+- Pipeline ops: `cmd | head -20`, `cmd | awk '{print $2}'`
+- Live tail: `tail -f log`
+- Multi-file concat: `cat f1 f2 > combined`
+- Heredoc scripts: `cat <<EOF > file`
+
+**Wrong (always)**:
+- Viewing static file → Read
+- First/last N lines of known file → Read with `limit`/`offset`
+- Piping file into tool → `tool < file` or `tool file`, never `cat file | tool`
+- Editing source → Edit / sd / ast-grep --rewrite (never sed/awk)
+- Tabular files → mlr / duckdb / dsq
+
+### Editing tool selection
+
+| Case | Tool |
+|---|---|
+| Single file, surgical change | Edit |
+| Single file >~1000 lines or >100KB | `sd` / `sed -i` (Edit risks freeze: opencode#19604, #20471, #16115) |
+| Same pattern across 5+ files | `ast-grep --rewrite` (AST-precise) or `sd` (text-only) |
+| Simple text substitution, no Read first | `sd 'pattern' 'replace' file` |
+| AST-precise rewrite (avoid strings/comments) | `ast-grep --pattern 'foo($X)' --rewrite 'bar($X)' --update-all -l ts` |
+| Append to file | `cat <<'EOF' >> file` |
+| Insert/delete by line range | `sed -i` with line addressing (GNU sed, no `''`) |
+| Whole-file regen | Write |
+
+**GNU sed recipes** (your `sed` is GNU 4.10):
+
+```bash
+sd 'old' 'new' big-file.md                              # simple substitution, no Read
+ast-grep --pattern 'oldFn($X)' --rewrite 'newFn($X)' --update-all -l ts
+sed -i '99a\new content here' file                      # insert after line 99
+sed -i '100,200d' file                                  # delete lines 100-200
+sed -i '/pattern/d' file                                # delete matching lines
+perl -i -pe 's/old/new/g' file                          # complex regex
+```
+
+### After editing source code
+
+Run formatter only if project has one configured (check `package.json` scripts, `Makefile`, `pyproject.toml`, `biome.json`, `.eslintrc*`, `.prettierrc*`, `ruff.toml`):
+
+- TS/JS with `biome.json`: `biome check --write`
+- TS/JS with `.prettierrc*`: `prettier --write` + `eslint --fix`
+- Python with `ruff.toml` or `pyproject.toml` [ruff] section: `ruff check --fix && ruff format`
+- Rust: `cargo clippy --fix --allow-dirty && cargo fmt`
+- Go: `gofmt -w` (or `make fmt` if Makefile target exists)
+
+### Token discipline
+
+**Probe before reading**:
+- Unknown size? `wc -l file` or `stat file` first
+- >300 lines? Read with `offset`/`limit`
+- Lockfiles (package-lock.json, pnpm-lock.yaml, Cargo.lock, poetry.lock): NEVER full-read — query with `jq`/`yq`/`rg`
+
+**GitHub via gh**:
+- `gh api repos/x/y/issues/N --jq '.title,.body'` over `gh issue view N`
+- `gh pr view N --json title,body,state,files`
+- `gh pr diff N --name-only` first, drill into specific files only when needed
+
+**Git**:
+- Recent commits: `git log --oneline -N`
+- Subjects only: `git log --pretty=format:'%h %s' -N`
+- Diff overview: `git diff --stat` then drill into files
+- Status: `git status --short`
+- Function history: `git log -L :funcName:file`
+- Blame range: `git blame -L start,end file`
+
+### Structured data extraction
+
+| Format | Tool | Example |
+|---|---|---|
+| JSON known shape | `jq` | `jq '.field' file.json` |
+| JSON unknown shape | `gron \| rg key` | `gron file.json \| rg apiKey` |
+| YAML/TOML/XML | `yq` | `yq '.spec.replicas' k.yaml` / `yq '.deps' Cargo.toml` (auto-detect by ext) / `yq -p xml '.config' f.xml` |
+| HTML | `htmlq` | `htmlq 'h1' --text < page.html` |
+| CSV/TSV transforms | `mlr` | `mlr --csv stats1 -a mean -f price data.csv` |
+| SQL on heterogeneous files | `dsq` | `dsq users.csv 'SELECT * FROM {} WHERE age > 30'` |
+| Large CSV/Parquet/JSON | `duckdb` | `duckdb -c "SELECT col FROM 'f.csv' WHERE x>100 LIMIT 10"` |
+
+### Search & discovery
+
+- Filenames only: `rg -l pattern`
+- Match counts: `rg -c pattern`
+- Bloat protection: `rg --max-columns 200 --max-count 3`
+- File finding with filters: `fd` (size, mtime, type) over Glob
+- Inline context: `rg -C 3` (avoids follow-up Read)
+- Code symbols: `ast-grep --pattern '...'` or `ctags -R` then query tags
+- Directory overview: `eza --tree -L 2 --git-ignore`
+- LOC stats: `tokei`
+- Verify own edits: `git diff <file>`, not re-Read
+- Test/build logs: `rg 'FAIL|Error|ERROR' output`, not Read whole log
+
+### OpenCode-specific gotchas
+
+- **Edit/Write degrade past ~100KB or ~1000 lines** (opencode#20471 O(N²) diff, #19604 silent Write fail, #16115 LSP socket deadlock, #10099 4MB freeze). For large files: `sd` or `sed -i`.
+- **`/messages` payload bloat** with many edits on 4MB+ files (#14543) — kills browser. Avoid Edit cycles on bundled JS / generated files.
+- **MCP tool timeout default 30s** (`packages/opencode/src/mcp/index.ts:36`). JSON-RPC -32001 = timeout. Bump via `mcp.<name>.timeout` (ms) in `opencode.json`.
