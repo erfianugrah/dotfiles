@@ -189,7 +189,11 @@ Run formatter only if project has one configured (check `package.json` scripts, 
 - Filenames only: `rg -l pattern`
 - Match counts: `rg -c pattern`
 - Bloat protection: `rg --max-columns 200 --max-count 3`
-- File finding with filters: `fd` (size, mtime, type) over Glob
+- **File finding: ripgrep, never `find`.** `rg --files <root>` lists files (parallel, gitignore-aware, skips `node_modules`/sessions/.git). Filter by name with a second `rg`. Examples:
+  - by name: `rg --files ~/.pi | rg -i '\.log$'`
+  - by ext under scoped root: `rg --files -g '*.ts' ~/.pi/agent/extensions`
+  - directories: `rg --files <root> | xargs -n1 dirname | sort -u | rg <pat>` (rare — reach for `fd -t d` only here)
+  - `find` on this box hangs on the 18GB home + sessions tree even with `-maxdepth`. Only fall back to `find` for capabilities ripgrep lacks (e.g. `-newer`, `-printf`, `-mtime`), and only with an explicit narrow root.
 - Inline context: `rg -C 3` (avoids follow-up Read)
 - Code symbols: `ast-grep --pattern '...'` or `ctags -R` then query tags
 - Directory overview: `eza --tree -L 2 --git-ignore`
