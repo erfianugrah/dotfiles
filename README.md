@@ -48,7 +48,29 @@ bin/
 .config/
   atuin/config.toml            # Atuin shell history (self-hosted sync)
   systemd/user/bw-serve.service  # Bitwarden CLI REST API service
-  opencode/                    # OpenCode AI assistant config
+  opencode/                    # opencode AI coding agent (custom fork)
+    AGENTS.md                  # shared agent context (linked from .pi/agent/)
+    opencode.json              # MCP servers (context7, gh-grep, whisper, comfyui, lora-train, research)
+    plugins/output-rules.ts    # prepends AGENTS.md output rules to system prompt
+    tools/docs.ts              # docs.erfi.io SSH tool (docs_search/read/grep/find/summary/sources)
+    skills/                    # 11 skills (see Coding-agents section)
+
+.pi/agent/                     # pi AI coding agent (sibling to opencode)
+  APPEND_SYSTEM.md             # appended to system prompt: Commit/PR + Safety only
+  prompts/                     # markdown sources loaded by extensions
+    tool-routing.md            #   prepended via before_agent_start with CRITICAL framing
+    local-model-rules.md       #   prepended only for gemma/qwen/llama-server models
+    commit.md, pr.md, review.md, test.md, init.md
+  extensions/                  # TypeScript plugins
+    tool-routing.ts            #   inject tool-routing.md as system prompt prefix
+    exa.ts, webfetch.ts, oci-tags.ts, web-research.ts
+    docs.ts (symlinked from opencode/tools/), context7.ts, session-search.ts
+    memory.ts, todowrite.ts, task.ts, question.ts
+    git-gh-gate.ts, superpowers.ts, local-model-rules.ts, lsp/
+    render-diagram.ts          #   mermaid + d2 via local mmdc / d2 CLI
+    build-favicon-set.ts       #   SVG/PNG → full PWA favicon set
+  themes/                      # pi TUI themes (opencode-dark, etc.)
+  models.json, settings.json
 
 .git-template/hooks/pre-commit # global pre-commit: block unencrypted secrets
 wezterm.sh                     # WezTerm shell integration (OSC 7/133)
@@ -582,6 +604,100 @@ Docker-based test matrix covering all three platforms:
 
 Arch test caches system packages in a Docker layer — rebuilds only re-run
 ecosystem installs unless `packages/arch-repo.txt` changes.
+
+## Coding agents (opencode + pi)
+
+Two AI coding agents are configured side-by-side and share a single skills /
+AGENTS.md surface so behaviour stays consistent across both. opencode is the
+primary daily driver (a custom fork at `~/opencode`); pi is the secondary
+harness for sessions where its TUI / extension model fits better.
+
+### Shared surface
+
+`AGENTS.md` lives once at `.config/opencode/AGENTS.md` and is symlinked from
+`.pi/agent/AGENTS.md`. Skills live once at `.config/opencode/skills/` and are
+linked into pi via `~/.pi/agent/skills`.
+
+Result: any skill added or AGENTS rule edited applies to both agents on the
+next launch.
+
+### Tool routing (the policy layer)
+
+Both agents use a *plugin-injected* policy block prepended to the system
+prompt with `CRITICAL MANDATORY INSTRUCTION` framing. Same content, two
+implementations:
+
+- **opencode** — `.config/opencode/plugins/output-rules.ts` reads AGENTS.md
+  and unshifts the pre-`## Documentation` section onto `output.system`.
+- **pi** — `.pi/agent/extensions/tool-routing.ts` reads
+  `.pi/agent/prompts/tool-routing.md` and prepends it via the
+  `before_agent_start` hook (re-runs every user prompt, so post-compaction
+  re-injection is automatic).
+
+The routing rules cover: search-family reformulation loop, web research
+escalation (Exa → fetch → research SearXNG / Playwright), docs.erfi.io
+pipeline (search → summary → read), LSP for code intel, subagent
+delegation, memory + session_search, bash discipline (no `find`, sd /
+ast-grep for large edits, lockfile guards).
+
+### Skills (`.config/opencode/skills/`)
+
+| Skill | Purpose |
+|---|---|
+| `comfyui` | SDXL / Illustrious / Flux image generation via llm-compose proxy |
+| `lora-train` | LoRA fine-tuning for SDXL / Flux via kohya sd-scripts |
+| `whisper` | WhisperX audio/video transcription (YouTube, local files) |
+| `research` | Multi-engine search + Playwright crawler + OSINT (SearXNG :8888, crawler :8889, OSINT :8890) |
+| `gh-search` | Public-GitHub code/issues/PRs via `gh` CLI |
+| `supabase` | All Supabase products (db, auth, edge fns, storage, realtime, ssr) |
+| `supabase-postgres-best-practices` | Postgres query/schema/index patterns from Supabase |
+| `superpowers` | obra/superpowers methodology (brainstorming → plans → TDD) |
+| `frontend-stack` | Opinionated Astro 6 / React (tsrouter) / Next + Tailwind v4 + shadcn v4 + zod v4 + tanstack-form/query/router + biome 2 — McMaster-Carr utilitarian design ethos |
+| `mermaid-d2` | Diagram language picker + render via `render_diagram` tool |
+| `favicons-and-icons` | SVG-first or ComfyUI-raster → `build_favicon_set` → full PWA favicon set |
+
+`bin/superpowers-sync` keeps `superpowers/` synced from
+obra/superpowers upstream; see `.config/opencode/skills/superpowers/.sync.json`
+for the pinned ref/sha. Run `--status`, `--check`, `--ref <tag|sha>`,
+`--main`.
+
+### pi extensions (`.pi/agent/extensions/`)
+
+Custom TypeScript plugins that register tools, gates, and TUI behaviour.
+Most are direct ports of opencode fork built-ins:
+
+| Extension | Provides |
+|---|---|
+| `tool-routing.ts` | Prepends `prompts/tool-routing.md` with CRITICAL framing |
+| `local-model-rules.ts` | Per-model rules for gemma / qwen / llama-server |
+| `docs.ts` (symlink) | docs.erfi.io SSH tools: docs_search/read/grep/find/summary/sources |
+| `exa.ts` | `websearch` + `codesearch` via mcp.exa.ai |
+| `webfetch.ts` | URL → markdown / text / html (5MB cap, Cloudflare retry) |
+| `web-research.ts` | Exa + auto-fetch top results + optional SearXNG cross-check; eliminates snippet-only reasoning |
+| `oci-tags.ts` | Docker Hub / ghcr.io / quay.io tag query (no stale registry data) |
+| `context7.ts` | Library docs via context7.com MCP |
+| `session-search.ts` | ripgrep across past pi sessions |
+| `render-diagram.ts` | mermaid + d2 render via local `mmdc` / `d2` CLI |
+| `build-favicon-set.ts` | SVG/PNG → favicon.ico + apple-touch + 192/512/maskable + manifest + HTML snippet |
+| `task.ts` | Subagent delegation (fresh context) |
+| `memory.ts` | Persistent cross-session memory |
+| `todowrite.ts` | Session todo list |
+| `git-gh-gate.ts` | Confirmation modal before mutating git/gh commands (truncates display body to avoid long-session scroll cascade) |
+| `superpowers.ts` | Conditional injection of using-superpowers/SKILL.md on build/debug intent |
+| `compaction-progress.ts` | Live spinner + token-before/after toast during /compact |
+| `lsp/` | LSP integration (multi-language: ts, rust, py, go, lua, clangd) |
+| `style-toggle.ts` | Per-session output-style switcher |
+| `bookmark.ts`, `migrate-sessions.ts`, `notify.ts`, `question.ts`, `session-name.ts`, `trigger-compact.ts`, `inline-bash.ts`, `custom-footer.ts` | Smaller utilities |
+
+### Why two agents
+
+opencode is the daily-driver fork with better default TUI, builtin Exa /
+codesearch / context7 integration, and the `output-rules.ts` plugin pattern.
+pi is from a different ecosystem (Earendil Works) with a richer extension
+API (`before_agent_start`, `tool_execution_*`, custom tool rendering),
+larger TUI primitives (modals, widgets, status slots), and a `task` /
+subagent system. Keeping both wired to the same skills + AGENTS.md means
+zero ergonomic delta when switching.
 
 ## Other tools
 
