@@ -30,7 +30,8 @@ import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { LspClient, findWorkspaceRoot, isExecutableOnPath } from "./client.ts";
+import { LspClient, findWorkspaceRoot } from "./client.ts";
+import { ensureInstalled } from "./install.ts";
 import { languageIdFor } from "./language.ts";
 import { candidatesFor, type ServerConfig } from "./servers.ts";
 
@@ -62,34 +63,30 @@ async function clientFor(filePath: string): Promise<LspClient | string> {
   const candidates = candidatesFor(lang);
   if (candidates.length === 0) return `no LSP server configured for language "${lang}"`;
 
-  // For each candidate, resolve workspace root and prefer the one whose
-  // root markers actually appear above the file. If multiple candidates
-  // resolve the same root, the first in SERVERS wins (deno before tsserver
-  // would be wrong — tsserver listed first, deno second, so deno only
-  // wins when it has a unique deno.json marker upstream of the file).
+  // Step 1: pick the best candidate by root-marker specificity. Prefer
+  // candidates whose markers actually exist above the file (e.g. deno.json
+  // → deno LSP, not typescript-language-server). If multiple match, the
+  // narrower marker set wins. PATH presence is NOT a filter here — we'll
+  // auto-install whatever we pick.
   let chosen: { server: ServerConfig; root: string } | undefined;
   for (const cand of candidates) {
-    if (!isExecutableOnPath(cand.which)) continue;
     const root = findWorkspaceRoot(filePath, cand.rootMarkers);
-    // Verify at least one marker actually matched (findWorkspaceRoot
-    // falls back to file's dir if no marker found — distinguish those)
     const matched = cand.rootMarkers.some((m) => existsSync(`${root}/${m}`));
     if (!matched) continue;
-    // Prefer servers whose root marker is the most specific (deno.json
-    // beats package.json for hybrid projects)
     if (!chosen || cand.rootMarkers.length < chosen.server.rootMarkers.length) {
       chosen = { server: cand, root };
     }
   }
-
+  // Fall back to first candidate, file's dir as root, if no markers matched
   if (!chosen) {
-    // Fall back to first candidate on PATH even without root markers
-    const fallback = candidates.find((c) => isExecutableOnPath(c.which));
-    if (!fallback) {
-      const names = candidates.map((c) => c.which).join(" or ");
-      return `LSP server not installed for "${lang}". Install one of: ${names}`;
-    }
-    chosen = { server: fallback, root: dirname(resolve(filePath)) };
+    chosen = { server: candidates[0], root: dirname(resolve(filePath)) };
+  }
+
+  // Step 2: ensure binary is installed (auto-install via install.ts).
+  // If install isn't configured or fails, surface a clear message.
+  const installed = await ensureInstalled(chosen.server.which, chosen.server.install);
+  if (!installed.ok) {
+    return `LSP server "${chosen.server.id}" unavailable for "${lang}": ${installed.reason}`;
   }
 
   const key = cacheKey({ serverId: chosen.server.id, root: chosen.root });

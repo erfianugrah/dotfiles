@@ -13,8 +13,8 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
-import { pathToFileURL, fileURLToPath } from "url";
-import { readFileSync, existsSync, statSync } from "fs";
+import { pathToFileURL } from "url";
+import { readFileSync, existsSync } from "fs";
 import { dirname, resolve } from "path";
 import { languageIdFor } from "./language.ts";
 import type { ServerConfig } from "./servers.ts";
@@ -255,6 +255,12 @@ export class LspClient {
       );
       this.notify("initialized", {});
       this.initialized = true;
+      // Optional warm-up wait before serving requests — rust-analyzer/gopls
+      // need a moment after `initialized` to scan the workspace, otherwise
+      // workspace_symbol returns empty.
+      if (this.serverConfig.indexWaitMs) {
+        await new Promise((r) => setTimeout(r, this.serverConfig.indexWaitMs));
+      }
     } catch (err) {
       this.initialized = false;
       throw err;
@@ -384,22 +390,6 @@ export function findWorkspaceRoot(filePath: string, markers: string[]): string {
   return dirname(resolve(filePath));
 }
 
-// ── server-on-PATH detection ───────────────────────────────────────────────
-
-export function isExecutableOnPath(name: string): boolean {
-  // Bun has Bun.which; fall back to checking PATH manually
-  const which = (globalThis as { Bun?: { which: (n: string) => string | null } }).Bun?.which;
-  if (which) return which(name) !== null;
-  const PATH = process.env.PATH ?? "";
-  const sep = process.platform === "win32" ? ";" : ":";
-  for (const dir of PATH.split(sep)) {
-    if (!dir) continue;
-    const full = `${dir}/${name}`;
-    try {
-      if (existsSync(full) && statSync(full).isFile()) return true;
-    } catch {
-      // ignore
-    }
-  }
-  return false;
-}
+// PATH detection moved to install.ts as `isExecutableOnPath` — re-exported
+// here for callers that already import from this module.
+export { isExecutableOnPath } from "./install.ts";

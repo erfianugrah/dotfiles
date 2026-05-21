@@ -7,12 +7,14 @@
  *   - languageIds: which document-language-ids this server handles
  *   - rootMarkers: filenames whose presence (walking up from the file)
  *                  identifies the workspace root for this server
- *   - command + args: how to spawn the server (must speak LSP on stdio)
- *   - which: name of the executable to look up via PATH; if absent the
- *            server is disabled and the lsp tool returns an "install X"
- *            hint instead of trying to spawn.
+ *   - which/command/args: how to look up + spawn the server (must speak LSP on stdio)
+ *   - install: how to auto-install when binary is missing (see install.ts)
  *   - initializationOptions: LSP initializationOptions to send on init
+ *   - indexWaitMs: how long to wait after `initialized` before the first
+ *                  request (rust-analyzer/gopls need cargo/go.mod indexing)
  */
+
+import type { InstallSpec } from "./install.ts";
 
 export interface ServerConfig {
   id: string;
@@ -21,23 +23,13 @@ export interface ServerConfig {
   which: string;
   command: string;
   args: string[];
+  install?: InstallSpec;
+  indexWaitMs?: number;
   initializationOptions?: Record<string, unknown>;
 }
 
 export const SERVERS: ServerConfig[] = [
   // ── TypeScript / JavaScript ────────────────────────────────────────────
-  {
-    id: "typescript",
-    languageIds: ["typescript", "typescriptreact", "javascript", "javascriptreact"],
-    rootMarkers: ["tsconfig.json", "jsconfig.json", "package.json", ".git"],
-    which: "typescript-language-server",
-    command: "typescript-language-server",
-    args: ["--stdio"],
-    initializationOptions: {
-      preferences: { includeInlayParameterNameHints: "none" },
-    },
-  },
-  // Fallback to deno's LSP if you're in a deno project (deno.json present)
   {
     id: "deno",
     languageIds: ["typescript", "typescriptreact", "javascript", "javascriptreact"],
@@ -45,6 +37,21 @@ export const SERVERS: ServerConfig[] = [
     which: "deno",
     command: "deno",
     args: ["lsp"],
+    install: { type: "manual", hint: "Install deno: https://deno.land/manual/getting_started/installation" },
+    indexWaitMs: 1000,
+  },
+  {
+    id: "typescript",
+    languageIds: ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+    rootMarkers: ["tsconfig.json", "jsconfig.json", "package.json", ".git"],
+    which: "typescript-language-server",
+    command: "typescript-language-server",
+    args: ["--stdio"],
+    install: { type: "bun-global", pkg: "typescript-language-server typescript" },
+    indexWaitMs: 2000,
+    initializationOptions: {
+      preferences: { includeInlayParameterNameHints: "none" },
+    },
   },
 
   // ── Python ─────────────────────────────────────────────────────────────
@@ -55,8 +62,9 @@ export const SERVERS: ServerConfig[] = [
     which: "pyright-langserver",
     command: "pyright-langserver",
     args: ["--stdio"],
+    install: { type: "bun-global", pkg: "pyright" },
+    indexWaitMs: 1500,
   },
-  // Fallback to pylsp if pyright isn't installed
   {
     id: "pylsp",
     languageIds: ["python"],
@@ -64,6 +72,8 @@ export const SERVERS: ServerConfig[] = [
     which: "pylsp",
     command: "pylsp",
     args: [],
+    install: { type: "manual", hint: "pip install python-lsp-server" },
+    indexWaitMs: 1500,
   },
 
   // ── Rust ───────────────────────────────────────────────────────────────
@@ -74,6 +84,8 @@ export const SERVERS: ServerConfig[] = [
     which: "rust-analyzer",
     command: "rust-analyzer",
     args: [],
+    install: { type: "rustup-component", component: "rust-analyzer" },
+    indexWaitMs: 10_000,
   },
 
   // ── Go ─────────────────────────────────────────────────────────────────
@@ -84,6 +96,8 @@ export const SERVERS: ServerConfig[] = [
     which: "gopls",
     command: "gopls",
     args: ["serve"],
+    install: { type: "go-install", module: "golang.org/x/tools/gopls@latest" },
+    indexWaitMs: 3000,
   },
 
   // ── C / C++ ────────────────────────────────────────────────────────────
@@ -94,6 +108,8 @@ export const SERVERS: ServerConfig[] = [
     which: "clangd",
     command: "clangd",
     args: [],
+    install: { type: "manual", hint: "Install clangd via your distro (e.g. sudo pacman -S clang)" },
+    indexWaitMs: 2000,
   },
 
   // ── Lua ────────────────────────────────────────────────────────────────
@@ -104,6 +120,8 @@ export const SERVERS: ServerConfig[] = [
     which: "lua-language-server",
     command: "lua-language-server",
     args: [],
+    install: { type: "manual", hint: "sudo pacman -S lua-language-server (or your distro equivalent)" },
+    indexWaitMs: 1000,
   },
 
   // ── Bash ───────────────────────────────────────────────────────────────
@@ -114,9 +132,11 @@ export const SERVERS: ServerConfig[] = [
     which: "bash-language-server",
     command: "bash-language-server",
     args: ["start"],
+    install: { type: "bun-global", pkg: "bash-language-server" },
+    indexWaitMs: 500,
   },
 
-  // ── JSON / YAML / TOML ─────────────────────────────────────────────────
+  // ── JSON / YAML / TOML / CSS / HTML (vscode-langservers-extracted bundle) ─
   {
     id: "vscode-json-language-server",
     languageIds: ["json", "jsonc"],
@@ -124,6 +144,8 @@ export const SERVERS: ServerConfig[] = [
     which: "vscode-json-language-server",
     command: "vscode-json-language-server",
     args: ["--stdio"],
+    install: { type: "bun-global", pkg: "vscode-langservers-extracted" },
+    indexWaitMs: 500,
   },
   {
     id: "yaml-language-server",
@@ -132,6 +154,8 @@ export const SERVERS: ServerConfig[] = [
     which: "yaml-language-server",
     command: "yaml-language-server",
     args: ["--stdio"],
+    install: { type: "bun-global", pkg: "yaml-language-server" },
+    indexWaitMs: 500,
   },
   {
     id: "taplo",
@@ -140,6 +164,28 @@ export const SERVERS: ServerConfig[] = [
     which: "taplo",
     command: "taplo",
     args: ["lsp", "stdio"],
+    install: { type: "cargo-install", crate: "taplo-cli", features: ["lsp"] },
+    indexWaitMs: 500,
+  },
+  {
+    id: "vscode-css-language-server",
+    languageIds: ["css", "scss", "less"],
+    rootMarkers: [".git", "package.json"],
+    which: "vscode-css-language-server",
+    command: "vscode-css-language-server",
+    args: ["--stdio"],
+    install: { type: "bun-global", pkg: "vscode-langservers-extracted" },
+    indexWaitMs: 500,
+  },
+  {
+    id: "vscode-html-language-server",
+    languageIds: ["html"],
+    rootMarkers: [".git", "package.json"],
+    which: "vscode-html-language-server",
+    command: "vscode-html-language-server",
+    args: ["--stdio"],
+    install: { type: "bun-global", pkg: "vscode-langservers-extracted" },
+    indexWaitMs: 500,
   },
 
   // ── Terraform / HCL ────────────────────────────────────────────────────
@@ -150,6 +196,8 @@ export const SERVERS: ServerConfig[] = [
     which: "terraform-ls",
     command: "terraform-ls",
     args: ["serve"],
+    install: { type: "manual", hint: "Download from https://github.com/hashicorp/terraform-ls/releases" },
+    indexWaitMs: 1000,
   },
 
   // ── Nix ────────────────────────────────────────────────────────────────
@@ -160,21 +208,11 @@ export const SERVERS: ServerConfig[] = [
     which: "nixd",
     command: "nixd",
     args: [],
+    install: { type: "manual", hint: "nix-env -iA nixpkgs.nixd" },
+    indexWaitMs: 1000,
   },
 ];
 
-/**
- * Find the best server for a given languageId. Tries each server in order;
- * returns the first one whose executable is on PATH.
- *
- * The "best" depends on context:
- *   - For deno.json projects, deno LSP. Otherwise typescript-language-server.
- *     The caller resolves project root first and can prefer deno.
- *   - For Python, pyright if installed, else pylsp.
- *
- * Caller is expected to filter by languageId first and then resolve which
- * server (of the candidates) is available.
- */
 export function candidatesFor(languageId: string): ServerConfig[] {
   return SERVERS.filter((s) => s.languageIds.includes(languageId));
 }
