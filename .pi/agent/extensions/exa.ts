@@ -81,6 +81,12 @@ async function exaCall(
 const websearchTool = defineTool({
   name: "websearch",
   label: "Web Search",
+  promptSnippet: "websearch — Exa web search returning LLM-optimised content strings. Use for quick discovery only; prefer web_research when making claims.",
+  promptGuidelines: [
+    "Prefer web_research over websearch when you intend to recommend, assert a fact, or answer a disputed question — web_research auto-fetches the top results so you're not reasoning from aggregator snippets.",
+    "After 2 websearch calls on the same topic without a webfetch drill-in, STOP rewording and webfetch the top hit instead.",
+    "For container image versions use oci_tags, not websearch. For library API docs use context7_query_docs.",
+  ],
   description: [
     "Search the web via Exa AI — fast, deep, and LLM-optimised. Returns content strings (not raw HTML) ready for the model to read directly.",
     "",
@@ -142,6 +148,10 @@ const websearchTool = defineTool({
 const codesearchTool = defineTool({
   name: "codesearch",
   label: "Code Search",
+  promptSnippet: "codesearch — Exa code-examples + library-docs lookup. Prefer over websearch for API usage patterns.",
+  promptGuidelines: [
+    "Use codesearch (not websearch) when looking for API / library / framework usage patterns. Be specific about the framework name in the query.",
+  ],
   description: [
     "Find code examples + documentation via Exa AI. Best for API/library/SDK usage patterns and specific framework concepts.",
     "",

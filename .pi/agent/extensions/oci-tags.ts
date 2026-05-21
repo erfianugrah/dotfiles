@@ -89,6 +89,11 @@ function versionCompare(a: string, b: string): number {
 
 const ociTagsTool = defineTool({
   name: "oci_tags",
+  promptSnippet: "oci_tags — query OCI registries (Docker Hub, ghcr.io, quay.io) for image tags. Authoritative, no stale results.",
+  promptGuidelines: [
+    "Use oci_tags for container image versions — NEVER websearch. Registry API is authoritative; websearch returns stale blog posts.",
+    "Pass semver:true when you want releases only (filters out branch/commit tags).",
+  ],
   label: "OCI Tags",
   description: [
     "Query OCI container registries for image tags. Works with Docker Hub, ghcr.io, quay.io, and any OCI-compliant registry.",

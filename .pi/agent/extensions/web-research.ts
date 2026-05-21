@@ -341,6 +341,12 @@ function formatReport(parts: {
 const webResearchTool = defineTool({
   name: "web_research",
   label: "Web Research",
+  promptSnippet: "web_research — Exa search + auto-fetch top result pages in one call. Use this (not websearch) when making a recommendation, asserting a fact, or after user pushback.",
+  promptGuidelines: [
+    "Use web_research instead of websearch when you intend to recommend, cite a fact, or answer a disputed question. Returns search results AND fetched page bodies in one call — eliminates snippet-only reasoning.",
+    "For local-business / maps / reviews / opening-hours queries, pass mode:'local' so JS-heavy hosts (Google Maps, Yelp, TripAdvisor) get Playwright-rendered.",
+    "For freshness-sensitive queries (<1 week old) pass mode:'fresh' — enables Exa livecrawl + SearXNG time-filtered cross-check.",
+  ],
   description: [
     "Search the web AND fetch the top result pages in one call. Returns combined Exa results + fetched page bodies.",
     "",

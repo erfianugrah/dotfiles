@@ -34,6 +34,18 @@ function sq(s: string): string {
   return s.replace(/'/g, "'\\''");
 }
 
+// Agents frequently call docs_read / docs_summary / docs_grep with
+// `filePath` (the built-in Read/Edit tool's arg name) instead of `path`.
+// Accepting both prevents a confusing crash and keeps the agent moving.
+// Prefer `path` when both are provided.
+function resolvePath(args: { path?: string; filePath?: string }): string {
+  const v = args.path ?? args.filePath;
+  if (typeof v !== "string" || v.length === 0) {
+    throw new Error("'path' is required (alias: 'filePath').");
+  }
+  return v;
+}
+
 function safePath(p: string): string {
   if (typeof p !== "string" || p.length === 0) {
     throw new Error("path is required (string).");
@@ -154,6 +166,12 @@ function formatRgMatches(matches: RgMatch[]): string {
 
 const docsSearch = defineTool({
   name: "docs_search",
+  promptSnippet: "docs_search — search docs.erfi.io titles+summaries (FIRST step). 158 sources: postgres, supabase, k8s, aws, cloudflare, react, nextjs, etc.",
+  promptGuidelines: [
+    "Use docs_search FIRST when looking up library / framework / cloud-platform behaviour. Always pass `source=` when the source is known.",
+    "After 2 docs_search calls on the same topic with no docs_read in between, STOP rewording and docs_read the top hit.",
+    "NEVER `ls` / `find` / `bash` paths under /docs/. They live on docs.erfi.io, not local disk. Use docs_sources / docs_find / docs_search.",
+  ],
   label: "Docs Search",
   description:
     "Search documentation by title and summary. Searches a pre-built index instead of scanning all files. Use this FIRST to find relevant docs, then docs_read or docs_grep to get content.",
@@ -195,13 +213,20 @@ const docsRead = defineTool({
   label: "Docs Read",
   description:
     "Read a documentation file. For large files, use docs_summary first to see the headings, then read with offset/lines to get only the section you need.",
+  promptSnippet: "docs_read — read a docs.erfi.io file by /docs/<source>/... path. Use offset+lines for large files.",
+  promptGuidelines: [
+    "On files >300 lines, run docs_summary first then docs_read with offset/lines instead of full-file reads.",
+    "When the user disputes a doc-based answer, the next call MUST be docs_read on the source — not another docs_search.",
+  ],
   parameters: Type.Object({
-    path: Type.String({ description: "File path (e.g. /docs/supabase/guides/auth.md)" }),
+    path: Type.Optional(Type.String({ description: "File path (e.g. /docs/supabase/guides/auth.md)" })),
+    filePath: Type.Optional(Type.String({ description: "Alias for 'path'. Accepted for compatibility with built-in Read tool." })),
     lines: Type.Optional(Type.Number({ description: "Read N lines. Omit to read to end of file." })),
     offset: Type.Optional(Type.Number({ description: "Start line (1-indexed)." })),
   }),
   async execute(_id, params) {
-    const p = safePath(params.path);
+    const argPath = resolvePath(params);
+    const p = safePath(argPath);
     let cmd: string;
     if (params.offset) {
       const start = Math.max(1, Math.floor(params.offset));
@@ -217,7 +242,7 @@ const docsRead = defineTool({
       cmd = `printf '[file] %s lines, %s bytes\\n\\n' "$(wc -l < '${sq(p)}')" "$(wc -c < '${sq(p)}')"; bat --decorations=always --paging=never --color=never --style=numbers '${sq(p)}' 2>/dev/null || cat '${sq(p)}'`;
     }
     const result = await ssh(cmd);
-    return { content: [{ type: "text", text: capOutput(result, params.path) }], details: { path: params.path } };
+    return { content: [{ type: "text", text: capOutput(result, argPath) }], details: { path: argPath } };
   },
 });
 
@@ -225,6 +250,10 @@ const docsFind = defineTool({
   name: "docs_find",
   label: "Docs Find",
   description: "Find documentation files by name or path pattern.",
+  promptSnippet: "docs_find — find docs files by glob pattern. Faster than docs_search when you already know part of the filename.",
+  promptGuidelines: [
+    "Use docs_find to verify a doc file exists by name pattern. Never use bash `ls` / `find` on /docs/ paths — they aren't local files.",
+  ],
   parameters: Type.Object({
     pattern: Type.String({ description: "Glob pattern (e.g. '*.md', '*auth*')" }),
     source: Type.Optional(Type.String({ description: "Filter to source (e.g. 'supabase', 'aws')" })),
@@ -243,14 +272,20 @@ const docsGrep = defineTool({
   label: "Docs Grep",
   description:
     "Search documentation content with surrounding context lines using ripgrep. Returns structured results with file paths and exact line numbers. More detailed than docs_search — shows actual content around matches.",
+  promptSnippet: "docs_grep — regex search inside /docs/<source>/ with context lines. Faster than docs_search when you know the source.",
+  promptGuidelines: [
+    "Prefer docs_grep over docs_search when the source is already known and you want a specific phrase or symbol. Always scope path=/docs/<source>/ so output stays sane.",
+  ],
   parameters: Type.Object({
     query: Type.String({ description: "Regex pattern to search for" }),
-    path: Type.String({ description: "File or dir path (e.g. /docs/postgres/)" }),
+    path: Type.Optional(Type.String({ description: "File or dir path (e.g. /docs/postgres/)" })),
+    filePath: Type.Optional(Type.String({ description: "Alias for 'path'. Accepted for compatibility with built-in Read tool." })),
     context: Type.Optional(Type.Number({ description: "Context lines per match (default: 3)" })),
   }),
   async execute(_id, params) {
     const ctx = Math.abs(Math.floor(params.context ?? 3));
-    const p = safePath(params.path);
+    const argPath = resolvePath(params);
+    const p = safePath(argPath);
     const [jsonResult, countResult] = await Promise.all([
       ssh(`rg -i --json -C${ctx} '${sq(params.query)}' '${sq(p)}' | head -500`),
       ssh(`rg -ic '${sq(params.query)}' '${sq(p)}' 2>/dev/null | awk -F: '{s+=$NF}END{print s+0}'`),
@@ -262,7 +297,7 @@ const docsGrep = defineTool({
         const formatted = formatRgMatches(matches);
         const countNote = total > matches.length ? ` (showing ${matches.length} of ${total})` : "";
         return {
-          content: [{ type: "text", text: capOutput(`${matches.length}${countNote} matches\n\n${formatted}`, params.path) }],
+          content: [{ type: "text", text: capOutput(`${matches.length}${countNote} matches\n\n${formatted}`, argPath) }],
           details: { matches: matches.length, total },
         };
       }
@@ -270,11 +305,11 @@ const docsGrep = defineTool({
     const plainResult = await ssh(`rg -in -C${ctx} '${sq(params.query)}' '${sq(p)}' | head -100`);
     if (!plainResult.trim()) {
       return {
-        content: [{ type: "text", text: `[no matches for "${params.query}" in ${params.path}]` }],
+        content: [{ type: "text", text: `[no matches for "${params.query}" in ${argPath}]` }],
         details: { matches: 0 },
       };
     }
-    return { content: [{ type: "text", text: capOutput(plainResult, params.path) }], details: { matches: total } };
+    return { content: [{ type: "text", text: capOutput(plainResult, argPath) }], details: { matches: total } };
   },
 });
 
@@ -283,18 +318,24 @@ const docsSummary = defineTool({
   label: "Docs Summary",
   description:
     "Get the structure/outline of a documentation file — headings and section names. Use this before docs_read to find the right section to read, saving tokens.",
+  promptSnippet: "docs_summary — outline of headings in a docs file. Run BEFORE docs_read on files >300 lines.",
+  promptGuidelines: [
+    "Run docs_summary before docs_read on any /docs/ file that's >300 lines. Then docs_read with offset/lines to target the section instead of full-file reads.",
+  ],
   parameters: Type.Object({
-    path: Type.String({ description: "File path (e.g. /docs/supabase/guides/auth.md)" }),
+    path: Type.Optional(Type.String({ description: "File path (e.g. /docs/supabase/guides/auth.md)" })),
+    filePath: Type.Optional(Type.String({ description: "Alias for 'path'. Accepted for compatibility with built-in Read tool." })),
   }),
   async execute(_id, params) {
-    const p = safePath(params.path);
+    const argPath = resolvePath(params);
+    const p = safePath(argPath);
     const [headings, lineCount, byteCount] = await Promise.all([
       ssh(`rg -n '^#' '${sq(p)}'`),
       ssh(`wc -l < '${sq(p)}'`),
       ssh(`wc -c < '${sq(p)}'`),
     ]);
     const text = `${lineCount.trim()} lines, ${byteCount.trim()} bytes\n\n${headings}`;
-    return { content: [{ type: "text", text }], details: { path: params.path } };
+    return { content: [{ type: "text", text }], details: { path: argPath } };
   },
 });
 
@@ -302,6 +343,10 @@ const docsSources = defineTool({
   name: "docs_sources",
   label: "Docs Sources",
   description: "List all available documentation sources and their file counts.",
+  promptSnippet: "docs_sources — list all docs.erfi.io sources (postgres, supabase, k8s, aws, cloudflare, react, nextjs, …). Use to check what's available.",
+  promptGuidelines: [
+    "Use docs_sources to verify a source exists before docs_search / docs_grep. NEVER `ls /docs/` — those paths aren't on local disk.",
+  ],
   parameters: Type.Object({
     filter: Type.Optional(Type.String({ description: "Filter source names (e.g. 'postgres', 'supabase')" })),
   }),
