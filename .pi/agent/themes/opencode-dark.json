@@ -20,7 +20,7 @@
 		"toolPendingBg": "#17171e",
 		"toolSuccessBg": "#16191c",
 		"toolErrorBg": "#1f1618",
-		"customMsgBg": "#1a1822"
+		"customMsgBg": "#000000"
 	},
 	"colors": {
 		"accent": "accent",
@@ -39,7 +39,7 @@
 		"userMessageBg": "userMsgBg",
 		"userMessageText": "textBright",
 		"customMessageBg": "customMsgBg",
-		"customMessageText": "text",
+		"customMessageText": "textBright",
 		"customMessageLabel": "purple",
 		"toolPendingBg": "toolPendingBg",
 		"toolSuccessBg": "toolSuccessBg",
