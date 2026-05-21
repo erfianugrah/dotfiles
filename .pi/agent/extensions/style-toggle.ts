@@ -80,10 +80,14 @@ type PiMessage = { role: string; content: unknown };
 // ── extension ─────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
-  // Initial status set on agent start so the TUI shows current style.
-  pi.on("agent_start", async (_event, ctx) => {
+  // Re-bind the status on every session lifecycle event with a fresh ctx.
+  // agent_start fires once per pi boot, but /reload + /new + fork all fire
+  // session_start instead — without this, the indicator vanishes on reload.
+  const setStatus = (ctx: { ui: { setStatus: (k: string, v: string) => void } }) => {
     ctx.ui.setStatus("style", `style: ${loadStyle()}`);
-  });
+  };
+  pi.on("agent_start", async (_event, ctx) => setStatus(ctx));
+  pi.on("session_start", async (_event, ctx) => setStatus(ctx));
 
   // /style command — set or toggle.
   pi.registerCommand("style", {

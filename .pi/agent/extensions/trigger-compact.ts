@@ -2,8 +2,9 @@
  * trigger-compact — auto-compact at context threshold + manual command.
  *
  * Watches `turn_end` and triggers compaction the first time tokens cross the
- * threshold. Threshold is 100k tokens — tuned for Opus 200k context so you
- * still have headroom for the post-compaction working set.
+ * threshold. Threshold is a fraction of the active model's contextWindow —
+ * scales with whatever you're using (200k Sonnet, 1M Opus 4.7, 32k local).
+ * Configurable via `PI_COMPACT_FRACTION` env (default 0.85).
  *
  * Manual: `/trigger-compact [custom instructions]` to compact on demand.
  * Custom instructions are passed through to the summariser.
@@ -17,7 +18,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-const THRESHOLD_TOKENS = 100_000;
+const FRACTION = Math.max(0.1, Math.min(0.95, Number(process.env.PI_COMPACT_FRACTION ?? "0.85")));
 
 // ── extension ─────────────────────────────────────────────────────────────
 
@@ -40,13 +41,15 @@ export default function (pi: ExtensionAPI) {
   pi.on("turn_end", (_event, ctx) => {
     const usage = ctx.getContextUsage();
     const current = usage?.tokens ?? null;
-    if (current === null) return;
+    const contextWindow = usage?.contextWindow ?? 0;
+    if (current === null || contextWindow <= 0) return;
 
+    const threshold = Math.floor(contextWindow * FRACTION);
     const crossed =
       previousTokens !== undefined &&
       previousTokens !== null &&
-      previousTokens <= THRESHOLD_TOKENS &&
-      current > THRESHOLD_TOKENS;
+      previousTokens <= threshold &&
+      current > threshold;
 
     previousTokens = current;
     if (crossed) trigger(ctx);
