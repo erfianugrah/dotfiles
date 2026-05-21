@@ -143,6 +143,11 @@ function htmlToMarkdown(html: string): string {
 const webfetchTool = defineTool({
   name: "webfetch",
   label: "Web Fetch",
+  promptSnippet: "webfetch — fetch a known URL as markdown / text / html. For unknown topics use websearch or web_research first.",
+  promptGuidelines: [
+    "Use webfetch to drill into a specific URL after websearch surfaces it, or when the user pastes a link. Don't reach for it before knowing the URL.",
+    "If webfetch returns empty / SPA-shell content (very short body on a JS-heavy host), escalate to the research skill crawler at :8889/fetch with force_js:true (Playwright fallback).",
+  ],
   description: [
     "Fetch a URL and return its content as markdown (default), text, or html.",
     "",
