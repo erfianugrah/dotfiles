@@ -75,10 +75,10 @@ pi -c                       # continue most recent
 /style                      # toggle terse ↔ socratic
 /skill:test-driven-development  # explicitly load a skill
 
-# Model switching (no /models command — use keybindings)
-Ctrl+L                      # full model picker (all providers, all models)
-Ctrl+P / Shift+Ctrl+P       # cycle forward/back through enabled models
+# Model switching
+/model                      # full model picker (or Ctrl+L)
 /scoped-models              # edit which models appear in Ctrl+P cycle (saves to settings.json)
+Ctrl+P / Shift+Ctrl+P       # cycle forward/back through enabled models
 ```
 
 ## Migrating new opencode work to Pi
