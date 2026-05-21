@@ -142,6 +142,27 @@ function styleBody(body: string): string {
   return `${BODY_FG}${body}${RESUME}`;
 }
 
+// Truncate a command for display in the gate dialog. Multi-line commit
+// messages (`git commit -m "\nlong\nbody\n"`) or 20+ line HEREDOCs make
+// ctx.ui.select() balloon the modal up to maxHeight: 80%. In long sessions
+// that triggers a repaint cascade that looks like "crazy scrolling until you
+// press enter". Keep the dialog body to one logical line: first line of the
+// command plus a hint about hidden content.
+const DIALOG_MAX_CHARS = 240;
+function truncateForDialog(command: string): string {
+  const trimmed = command.replace(/\s+$/g, "");
+  const lines = trimmed.split("\n");
+  let head = lines[0] ?? "";
+  if (head.length > DIALOG_MAX_CHARS) {
+    head = `${head.slice(0, DIALOG_MAX_CHARS)}…`;
+  }
+  const extraLines = lines.length - 1;
+  if (extraLines > 0) {
+    head += `\n  \u2026 (+${extraLines} more line${extraLines === 1 ? "" : "s"} hidden)`;
+  }
+  return head;
+}
+
 export default function (pi: ExtensionAPI) {
   // Block/confirm bash + write/edit tool calls
   pi.on("tool_call", async (event, ctx) => {
@@ -155,8 +176,9 @@ export default function (pi: ExtensionAPI) {
         return { block: true, reason: `Mutating git/gh command blocked (no UI). Matched: ${match.source}` };
       }
 
+      const display = truncateForDialog(command);
       const choice = await ctx.ui.select(
-        `⚠️  Mutating git/gh command:\n\n  ${styleBody(command)}\n\nAllow?`,
+        `⚠️  Mutating git/gh command:\n\n  ${styleBody(display)}\n\nAllow?`,
         ["Yes", "No"],
       );
       if (choice !== "Yes") {
