@@ -13,9 +13,10 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 ├── APPEND_SYSTEM.md   → ~/dotfiles/.pi/agent/APPEND_SYSTEM.md (commit/safety rules)
 ├── models.json        → ~/dotfiles/.pi/agent/models.json (llama-server + 8 local models)
 ├── skills/            → ~/.config/opencode/skills (zero-copy: 21 skills reused)
-├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (14 single-file + lsp/)
-├── settings.json      → ~/dotfiles/.pi/agent/settings.json (defaultProvider/Model)
-├── prompts/           contains symlinks to ~/dotfiles/.pi/agent/prompts/
+├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (20 single-file + lsp/)
+├── settings.json      → ~/dotfiles/.pi/agent/settings.json (defaultProvider/Model + theme)
+├── prompts/           → ~/dotfiles/.pi/agent/prompts/ (6 slash-command templates)
+├── themes/            → ~/dotfiles/.pi/agent/themes/ (opencode-dark high-contrast)
 ├── auth.json          (NOT tracked — runtime auth state)
 ├── sessions/          (NOT tracked — session JSONL files)
 └── memories.json      (NOT tracked — populated by memory extension)
@@ -40,6 +41,32 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 | `task.ts` | Spawn subagent via `pi -p` subprocess | port of opencode task |
 | `todowrite.ts` | TodoWrite tool surface (bridges to TODO.md philosophy) | port of opencode todowrite |
 | `lsp/` (multi-file) | Language Server Protocol — 8 operations + auto-install (bun/go/cargo/rustup) for 14 languages | port of opencode lsp |
+| `notify.ts` | Desktop ping (OSC 777 / OSC 99 / Windows toast) on `agent_end` | examples/notify.ts |
+| `inline-bash.ts` | Expand `!{cmd}` patterns inside prompts before send | examples/inline-bash.ts |
+| `trigger-compact.ts` | Auto-compact when context crosses 100k tokens + `/trigger-compact` | examples/trigger-compact.ts |
+| `session-name.ts` | `/session-name <label>` — readable identifiers in `pi -r` | examples/session-name.ts |
+| `bookmark.ts` | `/bookmark` + `/unbookmark` for `/tree` navigation in long sessions | examples/bookmark.ts |
+| `custom-footer.ts` | `/footer` — git branch + token/cost stats in footer | examples/custom-footer.ts |
+
+## Prompt templates (slash commands)
+
+| Template | Purpose |
+|---|---|
+| `/init [focus]` | Guided AGENTS.md setup (Pi-aware: docs.erfi.io refs, `.pi/agent/` paths, stricter "would agent miss this?" filter) |
+| `/review [target]` | Review uncommitted / commit / branch / PR — defaults to uncommitted; gh-aware for PRs |
+| `/commit [context]` | Inspect repo's recent log style → write commit matching it. Blocks AI attribution per APPEND_SYSTEM rules |
+| `/pr <num\|URL>` | Fetch + review GitHub PR end-to-end; reads CI status + existing inline comments |
+| `/test [filter]` | Detect toolchain (cargo/bun/pnpm/pytest/go/etc) → run targeted tests for the diff |
+| `/local-model-rules` | Inject per-model rules when running gemma/qwen on llama-server |
+
+## Themes
+
+| Theme | Source |
+|---|---|
+| `opencode-dark` | dotfiles — VS Code Dark+ palette with brighter contrast than Pi's built-in `dark` |
+| `dark` `light` | Built-in (Pi) |
+
+Switch via `/settings` or set `"theme"` in `settings.json`.
 
 ## Skills
 
@@ -74,6 +101,10 @@ pi -c                       # continue most recent
 # Customize
 /style                      # toggle terse ↔ socratic
 /skill:test-driven-development  # explicitly load a skill
+/footer                     # toggle git branch + token stats in footer
+/session-name <label>       # name session for pi -r selector
+/bookmark [label]           # bookmark last assistant message
+/trigger-compact            # compact conversation now (auto at 100k)
 
 # Model switching
 /model                      # full model picker (or Ctrl+L)
