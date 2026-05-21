@@ -1,6 +1,7 @@
 ---
 name: research
-description: Multi-engine web search (SearXNG aggregating 7+ engines), clean-content fetcher (trafilatura with Playwright fallback for SPAs), and OSINT toolkit (domain DNS+subdomains, IP geo+ports, email platform registrations, username social platform scan, URL urlscan.io lookups, phone libphonenumber, VirusTotal hash/URL/IP reputation, NVD CVE lookups). Three local services: SearXNG on :8888, crawler on :8889, OSINT on :8890. Long-running OSINT operations return job_id for polling.
+description: >-
+  Multi-engine web search (SearXNG aggregating 7+ engines), clean-content fetcher (trafilatura with Playwright fallback for SPAs), and OSINT toolkit (domain DNS+subdomains, IP geo+ports, email platform registrations, username social platform scan, URL urlscan.io lookups, phone libphonenumber, VirusTotal hash/URL/IP reputation, NVD CVE lookups). Three local services: SearXNG on :8888, crawler on :8889, OSINT on :8890. Long-running OSINT operations return job_id for polling.
 ---
 
 # Research & OSINT
