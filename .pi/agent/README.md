@@ -13,7 +13,8 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 ├── APPEND_SYSTEM.md   → ~/dotfiles/.pi/agent/APPEND_SYSTEM.md (commit/safety rules)
 ├── models.json        → ~/dotfiles/.pi/agent/models.json (llama-server + 8 local models)
 ├── skills/            → ~/.config/opencode/skills (zero-copy: 21 skills reused)
-├── extensions/        contains 7 symlinks to ~/dotfiles/.pi/agent/extensions/
+├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (14 single-file + lsp/)
+├── settings.json      → ~/dotfiles/.pi/agent/settings.json (defaultProvider/Model)
 ├── prompts/           contains symlinks to ~/dotfiles/.pi/agent/prompts/
 ├── auth.json          (NOT tracked — runtime auth state)
 ├── sessions/          (NOT tracked — session JSONL files)
@@ -31,6 +32,14 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 | `superpowers.ts` | Intent-gated injection of obra/superpowers methodology | f8eedb720 |
 | `local-model-rules.ts` | Per-model rules for gemma/qwen (LaTeX ban, parallelism, anti-loop) | gemma.txt routing |
 | `style-toggle.ts` | `/style` command for terse ↔ socratic output style | 4069bab24 |
+| `docs.ts` | docs.erfi.io SSH access (search/grep/read/find/summary/sources) | replaces docs-mcp |
+| `context7.ts` | Library documentation lookup via REST (replaces OAuth MCP) | replaces context7-mcp |
+| `exa.ts` | websearch + codesearch via mcp.exa.ai REST | replaces exa-mcp |
+| `webfetch.ts` | Fetch URL → markdown/text/html | port of opencode webfetch |
+| `question.ts` | Interactive question prompts during execution | port of opencode question |
+| `task.ts` | Spawn subagent via `pi -p` subprocess | port of opencode task |
+| `todowrite.ts` | TodoWrite tool surface (bridges to TODO.md philosophy) | port of opencode todowrite |
+| `lsp/` (multi-file) | Language Server Protocol — 8 operations (hover, definition, references, etc.) | port of opencode lsp |
 
 ## Skills
 
@@ -65,7 +74,11 @@ pi -c                       # continue most recent
 # Customize
 /style                      # toggle terse ↔ socratic
 /skill:test-driven-development  # explicitly load a skill
-/model                      # switch model
+
+# Model switching (no /models command — use keybindings)
+Ctrl+L                      # full model picker (all providers, all models)
+Ctrl+P / Shift+Ctrl+P       # cycle forward/back through enabled models
+/scoped-models              # edit which models appear in Ctrl+P cycle (saves to settings.json)
 ```
 
 ## Migrating new opencode work to Pi
