@@ -13,7 +13,7 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 ├── APPEND_SYSTEM.md   → ~/dotfiles/.pi/agent/APPEND_SYSTEM.md (commit/safety rules)
 ├── models.json        → ~/dotfiles/.pi/agent/models.json (llama-server + 8 local models)
 ├── skills/            → ~/.config/opencode/skills (zero-copy: 21 skills reused)
-├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (20 single-file + lsp/)
+├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (22 single-file + lsp/)
 ├── settings.json      → ~/dotfiles/.pi/agent/settings.json (defaultProvider/Model + theme)
 ├── prompts/           → ~/dotfiles/.pi/agent/prompts/ (6 slash-command templates)
 ├── themes/            → ~/dotfiles/.pi/agent/themes/ (opencode-dark high-contrast)
@@ -29,7 +29,8 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 | `git-gh-gate.ts` | Confirms mutating git/gh commands; protects `.git/` from direct writes | 560a2b983 |
 | `oci-tags.ts` | Query OCI registries for image tags | 8cf0f6b87 |
 | `memory.ts` | Cross-session persistent memory + per-turn injection | ffab004ea |
-| `session-search.ts` | Substring search across past Pi sessions | f9f58da11 |
+| `session-search.ts` | ripgrep-backed full-text search across past Pi sessions (overrides built-in; ~40ms on 18GB tree) | f9f58da11 + local |
+| `compaction-progress.ts` | Spinner + token-delta toast during `/compact` and auto-compaction | local |
 | `superpowers.ts` | Intent-gated injection of obra/superpowers methodology | f8eedb720 |
 | `local-model-rules.ts` | Per-model rules for gemma/qwen (LaTeX ban, parallelism, anti-loop) | gemma.txt routing |
 | `style-toggle.ts` | `/style` command for terse ↔ socratic output style | 4069bab24 |
