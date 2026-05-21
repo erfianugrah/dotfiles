@@ -129,6 +129,19 @@ function matchesGitInternal(path: string): boolean {
   return GIT_INTERNAL_PATTERNS.some((p) => p.test(path));
 }
 
+// ANSI helpers: Pi wraps the whole select() title in `accent`, which renders
+// multi-line bodies (command text, paths) in saturated teal. We re-style the
+// body inline so only the title/`Allow?` reads as accent.
+//
+// 38;2;R;G;B = truecolor fg. 22 = clear bold (Pi applies bold to the title).
+// Reapplying \x1b[1m re-enables bold for the trailing 'Allow?' line.
+const BODY_FG = "\x1b[22m\x1b[38;2;240;240;240m"; // textBright unbold
+const RESUME = "\x1b[1m\x1b[39m"; // restore bold + inherit fg from outer accent wrapper
+
+function styleBody(body: string): string {
+  return `${BODY_FG}${body}${RESUME}`;
+}
+
 export default function (pi: ExtensionAPI) {
   // Block/confirm bash + write/edit tool calls
   pi.on("tool_call", async (event, ctx) => {
@@ -142,7 +155,10 @@ export default function (pi: ExtensionAPI) {
         return { block: true, reason: `Mutating git/gh command blocked (no UI). Matched: ${match.source}` };
       }
 
-      const choice = await ctx.ui.select(`⚠️  Mutating git/gh command:\n\n  ${command}\n\nAllow?`, ["Yes", "No"]);
+      const choice = await ctx.ui.select(
+        `⚠️  Mutating git/gh command:\n\n  ${styleBody(command)}\n\nAllow?`,
+        ["Yes", "No"],
+      );
       if (choice !== "Yes") {
         return { block: true, reason: "Blocked by user" };
       }
@@ -162,7 +178,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       const choice = await ctx.ui.select(
-        `⚠️  Writing to .git internals:\n\n  ${filePath}\n\nAllow?`,
+        `⚠️  Writing to .git internals:\n\n  ${styleBody(filePath)}\n\nAllow?`,
         ["Yes", "No"],
       );
       if (choice !== "Yes") {
