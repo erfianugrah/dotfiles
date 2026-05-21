@@ -25,7 +25,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // ── git/gh bash patterns that require confirmation ─────────────────────────
-// Each pattern matches a command prefix. Tested against the full bash input.
+//
+// Patterns match individual command segments. Bash compound forms — chained
+// with &&, ||, ;, |, or wrapped in $(...) / `...` — are split first so that
+// `cd /repo && git commit -m "..."` correctly triggers the `git commit`
+// pattern. Each pattern is anchored with `^\s*` against its segment (NOT the
+// whole input).
 const GIT_GH_PATTERNS: RegExp[] = [
   // git mutations
   /^\s*git\s+commit\b/i,
@@ -71,6 +76,38 @@ const GIT_GH_PATTERNS: RegExp[] = [
   /^\s*gh\s+run\s+(cancel|rerun|delete)\b/i,
 ];
 
+/**
+ * Split a bash command into best-effort segments at shell operators that
+ * separate commands: && || ; |. Also unwraps trivial $(...) and `...`
+ * command substitutions.
+ *
+ * Not a full shell parser — quoted strings containing `&&` etc. will be
+ * mis-split, which is a false positive (we may prompt unnecessarily). Better
+ * to over-prompt than under-prompt for mutating commands.
+ *
+ * Examples:
+ *   "git commit -m 'x'"               → ["git commit -m 'x'"]
+ *   "cd /r && git commit"             → ["cd /r", "git commit"]
+ *   "git status; git commit"          → ["git status", "git commit"]
+ *   "echo $(git commit -m x)"         → ["echo ", "git commit -m x"]
+ *   "git rev-parse HEAD | tee f"      → ["git rev-parse HEAD", "tee f"]
+ */
+function splitCommandSegments(command: string): string[] {
+  const segments: string[] = [];
+  // Extract nested commands from $(...) and `...`, add each as its own segment
+  let stripped = command;
+  const subshellPatterns = [/\$\(([^)]*)\)/g, /`([^`]*)`/g];
+  for (const pat of subshellPatterns) {
+    for (const m of stripped.matchAll(pat)) {
+      segments.push(m[1]);
+    }
+    stripped = stripped.replace(pat, " ");
+  }
+  // Split the outer command on shell command-chaining operators
+  segments.push(...stripped.split(/&&|\|\||;|\|/));
+  return segments;
+}
+
 // ── .git internal paths that should never be written/edited directly ───────
 const GIT_INTERNAL_PATTERNS: RegExp[] = [/(^|\/)\.git(\/|$)/];
 
@@ -80,7 +117,12 @@ const GIT_INTERNAL_PATTERNS: RegExp[] = [/(^|\/)\.git(\/|$)/];
 const WRITE_TOOLS = new Set(["write", "edit"]);
 
 function matchesBashGate(command: string): RegExp | undefined {
-  return GIT_GH_PATTERNS.find((p) => p.test(command));
+  const segments = splitCommandSegments(command);
+  for (const seg of segments) {
+    const hit = GIT_GH_PATTERNS.find((p) => p.test(seg));
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
 function matchesGitInternal(path: string): boolean {
