@@ -39,7 +39,7 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 | `question.ts` | Interactive question prompts during execution | port of opencode question |
 | `task.ts` | Spawn subagent via `pi -p` subprocess | port of opencode task |
 | `todowrite.ts` | TodoWrite tool surface (bridges to TODO.md philosophy) | port of opencode todowrite |
-| `lsp/` (multi-file) | Language Server Protocol — 8 operations (hover, definition, references, etc.) | port of opencode lsp |
+| `lsp/` (multi-file) | Language Server Protocol — 8 operations + auto-install (bun/go/cargo/rustup) for 14 languages | port of opencode lsp |
 
 ## Skills
 
