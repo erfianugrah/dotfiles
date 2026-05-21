@@ -44,6 +44,7 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 | `notify.ts` | Desktop ping (OSC 777 / OSC 99 / Windows toast) on `agent_end` | examples/notify.ts |
 | `inline-bash.ts` | Expand `!{cmd}` patterns inside prompts before send | examples/inline-bash.ts |
 | `trigger-compact.ts` | Auto-compact when context crosses 100k tokens + `/trigger-compact` | examples/trigger-compact.ts |
+| `migrate-sessions.ts` | `/migrate-sessions [args]` — backfill opencode → Pi sessions | wraps `bin/opencode-to-pi-sessions` |
 | `session-name.ts` | `/session-name <label>` — readable identifiers in `pi -r` | examples/session-name.ts |
 | `bookmark.ts` | `/bookmark` + `/unbookmark` for `/tree` navigation in long sessions | examples/bookmark.ts |
 | `custom-footer.ts` | `/footer` — git branch + token/cost stats in footer | examples/custom-footer.ts |

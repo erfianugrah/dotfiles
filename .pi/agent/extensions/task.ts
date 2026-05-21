@@ -42,6 +42,15 @@ const SUBAGENT_PRESETS: Record<string, { tools: string[]; description: string }>
     tools: [], // empty = no restriction (all tools available)
     description: "General-purpose subagent with full tool access. Use for multi-step research + implementation tasks.",
   },
+  // Alias for Claude Code-style subagent type names baked into obra/superpowers
+  // skills (`requesting-code-review/SKILL.md`, `subagent-driven-development/*`,
+  // `writing-plans/plan-document-reviewer-prompt.md`, etc.). Without this alias
+  // those skills fail schema validation when the model passes
+  // subagent_type="general-purpose".
+  "general-purpose": {
+    tools: [],
+    description: "Alias for `general` — accepts Claude Code-style subagent type names from obra/superpowers skills.",
+  },
 };
 
 interface JsonEvent {
@@ -76,8 +85,33 @@ async function runSubagent(args: {
         console.error(`[task ${args.subagentType}] stderr:\n${err}`);
       }
       // Parse JSON events line-by-line. Last assistant text wins.
+      //
+      // `pi -p --mode json` emits a stream like:
+      //   {type:"session",id,...}
+      //   {type:"agent_start"}
+      //   {type:"turn_start"}
+      //   {type:"message_start",message:{role:"user",content:[...]}}
+      //   {type:"message_end",  message:{role:"user",content:[...]}}
+      //   {type:"message_start",message:{role:"assistant",content:[]}}
+      //   {type:"message_update",message:{role:"assistant",content:[...partial...]}}
+      //   {type:"message_end",  message:{role:"assistant",content:[{type:"text",text:"..."}]}}
+      //   {type:"turn_end",     message:{role:"assistant",content:[...]}}
+      //   {type:"agent_end",    messages:[...all...]}
+      //
+      // We accept any of message_end / message_update / turn_end / agent_end
+      // for the final assistant text. Legacy `type:"message"` and `type:"text"`
+      // are kept for backward compatibility.
       let finalText = "";
       let sessionId: string | undefined;
+      const extractAssistantText = (msg: JsonEvent["message"]): string => {
+        if (!msg || msg.role !== "assistant") return "";
+        return (
+          msg.content
+            ?.filter((c) => c.type === "text")
+            .map((c) => c.text ?? "")
+            .join("\n") ?? ""
+        );
+      };
       for (const line of out.split("\n")) {
         if (!line.trim()) continue;
         let ev: JsonEvent;
@@ -89,16 +123,51 @@ async function runSubagent(args: {
         if (ev.type === "session" && (ev as { id?: string }).id) {
           sessionId = (ev as { id: string }).id;
         }
-        if (ev.type === "message" && ev.message?.role === "assistant") {
-          const text =
-            ev.message.content?.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n") ?? "";
+        if (
+          ev.type === "message" ||
+          ev.type === "message_end" ||
+          ev.type === "message_update" ||
+          ev.type === "turn_end"
+        ) {
+          const text = extractAssistantText(ev.message);
           if (text) finalText = text;
+        }
+        if (ev.type === "agent_end") {
+          const messages = (ev as { messages?: JsonEvent["message"][] }).messages;
+          if (messages) {
+            for (const m of messages) {
+              const text = extractAssistantText(m);
+              if (text) finalText = text;
+            }
+          }
         }
         if (ev.type === "text" && ev.text) {
           finalText = ev.text;
         }
       }
-      if (!finalText && err) finalText = `[no text output from subagent; stderr]\n${err.slice(0, 500)}`;
+      if (!finalText && err) {
+        // Filter known-noise stderr lines that aren't actually failures:
+        //   - "extension ctx is stale" — a sibling extension captured ctx and
+        //     misused it across a reload; the subagent's actual output still
+        //     lives in agent_end.messages but if THAT was also missing we
+        //     surface a cleaner hint than the raw Pi stack trace.
+        //   - lines mentioning the compiled Pi binary internals (numbered
+        //     lines like "201086 |   throw new Error(...)") aren't actionable
+        //     for the user and clutter the result.
+        const cleaned = err
+          .split("\n")
+          .filter((l) => !/^\d+\s*\|/.test(l) && !/at\s+(emit|process)/.test(l))
+          .join("\n")
+          .trim();
+        if (cleaned.includes("extension ctx is stale")) {
+          finalText =
+            "[subagent crashed — a sibling extension is capturing stale ctx]\n" +
+            "Check ~/.pi/agent/extensions/ for setFooter/setStatus closures that reference ctx after /reload.\n" +
+            "Workaround: restart Pi (full quit + relaunch) and retry.";
+        } else {
+          finalText = `[no text output from subagent; stderr]\n${cleaned.slice(0, 500)}`;
+        }
+      }
       if (!finalText) finalText = "[subagent produced no output]";
       resolve({ output: finalText, sessionId });
     });
