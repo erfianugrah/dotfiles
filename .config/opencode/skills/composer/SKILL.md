@@ -24,23 +24,28 @@ Self-hosted compose-mgmt platform. Go + Astro. REST API only — no end-user CLI
 | `/home/erfi/composer/docs/security.md` | Docker socket, RBAC, encryption, hardening |
 | `/home/erfi/composer/docs/deployment.md` | Docker / Unraid / TrueNAS / Podman / bare metal |
 
-When the API spec matters, the **live source of truth** is the daemon itself:
+When the API spec matters, the **live source of truth** is the daemon itself. Both JSON and YAML are served publicly:
 
 ```bash
 curl -s composer.erfi.io/openapi.json | jq '.paths | keys'   # endpoint list
 curl -s composer.erfi.io/openapi.json | jq '.paths."/api/v1/stacks/{name}".put'
+curl -s composer.erfi.io/openapi.yaml | yq '.paths'           # YAML view
 # interactive: open composer.erfi.io/docs in browser
 ```
 
 ## API basics
 
 - Base: `composer.erfi.io/api/v1` (prod). Local dev: `localhost:8080/api/v1`.
-- Spec: `GET /openapi.json` or `/openapi.yaml`. Interactive docs at `/docs` (Stoplight Elements). All three are public — no auth.
-- Auth (any one of):
-  - Session cookie via `POST /api/v1/auth/login` (UI flow).
-  - API key as `Authorization: Bearer ck_…` OR `X-API-Key: ck_…`. **Preferred for agents.** Mint via `POST /api/v1/keys` (operator+ role). Shown once — redacted to `****<last4>` after.
-- Public endpoints: health, bootstrap, login, templates, openapi spec, oauth callbacks, webhook receivers.
-- Errors: RFC 9457 Problem Details. 500s include `request_id`.
+- Version constant: `0.14.0` (`version.go`).
+- Spec: OpenAPI **3.1.0**. Served at `GET /openapi.json` AND `GET /openapi.yaml`. Interactive docs at `/docs` (Stoplight Elements). All public — no auth.
+- Surface: **106 Huma-registered endpoints** under 19 tags + a few raw chi routes (WebSocket terminal/compose, OAuth begin/callback, webhook receiver). Tags: system, auth, users, keys, registries, stacks, git, containers, networks, volumes, images, docker, pipelines, webhooks, jobs, audit, templates, sse, oauth.
+- Auth (any of three, all defined in `internal/api/openapi.go`):
+  - `cookieAuth` — session cookie `composer_session` via `POST /api/v1/auth/login` (UI flow).
+  - `apiKeyAuth` — `X-API-Key: ck_…`. **Preferred for agents.**
+  - `bearerAuth` — `Authorization: Bearer ck_…`.
+  - Mint via `POST /api/v1/keys` (operator+ role). Shown once — redacted to `****<last4>` after.
+- Public endpoints: health, bootstrap, login, templates, openapi spec (JSON+YAML), oauth callbacks, webhook receivers.
+- Errors: RFC 9457 Problem Details, content-type `application/problem+json`. 500s include `request_id`. Hand-written client extractor at `web/src/lib/api/errors.ts`.
 - Hard limits: Huma 1 MB request body cap. Compose YAML 512 KB. .env 256 KB.
 
 ## Auth quick-start (agent driving the API)
@@ -106,7 +111,8 @@ Webhook CRUD: `GET/POST /webhooks`, `GET/PUT/DELETE /webhooks/{id}`, `GET /webho
 ## Real-time streams
 
 - SSE: `/sse/events` (global), `/sse/containers/{id}/{logs,stats}`, `/sse/stacks/{name}/logs`, `/sse/pipelines/{id}/runs/{runId}`
-- WebSocket: `/api/v1/ws/terminal/{containerId}?shell=/bin/sh&cols=80&rows=24` — operator+. Raw chi handler (not Huma).
+- WebSocket terminal: `/api/v1/ws/terminal/{containerId}?shell=/bin/sh&cols=80&rows=24` — operator+. Raw chi handler (not Huma).
+- WebSocket compose actions: `/api/v1/ws/stacks/{name}/action` — operator+. PTY-streamed progress for `compose pull` / `compose up` (added in `internal/api/ws/compose.go`). Raw chi handler. Use for live deploy progress in scripts/UI instead of polling `/jobs/{id}`.
 
 ## Common make targets
 
@@ -120,23 +126,42 @@ make test-integration   # -tags=integration -p 1 -timeout=5m (needs Docker)
 make test-e2e           # -tags=e2e ./e2e/...  (needs Docker daemon)
 make test-frontend      # cd web && bun run build && bun run test  (Playwright)
 make lint               # go vet ./...
-make generate           # OpenAPI spec + TS client (web/src/lib/api/{openapi.json,types.ts})
+make generate           # OpenAPI JSON + YAML + TS client
+make generate-lint      # generate + redocly spectral lint (web/redocly.yaml)
 make docker             # docker build -f deploy/Dockerfile -t composer:local .
 ```
 
 Integration tests **must run with `-p 1`** (sequential, Docker testcontainers).
 
+### `make generate` — what it actually does
+
+Emits **three** artifacts (was two before May 2026):
+
+1. `web/src/lib/api/openapi.json` — from `go run ./cmd/dumpopenapi`
+2. `web/src/lib/api/openapi.yaml` — from `go run ./cmd/dumpopenapi -yaml` (NEW)
+3. `web/src/lib/api/types.ts` — from `bunx openapi-typescript`
+
+All three are diff-checked in CI (`make generate` then `git diff --exit-code` on all three). Stale spec OR stale YAML OR stale types.ts breaks lint.
+
+`scripts/generate-client.sh` is an alternate entry point but emits only JSON + types.ts (no YAML) — use `make generate` to stay CI-compatible.
+
+`make generate-lint` is a new target that runs `make generate` then `bunx @redocly/cli lint src/lib/api/openapi.json --config redocly.yaml`. CI runs this as a separate "Lint OpenAPI spec" step after the diff check.
+
+Do NOT hand-edit `web/src/lib/api/openapi.{json,yaml}` or `types.ts` — always regenerate from the Go code. The Huma config that drives the spec lives in `internal/api/openapi.go` (`HumaConfig`, `RegisterHumaHandlers`, `DocumentRawRoutes`) and is shared by the runtime server AND `cmd/dumpopenapi`. Update there, then `make generate`.
+
 ## Release workflow — order matters
 
 1. Bump `version.go` (`const Version`)
-2. `make generate` — re-generates `web/src/lib/api/{openapi.json,types.ts}` from Go code
-3. `make build-frontend` — produces `web/dist/` for `static.go` to embed
-4. `make lint && make test-unit` — green required
-5. `git add -A && git commit` — stage and commit ALL changes including generated artifacts
-6. `git tag v<N> && git push && git push --tags`
+2. `make generate` — re-generates `web/src/lib/api/{openapi.json,openapi.yaml,types.ts}` from Go code
+3. `make generate-lint` — redocly spectral lint on the spec (catches schema bugs before CI)
+4. `make build-frontend` — produces `web/dist/` for `static.go` to embed
+5. `make lint && make test-unit` — green required
+6. `git add -A && git commit` — stage and commit ALL changes including generated artifacts
+7. `git tag v<N> && git push && git push --tags`
 
 **Why order matters:**
-- CI lint runs `make generate` then `git diff --exit-code` on generated files. Stale spec → CI fails.
+- CI lint runs `make generate` then `git diff --exit-code` on **all three** generated files (json, yaml, types.ts). Any stale artifact breaks lint.
+- CI also runs `make generate-lint` (redocly) as a separate step — schema errors fail the build.
 - `go vet` reads `static.go` which embeds `web/dist`. No dist → vet fails.
 - `release.yml` on `v*` tag builds + pushes multi-arch image to `ghcr.io/erfianugrah/composer:<tag>`.
 
@@ -144,18 +169,30 @@ Integration tests **must run with `-p 1`** (sequential, Docker testcontainers).
 
 ```
 cmd/composerd/        daemon entrypoint  ← DO NOT run on dev machine
-cmd/dumpopenapi/      dumps OpenAPI spec to stdout (used by make generate)
+cmd/dumpopenapi/      dumps OpenAPI spec to stdout. Flag: -yaml emits YAML (default JSON).
 cmd/decryptssh/       SSH key recovery tool (you hope you never need this)
 internal/domain/      pure business logic, zero deps (auth/container/event/pipeline/registry/stack)
 internal/app/         services: stack, git, pipeline (+ executor + cron scheduler), auth, jobs, etc.
-internal/api/         Huma wiring, 24 handlers, middleware, ws/terminal, dto
+internal/api/         Huma wiring + raw chi routes. Layout:
+  api/openapi.go        HumaConfig, RegisterHumaHandlers, DocumentRawRoutes (shared by server + dumpopenapi)
+  api/server.go         HTTP server entrypoint
+  api/static.go         embeds web/dist
+  api/handler/          20+ files — stack, pipeline, sse, webhook, docker_exec… (was a single dir before)
+  api/dto/              request/response shapes
+  api/middleware/       auth, CSRF, rate-limit, audit, problem-details
+  api/ws/               raw WebSocket handlers: terminal.go, compose.go (NEW)
 internal/infra/       docker, store, crypto, eventbus, fs, git, notify, registry, sops, cache
-web/                  Astro 6 + React 19 frontend. src/lib/api/* are GENERATED — never edit by hand.
+web/                  Astro 6 + React 19 frontend
+  web/src/lib/api/
+    openapi.json        GENERATED (make generate). Do not edit.
+    openapi.yaml        GENERATED (make generate). Do not edit.
+    types.ts            GENERATED (openapi-typescript). Do not edit.
+    errors.ts           Hand-written. RFC 9457 detail/title extractor for fetch responses.
+  web/redocly.yaml      Redocly lint config (extends recommended; allows relative \$schema URIs)
 e2e/                  Go E2E smoke tests (-tags=e2e)
 deploy/               Dockerfile, compose.yaml, entrypoint.sh (PUID/PGID + DOCKER_GID magic)
 docs/                 Canonical user/agent documentation
-static.go             embeds web/dist at compile time
-version.go            const Version — bump first on release
+version.go            const Version — currently 0.14.0; bump first on release
 ```
 
 ## Key env vars (subset — full list in docs/configuration.md)
