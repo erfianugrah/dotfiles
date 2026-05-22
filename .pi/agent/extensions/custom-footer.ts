@@ -98,37 +98,28 @@ function installFooter(pi: PiAPI, ctx: ExtensionContext) {
         const left = theme.fg("dim", leftPlain) + ctxPct;
 
         // ── right: session · thinking · cwd/branch · model ──────────────────────
-        const bits: string[] = [];
-
-        // Session name (from session-auto-title or /session-name)
+        // Build candidate fields. We'll drop from the FRONT progressively
+        // when width is tight — model is kept last because it's the most
+        // grounding bit when comparing sessions.
+        const candidates: string[] = [];
         try {
           const sn = pi.getSessionName?.();
-          if (sn) bits.push(sn);
+          if (sn) candidates.push(sn);
         } catch { /* ignore */ }
-
-        // Thinking level when not off
         try {
           const tl = pi.getThinkingLevel?.();
-          if (tl && tl !== "off") bits.push(`⚛${tl}`);
+          if (tl && tl !== "off") candidates.push(`⚛${tl}`);
         } catch { /* ignore */ }
-
-        // cwd basename / git branch  (cwd: only on width >= 100 to leave room)
         const branch = footerData.getGitBranch();
-        let cwdBranch = "";
         try {
           const cwdName = path.basename(ctx.cwd);
-          if (cwdName && branch) cwdBranch = width >= 100 ? `${cwdName}/${branch}` : branch;
-          else if (branch) cwdBranch = branch;
-          else if (cwdName) cwdBranch = cwdName;
+          if (cwdName && branch) candidates.push(`${cwdName}/${branch}`);
+          else if (branch) candidates.push(branch);
+          else if (cwdName) candidates.push(cwdName);
         } catch { /* ignore */ }
-        if (cwdBranch) bits.push(cwdBranch);
-
-        // Model id (the user-recognisable suffix only)
         let modelId = "no-model";
         try { modelId = ctx.model?.id ?? "no-model"; } catch { /* ignore */ }
-        bits.push(modelId);
-
-        const right = theme.fg("dim", bits.join(" · "));
+        candidates.push(modelId);
 
         // ── middle: extension status texts (e.g. session-fts indexing) ───────────
         let middle = "";
@@ -139,9 +130,28 @@ function installFooter(pi: PiAPI, ctx: ExtensionContext) {
           if (texts.length) middle = "  " + theme.fg("yellow", texts.join(" · ")) + "  ";
         } catch { /* ignore */ }
 
+        // Width-aware drop: try fitting all, then drop from the front until
+        // (left + middle + pad + right) <= width. Always keep at least the
+        // model (the last candidate).
+        const leftW = visibleWidth(left);
+        const middleW = visibleWidth(middle);
+        const minPad = 2; // breathing room between left and right blocks
+        const rightBudget = Math.max(0, width - leftW - middleW - minPad);
+
+        let kept = candidates.slice();
+        let rightPlain = kept.join(" · ");
+        while (kept.length > 1 && rightPlain.length > rightBudget) {
+          kept.shift();
+          rightPlain = kept.join(" · ");
+        }
+        // If even just the model doesn't fit, drop right entirely rather than
+        // chopping the model id mid-word.
+        if (rightPlain.length > rightBudget) rightPlain = "";
+
+        const right = rightPlain ? theme.fg("dim", rightPlain) : "";
         const padTotal = Math.max(
           1,
-          width - visibleWidth(left) - visibleWidth(middle) - visibleWidth(right),
+          width - leftW - middleW - visibleWidth(right),
         );
         const pad = " ".repeat(padTotal);
         return [truncateToWidth(left + middle + pad + right, width)];
