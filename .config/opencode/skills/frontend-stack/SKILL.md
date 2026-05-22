@@ -1,6 +1,6 @@
 ---
 name: frontend-stack
-description: Scaffold web frontend projects with the user's preferred stack. Astro 6 default, React via create-tsrouter-app, or Next.js. Foundation: biome (lint+format), shadcn/ui CLI v4 + Tailwind v4 (UI), zod v4 (validation), tanstack-form (forms), tanstack-query (server state), tanstack-router (React routing). Use when starting a new frontend project or making integration-level decisions. Pairs with `design-utilitarian` for the default visual ethos.
+description: 'Scaffold web frontend projects with the user''s preferred stack. Astro 6 default, React via create-tsrouter-app, or Next.js. Foundation = biome (lint+format), shadcn/ui CLI v4 + Tailwind v4 (UI), zod v4 (validation), tanstack-form (forms), tanstack-query (server state), tanstack-router (React routing). Use when starting a new frontend project or making integration-level decisions. Pairs with `design-utilitarian` for the default visual ethos.'
 ---
 
 # frontend-stack — Astro 6 / React / shadcn / Tailwind v4 / zod 4
