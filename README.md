@@ -644,15 +644,20 @@ ast-grep for large edits, lockfile guards).
 
 | Skill | Purpose |
 |---|---|
+| `superpowers` | obra/superpowers methodology (brainstorming → plans → TDD) |
+| `frontend-stack` | Scaffold Astro 6 / React (tsrouter) / Next.js with biome / shadcn v4 / Tailwind v4 / zod v4 / tanstack-form+query+router |
+| `design-utilitarian` | McMaster-Carr visual + interaction ethos for ANY web UI work (info density, tables over cards, no animation tax, two-color palette, no marketing prose in product surfaces) |
+| `software-architecture` | Backend/system design — bounded contexts, interface-driven deps, REST+WS surface, Postgres+Valkey persistence, slog+Prometheus observability |
+| `infrastructure-stack` | Self-hosted Docker Compose stacks — bridge networks + static IPs, expose-not-ports, host-mode Caddy, PUID/PGID, cross-stack shared networks |
+| `ci-workflows` | GitHub + Gitea Actions YAML — verified-current action pins, language setup, Docker build+push, pages deploy |
+| `composer` | User's self-hosted Docker Compose mgmt platform at composer.erfi.io — 106-endpoint REST API, auth, pipeline footguns, release workflow |
+| `supabase` | All Supabase products (db, auth, edge fns, storage, realtime, ssr) |
+| `supabase-postgres-best-practices` | Postgres query/schema/index patterns from Supabase |
+| `research` | Multi-engine search + Playwright crawler + OSINT (SearXNG :8888, crawler :8889, OSINT :8890) |
+| `gh-search` | Public-GitHub code/issues/PRs via `gh` CLI |
 | `comfyui` | SDXL / Illustrious / Flux image generation via llm-compose proxy |
 | `lora-train` | LoRA fine-tuning for SDXL / Flux via kohya sd-scripts |
 | `whisper` | WhisperX audio/video transcription (YouTube, local files) |
-| `research` | Multi-engine search + Playwright crawler + OSINT (SearXNG :8888, crawler :8889, OSINT :8890) |
-| `gh-search` | Public-GitHub code/issues/PRs via `gh` CLI |
-| `supabase` | All Supabase products (db, auth, edge fns, storage, realtime, ssr) |
-| `supabase-postgres-best-practices` | Postgres query/schema/index patterns from Supabase |
-| `superpowers` | obra/superpowers methodology (brainstorming → plans → TDD) |
-| `frontend-stack` | Opinionated Astro 6 / React (tsrouter) / Next + Tailwind v4 + shadcn v4 + zod v4 + tanstack-form/query/router + biome 2 — McMaster-Carr utilitarian design ethos |
 | `mermaid-d2` | Diagram language picker + render via `render_diagram` tool |
 | `favicons-and-icons` | SVG-first or ComfyUI-raster → `build_favicon_set` → full PWA favicon set |
 
@@ -663,31 +668,59 @@ for the pinned ref/sha. Run `--status`, `--check`, `--ref <tag|sha>`,
 
 ### pi extensions (`.pi/agent/extensions/`)
 
-Custom TypeScript plugins that register tools, gates, and TUI behaviour.
-Most are direct ports of opencode fork built-ins:
+Custom TypeScript plugins that register tools, gates, TUI behaviour, and
+background jobs. Some are direct ports of opencode fork built-ins; others
+are pi-only because pi's extension API supports things opencode's plugin
+API doesn't (mid-turn tool-call gating, custom footer rendering, sync
+DB access, session lifecycle hooks).
+
+**Tools** (called by the LLM):
 
 | Extension | Provides |
 |---|---|
-| `tool-routing.ts` | Prepends `prompts/tool-routing.md` with CRITICAL framing |
-| `local-model-rules.ts` | Per-model rules for gemma / qwen / llama-server |
-| `docs.ts` (symlink) | docs.erfi.io SSH tools: docs_search/read/grep/find/summary/sources |
+| `docs.ts` (symlink) | docs.erfi.io SSH tools: `docs_search` / `read` / `grep` / `find` / `summary` / `sources` |
 | `exa.ts` | `websearch` + `codesearch` via mcp.exa.ai |
 | `webfetch.ts` | URL → markdown / text / html (5MB cap, Cloudflare retry) |
 | `web-research.ts` | Exa + auto-fetch top results + optional SearXNG cross-check; eliminates snippet-only reasoning |
 | `oci-tags.ts` | Docker Hub / ghcr.io / quay.io tag query (no stale registry data) |
 | `context7.ts` | Library docs via context7.com MCP |
-| `session-search.ts` | ripgrep across past pi sessions |
+| `session-search.ts` | Full-text search across past pi sessions — FTS5 fast path, ripgrep fallback for unindexed files |
+| `glob.ts` | `**/*.ts`-style file pattern lookup, mtime-sorted |
+| `grep.ts` | Ripgrep regex content search with `include` glob filter |
 | `render-diagram.ts` | mermaid + d2 render via local `mmdc` / `d2` CLI |
 | `build-favicon-set.ts` | SVG/PNG → favicon.ico + apple-touch + 192/512/maskable + manifest + HTML snippet |
+| `apply-patch.ts` | Multi-file Add/Update/Delete patch envelope, atomic |
 | `task.ts` | Subagent delegation (fresh context) |
 | `memory.ts` | Persistent cross-session memory |
 | `todowrite.ts` | Session todo list |
-| `git-gh-gate.ts` | Confirmation modal before mutating git/gh commands (truncates display body to avoid long-session scroll cascade) |
-| `superpowers.ts` | Conditional injection of using-superpowers/SKILL.md on build/debug intent |
-| `compaction-progress.ts` | Live spinner + token-before/after toast during /compact |
 | `lsp/` | LSP integration (multi-language: ts, rust, py, go, lua, clangd) |
+
+**Gates + safety** (intercept tool calls):
+
+| Extension | Provides |
+|---|---|
+| `tool-guard.ts` | 29 rules blocking bash + write anti-patterns: npm-when-bun, `sed -i` on source files, `:latest` docker images, unsigned commits, hallucinated CLIs (`bun create @tanstack/router`), `\uXXXX` escapes in bash strings, `chmod 777`, force-push to main, edits on `.env` / lockfiles / `node_modules` / `.git` internals. Also a reformulation-loop guard that blocks the 4th consecutive search-family call when no drill-in tool fired between |
+| `git-gh-gate.ts` | Confirmation modal before mutating git/gh commands (truncates display body to avoid long-session scroll cascade) |
+
+**Prompt + policy layer:**
+
+| Extension | Provides |
+|---|---|
+| `tool-routing.ts` | Prepends `prompts/tool-routing.md` with CRITICAL framing on every user prompt |
+| `local-model-rules.ts` | Per-model rules for gemma / qwen / llama-server |
+| `superpowers.ts` | Conditional injection of using-superpowers/SKILL.md on build/debug intent |
 | `style-toggle.ts` | Per-session output-style switcher |
-| `bookmark.ts`, `migrate-sessions.ts`, `notify.ts`, `question.ts`, `session-name.ts`, `trigger-compact.ts`, `inline-bash.ts`, `custom-footer.ts` | Smaller utilities |
+
+**Session lifecycle + UX:**
+
+| Extension | Provides |
+|---|---|
+| `custom-footer.ts` | Default-on footer: cost (cumulative + per-turn), context %, session name, thinking level, cwd/branch, model. Re-installs on session_start to survive `/new` / `/resume` / `/reload` / `/fork`. Aggregates `ctx.ui.setStatus()` text from other extensions as a yellow middle segment |
+| `session-auto-title.ts` | Auto-generates a 3-6 word session title from the first user message via a small cheap model (claude-haiku / gpt-5-mini / local gemma fallback). Records a marker so it runs once per session and respects manual `/session-name` overrides |
+| `session-summary.ts` | On `startup` / `new` session_start, injects a project briefing: branch + ahead/behind, working-tree status counts, last 3 commits, up to 3 open PRs. Hard 1.5s budget; silent outside git working trees |
+| `session-fts-index.ts` | Background SQLite FTS5 indexer for `~/.pi/agent/sessions/`. 100 newest-first files per startup with setImmediate yields every file and every 50 INSERTs to keep TUI responsive. `/session-index status \| rebuild \| gc` |
+| `compaction-progress.ts` | Live spinner + token-before/after toast during /compact |
+| `bookmark.ts`, `migrate-sessions.ts`, `notify.ts`, `question.ts`, `session-name.ts`, `trigger-compact.ts`, `inline-bash.ts` | Smaller utilities |
 
 ### Why two agents
 
