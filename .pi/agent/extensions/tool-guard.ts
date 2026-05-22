@@ -232,6 +232,96 @@ const BASH_RULES: BlockRule[] = [
       "Don't pin to `:latest` in compose YAML (per infra-stack skill). Latest upgrades silently and breaks things. Use `oci_tags image=<image> semver:true` to find the current stable tag, then pin explicitly (e.g. `postgres:18.1-alpine`).",
     segment: false,
   },
+  {
+    id: "sudo_systemctl_restart",
+    // The user runs services via docker compose (and composer/k3s/Proxmox). Direct systemctl restart
+    // is rarely the right move on this user's boxes; it's usually a service managed elsewhere.
+    pattern: /^\s*sudo\s+systemctl\s+(restart|stop|start|enable|disable)\s+/,
+    reason:
+      "Direct `systemctl restart` is rarely correct on this user's hosts — services are usually managed by docker compose, composer (gitops), or k3s. Check first: is it a compose stack? (`docker compose -f ~/<svc>-compose/docker-compose.yml restart <svc>`). A k3s deployment? (`kubectl rollout restart deploy/<svc>`). Only fall back to systemctl if it's truly a host-level systemd unit (sshd, networking, etc.).",
+    segment: true,
+  },
+  {
+    id: "kubectl_without_context",
+    // Soft-warn for kubectl since we can't async-check current-context from a tool_call hook.
+    // The block message reminds the agent to verify before issuing destructive ops.
+    pattern: /^\s*kubectl\s+(delete|drain|cordon|uncordon|edit|patch|apply\s+--dry-run=false|rollout\s+(restart|undo))/,
+    reason:
+      "You're about to run a mutating kubectl command. First verify the context: `kubectl config current-context` — confirm it's the cluster you intend (k3s? remote? minikube?). The user has multiple kube-clusters on different hosts. A kubectl delete in the wrong context is one of the worst foot-guns.",
+    segment: true,
+  },
+  {
+    id: "psql_direct_connect",
+    // psql -h host -U user — direct PG connection. When the project has sqlc, prefer that. When it's Supabase,
+    // use the supabase CLI. Direct psql is fine for ad-hoc inspection but the LLM tends to reach for it
+    // when a structured query through the project's data layer is better.
+    pattern: /^\s*psql\s+(-h\s+\S+|--host=\S+|postgres(ql)?:\/\/)/,
+    reason:
+      "Direct `psql` connections are for ad-hoc inspection only. If the project has sqlc / drizzle / supabase CLI, use those for actual queries (they're type-safe and respect schema). If you genuinely need psql for inspection, this command is fine — just confirm you're not bypassing migrations or schema discipline.",
+    segment: true,
+  },
+  {
+    id: "bash_eval_curl",
+    // The classic 'curl | sh' pattern — user might do this manually but the LLM shouldn't suggest it without consent.
+    pattern: /^\s*(curl|wget)\s+[^|&;]*\|\s*(sudo\s+)?(bash|sh|zsh)\b/,
+    reason:
+      "`curl | sh` blindly executes whatever the remote serves. Download first to a file, inspect, then run — OR install via the platform's package manager. Even for trusted installs (nvm, rustup), prefer the manual two-step.",
+    segment: true,
+  },
+  {
+    id: "chmod_777",
+    // chmod 777 is almost always wrong (use 755 / 644 / 600 depending on file type).
+    pattern: /^\s*chmod\s+(-R\s+)?(0?777|a\+rwx)\b/,
+    reason:
+      "`chmod 777` is almost never the right answer — it grants write to everyone. Use 755 (dirs / executables), 644 (regular files), 600 (secrets), 700 (private dirs). If you're hitting a permission error in a container, the fix is usually PUID/PGID env vars (1000/100 on this user's boxes), not 777.",
+    segment: true,
+  },
+  {
+    id: "force_push_protected",
+    // git push --force on main/master/dev is a common destructive mistake.
+    pattern: /^\s*git\s+push\s+(\S+\s+)*(-f|--force)\b.*\b(main|master|dev|production|prod)\b/,
+    reason:
+      "Force-pushing to main/master/dev/prod can erase teammates' work. Confirm the branch is yours alone and the remote is up to date. If you really need it, use `--force-with-lease` (refuses if the remote moved). Better: open a PR with the force-pushed branch separately.",
+    segment: true,
+  },
+];
+
+// Write-tool guards: catch attempts to write/edit specific files that should
+// go through a different mechanism.
+type WriteRule = {
+  id: string;
+  pattern: RegExp; // matches against the filesystem path
+  reason: string;
+};
+
+const WRITE_RULES: WriteRule[] = [
+  {
+    id: "edit_dotenv",
+    // .env / .env.* files often hold secrets. User's pattern: Vaultwarden is canonical store,
+    // .env is reconstructed from vault. Direct edits drift from vault.
+    pattern: /(^|\/)\.env(\.|$)/,
+    reason:
+      "Direct `.env` edits drift from Vaultwarden (the canonical secret store for this user). Add/change the secret in vault first (`vw_save <field>` from ~/dotfiles bitwarden helpers), then run the project's env-rehydrate step. If this IS a vault-rehydration write, the warning is safe to acknowledge and proceed.",
+  },
+  {
+    id: "edit_lockfile",
+    pattern: /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|poetry\.lock|composer\.lock|go\.sum)$/,
+    reason:
+      "Lockfiles are auto-generated by the package manager. Don't edit them directly — instead change `package.json` / `Cargo.toml` / `pyproject.toml` and run install (bun install / cargo update / etc.). Direct lockfile edits break reproducibility and confuse tooling.",
+  },
+  {
+    id: "edit_git_internals",
+    // Already covered by git-gh-gate.ts but add here for defence in depth
+    pattern: /(^|\/)\.git\/(config|HEAD|refs\/|hooks\/|COMMIT_EDITMSG)/,
+    reason:
+      "`.git/` internals shouldn't be edited directly. Use the corresponding git command: `git config` (for .git/config), `git branch -m` (for HEAD/refs), `git commit --amend` (for COMMIT_EDITMSG). Direct edits can corrupt the repo.",
+  },
+  {
+    id: "edit_node_modules",
+    pattern: /(^|\/)node_modules\//,
+    reason:
+      "Don't edit files in `node_modules/` — changes get blown away on the next `bun install`. If you need to patch a dependency, use `patch-package` (creates a permanent diff in `patches/`).",
+  },
 ];
 
 // Detect when webfetch is called with a docs.erfi.io URL — block and
@@ -306,6 +396,20 @@ export default function (pi: ExtensionAPI) {
               reason: `tool-guard[${rule.id}]: ${rule.reason}`,
             };
           }
+        }
+      }
+      return undefined;
+    }
+
+    // write / edit on protected paths
+    if (event.toolName === "write" || event.toolName === "edit") {
+      const input = event.input as { path?: string; file_path?: string };
+      const filePath = input.path ?? input.file_path;
+      if (typeof filePath !== "string") return undefined;
+      for (const rule of WRITE_RULES) {
+        if (DISABLED.has(rule.id)) continue;
+        if (rule.pattern.test(filePath)) {
+          return { block: true, reason: `tool-guard[${rule.id}]: ${rule.reason}` };
         }
       }
       return undefined;
