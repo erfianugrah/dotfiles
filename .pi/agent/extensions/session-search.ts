@@ -21,7 +21,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
-import { searchFts, indexStats } from "./session-fts-index";
+import { searchFts, indexStats } from "./session-fts";
 
 type Hit = {
 	sessionPath: string;
