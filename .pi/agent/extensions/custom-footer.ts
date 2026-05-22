@@ -1,9 +1,16 @@
 /**
  * custom-footer — git branch + token/cost stats in the footer.
  *
- * Toggle on with `/footer`. The footer shows:
+ * On by default. Toggle off with `/footer`. The footer shows:
  *
- *   ↑<input-tokens> ↓<output-tokens> $<cost>           <model> (<branch>)
+ *   ↑<input> ↓<output> $<session-cost> (+$<turn-cost>) <ctx%>    <model> (<branch>)
+ *
+ * Where:
+ *   ↑input    = cumulative input tokens this session (incl. cached + writes)
+ *   ↓output   = cumulative output tokens this session
+ *   session-$ = cumulative $ cost this session (from message.usage.cost.total)
+ *   turn-$    = $ cost of the latest assistant message (delta)
+ *   ctx%      = % of model context window currently in use (red >80%)
  *
  * Tokens and cost are computed by walking the current branch's assistant
  * messages (via `ctx.sessionManager`). Branch comes from `footerData` — the
@@ -42,6 +49,7 @@ function installFooter(ctx: ExtensionContext) {
         let input = 0;
         let output = 0;
         let cost = 0;
+        let lastTurnCost = 0;
         try {
           for (const e of ctx.sessionManager.getBranch()) {
             if (e.type === "message" && e.message.role === "assistant") {
@@ -49,6 +57,7 @@ function installFooter(ctx: ExtensionContext) {
               input += m.usage.input;
               output += m.usage.output;
               cost += m.usage.cost.total;
+              lastTurnCost = m.usage.cost.total; // overwritten until last
             }
           }
         } catch {
@@ -58,13 +67,26 @@ function installFooter(ctx: ExtensionContext) {
           return [""];
         }
 
+        // Context window usage (red when high)
+        let ctxPct = "";
+        try {
+          const usage = ctx.getContextUsage();
+          if (usage && usage.maxTokens) {
+            const pct = Math.round((usage.tokens / usage.maxTokens) * 100);
+            const color = pct >= 80 ? "red" : pct >= 60 ? "yellow" : "dim";
+            ctxPct = " " + theme.fg(color, `${pct}%`);
+          }
+        } catch {
+          // getContextUsage can be unavailable mid-transition
+        }
+
         const branch = footerData.getGitBranch();
         const fmt = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`);
+        const turnSuffix = lastTurnCost > 0.0005 ? ` (+$${lastTurnCost.toFixed(3)})` : "";
 
-        const left = theme.fg(
-          "dim",
-          `↑${fmt(input)} ↓${fmt(output)} $${cost.toFixed(3)}`,
-        );
+        const leftPlain = `↑${fmt(input)} ↓${fmt(output)} $${cost.toFixed(3)}${turnSuffix}`;
+        const left = theme.fg("dim", leftPlain) + ctxPct;
+
         const branchStr = branch ? ` (${branch})` : "";
         let modelId = "no-model";
         try {
@@ -84,10 +106,11 @@ function installFooter(ctx: ExtensionContext) {
 }
 
 export default function (pi: ExtensionAPI) {
-  let enabled = false;
+  // Default ON. Toggle off with `/footer`.
+  let enabled = true;
 
   pi.registerCommand("footer", {
-    description: "Toggle custom footer with git branch + token stats",
+    description: "Toggle custom footer with git branch + token + cost stats",
     handler: async (_args, ctx) => {
       enabled = !enabled;
 
@@ -105,7 +128,8 @@ export default function (pi: ExtensionAPI) {
   // Re-install the footer on every session lifecycle event so the captured
   // ctx is always the live one. session_start fires for reasons: "new" |
   // "resume" | "reload" | "fork" — exactly the cases that invalidate the
-  // previous ctx.
+  // previous ctx. Since `enabled` defaults to true, this installs the
+  // footer automatically on every session.
   pi.on("session_start", async (_event, ctx) => {
     if (enabled) installFooter(ctx);
   });

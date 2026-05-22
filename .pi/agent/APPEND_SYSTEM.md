@@ -13,6 +13,15 @@ Commits and pull requests must read as if written by the human author. The user 
 
 NEVER run compiled binaries, servers, or daemons directly on the dev machine unless you fully understand their startup hooks and side effects. Use `go test`, `bun test`, Docker, or dry-run flags instead. If unsure what a binary does at startup, read the main() function first.
 
+# Output: real characters, not unicode escapes
+
+When using typographical characters in response text or any tool input (commit messages, planning notes, code prose, diagrams), use the **actual UTF-8 character**, never `\uXXXX` JS-style escapes. The TUI / bash / git all display escape sequences as the literal 6 ASCII characters — they don't interpret JS-style unicode escapes.
+
+Write: → ← ↑ ↓ — – … ✓ ✗ · • × → ⇒ (paste/use the glyphs directly).
+Never: `\u2192` `\u2014` `\u2026` etc in any output destined for the terminal, a commit message, or a file.
+
+The only legitimate `\uXXXX` usages are inside source code (JS/TS string literals, JSON strings, etc.) where the language runtime interprets them. Bash `$'\uXXXX'` ANSI-C quoting also works.
+
 <!--
 Tool-routing rules live in ~/.pi/agent/prompts/tool-routing.md and are
 prepended to the system prompt by ~/.pi/agent/extensions/tool-routing.ts.
