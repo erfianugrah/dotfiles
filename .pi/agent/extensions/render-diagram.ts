@@ -147,24 +147,13 @@ async function renderD2(
 const renderDiagramTool = defineTool({
   name: "render_diagram",
   label: "Render Diagram",
-  promptSnippet:
-    "render_diagram — render mermaid or d2 diagram source to SVG/PNG via local CLI (mmdc or d2). Validates syntax. Saves to outputPath or returns SVG text.",
+  promptSnippet: "render_diagram — mermaid/d2 to SVG/PNG. Validates syntax.",
   promptGuidelines: [
-    "Use render_diagram to validate mermaid/d2 source before committing it to docs — silent syntax errors produce broken renders downstream.",
-    "Prefer d2 over mermaid for system architecture diagrams (cleaner layouts, faster); prefer mermaid for sequence/gantt/ER diagrams (richer node types).",
-    "If render_diagram returns SVG text (no outputPath), use it to verify the result is sane before writing. Don't render twice.",
+    "d2 for system architecture (cleaner, faster); mermaid for sequence/gantt/ER.",
   ],
-  description: [
-    "Render a mermaid or d2 diagram from source to SVG or PNG. Validates syntax — non-zero exit returns the parser error so you can fix the source and re-render.",
-    "",
-    "Languages:",
-    "- `mermaid`: flowcharts, sequence, gantt, ER, state, mindmaps. Slower (puppeteer-based, ~3-5s per render). Richer node types.",
-    "- `d2`: system architecture, infra topology, declarative graphs. Instant (Go binary). Cleaner default layouts.",
-    "",
-    "If `outputPath` is omitted, SVG content is returned in the tool result (PNG is binary and cannot be inlined — outputPath is required for PNG).",
-    "",
-    "For syntax/best-practices guidance see the `mermaid-d2` skill.",
-  ].join("\n"),
+  description:
+    "Render mermaid/d2 source to SVG (default) or PNG. PNG requires outputPath. Syntax errors returned as text.",
+
   parameters: Type.Object({
     language: Type.Union([Type.Literal("mermaid"), Type.Literal("d2")], {
       description: "Diagram language",

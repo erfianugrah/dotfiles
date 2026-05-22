@@ -143,23 +143,13 @@ function htmlToMarkdown(html: string): string {
 const webfetchTool = defineTool({
   name: "webfetch",
   label: "Web Fetch",
-  promptSnippet: "webfetch — fetch a known URL as markdown / text / html. For unknown topics use websearch or web_research first.",
+  promptSnippet: "webfetch — fetch a known URL as markdown / text / html.",
   promptGuidelines: [
-    "Use webfetch to drill into a specific URL after websearch surfaces it, or when the user pastes a link. Don't reach for it before knowing the URL.",
-    "If webfetch returns empty / SPA-shell content (very short body on a JS-heavy host), escalate to the research skill crawler at :8889/fetch with force_js:true (Playwright fallback).",
+    "If response is SPA-shell / empty, escalate to research crawler :8889/fetch with force_js:true.",
   ],
-  description: [
-    "Fetch a URL and return its content as markdown (default), text, or html.",
-    "",
-    "Use this when you have a specific known URL to read. For external topic lookup that needs search, use `websearch` (Exa) instead.",
-    "",
-    "Limits: 5MB response size, 30s default timeout (max 120s), 1 retry with simpler User-Agent if Cloudflare 403s.",
-    "",
-    "Format options:",
-    "- `markdown` (default): HTML pages converted to clean markdown",
-    "- `text`: HTML stripped to plain text",
-    "- `html`: raw HTML (use sparingly — eats context)",
-  ].join("\n"),
+  description:
+    "Fetch URL as markdown (default) / text / html. 5MB cap, 30s default timeout (max 120s), 1 retry on CF 403.",
+
   parameters: Type.Object({
     url: Type.String({ description: "URL to fetch (http:// or https://)" }),
     format: Type.Optional(

@@ -55,20 +55,11 @@ async function rgFiles(cwd: string, pattern: string, signal?: AbortSignal): Prom
 const globTool = defineTool({
   name: "glob",
   label: "Glob",
-  promptSnippet:
-    "glob — fast file pattern matching. Returns up to 100 paths sorted by mtime. Wraps `rg --files -g <pattern>`.",
-  promptGuidelines: [
-    "Use glob to find files by name pattern (e.g. `**/*.ts`, `src/**/*.{ts,tsx}`). Faster + cleaner than `bash rg --files -g ...`.",
-    "Returns up to 100 results sorted by mtime (newest first). If truncated, narrow the pattern or pass a more specific `path`.",
-  ],
-  description: [
-    "Fast file pattern matching tool that works with any codebase size.",
-    "",
-    "- Supports glob patterns like `**/*.ts` or `src/**/*.{ts,tsx}`",
-    "- Returns matching file paths sorted by mtime (newest first)",
-    "- Capped at 100 results — narrow the pattern if you hit the cap",
-    "- Use this when you need to find files by name patterns, NOT for content search (use `grep` for that)",
-  ].join("\n"),
+  promptSnippet: "glob — fast file-by-pattern lookup. Wraps `rg --files -g`.",
+  promptGuidelines: [],
+  description:
+    "Glob file patterns (e.g. `**/*.ts`). Returns up to 100 paths sorted by mtime. For content search use `grep`.",
+
   parameters: Type.Object({
     pattern: Type.String({ description: "Glob pattern (e.g. '**/*.ts', 'src/**/*.{ts,tsx}')" }),
     path: Type.Optional(

@@ -147,28 +147,14 @@ function manifestJson(opts: { name: string; shortName: string; themeColor: strin
 const buildFaviconSetTool = defineTool({
   name: "build_favicon_set",
   label: "Build Favicon Set",
-  promptSnippet:
-    "build_favicon_set — turn an SVG string or high-res PNG into a full PWA favicon set (favicon.ico multi-res + apple-touch + 192/512/maskable + site.webmanifest + HTML snippet).",
+  promptSnippet: "build_favicon_set — SVG/PNG → full PWA favicon artifact set + HTML snippet.",
   promptGuidelines: [
-    "Use build_favicon_set after writing an SVG inline or generating a 512+px PNG. Don't manually run rsvg-convert/magick — this tool encapsulates the full PWA artifact set.",
-    "Prefer SVG input over PNG when the design is vector-friendly (favicons, geometric marks, monograms) — quality is better at 16/32px sizes than downscaling a raster.",
-    "Output directory should usually be `public/` or `static/` of a web project. The HTML snippet returned goes in <head>.",
+    "Prefer SVG input over PNG for geometric marks (better at 16/32px).",
   ],
   description: [
-    "Build the full PWA favicon artifact set from a single SVG or high-res PNG source.",
-    "",
-    "Pass EITHER `svg` (SVG source string) OR `pngPath` (path to a PNG, ideally ≥512×512). SVG is preferred for vector-friendly designs (cleaner at 16/32px).",
-    "",
-    "Writes to `outDir`:",
-    "- favicon.ico (multi-res 16/32/48)",
-    "- favicon-16.png, favicon-32.png",
-    "- apple-touch-icon.png (180×180)",
-    "- icon-192.png, icon-512.png (PWA)",
-    "- icon-maskable.png (512×512 with 80% safe-zone padding)",
-    "- site.webmanifest (PWA manifest stub)",
-    "- favicon.svg (if input was SVG)",
-    "",
-    "Returns an HTML <head> snippet ready to paste into a layout.",
+    "PWA favicon artifact set from SVG or ≥512px PNG.",
+    "Writes to outDir: favicon.ico (16/32/48), favicon-16.png, favicon-32.png, apple-touch-icon.png (180), icon-192.png, icon-512.png, icon-maskable.png (with 80% safe-zone), site.webmanifest, favicon.svg (if SVG input).",
+    "Returns HTML <head> snippet.",
   ].join("\n"),
   parameters: Type.Object({
     svg: Type.Optional(Type.String({ description: "SVG source string. Mutually exclusive with pngPath." })),

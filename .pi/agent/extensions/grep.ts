@@ -79,24 +79,13 @@ async function rgSearch(
 const grepTool = defineTool({
   name: "grep",
   label: "Grep",
-  promptSnippet:
-    "grep — fast regex content search (ripgrep). Returns file:line:text. Filter files via `include` glob.",
+  promptSnippet: "grep — ripgrep regex search. Returns file:line:text.",
   promptGuidelines: [
-    "Use grep to find files containing a regex pattern. Faster + structured vs `bash rg ...`.",
-    "Pair with `include` (e.g. `*.ts`) to scope to a file type. Default is all files (respecting .gitignore).",
-    "For counting matches or complex pipelines, use bash + rg directly. grep is for 'find files matching X'.",
+    "Use `include` glob (e.g. `*.ts`) to scope. For match counts / pipelines, use bash + rg.",
   ],
-  description: [
-    "Fast content search tool that works with any codebase size.",
-    "",
-    "- Searches file contents using regular expressions (Rust regex syntax)",
-    '- Supports full regex (e.g. "log.*Error", "function\\s+\\w+")',
-    '- Filter files by pattern via `include` (e.g. "*.ts", "*.{ts,tsx}")',
-    "- Returns file:line:text triples sorted by mtime (newest files first)",
-    "- Use this when you need to find files containing specific patterns.",
-    "- Capped at 100 hits — narrow the pattern or `include` if you hit the cap.",
-    "- If you need to count matches across files, use bash + rg directly.",
-  ].join("\n"),
+  description:
+    "Ripgrep content search (Rust regex). Filter files via `include` glob. Returns file:line:text, capped at 100 hits.",
+
   parameters: Type.Object({
     pattern: Type.String({
       description: "Regex pattern to search for (Rust regex syntax — same as ripgrep)",
