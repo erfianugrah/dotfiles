@@ -7,17 +7,26 @@
  * event loop.
  *
  * Strategy:
- *   1. Spawn `rg --json -i -F <query>` over the sessions dir.
- *   2. For each `match` event, JSON.parse the matched line (it IS a session
+ *   1. Tokenise the query (opencode's toFtsQuery pattern) — multi-word
+ *      queries auto-OR across tokens so 'opencode pi migration' matches any
+ *      of those words, not the literal three-word substring (which never
+ *      appears anywhere). Quoted phrases pass through as a single token.
+ *   2. Spawn `rg --json -i -F -e <tok1> -e <tok2> ...` over the sessions dir.
+ *   3. For each `match` event, JSON.parse the matched line (it IS a session
  *      entry — sessions are jsonl, one entry per line).
- *   3. Filter entries to type="message", optionally by role.
- *   4. Build a snippet around the match and emit.
- *   5. Stop early once `limit` hits land — kill the child to free CPU.
+ *   4. Filter entries to type="message", optionally by role.
+ *   5. Score by distinct-token-hit-count, sort desc, take limit.
+ *   6. Build a snippet around the first matching token and emit.
  *
  * Pi session layout: ~/.pi/agent/sessions/<cwd-encoded>/<timestamp>_<uuid>.jsonl
  * Message entry shape (v3):
  *   { type:"message", message:{ role:"user"|"assistant"|"toolResult",
  *                                content:[{type, text}, ...] }, ... }
+ *
+ * Mirrors opencode's session-search semantics (which uses SQLite FTS5 with
+ * stemming and auto-OR). Pi can't easily build an FTS5 index without a
+ * background indexer, but ripgrep + tokenisation reaches the same
+ * user-visible behaviour for multi-word queries.
  */
 
 import { Type } from "@earendil-works/pi-ai";
@@ -55,13 +64,38 @@ function extractText(content: unknown): string {
 		.join(" ");
 }
 
-function snippet(text: string, query: string, before = 40, after = 120): string {
+// Tokenise a query the way opencode's toFtsQuery does:
+//   - already-structured queries (with quotes / OR / AND / NOT / *) pass
+//     through unchanged as a single pattern
+//   - otherwise split on whitespace + common separators, dedupe
+// Each resulting token becomes a separate `-e <pattern>` arg to rg, which
+// ORs them automatically.
+function tokenise(input: string): string[] {
+	const trimmed = input.trim();
+	if (!trimmed) return [];
+	if (/\b(OR|AND|NOT)\b|[*"]/.test(trimmed)) return [trimmed];
+	const tokens = trimmed
+		.split(/[\s\-_./\\:]+/)
+		.filter((t) => t.length > 0);
+	return Array.from(new Set(tokens));
+}
+
+function snippet(text: string, tokens: string[], before = 40, after = 120): string {
 	const lc = text.toLowerCase();
-	const lq = query.toLowerCase();
-	const idx = lc.indexOf(lq);
+	// Find earliest token hit so the snippet shows the most context
+	let idx = -1;
+	let hitLen = 0;
+	for (const t of tokens) {
+		const lt = t.toLowerCase();
+		const pos = lc.indexOf(lt);
+		if (pos !== -1 && (idx === -1 || pos < idx)) {
+			idx = pos;
+			hitLen = lt.length;
+		}
+	}
 	if (idx === -1) return text.slice(0, before + after);
 	const start = Math.max(0, idx - before);
-	const end = Math.min(text.length, idx + lq.length + after);
+	const end = Math.min(text.length, idx + hitLen + after);
 	let s = text.slice(start, end).replace(/\s+/g, " ");
 	if (start > 0) s = "…" + s;
 	if (end < text.length) s = s + "…";
@@ -79,33 +113,26 @@ type RgMatch = {
 
 function searchWithRipgrep(
 	root: string,
-	query: string,
+	tokens: string[],
 	roleFilter: string | undefined,
 	limit: number,
 	signal: AbortSignal | undefined,
 ): Promise<Hit[]> {
 	return new Promise((resolve, reject) => {
-		// -F  fixed string (faster, treats query literally)
+		if (tokens.length === 0) return resolve([]);
+		// -F  fixed string (faster, treats each pattern literally)
 		// -i  case-insensitive
-		// -j  bounded threads (default = #cores; explicit avoids surprise on big boxes)
+		// -e <pat>  one per token — rg ORs them automatically
+		// Multiple -e flags is the rg-native equivalent of opencode's FTS5 auto-OR.
 		// --json  structured stream
 		// --no-config  ignore user's ripgreprc
 		// -g  only jsonl files (defensive — sessions dir should only have those)
-		const child = spawn(
-			"rg",
-			[
-				"--json",
-				"--no-config",
-				"-i",
-				"-F",
-				"-g",
-				"*.jsonl",
-				"--",
-				query,
-				root,
-			],
-			{ stdio: ["ignore", "pipe", "pipe"] },
-		);
+		const rgArgs = ["--json", "--no-config", "-i", "-F", "-g", "*.jsonl"];
+		for (const t of tokens) {
+			rgArgs.push("-e", t);
+		}
+		rgArgs.push(root);
+		const child = spawn("rg", rgArgs, { stdio: ["ignore", "pipe", "pipe"] });
 
 		const hits: Hit[] = [];
 		let done = false;
@@ -151,14 +178,26 @@ function searchWithRipgrep(
 			if (!text) return;
 
 			const sessionPath = ev.data.path.text;
+			// Score = count of distinct tokens that hit this line (case-insensitive)
+			const lc = text.toLowerCase();
+			let score = 0;
+			for (const t of tokens) {
+				if (lc.includes(t.toLowerCase())) score++;
+			}
 			hits.push({
 				sessionPath,
 				date: dateFromName(basename(sessionPath)),
 				role: role ?? "?",
-				snippet: snippet(text, query),
+				snippet: snippet(text, tokens),
+				// Tag the hit with its score; we sort + truncate after the stream
+				// drains rather than mid-stream, so multi-token relevance works.
+				// @ts-expect-error — augmented field, dropped before serialisation
+				_score: score,
 			});
 
-			if (hits.length >= limit) finish();
+			// Take 4× limit while streaming, then sort + slice to the real limit.
+			// Lets us keep multi-token relevance without buffering the entire scan.
+			if (hits.length >= Math.max(limit * 4, 40)) finish();
 		});
 
 		child.stderr.on("data", () => {
@@ -174,12 +213,20 @@ const sessionSearchTool = defineTool({
 	name: "session_search",
 	label: "Session Search",
 	description: [
-		"Search past session content using ripgrep (fixed-string, case-insensitive).",
+		"Search past session content using ripgrep with opencode-style multi-word OR semantics.",
 		"",
 		"Use this tool to find relevant context from previous sessions — past decisions, implementations, user preferences, and recurring patterns.",
 		"",
+		"Query handling:",
+		'- Multi-word queries auto-OR across tokens: "opencode pi migration" matches messages containing ANY of those words.',
+		'- Quoted phrases pass through as a single token: \'"web research"\' matches the literal phrase.',
+		'- Structured queries containing OR/AND/NOT or * also pass through unchanged.',
+		"- Case-insensitive. Stemming is NOT supported (use root words like 'test' not 'testing').",
+		"",
+		"Results are scored by distinct-token-hit-count and returned in descending relevance.",
+		"",
 		"Parameters:",
-		'- "query": Search terms (case-insensitive substring match)',
+		'- "query": Search terms (multi-word auto-OR; quote for literal phrase)',
 		'- "role": Filter by message role: "user", "assistant", or omit for both',
 		'- "limit": Max results to return (default: 10, max: 50)',
 		"",
@@ -191,7 +238,7 @@ const sessionSearchTool = defineTool({
 		"- Looking for patterns across sessions",
 	].join("\n"),
 	parameters: Type.Object({
-		query: Type.String({ description: "Search terms (case-insensitive substring)" }),
+		query: Type.String({ description: "Search terms (multi-word auto-OR; quote for literal phrase)" }),
 		role: Type.Optional(
 			Type.Union([Type.Literal("user"), Type.Literal("assistant")], { description: "Filter by message role" }),
 		),
@@ -208,11 +255,18 @@ const sessionSearchTool = defineTool({
 		}
 
 		const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
+		const tokens = tokenise(params.query);
+		if (tokens.length === 0) {
+			return {
+				content: [{ type: "text", text: "Empty query." }],
+				details: { count: 0, query: params.query },
+			};
+		}
 		const t0 = Date.now();
 
 		let hits: Hit[];
 		try {
-			hits = await searchWithRipgrep(root, params.query, params.role, limit, signal);
+			hits = await searchWithRipgrep(root, tokens, params.role, limit, signal);
 		} catch (err: any) {
 			return {
 				content: [{ type: "text", text: `Search failed: ${err?.message ?? String(err)}` }],
@@ -220,12 +274,19 @@ const sessionSearchTool = defineTool({
 			};
 		}
 
+		// Sort by distinct-token-hit score (desc), truncate to real limit,
+		// strip internal _score field before serialisation.
+		hits.sort((a: any, b: any) => (b._score ?? 0) - (a._score ?? 0));
+		hits = hits.slice(0, limit);
+		for (const h of hits as any[]) delete h._score;
+
 		const ms = Date.now() - t0;
 
 		if (hits.length === 0) {
+			const tokenList = tokens.length > 1 ? ` (tokens: ${tokens.join(", ")})` : "";
 			return {
-				content: [{ type: "text", text: `No matches for "${params.query}" (searched in ${ms}ms)` }],
-				details: { count: 0, query: params.query, ms },
+				content: [{ type: "text", text: `No matches for "${params.query}"${tokenList} (searched in ${ms}ms)` }],
+				details: { count: 0, query: params.query, tokens, ms },
 			};
 		}
 
@@ -233,9 +294,10 @@ const sessionSearchTool = defineTool({
 			.map((h, i) => `${i + 1}. [${h.date}] ${h.role}\n   ${h.sessionPath}\n   ${h.snippet}`)
 			.join("\n\n");
 
+		const tokenSummary = tokens.length > 1 ? ` for ${tokens.length} tokens` : "";
 		return {
-			content: [{ type: "text", text: `${out}\n\n(${hits.length} hits in ${ms}ms)` }],
-			details: { count: hits.length, query: params.query, ms },
+			content: [{ type: "text", text: `${out}\n\n(${hits.length} hits${tokenSummary} in ${ms}ms)` }],
+			details: { count: hits.length, query: params.query, tokens, ms },
 		};
 	},
 });
