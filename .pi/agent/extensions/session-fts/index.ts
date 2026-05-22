@@ -1,0 +1,316 @@
+/**
+ * session-fts-index — main-thread façade for the FTS5 indexer worker.
+ *
+ * The actual indexer (writes, SQLite churn, FTS5 inverted-index updates)
+ * runs in session-fts-worker.ts as a Bun Worker — completely off the main
+ * pi event loop. This file:
+ *
+ *   - Keeps a read-only DB handle for searchFts() + indexStats() (WAL mode
+ *     allows concurrent readers while the worker writes).
+ *   - Spawns the worker on session_start (delayed by STARTUP_DELAY_MS to
+ *     let the TUI fully render first).
+ *   - Forwards turn_end re-index requests to the worker.
+ *   - Surfaces worker progress + completion via ctx.ui.setStatus() so the
+ *     footer extension status slot shows what's happening.
+ *
+ * Before this refactor, the indexer ran on the main thread and even with
+ * setImmediate-every-file the synchronous SQLite work caused visible
+ * keystroke lag at every session_start (3ms per row × 150 rows × 100 files
+ * = ~45s of unyielding work on a 1.3GB index). Worker thread = problem
+ * eliminated; TUI stays smooth.
+ *
+ * Commands:
+ *   /session-index status   row counts + worker state
+ *   /session-index rebuild  worker: drop and reindex from scratch
+ *   /session-index gc       worker: remove rows for files no longer on disk
+ */
+
+import { Database } from "bun:sqlite";
+import { existsSync, mkdirSync, statSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+
+// ─────────────────────────────────────────────────────────────────────────
+// Constants
+
+const DB_PATH = join(getAgentDir(), "session-fts.db");
+const SESSIONS_ROOT = join(getAgentDir(), "sessions");
+const BATCH_PER_STARTUP = 100;
+const STARTUP_DELAY_MS = 5000; // TUI fully responsive before worker kicks in
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Read-only DB (main thread)
+
+let readDb: Database | null = null;
+function openReadDb(): Database {
+  if (readDb) return readDb;
+  mkdirSync(dirname(DB_PATH), { recursive: true });
+  const d = new Database(DB_PATH, { create: true });
+  d.exec("PRAGMA journal_mode = WAL");
+  d.exec("PRAGMA synchronous = NORMAL");
+  // Ensure schema exists (worker also does this, but we may search before
+  // the worker has run)
+  d.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS msg_fts USING fts5(
+      content,
+      session_path UNINDEXED,
+      date UNINDEXED,
+      role UNINDEXED,
+      tokenize = 'porter unicode61'
+    );
+  `);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS indexed_files (
+      path TEXT PRIMARY KEY,
+      mtime INTEGER NOT NULL,
+      size INTEGER NOT NULL,
+      entry_count INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+  readDb = d;
+  return d;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Worker management
+
+type WorkerMessage =
+  | { type: "progress"; files: number; entries: number }
+  | { type: "done"; files: number; entries: number; ms: number }
+  | { type: "error"; message: string };
+
+let worker: Worker | null = null;
+let workerBusy = false;
+let lastCommand: string | null = null;
+
+function ensureWorker(onMessage: (msg: WorkerMessage) => void): Worker {
+  if (worker) return worker;
+  // Bun's Worker takes a URL. The .ts file is resolved relative to this file.
+  worker = new Worker(new URL("./worker.ts", import.meta.url).href);
+  worker.onmessage = (e: MessageEvent) => onMessage(e.data as WorkerMessage);
+  worker.onerror = () => {
+    workerBusy = false;
+    // Don't kill the worker on transient errors — let the next request retry
+  };
+  return worker;
+}
+
+function sendWorkerCmd(
+  cmd: "index-batch" | "index-file" | "rebuild" | "gc",
+  payload: { limit?: number; path?: string },
+  onMessage: (msg: WorkerMessage) => void,
+) {
+  if (workerBusy) return false; // single-flight; drop duplicate requests
+  const w = ensureWorker(onMessage);
+  workerBusy = true;
+  lastCommand = cmd;
+  w.postMessage({ cmd, ...payload });
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Helpers reused by search
+
+export function toFtsQuery(input: string): string {
+  if (/\b(OR|AND|NOT)\b|[*"]/.test(input)) return input;
+  return input
+    .split(/[\s\-_./\\:]+/)
+    .filter(Boolean)
+    .join(" OR ");
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Search (synchronous reads on main thread — fast, doesn't block typing)
+
+export interface FtsHit {
+  sessionPath: string;
+  date: string;
+  role: string;
+  snippet: string;
+  rank: number;
+}
+
+export function searchFts(query: string, role: string | undefined, limit: number): FtsHit[] {
+  const d = openReadDb();
+  const ftsQuery = toFtsQuery(query);
+  const args: (string | number)[] = [ftsQuery];
+  let sql = `
+    SELECT
+      snippet(msg_fts, 0, '«', '»', '…', 32) as snippet,
+      session_path,
+      date,
+      role,
+      rank
+    FROM msg_fts
+    WHERE msg_fts MATCH ?
+  `;
+  if (role) {
+    sql += " AND role = ?";
+    args.push(role);
+  }
+  sql += " ORDER BY rank LIMIT ?";
+  args.push(limit);
+  try {
+    const rows = d.query<
+      { snippet: string; session_path: string; date: string; role: string; rank: number },
+      typeof args
+    >(sql).all(...args);
+    return rows.map((r) => ({
+      sessionPath: r.session_path,
+      date: r.date,
+      role: r.role,
+      snippet: r.snippet,
+      rank: r.rank,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export function indexStats(): { totalRows: number; totalFiles: number; pendingFiles: number; workerBusy: boolean; lastCommand: string | null } {
+  const d = openReadDb();
+  const totalRows = d.query<{ c: number }, []>("SELECT COUNT(*) as c FROM msg_fts").get()?.c ?? 0;
+  const totalFiles = d.query<{ c: number }, []>("SELECT COUNT(*) as c FROM indexed_files").get()?.c ?? 0;
+  // Approximate pending count without enumerating every file (which is a
+  // synchronous main-thread walk we're trying to avoid). Use filesystem
+  // count vs indexed_files count.
+  let pendingFiles = 0;
+  if (existsSync(SESSIONS_ROOT)) {
+    let total = 0;
+    try {
+      for (const e of readdirSync(SESSIONS_ROOT, { withFileTypes: true })) {
+        if (!e.isDirectory()) continue;
+        try {
+          for (const f of readdirSync(join(SESSIONS_ROOT, e.name))) {
+            if (f.endsWith(".jsonl")) total++;
+          }
+        } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+    pendingFiles = Math.max(0, total - totalFiles);
+  }
+  return { totalRows, totalFiles, pendingFiles, workerBusy, lastCommand };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Extension hooks
+
+export default function (pi: ExtensionAPI) {
+  // Open the read-only DB lazily but ensure the schema exists at startup.
+  openReadDb();
+
+  // Spawn the worker shortly after each session_start. Worker stays alive
+  // between batches so we don't pay startup cost on every turn_end.
+  pi.on("session_start", async (_event, ctx) => {
+    setTimeout(() => {
+      const ok = sendWorkerCmd("index-batch", { limit: BATCH_PER_STARTUP }, (msg) => {
+        try {
+          if (msg.type === "progress") {
+            ctx.ui.setStatus?.("session-fts", `indexing +${msg.files}f ${msg.entries}m`);
+          } else if (msg.type === "done") {
+            workerBusy = false;
+            if (msg.files > 0) {
+              ctx.ui.setStatus?.("session-fts", `+${msg.files}f ${msg.entries}m`);
+              setTimeout(() => { try { ctx.ui.setStatus?.("session-fts", ""); } catch { /* ignore */ } }, 5000);
+            } else {
+              ctx.ui.setStatus?.("session-fts", "");
+            }
+          } else if (msg.type === "error") {
+            workerBusy = false;
+            // Don't surface every error — they're usually transient per-file
+          }
+        } catch { /* ignore */ }
+      });
+      if (!ok) {
+        // Worker was already busy when session_start fired — fine, current
+        // batch will finish and the next session_start will pick up.
+      }
+    }, STARTUP_DELAY_MS);
+  });
+
+  // Re-index the current session file at each turn_end so live messages
+  // are searchable. Worker does this off-thread.
+  pi.on("turn_end", async (_event, ctx) => {
+    const sessionFile = ctx.sessionManager.getSessionFile?.();
+    if (!sessionFile || !existsSync(sessionFile)) return;
+    sendWorkerCmd("index-file", { path: sessionFile }, (msg) => {
+      if (msg.type === "done" || msg.type === "error") {
+        workerBusy = false;
+      }
+    });
+  });
+
+  pi.on("session_shutdown", async () => {
+    if (worker) {
+      try { worker.postMessage({ cmd: "shutdown" }); } catch { /* ignore */ }
+      try { worker.terminate(); } catch { /* ignore */ }
+      worker = null;
+    }
+    if (readDb) {
+      try { readDb.close(); } catch { /* ignore */ }
+      readDb = null;
+    }
+  });
+
+  pi.registerCommand("session-index", {
+    description: "Manage session FTS5 index (status | rebuild | gc)",
+    handler: async (args, ctx) => {
+      const sub = args.trim().split(/\s+/)[0] || "status";
+
+      if (sub === "status") {
+        const s = indexStats();
+        const workerState = s.workerBusy ? ` (worker busy: ${s.lastCommand})` : "";
+        ctx.ui.notify(
+          `index: ${s.totalRows} messages / ${s.totalFiles} files (${s.pendingFiles} pending)${workerState}`,
+          "info",
+        );
+        return;
+      }
+
+      if (sub === "rebuild") {
+        const ok = await ctx.ui.confirm(
+          "Rebuild session index",
+          "This drops the FTS5 table and re-indexes everything. Worker runs off-thread so TUI stays responsive, but the rebuild itself takes several minutes for a 15K-session corpus. Continue?",
+        );
+        if (!ok) return;
+        const sent = sendWorkerCmd("rebuild", {}, (msg) => {
+          if (msg.type === "progress") {
+            ctx.ui.setStatus?.("session-fts", `rebuild +${msg.files}f ${msg.entries}m`);
+          } else if (msg.type === "done") {
+            workerBusy = false;
+            ctx.ui.notify(
+              `rebuild done: ${msg.files} files, ${msg.entries} messages in ${(msg.ms / 1000).toFixed(1)}s`,
+              "info",
+            );
+            ctx.ui.setStatus?.("session-fts", "");
+          } else if (msg.type === "error") {
+            workerBusy = false;
+            ctx.ui.notify(`rebuild error: ${msg.message}`, "warning");
+          }
+        });
+        if (sent) ctx.ui.notify("rebuilding index in background worker…", "info");
+        else ctx.ui.notify("worker busy — try again after current job", "warning");
+        return;
+      }
+
+      if (sub === "gc") {
+        const sent = sendWorkerCmd("gc", {}, (msg) => {
+          if (msg.type === "done") {
+            workerBusy = false;
+            ctx.ui.notify(`gc: removed ${msg.files} stale entries`, "info");
+          } else if (msg.type === "error") {
+            workerBusy = false;
+            ctx.ui.notify(`gc failed: ${msg.message}`, "warning");
+          }
+        });
+        if (!sent) ctx.ui.notify("worker busy — try again after current job", "warning");
+        return;
+      }
+
+      ctx.ui.notify("usage: /session-index [status|rebuild|gc]", "info");
+    },
+  });
+}
