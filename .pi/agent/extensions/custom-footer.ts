@@ -1,23 +1,27 @@
 /**
- * custom-footer — git branch + token/cost stats in the footer.
+ * custom-footer — token/cost stats + session/model/branch context.
  *
- * On by default. Toggle off with `/footer`. The footer shows:
+ * On by default. Toggle off with `/footer` to restore pi's default footer.
  *
- *   ↑<input> ↓<output> $<session-cost> (+$<turn-cost>) <ctx%>    <model> (<branch>)
+ * Layout (width-aware, drops fields gracefully on narrow terminals):
  *
- * Where:
- *   ↑input    = cumulative input tokens this session (incl. cached + writes)
- *   ↓output   = cumulative output tokens this session
- *   session-$ = cumulative $ cost this session (from message.usage.cost.total)
- *   turn-$    = $ cost of the latest assistant message (delta)
- *   ctx%      = % of model context window currently in use (red >80%)
+ *   ↑<in> ↓<out> $<session> (+$<turn>) <ctx%>     <session-name> · <thinking> · <cwd>/<branch> · <model>
  *
- * Tokens and cost are computed by walking the current branch's assistant
- * messages (via `ctx.sessionManager`). Branch comes from `footerData` — the
- * only place where git branch is exposed without shelling out per render.
+ * Fields:
+ *   ↑in        cumulative input tokens this session
+ *   ↓out       cumulative output tokens this session
+ *   $session   cumulative \$ cost (sum of message.usage.cost.total)
+ *   +$turn     last-turn delta (omitted if <\$0.0005)
+ *   ctx%       % of model context window in use, dim<60%, yellow 60-79, red >=80
+ *   session    pi.getSessionName() — set automatically by session-auto-title
+ *   thinking   pi.getThinkingLevel() — omitted when 'off'
+ *   cwd        path.basename(ctx.cwd)
+ *   branch     footerData.getGitBranch()
+ *   model      ctx.model.id
  *
- * The footer auto-rerenders when the git branch changes (checkouts, new
- * worktrees) — `footerData.onBranchChange` returns the unsubscribe.
+ * Plus extension statuses (from ctx.ui.setStatus()) are appended as a
+ * dim middle segment when set — lets other extensions surface progress
+ * (e.g. session-fts-index's '+15f 1.2k m' indexing notice).
  *
  * ── stale-ctx bug fix ──
  * Pi's official example for this pattern (and the previous version of this
@@ -33,11 +37,20 @@
  * closure always captures the live ctx for the current session.
  */
 
+import path from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-function installFooter(ctx: ExtensionContext) {
+// Pi exposes this on the module API — declare here so we can reference it
+// without an import cycle. The actual function comes from `pi` passed to
+// the extension factory; we close over it via installFooter's arg.
+type PiAPI = ExtensionAPI & {
+  getSessionName?: () => string | undefined;
+  getThinkingLevel?: () => "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+};
+
+function installFooter(pi: PiAPI, ctx: ExtensionContext) {
   ctx.ui.setFooter((tui, theme, footerData) => {
     const unsub = footerData.onBranchChange(() => tui.requestRender());
 
@@ -67,7 +80,10 @@ function installFooter(ctx: ExtensionContext) {
           return [""];
         }
 
-        // Context window usage (red when high)
+        const fmt = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`);
+        const turnSuffix = lastTurnCost > 0.0005 ? ` (+$${lastTurnCost.toFixed(3)})` : "";
+
+        // ── left: cost block + context % ──────────────────────────────────────
         let ctxPct = "";
         try {
           const usage = ctx.getContextUsage();
@@ -76,30 +92,59 @@ function installFooter(ctx: ExtensionContext) {
             const color = pct >= 80 ? "red" : pct >= 60 ? "yellow" : "dim";
             ctxPct = " " + theme.fg(color, `${pct}%`);
           }
-        } catch {
-          // getContextUsage can be unavailable mid-transition
-        }
-
-        const branch = footerData.getGitBranch();
-        const fmt = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`);
-        const turnSuffix = lastTurnCost > 0.0005 ? ` (+$${lastTurnCost.toFixed(3)})` : "";
+        } catch { /* mid-transition is fine */ }
 
         const leftPlain = `↑${fmt(input)} ↓${fmt(output)} $${cost.toFixed(3)}${turnSuffix}`;
         const left = theme.fg("dim", leftPlain) + ctxPct;
 
-        const branchStr = branch ? ` (${branch})` : "";
-        let modelId = "no-model";
-        try {
-          modelId = ctx.model?.id ?? "no-model";
-        } catch {
-          // same defensive pattern as sessionManager
-        }
-        const right = theme.fg("dim", `${modelId}${branchStr}`);
+        // ── right: session · thinking · cwd/branch · model ──────────────────────
+        const bits: string[] = [];
 
-        const pad = " ".repeat(
-          Math.max(1, width - visibleWidth(left) - visibleWidth(right)),
+        // Session name (from session-auto-title or /session-name)
+        try {
+          const sn = pi.getSessionName?.();
+          if (sn) bits.push(sn);
+        } catch { /* ignore */ }
+
+        // Thinking level when not off
+        try {
+          const tl = pi.getThinkingLevel?.();
+          if (tl && tl !== "off") bits.push(`⚛${tl}`);
+        } catch { /* ignore */ }
+
+        // cwd basename / git branch  (cwd: only on width >= 100 to leave room)
+        const branch = footerData.getGitBranch();
+        let cwdBranch = "";
+        try {
+          const cwdName = path.basename(ctx.cwd);
+          if (cwdName && branch) cwdBranch = width >= 100 ? `${cwdName}/${branch}` : branch;
+          else if (branch) cwdBranch = branch;
+          else if (cwdName) cwdBranch = cwdName;
+        } catch { /* ignore */ }
+        if (cwdBranch) bits.push(cwdBranch);
+
+        // Model id (the user-recognisable suffix only)
+        let modelId = "no-model";
+        try { modelId = ctx.model?.id ?? "no-model"; } catch { /* ignore */ }
+        bits.push(modelId);
+
+        const right = theme.fg("dim", bits.join(" · "));
+
+        // ── middle: extension status texts (e.g. session-fts indexing) ───────────
+        let middle = "";
+        try {
+          const statuses = footerData.getExtensionStatuses();
+          const texts: string[] = [];
+          for (const [_id, t] of statuses) if (t) texts.push(t);
+          if (texts.length) middle = "  " + theme.fg("yellow", texts.join(" · ")) + "  ";
+        } catch { /* ignore */ }
+
+        const padTotal = Math.max(
+          1,
+          width - visibleWidth(left) - visibleWidth(middle) - visibleWidth(right),
         );
-        return [truncateToWidth(left + pad + right, width)];
+        const pad = " ".repeat(padTotal);
+        return [truncateToWidth(left + middle + pad + right, width)];
       },
     };
   });
@@ -120,7 +165,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      installFooter(ctx);
+      installFooter(pi, ctx);
       ctx.ui.notify("custom footer enabled", "info");
     },
   });
@@ -131,6 +176,6 @@ export default function (pi: ExtensionAPI) {
   // previous ctx. Since `enabled` defaults to true, this installs the
   // footer automatically on every session.
   pi.on("session_start", async (_event, ctx) => {
-    if (enabled) installFooter(ctx);
+    if (enabled) installFooter(pi, ctx);
   });
 }
