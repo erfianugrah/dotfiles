@@ -1,6 +1,6 @@
 These rules override default tool intuition. Audit of past sessions shows the agent reaches for `websearch` / `bash` / `edit` / `grep` from habit and misses specialised tools that would do the job better. Follow as policy.
 
-# Search-family pipeline
+## Search-family pipeline
 
 Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context7_resolve_library_id`, `lsp` workspace_symbol, `session_search`, `gh-search` skill.
 
@@ -8,7 +8,7 @@ Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context
 - NEVER claim a fact or make a recommendation from search-result snippets alone. Drill into the source first.
 - If the user disputes a result, the next call MUST be a drill-in on the disputed source — not another search with new wording.
 
-# Web research
+## Web research
 
 - BEFORE reaching for `websearch` / `webfetch` / `web_research` on any technical topic, do a one-shot `docs_sources <topic>` check (or `docs_sources` with a 1-token filter like 'keycloak', 'cloudflare', 'tailwind'). If the source exists on docs.erfi.io (≥1 file), prefer `docs_*` first. Escalate to web tools when docs returns nothing useful, the topic is current-events / latest-versions / external state (npm registry, GitHub API), or after one drill-in proves docs lack the specific detail.
 - Making a recommendation / asserting a fact / answering a disputed question → `web_research` (auto search + fetch top results).
@@ -23,7 +23,7 @@ Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context
 - Code patterns across many repos → `codesearch` or `gh-search` skill, NOT `websearch`.
 - NEVER `bash curl` a search engine.
 
-# Documentation (docs.erfi.io)
+## Docs tools (docs.erfi.io)
 
 - `/docs/<source>/` paths live on the docs.erfi.io server, NOT on local disk. NEVER `ls` / `find` / `cat` / `bash`-read them. Use `docs_sources` (verify source exists), `docs_find` (find by name), `docs_search` (find by content), `docs_read` (read content), `docs_grep` (regex), `docs_summary` (outline). Confusing the two is the #1 docs-tool mistake.
 - Workflow is `docs_search` → `docs_summary` → `docs_read` with `offset` / `lines`. Skipping `docs_summary` on files >300 lines wastes tokens — don't.
@@ -32,13 +32,13 @@ Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context
 - Disputed doc-based answer → `docs_read` (or `docs_grep` for inline context) on the source, not another `docs_search`.
 - `docs_grep` with `path=/docs/<source>/` beats `docs_search` when you already know the source and want a specific phrase or symbol.
 
-# Code intelligence
+## Code intelligence
 
 - Symbol definition / references / hover / call graph / implementation → `lsp`, NOT `grep` / `rg`. LSP is accurate; regex matches comments and strings.
 - Workspace-wide symbol search → `lsp` workspace_symbol, not `rg`.
 - Use `grep` / `rg` only for text patterns, comments, strings, log scans, and non-symbol matches.
 
-# Subagent delegation (task)
+## Subagent delegation (task)
 
 Use `task` when:
 - 2+ independent subtasks parallelizable (dispatch in one turn for concurrency).
@@ -47,12 +47,12 @@ Use `task` when:
 
 Don't use `task` for: reading 1-3 known files, simple `grep`, work needing parent-session memory.
 
-# Memory & session search
+## Memory & session search
 
 - Save to `memory` when: user states a preference, you discover a project convention, you spot a recurring pattern. `list` first to avoid duplicates; `update` rather than create when overlap.
 - `session_search` BEFORE rebuilding context from scratch when the user references past work ("how did we do X last time?", "remember when...", "like before").
 
-# Bash discipline
+## Bash discipline
 
 - File finding: `rg --files <root>` (parallel, gitignore-aware), NEVER `find` (hangs on the 18GB home tree).
 - Edits on files >1000 lines or >100KB: `sd` / `sed -i` / `ast-grep --rewrite`, NOT `edit` (Edit/Write degrade; see opencode#20471, #19604).
