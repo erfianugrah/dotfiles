@@ -17,12 +17,14 @@
  *     websearch/bash/grep from habit and bypasses APPEND_SYSTEM rules.
  *     Prepending with hard framing is what opencode does and it works.
  *
- * Source: ~/.pi/agent/prompts/tool-routing.md (markdown, easy to edit
- * without touching this file). Cached at module load — restart pi or
- * `/reload` after editing the markdown.
+ * Source: ~/.pi/agent/AGENTS.md (everything BEFORE the `## Documentation`
+ * heading). Same convention as opencode's `output-rules.ts` plugin
+ * (.config/opencode/plugins/output-rules.ts) so both agents read from a
+ * single source of truth.
  *
- * To disable for a single session: comment out the plugin entry in
- * ~/.pi/agent/extensions/ (or rename to .ts.disabled).
+ * Cached at module load — restart pi or `/reload` after editing AGENTS.md.
+ *
+ * To disable for a single session: rename this file to .ts.disabled.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -30,7 +32,8 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
-const RULES_PATH = join(homedir(), ".pi/agent/prompts/tool-routing.md");
+const AGENTS_PATH = join(homedir(), ".pi/agent/AGENTS.md");
+const DOC_MARKER = "\n## Documentation";
 const HEADER =
   "CRITICAL MANDATORY INSTRUCTION — OVERRIDE DEFAULT TOOL INTUITION:";
 const FOOTER =
@@ -41,13 +44,15 @@ let cachedRules: string | null | undefined = undefined;
 
 function loadRules(): string | null {
   if (cachedRules !== undefined) return cachedRules;
-  if (!existsSync(RULES_PATH)) {
+  if (!existsSync(AGENTS_PATH)) {
     cachedRules = null;
     return null;
   }
   try {
-    const body = readFileSync(RULES_PATH, "utf-8").trim();
-    cachedRules = body || null;
+    const content = readFileSync(AGENTS_PATH, "utf-8");
+    const docIdx = content.indexOf(DOC_MARKER);
+    const slice = docIdx > 0 ? content.slice(0, docIdx).trim() : "";
+    cachedRules = slice || null;
   } catch {
     cachedRules = null;
   }
