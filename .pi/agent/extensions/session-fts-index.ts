@@ -51,12 +51,17 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const DB_PATH = join(getAgentDir(), "session-fts.db");
 const SESSIONS_ROOT = join(getAgentDir(), "sessions");
-// Reality check: parsing+inserting ~5-15ms per file (measured 4ms for parse
-// alone on this box, SQLite adds the rest). Full 15K-file corpus indexes in
-// ~2-4min total. We bias toward fast convergence — 2000 files per startup
-// means most users are fully indexed within 8 sessions.
-const BATCH_PER_STARTUP = 2000;
-const YIELD_EVERY = 25; // setImmediate every N files keeps TUI responsive
+// bun:sqlite calls are SYNCHRONOUS — each INSERT blocks the event loop.
+// On this box one earlier attempt with BATCH_PER_STARTUP=2000 and yield-every-25-files
+// produced a 82% CPU pi process that made typing janky for minutes. New tuning:
+//   - 100 files per startup (full corpus convergence over ~150 sessions, fine)
+//   - yield setImmediate AFTER EVERY FILE
+//   - yield setImmediate every 50 INSERTs within a file (for huge sessions)
+//   - 3s startup delay so the TUI is responsive before indexing kicks in
+const BATCH_PER_STARTUP = 100;
+const YIELD_EVERY_FILE = 1; // setImmediate after every file
+const YIELD_EVERY_INSERT = 50; // setImmediate every N inserts within a file
+const STARTUP_DELAY_MS = 3000;
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // skip files >50MB (defensive)
 
 let db: Database | null = null;
@@ -181,43 +186,63 @@ function listFilesNeedingIndex(d: Database, limit: number): FileToIndex[] {
   return out.slice(0, limit);
 }
 
-/** Index one jsonl file. Returns entry count, or -1 on parse error. */
+/** Index one jsonl file. Returns entry count, or -1 on parse error.
+ *
+ * To keep the TUI responsive on huge session files (some are 50MB+), we:
+ *   - Read + parse + buffer entries first (no SQLite calls)
+ *   - Yield between batches of YIELD_EVERY_INSERT entries
+ *   - Hold the transaction as briefly as possible at the end
+ */
 async function indexFile(d: Database, file: FileToIndex): Promise<number> {
   const path = file.path;
   const date = dateFromName(basename(path));
 
-  // Delete any existing rows for this file (file might have grown / changed).
-  d.run("DELETE FROM msg_fts WHERE session_path = ?", [path]);
+  // Buffer entries from the jsonl file first — cheap, mostly I/O bound.
+  type Row = { text: string; role: string };
+  const rows: Row[] = [];
+  const rl = createInterface({ input: createReadStream(path, { encoding: "utf8" }) });
+  for await (const line of rl) {
+    if (!line) continue;
+    let entry: { type?: string; message?: { role?: string; content?: unknown } };
+    try { entry = JSON.parse(line); } catch { continue; }
+    if (entry.type !== "message") continue;
+    const role = entry.message?.role ?? "?";
+    const text = extractText(entry.message?.content);
+    if (!text || text.length < 8) continue;
+    rows.push({ text, role });
+  }
 
-  let count = 0;
+  // Now do the SQLite work in small chunks with yields in between. This is
+  // where the CPU cost concentrates — yielding here lets keystrokes through.
+  d.run("DELETE FROM msg_fts WHERE session_path = ?", [path]);
   const insert = d.prepare(
     "INSERT INTO msg_fts (content, session_path, date, role) VALUES (?, ?, ?, ?)",
   );
 
-  const rl = createInterface({ input: createReadStream(path, { encoding: "utf8" }) });
-  d.exec("BEGIN");
-  try {
-    for await (const line of rl) {
-      if (!line) continue;
-      let entry: { type?: string; message?: { role?: string; content?: unknown } };
-      try { entry = JSON.parse(line); } catch { continue; }
-      if (entry.type !== "message") continue;
-      const role = entry.message?.role ?? "?";
-      const text = extractText(entry.message?.content);
-      if (!text || text.length < 8) continue;
-      insert.run(text, path, date, role);
-      count++;
+  let inserted = 0;
+  while (inserted < rows.length) {
+    const end = Math.min(inserted + YIELD_EVERY_INSERT, rows.length);
+    d.exec("BEGIN");
+    try {
+      for (let i = inserted; i < end; i++) {
+        insert.run(rows[i].text, path, date, rows[i].role);
+      }
+      d.exec("COMMIT");
+    } catch (err) {
+      d.exec("ROLLBACK");
+      throw err;
     }
-    d.run(
-      "INSERT OR REPLACE INTO indexed_files (path, mtime, size, entry_count) VALUES (?, ?, ?, ?)",
-      [path, file.mtime, file.size, count],
-    );
-    d.exec("COMMIT");
-  } catch (err) {
-    d.exec("ROLLBACK");
-    throw err;
+    inserted = end;
+    if (inserted < rows.length) {
+      await new Promise<void>((r) => setImmediate(r));
+    }
   }
-  return count;
+
+  d.run(
+    "INSERT OR REPLACE INTO indexed_files (path, mtime, size, entry_count) VALUES (?, ?, ?, ?)",
+    [path, file.mtime, file.size, rows.length],
+  );
+  return rows.length;
 }
 
 /** Background indexer entry point. Returns the number of files indexed. */
@@ -240,7 +265,9 @@ async function runIndexer(limit: number): Promise<{ files: number; entries: numb
       } catch {
         // Single bad file shouldn't kill the whole indexer
       }
-      if (i % YIELD_EVERY === YIELD_EVERY - 1) {
+      // Yield after EVERY file. The indexer is a background task; throughput
+      // doesn't matter, latency for user keystrokes does.
+      if (i % YIELD_EVERY_FILE === YIELD_EVERY_FILE - 1) {
         await new Promise<void>((r) => setImmediate(r));
       }
     }
@@ -317,20 +344,22 @@ export default function (pi: ExtensionAPI) {
   // Open DB lazily on first use — but ensure schema exists at startup
   openDb();
 
-  // Background-index newest-first files on every session_start
+  // Background-index newest-first files on every session_start. Delayed so
+  // the TUI is fully responsive before the indexer's synchronous SQLite
+  // batches start gobbling event-loop time.
   pi.on("session_start", async (_event, ctx) => {
-    // Fire-and-forget; don't block startup
-    runIndexer(BATCH_PER_STARTUP)
-      .then((r) => {
-        if (r.files > 0 && ctx.hasUI) {
-          // Quiet status update — user sees if they care
-          try {
-            ctx.ui.setStatus("session-fts", `+${r.files}f ${r.entries}m`);
-            setTimeout(() => { try { ctx.ui.setStatus("session-fts", ""); } catch { /* ignore */ } }, 5000);
-          } catch { /* ignore */ }
-        }
-      })
-      .catch(() => { /* swallow */ });
+    setTimeout(() => {
+      runIndexer(BATCH_PER_STARTUP)
+        .then((r) => {
+          if (r.files > 0 && ctx.hasUI) {
+            try {
+              ctx.ui.setStatus("session-fts", `+${r.files}f ${r.entries}m`);
+              setTimeout(() => { try { ctx.ui.setStatus("session-fts", ""); } catch { /* ignore */ } }, 5000);
+            } catch { /* ignore */ }
+          }
+        })
+        .catch(() => { /* swallow */ });
+    }, STARTUP_DELAY_MS);
   });
 
   // Re-index the current session at every turn_end so live messages are
