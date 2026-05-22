@@ -166,15 +166,12 @@ function formatRgMatches(matches: RgMatch[]): string {
 
 const docsSearch = defineTool({
   name: "docs_search",
-  promptSnippet: "docs_search — search docs.erfi.io titles+summaries (FIRST step). 158 sources: postgres, supabase, k8s, aws, cloudflare, react, nextjs, etc.",
+  promptSnippet: "docs_search — docs.erfi.io title+summary index. First step of docs lookup.",
   promptGuidelines: [
-    "Use docs_search FIRST when looking up library / framework / cloud-platform behaviour. Always pass `source=` when the source is known.",
-    "After 2 docs_search calls on the same topic with no docs_read in between, STOP rewording and docs_read the top hit.",
-    "NEVER `ls` / `find` / `bash` paths under /docs/. They live on docs.erfi.io, not local disk. Use docs_sources / docs_find / docs_search.",
+    "Pass source= when known. Index covers 158 sources.",
   ],
   label: "Docs Search",
-  description:
-    "Search documentation by title and summary. Searches a pre-built index instead of scanning all files. Use this FIRST to find relevant docs, then docs_read or docs_grep to get content.",
+  description: "Search docs.erfi.io title+summary index.",
   parameters: Type.Object({
     query: Type.String({ description: "Search text" }),
     source: Type.Optional(
@@ -211,12 +208,10 @@ const docsSearch = defineTool({
 const docsRead = defineTool({
   name: "docs_read",
   label: "Docs Read",
-  description:
-    "Read a documentation file. For large files, use docs_summary first to see the headings, then read with offset/lines to get only the section you need.",
-  promptSnippet: "docs_read — read a docs.erfi.io file by /docs/<source>/... path. Use offset+lines for large files.",
+  description: "Read a /docs/<source>/... file. Use offset+lines for large files.",
+  promptSnippet: "docs_read — read a docs file. Drill-in tool after docs_search.",
   promptGuidelines: [
-    "On files >300 lines, run docs_summary first then docs_read with offset/lines instead of full-file reads.",
-    "When the user disputes a doc-based answer, the next call MUST be docs_read on the source — not another docs_search.",
+    "On files >300 lines, docs_summary first, then docs_read with offset/lines.",
   ],
   parameters: Type.Object({
     path: Type.Optional(Type.String({ description: "File path (e.g. /docs/supabase/guides/auth.md)" })),
@@ -249,11 +244,9 @@ const docsRead = defineTool({
 const docsFind = defineTool({
   name: "docs_find",
   label: "Docs Find",
-  description: "Find documentation files by name or path pattern.",
-  promptSnippet: "docs_find — find docs files by glob pattern. Faster than docs_search when you already know part of the filename.",
-  promptGuidelines: [
-    "Use docs_find to verify a doc file exists by name pattern. Never use bash `ls` / `find` on /docs/ paths — they aren't local files.",
-  ],
+  description: "Find docs files by name / glob pattern.",
+  promptSnippet: "docs_find — docs files by name. Use when filename is partly known.",
+  promptGuidelines: [],
   parameters: Type.Object({
     pattern: Type.String({ description: "Glob pattern (e.g. '*.md', '*auth*')" }),
     source: Type.Optional(Type.String({ description: "Filter to source (e.g. 'supabase', 'aws')" })),
@@ -270,11 +263,10 @@ const docsFind = defineTool({
 const docsGrep = defineTool({
   name: "docs_grep",
   label: "Docs Grep",
-  description:
-    "Search documentation content with surrounding context lines using ripgrep. Returns structured results with file paths and exact line numbers. More detailed than docs_search — shows actual content around matches.",
-  promptSnippet: "docs_grep — regex search inside /docs/<source>/ with context lines. Faster than docs_search when you know the source.",
+  description: "Regex search inside /docs/<path>/ with context lines.",
+  promptSnippet: "docs_grep — regex search docs. Use when source is known and you want a phrase / symbol.",
   promptGuidelines: [
-    "Prefer docs_grep over docs_search when the source is already known and you want a specific phrase or symbol. Always scope path=/docs/<source>/ so output stays sane.",
+    "Scope path=/docs/<source>/ to keep output sane.",
   ],
   parameters: Type.Object({
     query: Type.String({ description: "Regex pattern to search for" }),
@@ -316,12 +308,9 @@ const docsGrep = defineTool({
 const docsSummary = defineTool({
   name: "docs_summary",
   label: "Docs Summary",
-  description:
-    "Get the structure/outline of a documentation file — headings and section names. Use this before docs_read to find the right section to read, saving tokens.",
-  promptSnippet: "docs_summary — outline of headings in a docs file. Run BEFORE docs_read on files >300 lines.",
-  promptGuidelines: [
-    "Run docs_summary before docs_read on any /docs/ file that's >300 lines. Then docs_read with offset/lines to target the section instead of full-file reads.",
-  ],
+  description: "Outline (headings only) of a docs file.",
+  promptSnippet: "docs_summary — file outline. Run before docs_read on files >300 lines.",
+  promptGuidelines: [],
   parameters: Type.Object({
     path: Type.Optional(Type.String({ description: "File path (e.g. /docs/supabase/guides/auth.md)" })),
     filePath: Type.Optional(Type.String({ description: "Alias for 'path'. Accepted for compatibility with built-in Read tool." })),
@@ -342,11 +331,9 @@ const docsSummary = defineTool({
 const docsSources = defineTool({
   name: "docs_sources",
   label: "Docs Sources",
-  description: "List all available documentation sources and their file counts.",
-  promptSnippet: "docs_sources — list all docs.erfi.io sources (postgres, supabase, k8s, aws, cloudflare, react, nextjs, …). Use to check what's available.",
-  promptGuidelines: [
-    "Use docs_sources to verify a source exists before docs_search / docs_grep. NEVER `ls /docs/` — those paths aren't on local disk.",
-  ],
+  description: "List docs.erfi.io sources with file counts.",
+  promptSnippet: "docs_sources — verify source exists. Full grouping reference in ~/.pi/agent/prompts/docs-reference.md.",
+  promptGuidelines: [],
   parameters: Type.Object({
     filter: Type.Optional(Type.String({ description: "Filter source names (e.g. 'postgres', 'supabase')" })),
   }),

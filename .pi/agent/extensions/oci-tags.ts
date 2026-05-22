@@ -89,24 +89,14 @@ function versionCompare(a: string, b: string): number {
 
 const ociTagsTool = defineTool({
   name: "oci_tags",
-  promptSnippet: "oci_tags — query OCI registries (Docker Hub, ghcr.io, quay.io) for image tags. Authoritative, no stale results.",
+  promptSnippet: "oci_tags — OCI registry tag query. Use for container versions.",
   promptGuidelines: [
-    "Use oci_tags for container image versions — NEVER websearch. Registry API is authoritative; websearch returns stale blog posts.",
-    "Pass semver:true when you want releases only (filters out branch/commit tags).",
+    "Pass semver:true for release tags only.",
   ],
   label: "OCI Tags",
-  description: [
-    "Query OCI container registries for image tags. Works with Docker Hub, ghcr.io, quay.io, and any OCI-compliant registry.",
-    "",
-    "Use this tool instead of web search when you need container image versions. It queries the registry API directly — no stale results, no wasted tokens.",
-    "",
-    "Returns tags sorted by version (latest last).",
-    "",
-    "Examples:",
-    '- image: "vaultwarden/server", semver: true, limit: 5',
-    '- image: "ghcr.io/astral-sh/uv", semver: true',
-    '- image: "nginx"',
-  ].join("\n"),
+  description:
+    "Query OCI registries (Docker Hub, ghcr.io, quay.io, any OCI) for image tags. Sorted by version (latest last).",
+
   parameters: Type.Object({
     image: Type.String({
       description: 'Container image reference (e.g. "vaultwarden/server", "ghcr.io/astral-sh/uv", "nginx")',
