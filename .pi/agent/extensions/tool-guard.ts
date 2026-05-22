@@ -277,6 +277,18 @@ const BASH_RULES: BlockRule[] = [
     segment: true,
   },
   {
+    id: "unicode_escape_in_bash",
+    // Recurring foot-gun: agents write `\u2014` in bash strings expecting JS-style
+    // unicode escape. Bash leaves it as the literal 6 chars unless wrapped in $'...'
+    // (ANSI-C quoting). Most often appears in `git commit -m "... \u2014 ..."` and
+    // ends up in the actual commit message verbatim. We guard the COMMON case
+    // (\uXXXX not preceded by $') and let the rare correct usage through.
+    pattern: /(?<!\$')\\u[0-9a-fA-F]{4}/,
+    reason:
+      "Bash doesn't interpret `\\uXXXX` JS-style unicode escapes inside regular quotes — they end up as literal 6-char sequences in your output (most painfully in `git commit -m`). Two correct options: (1) paste the actual character into the string (em-dash —, en-dash –, arrow →, etc.); (2) use bash ANSI-C quoting: `$'\\u2014'`. Recommended: just use the real character.",
+    segment: false,
+  },
+  {
     id: "force_push_protected",
     // git push --force on main/master/dev is a common destructive mistake.
     pattern: /^\s*git\s+push\s+(\S+\s+)*(-f|--force)\b.*\b(main|master|dev|production|prod)\b/,
