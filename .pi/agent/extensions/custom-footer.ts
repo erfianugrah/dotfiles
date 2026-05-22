@@ -8,16 +8,24 @@
  *   ↑<in> ↓<out> $<session> (+$<turn>) <ctx%>     <session-name> · <thinking> · <cwd>/<branch> · <model>
  *
  * Fields:
- *   ↑in        cumulative input tokens this session
+ *   ↑in        cumulative input tokens this session = input + cacheRead +
+ *              cacheWrite (the prior version counted only `usage.input` which
+ *              excludes cached tokens — in heavy prompt-cache sessions that
+ *              undercounts by 6 orders of magnitude vs the real cost)
  *   ↓out       cumulative output tokens this session
  *   $session   cumulative \$ cost (sum of message.usage.cost.total)
  *   +$turn     last-turn delta (omitted if <\$0.0005)
- *   ctx%       % of model context window in use, dim<60%, yellow 60-79, red >=80
+ *   ctx%       % of model context window in use. Color: dim<60, yellow 60-79,
+ *              red >=80. Falls back to absolute `~Nk` when maxTokens unknown.
  *   session    pi.getSessionName() — set automatically by session-auto-title
  *   thinking   pi.getThinkingLevel() — omitted when 'off'
  *   cwd        path.basename(ctx.cwd)
  *   branch     footerData.getGitBranch()
  *   model      ctx.model.id
+ *
+ * All numeric accumulators guarded against NaN — a single corrupt/migrated
+ * session entry won't poison the entire footer (pi's default footer has the
+ * same guard, see pi#4158).
  *
  * Plus extension statuses (from ctx.ui.setStatus()) are appended as a
  * dim middle segment when set — lets other extensions surface progress
@@ -59,6 +67,10 @@ function installFooter(pi: PiAPI, ctx: ExtensionContext) {
       invalidate() {},
       render(width: number): string[] {
         // ctx here is the freshly-passed reference — never the stale parent
+        const safeAdd = (acc: number, v: unknown): number => {
+          const n = typeof v === "number" ? v : 0;
+          return Number.isFinite(n) ? acc + n : acc;
+        };
         let input = 0;
         let output = 0;
         let cost = 0;
@@ -67,10 +79,24 @@ function installFooter(pi: PiAPI, ctx: ExtensionContext) {
           for (const e of ctx.sessionManager.getBranch()) {
             if (e.type === "message" && e.message.role === "assistant") {
               const m = e.message as AssistantMessage;
-              input += m.usage.input;
-              output += m.usage.output;
-              cost += m.usage.cost.total;
-              lastTurnCost = m.usage.cost.total; // overwritten until last
+              const u = m.usage as {
+                input?: number;
+                output?: number;
+                cacheRead?: number;
+                cacheWrite?: number;
+                cost?: { total?: number };
+              };
+              // True input = uncached input + cacheRead + cacheWrite. The
+              // first two are what gets passed to the model; cacheWrite is
+              // billed input that establishes the cache. Pi's `usage.input`
+              // is uncached-only; counting it alone undercounts massively.
+              input = safeAdd(input, u.input);
+              input = safeAdd(input, u.cacheRead);
+              input = safeAdd(input, u.cacheWrite);
+              output = safeAdd(output, u.output);
+              const c = u.cost?.total;
+              cost = safeAdd(cost, c);
+              lastTurnCost = typeof c === "number" && Number.isFinite(c) ? c : lastTurnCost;
             }
           }
         } catch {
@@ -80,21 +106,35 @@ function installFooter(pi: PiAPI, ctx: ExtensionContext) {
           return [""];
         }
 
-        const fmt = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`);
+        const fmt = (n: number) => {
+          if (!Number.isFinite(n)) return "0";
+          if (n < 1000) return `${Math.round(n)}`;
+          if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+          return `${(n / 1_000_000).toFixed(2)}M`;
+        };
         const turnSuffix = lastTurnCost > 0.0005 ? ` (+$${lastTurnCost.toFixed(3)})` : "";
 
         // ── left: cost block + context % ──────────────────────────────────────
+        // Context %: prefer pct when we have maxTokens, fall back to absolute
+        // token count so this field shows SOMETHING even if maxTokens is
+        // missing or zero (e.g. for local models without a declared limit).
         let ctxPct = "";
         try {
           const usage = ctx.getContextUsage();
-          if (usage && usage.maxTokens) {
-            const pct = Math.round((usage.tokens / usage.maxTokens) * 100);
-            const color = pct >= 80 ? "red" : pct >= 60 ? "yellow" : "dim";
-            ctxPct = " " + theme.fg(color, `${pct}%`);
+          if (usage && Number.isFinite(usage.tokens) && usage.tokens > 0) {
+            if (usage.maxTokens && Number.isFinite(usage.maxTokens) && usage.maxTokens > 0) {
+              const pct = Math.round((usage.tokens / usage.maxTokens) * 100);
+              const color = pct >= 80 ? "red" : pct >= 60 ? "yellow" : "dim";
+              ctxPct = " " + theme.fg(color, `${pct}%`);
+            } else {
+              // No context-window cap known; show absolute tokens
+              ctxPct = " " + theme.fg("dim", `~${fmt(usage.tokens)}`);
+            }
           }
         } catch { /* mid-transition is fine */ }
 
-        const leftPlain = `↑${fmt(input)} ↓${fmt(output)} $${cost.toFixed(3)}${turnSuffix}`;
+        const safeCost = Number.isFinite(cost) ? cost : 0;
+        const leftPlain = `↑${fmt(input)} ↓${fmt(output)} $${safeCost.toFixed(3)}${turnSuffix}`;
         const left = theme.fg("dim", leftPlain) + ctxPct;
 
         // ── right: session · thinking · cwd/branch · model ──────────────────────

@@ -24,6 +24,8 @@
 
 import { complete, getModel } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const MARKER_TYPE = "session-auto-title";
 const MAX_INPUT_CHARS = 4000;
@@ -63,24 +65,67 @@ function cleanTitle(raw: string): string {
 }
 
 // Try to find a small/cheap model. Returns undefined if no auth available.
+//
+// Discovery strategy (handles user's models.json changing over time without
+// hardcoded IDs going stale — prior version hard-coded model IDs that the
+// user never had):
+//
+//   1. Read ~/.pi/agent/models.json directly to enumerate all configured
+//      provider/model pairs.
+//   2. Score each by 'smallness heuristic' — prefer local llama-server,
+//      then haiku/mini/flash/nano name patterns, then anything else.
+//   3. Try each in priority order. First one with valid auth wins.
+//   4. Fall back to current session model only if no small model found.
 async function pickTitleModel(ctx: ExtensionContext) {
-  const candidates: Array<{ provider: string; id: string }> = [
-    { provider: "anthropic", id: "claude-haiku-4-5" },
-    { provider: "anthropic", id: "claude-haiku-4" },
-    { provider: "anthropic", id: "claude-3-5-haiku-latest" },
-    { provider: "openai", id: "gpt-5-mini" },
-    { provider: "openai", id: "gpt-4o-mini" },
-    // Local fallback if user has llm-compose proxy registered
-    { provider: "llama-server", id: "gemma-3-12b-it" },
-    { provider: "llama-server", id: "qwen3-4b-instruct" },
+  // Pattern → priority weight (lower = better)
+  const PROVIDER_WEIGHTS: Array<[RegExp, number]> = [
+    [/llama-server|ollama|lmstudio|vllm/i, 0],   // local & free
+    [/anthropic/i, 30],
+    [/openai/i, 30],
+    [/google/i, 30],
+    [/.+/, 50],                                   // anything else
   ];
+  const NAME_WEIGHTS: Array<[RegExp, number]> = [
+    [/haiku/i, 0],
+    [/mini|nano|micro|small/i, 5],
+    [/flash|turbo/i, 10],
+    [/gemma|qwen.*(?:3|4)|phi|llama-?3.*8b|llama-?3.*1b|llama-?3.*3b/i, 15],
+    [/.+/, 100],
+  ];
+
+  function weightOf(provider: string, id: string): number {
+    let pw = 99;
+    for (const [re, w] of PROVIDER_WEIGHTS) if (re.test(provider)) { pw = w; break; }
+    let nw = 99;
+    for (const [re, w] of NAME_WEIGHTS) if (re.test(id)) { nw = w; break; }
+    return pw + nw;
+  }
+
+  type Candidate = { provider: string; id: string; weight: number };
+  const candidates: Candidate[] = [];
+  try {
+    const path = join(process.env.HOME ?? "", ".pi", "agent", "models.json");
+    const data = JSON.parse(readFileSync(path, "utf8")) as {
+      providers?: Record<string, { models?: Array<{ id?: string }> }>;
+    };
+    for (const [prov, pd] of Object.entries(data.providers ?? {})) {
+      for (const m of pd.models ?? []) {
+        if (!m.id) continue;
+        candidates.push({ provider: prov, id: m.id, weight: weightOf(prov, m.id) });
+      }
+    }
+  } catch {
+    // No models.json or unreadable — fall through to current-model fallback
+  }
+  candidates.sort((a, b) => a.weight - b.weight);
+
   for (const c of candidates) {
     const m = getModel(c.provider, c.id);
     if (!m) continue;
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
     if (auth?.ok && auth.apiKey) return { model: m, auth };
   }
-  // Last resort: current session model
+  // Last resort: current session model (heavyweight, but always works)
   const current = (ctx as { model?: { id: string; provider: string } }).model;
   if (current) {
     const m = getModel(current.provider, current.id);
