@@ -2,5 +2,6 @@
   "lastChangelogVersion": "0.75.4",
   "defaultProvider": "opencode",
   "defaultModel": "claude-opus-4-7",
-  "theme": "opencode-dark"
+  "theme": "opencode-dark",
+  "defaultThinkingLevel": "high"
 }

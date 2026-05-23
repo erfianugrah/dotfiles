@@ -13,14 +13,13 @@ Commits and pull requests must read as if written by the human author. The user 
 
 NEVER run compiled binaries, servers, or daemons directly on the dev machine unless you fully understand their startup hooks and side effects. Use `go test`, `bun test`, Docker, or dry-run flags instead. If unsure what a binary does at startup, read the main() function first.
 
-# Output: real characters, not unicode escapes
+# Output: real Unicode characters
 
-When using typographical characters in response text or any tool input (commit messages, planning notes, code prose, diagrams), use the **actual UTF-8 character**, never `\uXXXX` JS-style escapes. The TUI / bash / git all display escape sequences as the literal 6 ASCII characters — they don't interpret JS-style unicode escapes.
+In ALL text output — response text, tool inputs (bash commands, commit messages, heredoc bodies, file contents, planning notes, prose) — use the actual Unicode character directly. Em-dash, en-dash, arrows, ellipsis, bullets, check / cross marks: paste the real glyph.
 
-Write: → ← ↑ ↓ — – … ✓ ✗ · • × → ⇒ (paste/use the glyphs directly).
-Never: `\u2192` `\u2014` `\u2026` etc in any output destined for the terminal, a commit message, or a file.
+The terminal, bash, git, and pi's renderer all preserve real UTF-8. They do NOT interpret JS-style six-character backslash-u escape sequences as Unicode. Such sequences pass through verbatim as ugly six-character strings in commit messages, terminal output, and committed files.
 
-The only legitimate `\uXXXX` usages are inside source code (JS/TS string literals, JSON strings, etc.) where the language runtime interprets them. Bash `$'\uXXXX'` ANSI-C quoting also works.
+Exceptions where the escape form is correct: source code where the language runtime interprets the escape (TypeScript / JavaScript / JSON string literals etc.), and bash ANSI-C quoting in dollar-single-quote form.
 
 <!--
 Tool-routing rules live in ~/.pi/agent/prompts/tool-routing.md and are
