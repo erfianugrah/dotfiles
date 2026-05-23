@@ -60,6 +60,27 @@ Don't use `task` for: reading 1-3 known files, simple `grep`, work needing paren
 - Lockfiles (package-lock.json, pnpm-lock.yaml, Cargo.lock, poetry.lock): query with `jq` / `yq` / `rg`, NEVER full-read.
 - Probe before reading unknown files: `wc -l file` or `stat file`. >300 lines → `read` with `offset` / `limit`, not full-file.
 
+## CLI-wrapped pi tools (prefer over raw `bash`)
+
+Pi has wrapper tools that return token-efficient structured output. Prefer them over the raw binary when both exist — the raw form floods your context window with prose; the wrapper returns just the actionable bits.
+
+- **Vuln scan** → `osv_scan` (flattens to one line per CVE), NOT `bash osv-scanner` (paragraphs of nested JSON).
+- **Leaked secrets** → `secret_scan` (truncates secrets to 12 chars in output — keeps full secrets OUT of your context), NOT `bash gitleaks detect` (full values leak into context). Use `backend="noseyparker"` for entropy/provenance scans, `scan_history=true` for git history.
+- **HTTP integration test** → `hurl_test` (returns failed entries only with the failing assertion), NOT `bash hurl --test` (full request/response dump per entry).
+- **Go tests** → `go_test` (returns failed-only with last 30 output lines per test), NOT `bash go test ./...` (full pass/skip/fail stream). Pass `run=` regex to narrow, `race=true` for race detector.
+- **Benchmarks** → `bench` (statistical compare via hyperfine, returns winner + speedup), NOT `bash time` or `bash hyperfine` directly (table-formatted human prose).
+- **OCI image tags** → `oci_tags`, NEVER `websearch` for container versions (the registry API is authoritative; web search returns stale blog posts).
+
+## Background / parallel work
+
+When a task will take >30s OR you want pi to keep working in parallel, use the bg-tasks family instead of blocking pi's `bash` tool.
+
+- **Long bash work** (polling loops, builds >30s, slow downloads, anything that would hit pi's `bash` tool 30s timeout) → `bg_bash command="..."`. Returns the session name within ~100ms. Check progress with `bg_status name=...` later.
+- **Delegated pi work** (multi-step task that benefits from another LLM brain, expected >5 min) → `bg_task prompt="..."`. Same lifecycle as bg_bash but spawns `pi -p` instead of bash. Pass `minimal=true` for read-only exploration with no extensions/skills loaded.
+- **Read-only deep dive that must complete before continuing** → existing `task subagent_type="explore"` (blocks parent; cheaper than bg_task).
+- **Check on running / recent tasks** → `bg_list` (one line per task with kind glyph π/$, status, elapsed). `bg_status name=...` for details + last N lines of output.
+- **Anti-pattern**: a `bash` call with `sleep N` loops or `for i in $(seq 1 N); do ... done` that runs >30s — use `bg_bash` instead.
+
 ## Documentation
 
 Docs server at `docs.erfi.io` — 158 sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
