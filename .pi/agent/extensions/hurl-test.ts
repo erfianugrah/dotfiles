@@ -11,6 +11,7 @@
  * On failure: structured per-entry breakdown with first failing assert.
  *
  * Requires the `hurl` binary (pacman -S hurl).
+ * See also: ~/.pi/agent/TOOLKIT.md (workflows, canonical invocations)
  */
 
 import { Type } from "@earendil-works/pi-ai";

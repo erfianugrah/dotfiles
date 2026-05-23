@@ -12,6 +12,7 @@
  *   - Periodic security audit during refactors
  *
  * Requires the `osv-scanner` binary (pacman -S osv-scanner).
+ * See also: ~/.pi/agent/TOOLKIT.md (workflows, canonical invocations)
  */
 
 import { Type } from "@earendil-works/pi-ai";

@@ -11,6 +11,7 @@
  *   bench commands=["./old", "./new"] runs=20 warmup=5
  *
  * Requires the `hyperfine` binary (pacman -S hyperfine).
+ * See also: ~/.pi/agent/TOOLKIT.md (workflows, canonical invocations)
  */
 
 import { Type } from "@earendil-works/pi-ai";

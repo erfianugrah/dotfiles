@@ -37,6 +37,7 @@
  *     attach to the tmux session manually with `tmux attach -t <name>`.
  *   - bg_list only lists tasks whose state file is on disk; truly orphan
  *     tmux sessions (created outside this extension) are ignored.
+ * See also: ~/.pi/agent/TOOLKIT.md (workflows, canonical invocations)
  */
 
 import { Type } from "@earendil-works/pi-ai";
