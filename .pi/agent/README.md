@@ -13,7 +13,7 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 ├── APPEND_SYSTEM.md   → ~/dotfiles/.pi/agent/APPEND_SYSTEM.md (commit/safety rules)
 ├── models.json        → ~/dotfiles/.pi/agent/models.json (llama-server + 8 local models)
 ├── skills/            → ~/.config/opencode/skills (zero-copy: 15 top-level + 14 superpowers subskills)
-├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (31 single-file + lsp/ + session-fts/)
+├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (37 single-file + lsp/ + session-fts/)
 ├── tests/             → ~/dotfiles/.pi/agent/tests/ (bun unit tests for pure helpers)
 ├── settings.json      → ~/dotfiles/.pi/agent/settings.json (defaultProvider/Model + theme)
 ├── prompts/           → ~/dotfiles/.pi/agent/prompts/ (6 slash-command templates)
@@ -21,6 +21,7 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 ├── auth.json          (NOT tracked — runtime auth state)
 ├── sessions/          (NOT tracked — session JSONL files)
 ├── session-fts.db     (NOT tracked — SQLite FTS5 index, populated by worker)
+├── bg-tasks/          (NOT tracked — detached pi task state, GC after 24h)
 ├── todos/             (NOT tracked — per-session todo JSON files)
 ├── style.json         (NOT tracked — /style command state)
 └── memories.json      (NOT tracked — populated by memory extension)
@@ -53,6 +54,21 @@ the loader without deleting it.
 | `todowrite.ts` | TodoWrite tool surface; persists per-session JSON + status indicator. |
 | `web-research.ts` | Exa search + auto-fetch top pages with Playwright fallback. Modes: default / local / fresh / crosscheck. |
 | `webfetch.ts` | Fetch URL → markdown/text/html (5MB cap). Auto-escalates to crawler `:8889/fetch` with `force_js:true` on SPA-shell responses (<500 visible chars). |
+
+### CLI-wrapping tool extensions (token-efficient JSON output)
+
+These wrap installed binaries from the agent toolkit (pacman/paru). Each
+returns structured JSON via the tool's native `--json` flag and projects
+only the fields pi actually needs — avoiding token waste on raw prose output.
+
+| Extension | Wraps | Returns |
+|---|---|---|
+| `osv-scan.ts` | `osv-scanner -r . --format=json` | Flattened vuln list: package, version, id, severity, fixed-in, summary. One line per (package, CVE). |
+| `secret-scan.ts` | `gitleaks` (default) or `noseyparker` | Findings with rule/file/line. Secret values **truncated to first 12 chars** — full secrets never enter pi's context. |
+| `hurl-test.ts` | `hurl --test --json <file>` | Compact pass/fail summary. On failure: per-entry method/URL/status + the assertion that failed. Variable substitution supported. |
+| `go-test.ts` | `go test -json ./...` | Filters to failed tests + last 30 output lines per failure. Supports `run`, `race`, `count`, `short`, `timeout`. |
+| `bench.ts` | `hyperfine --export-json` | Statistical benchmark across N commands. Returns mean/stddev/min/max/winner/speedup. |
+| `bg-tasks.ts` (3 tools) | `tmux new-session -d` + `pi -p` | Detached parallel pi tasks. `bg_task` spawns, `bg_list` enumerates, `bg_status` drills in. Plus `/bg-list` and `/bg-kill` slash commands. Skips amux's Claude-Code lock-in. |
 
 ### Event / behavior extensions (no LLM-visible tool surface)
 
@@ -174,12 +190,22 @@ Edit the source-of-truth files in `~/dotfiles/.pi/agent/`. Pi hot-reloads:
 
 ## Tests
 
-Unit tests for the pure parsers (tool-guard segment splitter + patch path
-extraction, apply\_patch parser, oci-tags image parser + version compare,
-session-search tokenizer, session-fts query tokenizer):
+Unit tests for the pure parsers in each extension:
+
+- tool-guard segment splitter + apply_patch path extraction
+- apply-patch envelope parser
+- oci-tags image parser + version compare
+- session-search tokenizer
+- session-fts query tokenizer
+- osv-scan JSON parser
+- secret-scan gitleaks + noseyparker parsers
+- hurl-test JSON parser
+- go-test JSON event parser
+- bench hyperfine output parser
+- bg-tasks duration formatter + slug generator
 
 ```bash
-~/dotfiles/.pi/agent/tests/run.sh        # all (52 tests)
+~/dotfiles/.pi/agent/tests/run.sh        # all (86 tests)
 ~/dotfiles/.pi/agent/tests/run.sh -t "tool-guard"   # filter
 ```
 
