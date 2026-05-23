@@ -54,6 +54,15 @@ export function parseHurlJson(raw: string): { entries: HurlEntryResult[]; allSuc
       success?: boolean;
       entries?: Array<{
         index?: number;
+        // hurl --json puts request/response inside calls[], one per HTTP
+        // round-trip. The entry-level keys aren't populated. Read the
+        // first call to get method/url/status.
+        calls?: Array<{
+          request?: { method?: string; url?: string };
+          response?: { status?: number };
+        }>;
+        // Older hurl versions populated request/response at entry level;
+        // keep as fallback.
         request?: { method?: string; url?: string };
         response?: { status?: number };
         time?: number; // ms
@@ -71,12 +80,15 @@ export function parseHurlJson(raw: string): { entries: HurlEntryResult[]; allSuc
           kind: a.predicate?.kind ?? "assert",
           message: a.message ?? `expected ${JSON.stringify(a.expected)}, got ${JSON.stringify(a.actual)}`,
         }));
+      const firstCall = e.calls?.[0];
+      const request = firstCall?.request ?? e.request;
+      const response = firstCall?.response ?? e.response;
       entries.push({
         index: e.index ?? entries.length + 1,
-        url: e.request?.url ?? "(unknown)",
-        method: e.request?.method ?? "GET",
-        status: e.response?.status ?? null,
-        success: failedAsserts.length === 0 && (e.response?.status ?? 0) < 400,
+        url: request?.url ?? "(unknown)",
+        method: request?.method ?? "GET",
+        status: response?.status ?? null,
+        success: failedAsserts.length === 0 && (response?.status ?? 0) < 400,
         durationMs: e.time ?? 0,
         failedAsserts,
         curlCmd: failedAsserts.length > 0 ? e.curl_cmd : undefined,
