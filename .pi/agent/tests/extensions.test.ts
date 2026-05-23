@@ -587,6 +587,30 @@ describe("hurl-test.parseHurlJson", () => {
     expect(parseHurlJson(raw).entries).toHaveLength(2);
   });
 
+  test("reads request/response from calls[] (hurl 8+ format)", () => {
+    const raw = JSON.stringify({
+      success: false,
+      entries: [
+        {
+          index: 2,
+          time: 8,
+          calls: [{ request: { method: "GET", url: "https://example.com/" }, response: { status: 200 } }],
+          asserts: [
+            { success: true, line: 10 },
+            { success: false, line: 12, message: "body assertion failed" },
+          ],
+        },
+      ],
+    });
+    const r = parseHurlJson(raw);
+    expect(r.entries).toHaveLength(1);
+    expect(r.entries[0].method).toBe("GET");
+    expect(r.entries[0].url).toBe("https://example.com/");
+    expect(r.entries[0].status).toBe(200);
+    expect(r.entries[0].failedAsserts).toHaveLength(1);
+    expect(r.entries[0].failedAsserts[0].message).toBe("body assertion failed");
+  });
+
   test("invalid JSON", () => {
     const r = parseHurlJson("not json");
     expect(r.entries).toEqual([]);

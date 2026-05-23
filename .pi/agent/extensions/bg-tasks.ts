@@ -187,51 +187,77 @@ function makeSessionName(slug: string): string {
 // ── wrapper script that runs inside tmux ──────────────────────────────────
 
 // Build a bash command that:
-//   1. Runs `pi -p <prompt>` with optional flags
-//   2. Captures exit code
-//   3. Updates the state file with completed_at + exit_code
+//   1. Writes the prompt to a tempfile (avoids ALL shell-quoting issues —
+//      prompts can contain backticks, $(...) substitutions, quotes, newlines)
+//   2. Runs `pi -p "$(cat $promptfile)" $flags` with the flags array
+//      passed verbatim through positional args (not eval-expanded)
+//   3. Captures exit code, updates the state file with completed_at + exit_code
 //   4. Keeps the tmux pane alive briefly so capture-pane has output, then exits
 //
-// We pass the prompt + JSON path via env to avoid shell-quoting hell.
+// CRITICAL: do not use `eval` on the prompt. Prompts contain user content
+// with arbitrary characters. Backticks would trigger command substitution and
+// hang the wrapper waiting for input from an interactive sub-bash.
 function buildWrapperCommand(state: TaskState, piFlags: string[]): string {
-  // env keys consumed by the inline shell snippet below
+  const promptFile = `${statePath(state.name)}.prompt`;
+  // We write the prompt file from inside the wrapper itself (single-quoted
+  // base64 keeps it safe regardless of contents), then decode at runtime.
+  const promptB64 = Buffer.from(state.prompt, "utf-8").toString("base64");
+  // Build the pi argv as an array; we'll splat with "${PI_FLAGS[@]}" so
+  // arguments containing spaces survive intact.
+  // shellSingleQuote each flag in case any contains a metachar.
+  const flagsArrayInit = piFlags.map((f) => shellSingleQuote(f)).join(" ");
+
   const env = {
-    PI_BG_PROMPT: state.prompt,
     PI_BG_STATE: statePath(state.name),
-    PI_BG_FLAGS: piFlags.join(" "),
+    PI_BG_PROMPT_FILE: promptFile,
+    PI_BG_PROMPT_B64: promptB64,
     PI_BG_CWD: state.cwd,
   };
   const envPrefix = Object.entries(env)
     .map(([k, v]) => `${k}=${shellSingleQuote(v)}`)
     .join(" ");
-  // The script body — runs pi -p, captures exit + bytes, rewrites state JSON.
-  // We use jq if available for safe JSON edits; fallback to a python one-liner.
-  const body = String.raw`
-    cd "$PI_BG_CWD" || exit 1
+
+  // Plain template literal (not String.raw) so we can escape \${ for bash
+  // parameter expansion while letting JS substitute ${flagsArrayInit}.
+  // The wrapper:
+  //  1. base64-decodes the prompt to a file (binary-safe)
+  //  2. reads the prompt as a single shell variable
+  //  3. uses a bash array (PI_FLAGS) splatted with "$\{PI_FLAGS[@]\}" so
+  //     each flag stays as a separate argv entry
+  //  4. runs pi WITHOUT eval — prompt's special chars (backticks, $, etc.)
+  //     pass through verbatim
+  const body = `
     set -o pipefail
-    OUT_FILE=$(mktemp)
-    eval "pi -p \"$PI_BG_PROMPT\" $PI_BG_FLAGS" > "$OUT_FILE" 2>&1
-    RC=$?
-    cat "$OUT_FILE"
-    BYTES=$(wc -c < "$OUT_FILE")
-    NOW=$(date +%s%3N)
+    cd "\$PI_BG_CWD" || exit 1
+    PI_FLAGS=(${flagsArrayInit})
+    # Decode the prompt to a file. base64 is binary-safe for any content.
+    printf '%s' "\$PI_BG_PROMPT_B64" | base64 -d > "\$PI_BG_PROMPT_FILE"
+    PROMPT="\$(cat "\$PI_BG_PROMPT_FILE")"
+    OUT_FILE=\$(mktemp)
+    # Run pi WITHOUT eval. Array splat keeps flags as separate argv entries;
+    # prompt is passed as a single quoted arg with all special chars intact.
+    pi -p "\$PROMPT" "\${PI_FLAGS[@]}" > "\$OUT_FILE" 2>&1
+    RC=\$?
+    cat "\$OUT_FILE"
+    BYTES=\$(wc -c < "\$OUT_FILE")
+    NOW=\$(date +%s%3N)
     if command -v jq >/dev/null; then
-      tmp=$(mktemp)
-      jq --argjson rc "$RC" --argjson b "$BYTES" --argjson t "$NOW" \
-         '.exit_code=$rc | .output_bytes=$b | .completed_at=$t' \
-         "$PI_BG_STATE" > "$tmp" && mv "$tmp" "$PI_BG_STATE"
+      tmp=\$(mktemp)
+      jq --argjson rc "\$RC" --argjson b "\$BYTES" --argjson t "\$NOW" \\
+         '.exit_code=\$rc | .output_bytes=\$b | .completed_at=\$t' \\
+         "\$PI_BG_STATE" > "\$tmp" && mv "\$tmp" "\$PI_BG_STATE"
     else
       python3 -c "
-import json,sys,os
+import json,os
 p=os.environ['PI_BG_STATE']
 d=json.load(open(p))
-d['exit_code']=$RC
-d['output_bytes']=$BYTES
-d['completed_at']=int($NOW)
+d['exit_code']=\$RC
+d['output_bytes']=\$BYTES
+d['completed_at']=int(\$NOW)
 json.dump(d, open(p,'w'), indent=2)
 "
     fi
-    rm -f "$OUT_FILE"
+    rm -f "\$OUT_FILE" "\$PI_BG_PROMPT_FILE"
     # Keep the pane alive for ~30s so a fast bg_status call can still see the
     # final output via tmux capture-pane. After that tmux GCs the session.
     sleep 30
