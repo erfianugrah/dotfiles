@@ -220,8 +220,10 @@ imports.
 
 ```bash
 # Methodology / context injection
-SUPERPOWERS_OFF=1                 # disable superpowers methodology injection
+SUPERPOWERS_OFF=1                 # disable superpowers methodology injection entirely
+SUPERPOWERS_MINIMAL=1             # inject the 4-essential-skill version (~250 tok, vs ~1.4k full)
 SUPERPOWERS_BOOTSTRAP=<path>      # custom using-superpowers SKILL.md path
+SUPERPOWERS_INTENT=<regex>        # override intent-match regex (forces inject on match)
 MEMORY_OFF=1                      # don't inject memories into context
 MEMORY_INJECT_MAX_BYTES=8000      # cap on injected memory block (oldest dropped)
 

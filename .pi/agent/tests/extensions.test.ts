@@ -27,6 +27,7 @@ import { parseHurlJson } from "../extensions/hurl-test.ts";
 import { parseGoTestJson } from "../extensions/go-test.ts";
 import { parseHyperfineJson } from "../extensions/bench.ts";
 import { fmtDuration, makeSlug, makeSessionName } from "../extensions/bg-tasks.ts";
+import { decideInjection, matchesIntent, looksLikeSpec } from "../extensions/superpowers.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -750,5 +751,129 @@ describe("bg-tasks.makeSessionName", () => {
     await new Promise((r) => setTimeout(r, 1100));
     const n2 = makeSessionName("x");
     expect(n1).not.toBe(n2);
+  });
+});
+
+// ── superpowers intent classifier ─────────────────────────────────────────
+
+describe("superpowers.decideInjection", () => {
+  // Force token always wins
+  test("<superpowers> token forces injection", () => {
+    expect(decideInjection("<superpowers> please help me think about this")).toBe("forced");
+  });
+
+  test("<superpowers> + spec promotes to forced-spec", () => {
+    const spec = `<superpowers>\n\nI want to add etymology cards.\n\nRequirements:\n` +
+      `1. fetch from dict API\n2. cache in valkey\n3. show below board\n` +
+      `${"x".repeat(500)}`;
+    expect(decideInjection(spec)).toBe("forced-spec");
+  });
+
+  // Hedges win over intent (small-change signal)
+  test("'just fix this typo' is skipped despite 'fix'", () => {
+    expect(decideInjection("just fix this typo in the README")).toBe("skip");
+  });
+  test("'quick one-liner to bump deps' is skipped", () => {
+    expect(decideInjection("quick one-liner to bump the urllib3 version")).toBe("skip");
+  });
+  test("'trivial config tweak' is skipped", () => {
+    expect(decideInjection("trivial config tweak, set timeout to 30s")).toBe("skip");
+  });
+
+  // Real implementation intent fires
+  test("'implement etymology cards' fires intent", () => {
+    expect(decideInjection("implement etymology cards from the spec")).toBe("intent");
+  });
+  test("'add a new compose stack' fires", () => {
+    expect(decideInjection("add a new compose stack for ntfy")).toBe("intent");
+  });
+  test("'refactor auth.go into per-route guards' fires", () => {
+    expect(decideInjection("refactor auth.go into per-route guards")).toBe("intent");
+  });
+  test("'fix the bug in the websocket handler' fires", () => {
+    expect(decideInjection("fix the bug in the websocket handler")).toBe("intent");
+  });
+  test("'write unit tests for parseHurlJson' fires", () => {
+    expect(decideInjection("write unit tests for parseHurlJson")).toBe("intent");
+  });
+  test("'TDD this new endpoint' fires", () => {
+    expect(decideInjection("TDD this new endpoint")).toBe("intent");
+  });
+
+  // Question-only is skipped
+  test("'how does the FTS5 indexer work?' is skipped", () => {
+    expect(decideInjection("how does the FTS5 indexer work?")).toBe("skip");
+  });
+  test("'why is the test failing?' is skipped", () => {
+    expect(decideInjection("why is the test failing?")).toBe("skip");
+  });
+  test("'show me how memory.ts caches' is skipped", () => {
+    expect(decideInjection("show me how memory.ts caches the memories")).toBe("skip");
+  });
+  test("'review the extensions in this repo' is skipped", () => {
+    expect(decideInjection("review the extensions in this repo")).toBe("skip");
+  });
+  test("'look at the bg-tasks implementation' is skipped", () => {
+    expect(decideInjection("look at the bg-tasks implementation and tell me what's wrong")).toBe("skip");
+  });
+
+  // Bare verb without object should NOT fire
+  test("'implement?' alone is skipped", () => {
+    expect(decideInjection("implement?")).toBe("skip");
+  });
+  test("'what should I add?' is skipped (question + verb but no object)", () => {
+    expect(decideInjection("what should I add?")).toBe("skip");
+  });
+
+  // Spec mode
+  test("intent + numbered list + >500 chars → intent-spec", () => {
+    const txt = `implement etymology cards.\n\n1. fetch from API\n2. cache results\n3. show below board\n` +
+      `${"x".repeat(500)}`;
+    expect(decideInjection(txt)).toBe("intent-spec");
+  });
+  test("intent + 'spec:' marker + >500 chars → intent-spec", () => {
+    const txt = `implement the new feature.\n\nspec: lots of detail here ` +
+      `${"x".repeat(500)}`;
+    expect(decideInjection(txt)).toBe("intent-spec");
+  });
+  test("intent + bullet list short → intent (not spec, too short)", () => {
+    expect(decideInjection("add a feature.\n- step one\n- step two")).toBe("intent");
+  });
+});
+
+describe("superpowers.matchesIntent", () => {
+  test("verb + object pattern matches", () => {
+    expect(matchesIntent("refactor auth.go")).toBe(true);
+    expect(matchesIntent("add etymology cards")).toBe(true);
+  });
+  test("bare verb without object doesn't match", () => {
+    expect(matchesIntent("implement")).toBe(false);
+    expect(matchesIntent("refactor?")).toBe(false);
+  });
+  test("verbs added in tighter pass", () => {
+    expect(matchesIntent("swap the old client for the new one")).toBe(true);
+    expect(matchesIntent("port the websocket handler to gorilla")).toBe(true);
+    expect(matchesIntent("harden the auth endpoint")).toBe(true);
+  });
+});
+
+describe("superpowers.looksLikeSpec", () => {
+  test("short text never a spec", () => {
+    expect(looksLikeSpec("add etymology cards")).toBe(false);
+  });
+  test("long text without markers not a spec", () => {
+    expect(looksLikeSpec("x".repeat(800))).toBe(false);
+  });
+  test("long + bullets is a spec", () => {
+    expect(looksLikeSpec(`- one\n- two\n${"x".repeat(500)}`)).toBe(true);
+  });
+  test("long + numbered list is a spec", () => {
+    expect(looksLikeSpec(`1. one\n2. two\n${"x".repeat(500)}`)).toBe(true);
+  });
+  test("long + 'requirements:' is a spec", () => {
+    expect(looksLikeSpec(`Requirements: ${"x".repeat(500)}`)).toBe(true);
+  });
+  test("long + code fence is a spec", () => {
+    expect(looksLikeSpec(`\`\`\`\ncode\n\`\`\`\n${"x".repeat(500)}`)).toBe(true);
   });
 });
