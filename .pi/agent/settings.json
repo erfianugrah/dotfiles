@@ -4,7 +4,6 @@
   "defaultModel": "claude-opus-4-7",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
-  "quietStartup": true,
   "compaction": {
     "enabled": true
   }
