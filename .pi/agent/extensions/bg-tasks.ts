@@ -710,7 +710,7 @@ const bgStatusTool = defineTool({
       `name:    ${state.name}`,
       `kind:    ${kind}`,
       `status:  ${status}`,
-      `elapsed: ${fmtDuration(elapsedMs)}${live ? " (still running)" : ""}`,
+      `elapsed: ${fmtDuration(elapsedMs)}${live && status === "running" ? " (still running)" : live ? " (pane held — wrapper grace period)" : ""}`,
       `cwd:     ${state.cwd}`,
       state.model ? `model:   ${state.model}` : null,
       state.minimal ? "minimal: true (no extensions/skills)" : null,
