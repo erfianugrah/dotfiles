@@ -3,24 +3,33 @@
  * check on them from anywhere. The "amux pattern" minus the Claude Code lock-in,
  * minus the web dashboard, minus 95% of the code.
  *
- * Three tools:
+ * Four tools:
  *
  *   bg_task       Spawn `pi -p "<prompt>"` in a fresh detached tmux session.
  *                 Returns the session handle immediately so the parent pi can
  *                 keep going. Background pi inherits pi's settings (extensions,
  *                 skills, AGENTS.md, model) unless `minimal: true` is set.
  *
- *   bg_list       Enumerate all currently-known bg tasks (running + completed
- *                 in last 24h) with their status, prompt summary, elapsed
- *                 time, last output line. Token-efficient one-line-per-task.
+ *   bg_bash       Spawn an arbitrary bash command in a detached tmux session.
+ *                 Same lifecycle as bg_task but runs the user's bash directly
+ *                 instead of `pi -p`. Use for polling loops, long builds,
+ *                 slow downloads — anything that would hit pi's `bash` tool
+ *                 timeout. The command's quoting / substitutions / pipes /
+ *                 redirects all work as if you'd typed them in your terminal.
  *
- *   bg_status     Drill into ONE bg task: full prompt, last N output lines,
- *                 exit code, output bytes, working directory. Use after
- *                 bg_list to inspect a specific task.
+ *   bg_list       Enumerate all currently-known bg tasks (running + completed
+ *                 in last 24h) with their status, kind (π=pi, $=bash), prompt
+ *                 / command summary, elapsed time. Token-efficient one-line-per-task.
+ *
+ *   bg_status     Drill into ONE bg task: full prompt/command, last N output
+ *                 lines, exit code, output bytes, working directory.
  *
  * State (per-task) lives at ~/.pi/agent/bg-tasks/<name>.json:
  *   {
- *     name, prompt, cwd, started_at,
+ *     name, slug, kind: "pi"|"bash",
+ *     prompt?: string,    // present when kind="pi" (bg_task)
+ *     command?: string,   // present when kind="bash" (bg_bash)
+ *     cwd, started_at,
  *     completed_at?, exit_code?, output_bytes?, model?
  *   }
  *
@@ -35,6 +44,8 @@
  *   - `bg_task` doesn't accept follow-up messages (pi -p is one-shot).
  *     For multi-turn delegation, use the existing `task` extension or
  *     attach to the tmux session manually with `tmux attach -t <name>`.
+ *   - `bg_bash` runs in a fresh `bash <tempfile>` subshell — no inherited
+ *     shell state from the parent pi. Set up env in the command itself.
  *   - bg_list only lists tasks whose state file is on disk; truly orphan
  *     tmux sessions (created outside this extension) are ignored.
  * See also: ~/.pi/agent/TOOLKIT.md (workflows, canonical invocations)
@@ -66,7 +77,12 @@ const TMUX_PREFIX = "pi-bg-";
 interface TaskState {
   name: string; // tmux session name
   slug: string; // short user-given label
-  prompt: string;
+  // Exactly one of these is set depending on the task kind:
+  //   prompt: spawned via bg_task — runs `pi -p <prompt>`
+  //   command: spawned via bg_bash — runs an arbitrary bash command
+  prompt?: string;
+  command?: string;
+  kind: "pi" | "bash"; // discriminator
   cwd: string;
   model?: string;
   minimal?: boolean;
@@ -269,6 +285,56 @@ function shellSingleQuote(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
+// Wrapper for arbitrary bash commands (bg_bash). Same overall structure as
+// buildWrapperCommand but the inner command is the user's bash literal
+// instead of `pi -p <prompt>`. Command is passed via env var so it's never
+// re-quoted.
+function buildBashWrapper(state: TaskState): string {
+  const cmdB64 = Buffer.from(state.command ?? "", "utf-8").toString("base64");
+  const env = {
+    PI_BG_STATE: statePath(state.name),
+    PI_BG_CMD_B64: cmdB64,
+    PI_BG_CWD: state.cwd,
+  };
+  const envPrefix = Object.entries(env)
+    .map(([k, v]) => `${k}=${shellSingleQuote(v)}`)
+    .join(" ");
+  const body = `
+    set -o pipefail
+    cd "\$PI_BG_CWD" || exit 1
+    OUT_FILE=\$(mktemp)
+    CMD_FILE=\$(mktemp)
+    printf '%s' "\$PI_BG_CMD_B64" | base64 -d > "\$CMD_FILE"
+    # Run the user's bash command as a fresh subshell sourcing the file.
+    # No eval. The command's own quoting / substitutions are evaluated
+    # by bash exactly as if you'd typed them yourself.
+    bash "\$CMD_FILE" > "\$OUT_FILE" 2>&1
+    RC=\$?
+    cat "\$OUT_FILE"
+    BYTES=\$(wc -c < "\$OUT_FILE")
+    NOW=\$(date +%s%3N)
+    if command -v jq >/dev/null; then
+      tmp=\$(mktemp)
+      jq --argjson rc "\$RC" --argjson b "\$BYTES" --argjson t "\$NOW" \\
+         '.exit_code=\$rc | .output_bytes=\$b | .completed_at=\$t' \\
+         "\$PI_BG_STATE" > "\$tmp" && mv "\$tmp" "\$PI_BG_STATE"
+    else
+      python3 -c "
+import json,os
+p=os.environ['PI_BG_STATE']
+d=json.load(open(p))
+d['exit_code']=\$RC
+d['output_bytes']=\$BYTES
+d['completed_at']=int(\$NOW)
+json.dump(d, open(p,'w'), indent=2)
+"
+    fi
+    rm -f "\$OUT_FILE" "\$CMD_FILE"
+    sleep 30
+  `;
+  return `${envPrefix} bash -c ${shellSingleQuote(body)}`;
+}
+
 // ── tool: bg_task ─────────────────────────────────────────────────────────
 
 const bgTaskTool = defineTool({
@@ -348,6 +414,7 @@ const bgTaskTool = defineTool({
     const state: TaskState = {
       name: sessionName,
       slug,
+      kind: "pi",
       prompt: params.prompt,
       cwd,
       model: params.model,
@@ -398,6 +465,109 @@ const bgTaskTool = defineTool({
   },
 });
 
+// ── tool: bg_bash ─────────────────────────────────────────────────────────
+
+const bgBashTool = defineTool({
+  name: "bg_bash",
+  label: "Background Bash",
+  promptSnippet:
+    "bg_bash — run an arbitrary bash command in a detached tmux session. Use for polling loops, long builds, slow downloads, anything past pi's `bash` tool timeout.",
+  promptGuidelines: [
+    "Use when the command will take >30s and you don't want pi's bash to time out / block the agent.",
+    "Use for polling loops (`for i in $(seq 1 N); do ... sleep ...; done`), long builds, slow downloads.",
+    "Returns the session name immediately — check progress via bg_list / bg_status.",
+  ],
+  description: [
+    "Spawn an arbitrary bash command in a detached tmux session and return the session handle.",
+    "",
+    "Same lifecycle as bg_task but runs your bash directly instead of `pi -p`. Use this when:",
+    "- You're polling external state (e.g. waiting for a TLS cert to be issued)",
+    "- You need to run a long build / migration / download in the background",
+    "- The command would otherwise hit pi's `bash` tool timeout",
+    "",
+    "The command runs in a fresh `bash <tempfile>` subshell so all standard bash features work: pipes, redirects, loops, command substitution, $variables. The command receives no positional args.",
+  ].join("\n"),
+  parameters: Type.Object({
+    command: Type.String({
+      description:
+        "The bash command to run. Can be multi-line (use \\n) or include loops, pipes, etc. No positional args supported.",
+    }),
+    name: Type.Optional(
+      Type.String({
+        description: "Optional human-readable slug (auto-generated from command if omitted).",
+      }),
+    ),
+    cwd: Type.Optional(
+      Type.String({
+        description: "Working directory for the command (default: parent pi's cwd).",
+      }),
+    ),
+  }),
+  async execute(_id, params, _signal, _onUpdate, ctx) {
+    const probe = spawnSync("tmux", ["-V"], { stdio: "ignore" });
+    if (probe.status !== 0) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: "tmux not on PATH. Install with `sudo pacman -S tmux`." }],
+        details: { error: "tmux-missing" },
+      };
+    }
+    gc();
+
+    const slug = makeSlug(params.name ?? params.command);
+    const sessionName = makeSessionName(slug);
+    const cwd = params.cwd ?? ctx.cwd;
+
+    const state: TaskState = {
+      name: sessionName,
+      slug,
+      kind: "bash",
+      command: params.command,
+      cwd,
+      started_at: Date.now(),
+    };
+    saveState(state);
+
+    const wrapperCmd = buildBashWrapper(state);
+    const r = spawnSync("tmux", ["new-session", "-d", "-s", sessionName, wrapperCmd], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (r.status !== 0) {
+      try {
+        unlinkSync(statePath(sessionName));
+      } catch {
+        /* ignore */
+      }
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `Failed to spawn tmux session: ${r.stderr?.toString().trim() || "unknown error"}`,
+          },
+        ],
+        details: { error: "tmux-spawn-failed" },
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `Spawned bg bash task: ${sessionName}\n` +
+            `  command: ${params.command.slice(0, 140).replace(/\n/g, " ↵ ")}${params.command.length > 140 ? "…" : ""}\n` +
+            `  cwd:     ${cwd}\n` +
+            `  attach:  tmux attach -t ${sessionName}\n` +
+            `  check:   bg_status name=${sessionName}`,
+        },
+      ],
+      details: { name: sessionName, slug, cwd, started_at: state.started_at, kind: "bash" },
+    };
+  },
+});
+
+
 // ── tool: bg_list ─────────────────────────────────────────────────────────
 
 const bgListTool = defineTool({
@@ -440,8 +610,10 @@ const bgListTool = defineTool({
         else status = "lost"; // tmux session gone but no completion recorded — crashed or killed
         const elapsedMs = (s.completed_at ?? now) - s.started_at;
         const elapsed = fmtDuration(elapsedMs);
-        const promptPreview = s.prompt.replace(/\s+/g, " ").slice(0, 80);
-        return { status, elapsed, name: s.name, slug: s.slug, prompt: promptPreview, isDone, isLive, raw: s };
+        const previewSrc = s.prompt ?? s.command ?? "";
+        const preview = previewSrc.replace(/\s+/g, " ").slice(0, 80);
+        const kind = s.kind ?? (s.prompt ? "pi" : s.command ? "bash" : "pi");
+        return { status, elapsed, name: s.name, slug: s.slug, prompt: preview, isDone, isLive, kind, raw: s };
       })
       .filter((r) => (params.only_running ? !r.isDone && r.isLive : true));
 
@@ -461,7 +633,8 @@ const bgListTool = defineTool({
             : r.status === "lost"
               ? "? lost   "
               : `✗ ${r.status}`;
-      return `${tag}  ${r.elapsed.padEnd(7)}  ${r.name}\n             ${r.prompt}${r.prompt.length === 80 ? "…" : ""}`;
+      const kindGlyph = r.kind === "bash" ? "$" : "π"; // π for pi, $ for bash
+      return `${tag} ${kindGlyph} ${r.elapsed.padEnd(7)}  ${r.name}\n             ${r.prompt}${r.prompt.length === 80 ? "…" : ""}`;
     });
 
     return {
@@ -530,16 +703,20 @@ const bgStatusTool = defineTool({
     else if (state.exit_code !== undefined) status = `exit-${state.exit_code}`;
     else status = "lost";
 
+    const kind = state.kind ?? (state.prompt ? "pi" : state.command ? "bash" : "pi");
+    const body = state.prompt ?? state.command ?? "(missing)";
+    const bodyLabel = kind === "bash" ? "command" : "prompt";
     const headerLines = [
       `name:    ${state.name}`,
+      `kind:    ${kind}`,
       `status:  ${status}`,
       `elapsed: ${fmtDuration(elapsedMs)}${live ? " (still running)" : ""}`,
       `cwd:     ${state.cwd}`,
       state.model ? `model:   ${state.model}` : null,
       state.minimal ? "minimal: true (no extensions/skills)" : null,
       "",
-      `prompt:`,
-      `  ${state.prompt.replace(/\n/g, "\n  ").slice(0, 1000)}`,
+      `${bodyLabel}:`,
+      `  ${body.replace(/\n/g, "\n  ").slice(0, 1000)}`,
     ].filter((x): x is string => x !== null);
 
     const outputBlock = output.trim() ? `\n\noutput (last ${linesWanted} lines):\n${output.trimEnd()}` : "";
@@ -584,6 +761,7 @@ export { makeSlug, makeSessionName };
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool(bgTaskTool);
+  pi.registerTool(bgBashTool);
   pi.registerTool(bgListTool);
   pi.registerTool(bgStatusTool);
 
@@ -604,7 +782,10 @@ export default function (pi: ExtensionAPI) {
         const done = s.completed_at !== undefined;
         const status = live && !done ? "running" : done && s.exit_code === 0 ? "done" : done ? `exit-${s.exit_code}` : "lost";
         const elapsed = fmtDuration((s.completed_at ?? now) - s.started_at);
-        return `${status.padEnd(10)} ${elapsed.padEnd(7)} ${s.slug.padEnd(20)} ${s.prompt.slice(0, 60)}`;
+        const kind = s.kind ?? (s.prompt ? "pi" : "bash");
+        const kindGlyph = kind === "bash" ? "$" : "π";
+        const preview = (s.prompt ?? s.command ?? "").slice(0, 60);
+        return `${status.padEnd(10)} ${kindGlyph} ${elapsed.padEnd(7)} ${s.slug.padEnd(20)} ${preview}`;
       });
       ctx.ui.notify(`${states.length} bg task(s):\n${lines.join("\n")}`, "info");
     },

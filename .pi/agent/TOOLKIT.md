@@ -186,35 +186,71 @@ Defaults to `--shell=none` for accurate short-command measurement.
 **When to use**: confirming a refactor is actually faster, A/B-ing two
 implementations, comparing model invocations.
 
-### `bg-tasks` — parallel pi sessions in detached tmux
+### `bg-tasks` — parallel pi sessions + arbitrary bash in detached tmux
 
-Three tools + two slash commands. Detailed in
+Four tools + two slash commands. Detailed in
 [Background tasks pattern](#background-tasks-pattern) below.
 
 ## Background tasks pattern
 
-`bg_task` is the amux-style "kick off a long task and check on it later"
-mechanism, minus amux's Claude-Code lock-in. State lives in flat JSON
-files under `~/.pi/agent/bg-tasks/`. Each task runs in its own tmux
-session named `pi-bg-<slug>-<unix-ts>`.
+Two spawn tools (`bg_task` for pi sessions, `bg_bash` for arbitrary shell
+commands) + two query tools (`bg_list`, `bg_status`). All share the same
+state-file format under `~/.pi/agent/bg-tasks/`. Each task runs in its
+own tmux session named `pi-bg-<slug>-<unix-ts>`.
 
-### Lifecycle
+This is the amux-style "kick off a long task and check on it later"
+mechanism, minus amux's Claude-Code lock-in.
+
+### bg_task — spawn another pi session
 
 ```typescript
-// Spawn — returns within ~100ms with the session handle
 bg_task({
   prompt: "refactor bonkled's auth.go into per-route guards, then run go test",
   minimal: false,     // keeps full extension set (default)
   cwd: "/home/erfi/bonkled"
 })
 // → { name: "pi-bg-refactor-bonkled-auth-1748056290", started_at: ... }
+```
 
+### bg_bash — spawn an arbitrary bash command
+
+Use this for anything that would otherwise hit pi's `bash` tool timeout
+(~30s) or that you simply want to run detached:
+
+- Polling loops (waiting for TLS cert, deploy completion, etc.)
+- Long builds, migrations, downloads
+- Long-running test suites
+- Multi-step shell scripts you'd otherwise have to interleave with the agent
+
+```typescript
+// Example: poll flyctl until a cert is ready (replaces a synchronous
+// bash loop that would time out pi's bash tool):
+bg_bash({
+  command: `
+    for i in $(seq 1 20); do
+      status=$(flyctl certs check ntfy.erfi.io 2>&1 | grep -E "Status\\s+=" | awk -F= '{print $2}' | xargs)
+      echo "attempt $i: status = $status"
+      [ "$status" = "Ready" ] && break
+      sleep 10
+    done
+    echo "=== HTTPS check ==="
+    curl -sS https://ntfy.erfi.io/v1/health
+  `,
+  name: "flyctl-cert-wait",
+  cwd: "/home/erfi/servarr-compose/ntfy-fly"
+})
+// → returns immediately; check progress with bg_status when convenient
+```
+
+### Query: bg_list + bg_status
+
+```typescript
 // List all running + recently-completed (24h window)
 bg_list({ only_running: true })
-// → status / elapsed / name / prompt-preview, one line per task
+// → status / kind (π=pi, $=bash) / elapsed / name / prompt-preview
 
-// Drill into one
-bg_status({ name: "pi-bg-refactor-bonkled-auth-1748056290", lines: 100 })
+// Drill into one task
+bg_status({ name: "pi-bg-flyctl-cert-wait-1748056290", lines: 100 })
 // → full state + last 100 lines of tmux pane output
 ```
 
@@ -225,23 +261,29 @@ bg_status({ name: "pi-bg-refactor-bonkled-auth-1748056290", lines: 100 })
 /bg-kill <session-name>      # terminate a running task (with confirm)
 ```
 
-### When to use `bg_task` vs `task` vs sync
+### When to use `bg_task` vs `bg_bash` vs `task` vs sync
 
 | Pattern | Use this | Why |
 |---|---|---|
 | Read-only deep dive into another part of the codebase, context isolation matters | `task subagent_type=explore` | Spawns `pi -p --no-extensions --no-skills` + `-e docs.ts`. Cheap, fast, parent waits for result. |
-| Big multi-step task expected to take >5 min, parent wants to keep working | `bg_task` | Spawns detached tmux, parent moves on, check later via `bg_list`. |
+| Big multi-step task expected to take >5 min that benefits from another LLM brain | `bg_task` | Spawns detached `pi -p`, parent moves on, check later via `bg_list`. |
+| Long bash work — polling, build, migration, download, slow test suite | `bg_bash` | Spawns detached `bash <tempfile>`, no LLM involved. Pi keeps working. |
 | Small task that needs result inline | regular pi tool calls | No subprocess overhead. |
-| Same task across many repos / variants | `bg_task` x N (one per repo) + `bg_list` to check | Real parallel agent fleet. Each gets its own session, won't step on each other. |
+| Same task across many repos / variants | `bg_task` x N or `bg_bash` x N (one per repo) + `bg_list` to check | Real parallel agent fleet. Each gets its own session, won't step on each other. |
 
 ### Architecture
 
-The wrapper script `bg-tasks.ts` runs inside each tmux session does:
+The wrapper script runs inside each tmux session and does:
 
-1. `cd $cwd && pi -p "$prompt" $flags > /tmp/out 2>&1; RC=$?`
-2. Print the captured output to the pane
-3. Update the state JSON via `jq` (or `python3` fallback) with `exit_code`, `output_bytes`, `completed_at`
-4. `sleep 30` so a fast post-completion `bg_status` can still see the pane
+1. `cd $cwd && <inner-command> > /tmp/out 2>&1; RC=$?`
+   - For `bg_task`: inner-command is `pi -p "$prompt" "${PI_FLAGS[@]}"`. The prompt is
+     base64-encoded into an env var and decoded to a tempfile at runtime so backticks,
+     `$(...)`, and other shell metacharacters in the prompt can't trigger injection.
+   - For `bg_bash`: inner-command is `bash <tempfile-containing-user-command>`. The
+     command is also base64-passed for the same safety reason.
+2. Print the captured output to the pane.
+3. Update the state JSON via `jq` (or `python3` fallback) with `exit_code`, `output_bytes`, `completed_at`.
+4. `sleep 30` so a fast post-completion `bg_status` can still see the pane.
 
 No daemon, no DB, no port. Just files + tmux. The state files are GC'd 24h
 after `completed_at`. Truly orphaned tmux sessions (tmux session exists but
