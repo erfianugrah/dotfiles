@@ -60,6 +60,7 @@ the loader without deleting it.
 These wrap installed binaries from the agent toolkit (pacman/paru). Each
 returns structured JSON via the tool's native `--json` flag and projects
 only the fields pi actually needs — avoiding token waste on raw prose output.
+Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 
 | Extension | Wraps | Returns |
 |---|---|---|
@@ -238,6 +239,9 @@ PI_VERBOSE=1                      # verbose subagent stderr in task.ts
 
 ## See also
 
+- [`TOOLKIT.md`](./TOOLKIT.md) — Reference for the 33-binary agent toolkit + 6 CLI-wrapping extensions + workflows. Token-efficient invocation patterns, bg-task usage, when to use each editing strategy, template for new extensions.
+- [`AGENTS.md`](./AGENTS.md) — Tool-routing rules, docs.erfi.io conventions, bash discipline.
+- [`APPEND_SYSTEM.md`](./APPEND_SYSTEM.md) — Commit authorship, safety rules, Unicode-output rules.
 - Pi docs: `/opt/pi-coding-agent/docs/` (extensions.md, skills.md, models.md, etc.)
 - Pi examples: `/opt/pi-coding-agent/examples/extensions/`
 - Upstream: https://pi.dev / https://github.com/earendil-works/pi

@@ -14,6 +14,7 @@
  *   go_test pattern="./..." run="TestRoomWS"   # filter by name regex
  *
  * Requires Go on PATH (you already have it for bonkled).
+ * See also: ~/.pi/agent/TOOLKIT.md (workflows, canonical invocations)
  */
 
 import { Type } from "@earendil-works/pi-ai";

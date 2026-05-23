@@ -14,6 +14,7 @@
  * or when scanning historical git blobs (it's better at deduping).
  *
  * Requires gitleaks (pacman -S gitleaks) and/or noseyparker (paru -S noseyparker).
+ * See also: ~/.pi/agent/TOOLKIT.md (workflows, canonical invocations)
  */
 
 import { Type } from "@earendil-works/pi-ai";
