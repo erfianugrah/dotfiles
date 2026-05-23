@@ -1,0 +1,604 @@
+/**
+ * bg-tasks — kick off long-running pi tasks in detached tmux sessions, then
+ * check on them from anywhere. The "amux pattern" minus the Claude Code lock-in,
+ * minus the web dashboard, minus 95% of the code.
+ *
+ * Three tools:
+ *
+ *   bg_task       Spawn `pi -p "<prompt>"` in a fresh detached tmux session.
+ *                 Returns the session handle immediately so the parent pi can
+ *                 keep going. Background pi inherits pi's settings (extensions,
+ *                 skills, AGENTS.md, model) unless `minimal: true` is set.
+ *
+ *   bg_list       Enumerate all currently-known bg tasks (running + completed
+ *                 in last 24h) with their status, prompt summary, elapsed
+ *                 time, last output line. Token-efficient one-line-per-task.
+ *
+ *   bg_status     Drill into ONE bg task: full prompt, last N output lines,
+ *                 exit code, output bytes, working directory. Use after
+ *                 bg_list to inspect a specific task.
+ *
+ * State (per-task) lives at ~/.pi/agent/bg-tasks/<name>.json:
+ *   {
+ *     name, prompt, cwd, started_at,
+ *     completed_at?, exit_code?, output_bytes?, model?
+ *   }
+ *
+ * tmux session names: `pi-bg-<slug>-<unix-ts>`. The wrapper script that
+ * launches pi inside tmux updates the JSON on exit so polling sees terminal
+ * state without parsing tmux.
+ *
+ * No daemon. No DB. No dashboard. No external port. Just files + tmux.
+ *
+ * Limitations:
+ *   - Requires `tmux` on PATH (Arch: pacman -S tmux; you already have it).
+ *   - `bg_task` doesn't accept follow-up messages (pi -p is one-shot).
+ *     For multi-turn delegation, use the existing `task` extension or
+ *     attach to the tmux session manually with `tmux attach -t <name>`.
+ *   - bg_list only lists tasks whose state file is on disk; truly orphan
+ *     tmux sessions (created outside this extension) are ignored.
+ */
+
+import { Type } from "@earendil-works/pi-ai";
+import { defineTool, getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+
+// ── constants ─────────────────────────────────────────────────────────────
+
+const STATE_DIR = join(getAgentDir(), "bg-tasks");
+const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24h
+const MAX_OUTPUT_LINES_DEFAULT = 60;
+const TMUX_PREFIX = "pi-bg-";
+
+// ── types ─────────────────────────────────────────────────────────────────
+
+interface TaskState {
+  name: string; // tmux session name
+  slug: string; // short user-given label
+  prompt: string;
+  cwd: string;
+  model?: string;
+  minimal?: boolean;
+  started_at: number;
+  completed_at?: number;
+  exit_code?: number;
+  output_bytes?: number;
+}
+
+// ── state helpers ─────────────────────────────────────────────────────────
+
+function ensureStateDir() {
+  if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
+}
+
+function statePath(name: string): string {
+  return join(STATE_DIR, `${name}.json`);
+}
+
+function saveState(s: TaskState) {
+  ensureStateDir();
+  writeFileSync(statePath(s.name), JSON.stringify(s, null, 2) + "\n");
+}
+
+function loadState(name: string): TaskState | null {
+  const p = statePath(name);
+  if (!existsSync(p)) return null;
+  try {
+    return JSON.parse(readFileSync(p, "utf-8")) as TaskState;
+  } catch {
+    return null;
+  }
+}
+
+function listStates(): TaskState[] {
+  ensureStateDir();
+  const out: TaskState[] = [];
+  for (const f of readdirSync(STATE_DIR)) {
+    if (!f.endsWith(".json")) continue;
+    const s = loadState(f.replace(/\.json$/, ""));
+    if (s) out.push(s);
+  }
+  // Newest first
+  out.sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0));
+  return out;
+}
+
+// GC: remove state files older than RECENT_WINDOW_MS for tasks that have
+// completed. Keeps the dir tidy without losing running tasks.
+function gc() {
+  ensureStateDir();
+  const now = Date.now();
+  for (const f of readdirSync(STATE_DIR)) {
+    if (!f.endsWith(".json")) continue;
+    const s = loadState(f.replace(/\.json$/, ""));
+    if (!s) continue;
+    if (s.completed_at && now - s.completed_at > RECENT_WINDOW_MS) {
+      try {
+        unlinkSync(statePath(s.name));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+// ── tmux helpers ──────────────────────────────────────────────────────────
+
+function tmuxHasSession(name: string): boolean {
+  const r = spawnSync("tmux", ["has-session", "-t", name], { stdio: "ignore" });
+  return r.status === 0;
+}
+
+function tmuxCapture(name: string, lines: number): string {
+  // capture-pane -p prints to stdout; -S -<N> means start N lines back from
+  // the end of the scrollback (negative numbers count from end).
+  const r = spawnSync("tmux", ["capture-pane", "-p", "-t", name, "-S", `-${lines}`], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (r.status !== 0) return "";
+  return r.stdout?.toString("utf-8") ?? "";
+}
+
+function tmuxListSessions(): string[] {
+  const r = spawnSync("tmux", ["list-sessions", "-F", "#{session_name}"], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (r.status !== 0) return [];
+  return (r.stdout?.toString("utf-8") ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+function tmuxKillSession(name: string): void {
+  spawnSync("tmux", ["kill-session", "-t", name], { stdio: "ignore" });
+}
+
+// ── slug helpers ──────────────────────────────────────────────────────────
+
+function makeSlug(input: string): string {
+  // Take first 4 alpha tokens, lowercase, hyphenated. Bounded to 30 chars.
+  const tokens = input
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 2)
+    .slice(0, 4);
+  const slug = tokens.join("-").slice(0, 30) || "task";
+  return slug;
+}
+
+function makeSessionName(slug: string): string {
+  // Compact unix-ts (seconds) — enough resolution; reads as a sortable suffix
+  return `${TMUX_PREFIX}${slug}-${Math.floor(Date.now() / 1000)}`;
+}
+
+// ── wrapper script that runs inside tmux ──────────────────────────────────
+
+// Build a bash command that:
+//   1. Runs `pi -p <prompt>` with optional flags
+//   2. Captures exit code
+//   3. Updates the state file with completed_at + exit_code
+//   4. Keeps the tmux pane alive briefly so capture-pane has output, then exits
+//
+// We pass the prompt + JSON path via env to avoid shell-quoting hell.
+function buildWrapperCommand(state: TaskState, piFlags: string[]): string {
+  // env keys consumed by the inline shell snippet below
+  const env = {
+    PI_BG_PROMPT: state.prompt,
+    PI_BG_STATE: statePath(state.name),
+    PI_BG_FLAGS: piFlags.join(" "),
+    PI_BG_CWD: state.cwd,
+  };
+  const envPrefix = Object.entries(env)
+    .map(([k, v]) => `${k}=${shellSingleQuote(v)}`)
+    .join(" ");
+  // The script body — runs pi -p, captures exit + bytes, rewrites state JSON.
+  // We use jq if available for safe JSON edits; fallback to a python one-liner.
+  const body = String.raw`
+    cd "$PI_BG_CWD" || exit 1
+    set -o pipefail
+    OUT_FILE=$(mktemp)
+    eval "pi -p \"$PI_BG_PROMPT\" $PI_BG_FLAGS" > "$OUT_FILE" 2>&1
+    RC=$?
+    cat "$OUT_FILE"
+    BYTES=$(wc -c < "$OUT_FILE")
+    NOW=$(date +%s%3N)
+    if command -v jq >/dev/null; then
+      tmp=$(mktemp)
+      jq --argjson rc "$RC" --argjson b "$BYTES" --argjson t "$NOW" \
+         '.exit_code=$rc | .output_bytes=$b | .completed_at=$t' \
+         "$PI_BG_STATE" > "$tmp" && mv "$tmp" "$PI_BG_STATE"
+    else
+      python3 -c "
+import json,sys,os
+p=os.environ['PI_BG_STATE']
+d=json.load(open(p))
+d['exit_code']=$RC
+d['output_bytes']=$BYTES
+d['completed_at']=int($NOW)
+json.dump(d, open(p,'w'), indent=2)
+"
+    fi
+    rm -f "$OUT_FILE"
+    # Keep the pane alive for ~30s so a fast bg_status call can still see the
+    # final output via tmux capture-pane. After that tmux GCs the session.
+    sleep 30
+  `;
+  return `${envPrefix} bash -c ${shellSingleQuote(body)}`;
+}
+
+function shellSingleQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+// ── tool: bg_task ─────────────────────────────────────────────────────────
+
+const bgTaskTool = defineTool({
+  name: "bg_task",
+  label: "Background Task",
+  promptSnippet:
+    "bg_task — spawn `pi -p` in a detached tmux session, returns immediately. Check progress via bg_list / bg_status.",
+  promptGuidelines: [
+    "Use when the task will take >5 minutes and you want to keep working in parallel.",
+    "Use `minimal: true` for read-only exploration to skip the full extension load (same flags as task `explore`).",
+    "Returns the session name — pass that to bg_status later.",
+  ],
+  description: [
+    "Spawn a fresh `pi -p` instance in a detached tmux session and return the session handle.",
+    "",
+    "Parent pi does NOT block — bg_task returns within ~100ms with the handle. Use bg_list / bg_status to check progress later.",
+    "",
+    "The background pi inherits all your normal config (extensions, skills, AGENTS.md, default model) unless `minimal: true` is set.",
+    "",
+    "tmux session names look like `pi-bg-<slug>-<unix-ts>`. Attach manually with `tmux attach -t <name>` if you want a live view.",
+  ].join("\n"),
+  parameters: Type.Object({
+    prompt: Type.String({
+      description: "The prompt to send to the background pi. Be self-contained — the subagent starts fresh.",
+    }),
+    name: Type.Optional(
+      Type.String({
+        description: "Optional human-readable slug for the tmux session (auto-generated from prompt if omitted).",
+      }),
+    ),
+    cwd: Type.Optional(
+      Type.String({
+        description: "Working directory for the background pi (default: parent pi's cwd).",
+      }),
+    ),
+    model: Type.Optional(
+      Type.String({
+        description: "Pass `--model <m>` to background pi (default: inherit).",
+      }),
+    ),
+    minimal: Type.Optional(
+      Type.Boolean({
+        description:
+          "If true, background pi runs with --no-extensions --no-skills --no-prompt-templates. Cheap explore mode.",
+      }),
+    ),
+    tools: Type.Optional(
+      Type.String({
+        description: "Comma-separated tool whitelist (passed as --tools).",
+      }),
+    ),
+  }),
+  async execute(_id, params, _signal, _onUpdate, ctx) {
+    // Probe tmux up front so we don't write state for a doomed run
+    const probe = spawnSync("tmux", ["-V"], { stdio: "ignore" });
+    if (probe.status !== 0) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: "tmux not on PATH. Install with `sudo pacman -S tmux`." }],
+        details: { error: "tmux-missing" },
+      };
+    }
+
+    gc(); // tidy stale state on every spawn — cheap
+
+    const slug = makeSlug(params.name ?? params.prompt);
+    const sessionName = makeSessionName(slug);
+    const cwd = params.cwd ?? ctx.cwd;
+
+    const piFlags: string[] = ["--no-session"]; // no persisted session for bg
+    if (params.model) piFlags.push("--model", params.model);
+    if (params.minimal) {
+      piFlags.push("--no-extensions", "--no-skills", "--no-prompt-templates");
+    }
+    if (params.tools) piFlags.push("--tools", params.tools);
+
+    const state: TaskState = {
+      name: sessionName,
+      slug,
+      prompt: params.prompt,
+      cwd,
+      model: params.model,
+      minimal: params.minimal,
+      started_at: Date.now(),
+    };
+    saveState(state);
+
+    const wrapperCmd = buildWrapperCommand(state, piFlags);
+    const r = spawnSync(
+      "tmux",
+      ["new-session", "-d", "-s", sessionName, wrapperCmd],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    if (r.status !== 0) {
+      // Roll back state file on failure so list isn't polluted
+      try {
+        unlinkSync(statePath(sessionName));
+      } catch {
+        /* ignore */
+      }
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `Failed to spawn tmux session: ${r.stderr?.toString().trim() || "unknown error"}`,
+          },
+        ],
+        details: { error: "tmux-spawn-failed" },
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `Spawned bg task: ${sessionName}\n` +
+            `  prompt: ${params.prompt.slice(0, 120)}${params.prompt.length > 120 ? "…" : ""}\n` +
+            `  cwd:    ${cwd}\n` +
+            `  attach: tmux attach -t ${sessionName}\n` +
+            `  check:  bg_status name=${sessionName}`,
+        },
+      ],
+      details: { name: sessionName, slug, cwd, started_at: state.started_at },
+    };
+  },
+});
+
+// ── tool: bg_list ─────────────────────────────────────────────────────────
+
+const bgListTool = defineTool({
+  name: "bg_list",
+  label: "Background Task List",
+  promptSnippet: "bg_list — enumerate all bg tasks (running + recently completed).",
+  promptGuidelines: [],
+  description: [
+    "List all known bg tasks (state files in ~/.pi/agent/bg-tasks/, plus live tmux session check).",
+    "",
+    "Returns one line per task: status (running/done/exit-N), elapsed, slug, prompt preview.",
+    "Completed tasks are kept for 24h after exit, then garbage-collected.",
+  ].join("\n"),
+  parameters: Type.Object({
+    only_running: Type.Optional(
+      Type.Boolean({ description: "If true, hide completed tasks. Default false." }),
+    ),
+  }),
+  async execute(_id, params) {
+    gc();
+    const states = listStates();
+    const liveSessions = new Set(tmuxListSessions());
+
+    if (states.length === 0) {
+      return {
+        content: [{ type: "text", text: "No background tasks (none running, none in last 24h)." }],
+        details: { count: 0 },
+      };
+    }
+
+    const now = Date.now();
+    const rows = states
+      .map((s) => {
+        const isLive = liveSessions.has(s.name);
+        const isDone = s.completed_at !== undefined;
+        let status: string;
+        if (isLive && !isDone) status = "running";
+        else if (isDone && s.exit_code === 0) status = "done";
+        else if (isDone) status = `exit-${s.exit_code}`;
+        else status = "lost"; // tmux session gone but no completion recorded — crashed or killed
+        const elapsedMs = (s.completed_at ?? now) - s.started_at;
+        const elapsed = fmtDuration(elapsedMs);
+        const promptPreview = s.prompt.replace(/\s+/g, " ").slice(0, 80);
+        return { status, elapsed, name: s.name, slug: s.slug, prompt: promptPreview, isDone, isLive, raw: s };
+      })
+      .filter((r) => (params.only_running ? !r.isDone && r.isLive : true));
+
+    if (rows.length === 0) {
+      return {
+        content: [{ type: "text", text: "No bg tasks match the filter." }],
+        details: { count: 0, filter: params },
+      };
+    }
+
+    const lines = rows.map((r) => {
+      const tag =
+        r.status === "running"
+          ? "▶ running"
+          : r.status === "done"
+            ? "✓ done   "
+            : r.status === "lost"
+              ? "? lost   "
+              : `✗ ${r.status}`;
+      return `${tag}  ${r.elapsed.padEnd(7)}  ${r.name}\n             ${r.prompt}${r.prompt.length === 80 ? "…" : ""}`;
+    });
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      details: {
+        count: rows.length,
+        running: rows.filter((r) => r.status === "running").length,
+        done: rows.filter((r) => r.status === "done").length,
+        failed: rows.filter((r) => r.status.startsWith("exit-")).length,
+        lost: rows.filter((r) => r.status === "lost").length,
+        tasks: rows.map((r) => ({
+          name: r.name,
+          slug: r.slug,
+          status: r.status,
+          elapsedMs: (r.raw.completed_at ?? now) - r.raw.started_at,
+          startedAt: r.raw.started_at,
+        })),
+      },
+    };
+  },
+});
+
+// ── tool: bg_status ───────────────────────────────────────────────────────
+
+const bgStatusTool = defineTool({
+  name: "bg_status",
+  label: "Background Task Status",
+  promptSnippet: "bg_status — drill into one bg task: full prompt, last output, exit code.",
+  promptGuidelines: [],
+  description: [
+    "Get the full status of one bg task: state file contents + last N lines of tmux output.",
+    "",
+    "If the task is still running, output is captured live from tmux. If completed, the last tmux pane state is returned (kept ~30s after exit).",
+  ].join("\n"),
+  parameters: Type.Object({
+    name: Type.String({
+      description: "tmux session name returned by bg_task (e.g. pi-bg-foo-1748050000).",
+    }),
+    lines: Type.Optional(
+      Type.Number({ description: "Max output lines to return from tmux pane. Default 60." }),
+    ),
+  }),
+  async execute(_id, params) {
+    const state = loadState(params.name);
+    if (!state) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `No state file for ${params.name}. Either the task never existed or it was GC'd (>24h ago).`,
+          },
+        ],
+        details: { error: "no-state", name: params.name },
+      };
+    }
+    const live = tmuxHasSession(params.name);
+    const linesWanted = params.lines ?? MAX_OUTPUT_LINES_DEFAULT;
+    const output = live ? tmuxCapture(params.name, linesWanted) : "";
+
+    const now = Date.now();
+    const elapsedMs = (state.completed_at ?? now) - state.started_at;
+    let status: string;
+    if (live && state.completed_at === undefined) status = "running";
+    else if (state.exit_code === 0) status = "done";
+    else if (state.exit_code !== undefined) status = `exit-${state.exit_code}`;
+    else status = "lost";
+
+    const headerLines = [
+      `name:    ${state.name}`,
+      `status:  ${status}`,
+      `elapsed: ${fmtDuration(elapsedMs)}${live ? " (still running)" : ""}`,
+      `cwd:     ${state.cwd}`,
+      state.model ? `model:   ${state.model}` : null,
+      state.minimal ? "minimal: true (no extensions/skills)" : null,
+      "",
+      `prompt:`,
+      `  ${state.prompt.replace(/\n/g, "\n  ").slice(0, 1000)}`,
+    ].filter((x): x is string => x !== null);
+
+    const outputBlock = output.trim() ? `\n\noutput (last ${linesWanted} lines):\n${output.trimEnd()}` : "";
+
+    return {
+      content: [{ type: "text", text: headerLines.join("\n") + outputBlock }],
+      details: {
+        name: state.name,
+        status,
+        live,
+        elapsedMs,
+        startedAt: state.started_at,
+        completedAt: state.completed_at ?? null,
+        exitCode: state.exit_code ?? null,
+        outputBytes: state.output_bytes ?? null,
+        cwd: state.cwd,
+        model: state.model,
+        minimal: state.minimal ?? false,
+      },
+    };
+  },
+});
+
+// ── helpers (exported for tests) ──────────────────────────────────────────
+
+export function fmtDuration(ms: number): string {
+  if (ms < 0) return "-";
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  if (m < 60) return `${m}m${rs.toString().padStart(2, "0")}s`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h}h${rm.toString().padStart(2, "0")}m`;
+}
+
+export { makeSlug, makeSessionName };
+
+// ── extension entry ───────────────────────────────────────────────────────
+
+export default function (pi: ExtensionAPI) {
+  pi.registerTool(bgTaskTool);
+  pi.registerTool(bgListTool);
+  pi.registerTool(bgStatusTool);
+
+  // Convenience slash command: `/bg-list` for human use (same as the LLM tool)
+  pi.registerCommand("bg-list", {
+    description: "List background pi tasks",
+    handler: async (_args, ctx) => {
+      gc();
+      const states = listStates();
+      if (states.length === 0) {
+        ctx.ui.notify("No background tasks", "info");
+        return;
+      }
+      const liveSessions = new Set(tmuxListSessions());
+      const now = Date.now();
+      const lines = states.map((s) => {
+        const live = liveSessions.has(s.name);
+        const done = s.completed_at !== undefined;
+        const status = live && !done ? "running" : done && s.exit_code === 0 ? "done" : done ? `exit-${s.exit_code}` : "lost";
+        const elapsed = fmtDuration((s.completed_at ?? now) - s.started_at);
+        return `${status.padEnd(10)} ${elapsed.padEnd(7)} ${s.slug.padEnd(20)} ${s.prompt.slice(0, 60)}`;
+      });
+      ctx.ui.notify(`${states.length} bg task(s):\n${lines.join("\n")}`, "info");
+    },
+  });
+
+  pi.registerCommand("bg-kill", {
+    description: "Kill a background pi task by name",
+    handler: async (args, ctx) => {
+      const name = args.trim();
+      if (!name) {
+        ctx.ui.notify("usage: /bg-kill <session-name>", "warning");
+        return;
+      }
+      if (!tmuxHasSession(name)) {
+        ctx.ui.notify(`No live tmux session: ${name}`, "warning");
+        return;
+      }
+      const ok = await ctx.ui.confirm(`Kill background task ${name}?`, "This terminates the pi -p subprocess immediately.");
+      if (!ok) return;
+      tmuxKillSession(name);
+      ctx.ui.notify(`killed ${name}`, "info");
+    },
+  });
+}
