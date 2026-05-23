@@ -5,7 +5,7 @@
  *
  * Layout (width-aware, drops fields gracefully on narrow terminals):
  *
- *   ↑<in> ↓<out> $<session> (+$<turn>) <ctx%>     <session-name> · <thinking> · <cwd>/<branch> · <model>
+ *   ↑<in> ↓<out> $<session> (+$<turn>) <ctx%>  style:terse · todos:3(1▸) · mem:42  <session-name> · <thinking> · <cwd>/<branch> · <model>
  *
  * Fields:
  *   ↑in        cumulative input tokens this session = input + cacheRead +
@@ -15,8 +15,12 @@
  *   ↓out       cumulative output tokens this session
  *   $session   cumulative \$ cost (sum of message.usage.cost.total)
  *   +$turn     last-turn delta (omitted if <\$0.0005)
- *   ctx%       % of model context window in use. Color: dim<60, yellow 60-79,
- *              red >=80. Falls back to absolute `~Nk` when maxTokens unknown.
+ *   ctx%       % of model context window in use. Color: dim<60, warning 60-79,
+ *              error >=80 (warning/error theme slots = yellow/red in defaults).
+ *              Falls back to absolute `~Nk` when maxTokens unknown.
+ *   style      from ~/.pi/agent/style.json (default 'terse', toggle via /style)
+ *   todos      from ~/.pi/agent/todos/<session>.json (pending count + active marker)
+ *   mem        from ~/.pi/agent/memories.json (count of saved memories)
  *   session    pi.getSessionName() — set automatically by session-auto-title
  *   thinking   pi.getThinkingLevel() — omitted when 'off'
  *   cwd        path.basename(ctx.cwd)
@@ -27,9 +31,13 @@
  * session entry won't poison the entire footer (pi's default footer has the
  * same guard, see pi#4158).
  *
- * Plus extension statuses (from ctx.ui.setStatus()) are appended as a
- * dim middle segment when set — lets other extensions surface progress
- * (e.g. session-fts-index's '+15f 1.2k m' indexing notice).
+ * The middle slot reads sibling-extension state directly from disk rather
+ * than relying on ctx.ui.setStatus() to be populated — the status registry
+ * can be empty mid-transition (session_shutdown clears it, session_start in
+ * the sibling extension may not have fired yet), so the disk path is more
+ * robust. Transient setStatus texts (e.g. session-fts '+15f 1.2k m' indexing
+ * progress) still appear when present — we just don't depend on them for
+ * the always-on style / todos / mem indicators.
  *
  * ── stale-ctx bug fix ──
  * Pi's official example for this pattern (and the previous version of this
@@ -46,9 +54,61 @@
  */
 
 import path from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+
+// ── sibling-extension state read directly from disk ─────────────────────────
+//
+// Don't rely solely on ctx.ui.setStatus() from style-toggle / todowrite /
+// session-fts — those depend on event ordering and the status registry
+// can be empty mid-transition. Read the source-of-truth files directly
+// so the footer always reflects current state.
+
+const STYLE_FILE = join(homedir(), ".pi/agent/style.json");
+function readStyle(): string | null {
+  try {
+    if (!existsSync(STYLE_FILE)) return "terse"; // default per style-toggle.ts
+    const parsed = JSON.parse(readFileSync(STYLE_FILE, "utf8")) as { style?: string };
+    return parsed.style === "socratic" ? "socratic" : "terse";
+  } catch {
+    return null;
+  }
+}
+
+function readTodos(sessionId: string | undefined): { pending: number; active: number } | null {
+  try {
+    const dir = join(getAgentDir(), "todos");
+    if (!existsSync(dir)) return null;
+    const safe = (sessionId ?? "default").replace(/[^a-zA-Z0-9_.-]/g, "_");
+    const file = join(dir, `${safe}.json`);
+    if (!existsSync(file)) return null;
+    const data = JSON.parse(readFileSync(file, "utf8")) as {
+      todos?: Array<{ status: string }>;
+    };
+    const todos = data.todos ?? [];
+    const pending = todos.filter((t) => t.status !== "completed" && t.status !== "cancelled").length;
+    const active = todos.filter((t) => t.status === "in_progress").length;
+    return pending === 0 && todos.length === 0 ? null : { pending, active };
+  } catch {
+    return null;
+  }
+}
+
+function readMemoryCount(): number {
+  try {
+    const file = join(getAgentDir(), "memories.json");
+    if (!existsSync(file)) return 0;
+    const data = JSON.parse(readFileSync(file, "utf8")) as { memories?: unknown[] };
+    return data.memories?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
 
 // Pi exposes this on the module API — declare here so we can reference it
 // without an import cycle. The actual function comes from `pi` passed to
@@ -60,10 +120,22 @@ type PiAPI = ExtensionAPI & {
 
 function installFooter(pi: PiAPI, ctx: ExtensionContext) {
   ctx.ui.setFooter((tui, theme, footerData) => {
-    const unsub = footerData.onBranchChange(() => tui.requestRender());
+    const unsubBranch = footerData.onBranchChange(() => tui.requestRender());
+    // Poll style.json / todos / memories every 2s for changes. setStatus()
+    // from sibling extensions still triggers footer re-renders, but our
+    // disk-read sources need their own tick or the footer will lag behind
+    // (e.g. when the user runs /style and the footer wouldn't update until
+    // the next assistant message).
+    const poll = setInterval(() => {
+      try { tui.requestRender(); } catch { /* ignore */ }
+    }, 2000);
+    const dispose = () => {
+      try { unsubBranch(); } catch { /* ignore */ }
+      try { clearInterval(poll); } catch { /* ignore */ }
+    };
 
     return {
-      dispose: unsub,
+      dispose,
       invalidate() {},
       render(width: number): string[] {
         // ctx here is the freshly-passed reference — never the stale parent
@@ -124,7 +196,10 @@ function installFooter(pi: PiAPI, ctx: ExtensionContext) {
           if (usage && Number.isFinite(usage.tokens) && usage.tokens > 0) {
             if (usage.maxTokens && Number.isFinite(usage.maxTokens) && usage.maxTokens > 0) {
               const pct = Math.round((usage.tokens / usage.maxTokens) * 100);
-              const color = pct >= 80 ? "red" : pct >= 60 ? "yellow" : "dim";
+              // Named theme colors only — "red" / "yellow" are theme vars,
+              // not named colors. Use the semantic "error" / "warning" slots
+              // that map to red/yellow in every theme.
+              const color = pct >= 80 ? "error" : pct >= 60 ? "warning" : "dim";
               ctxPct = " " + theme.fg(color, `${pct}%`);
             } else {
               // No context-window cap known; show absolute tokens
@@ -161,14 +236,44 @@ function installFooter(pi: PiAPI, ctx: ExtensionContext) {
         try { modelId = ctx.model?.id ?? "no-model"; } catch { /* ignore */ }
         candidates.push(modelId);
 
-        // ── middle: extension status texts (e.g. session-fts indexing) ───────────
+        // ── middle: per-session indicators (style, todos, ext statuses) ───────────
+        // Combines (a) state we read directly from disk — style, todos,
+        // memory count — with (b) transient setStatus() texts from other
+        // extensions (e.g. session-fts indexing progress).
         let middle = "";
+        const middleParts: string[] = [];
+        try {
+          const style = readStyle();
+          if (style) middleParts.push(`style:${style}`);
+        } catch { /* ignore */ }
+        try {
+          let sessionId: string | undefined;
+          try {
+            const f = ctx.sessionManager.getSessionFile?.();
+            if (f) sessionId = path.basename(f).replace(/\.jsonl?$/, "");
+          } catch { /* ignore */ }
+          const t = readTodos(sessionId);
+          if (t) middleParts.push(t.active > 0 ? `todos:${t.pending}(${t.active}▸)` : t.pending === 0 ? "todos:✓" : `todos:${t.pending}`);
+        } catch { /* ignore */ }
+        try {
+          const mc = readMemoryCount();
+          if (mc > 0) middleParts.push(`mem:${mc}`);
+        } catch { /* ignore */ }
         try {
           const statuses = footerData.getExtensionStatuses();
-          const texts: string[] = [];
-          for (const [_id, t] of statuses) if (t) texts.push(t);
-          if (texts.length) middle = "  " + theme.fg("yellow", texts.join(" · ")) + "  ";
+          for (const [id, t] of statuses) {
+            if (!t) continue;
+            // Skip statuses we've already rendered from disk (avoids double-display).
+            if (id === "style" || id === "todos") continue;
+            middleParts.push(t);
+          }
         } catch { /* ignore */ }
+        if (middleParts.length) {
+          // "warning" maps to yellow in pi's theme registry ("yellow" is a var,
+          // not a named theme color — calling theme.fg("yellow", …) throws
+          // "Unknown theme color" at render time).
+          middle = "  " + theme.fg("warning", middleParts.join(" · ")) + "  ";
+        }
 
         // Width-aware drop: try fitting all, then drop from the front until
         // (left + middle + pad + right) <= width. Always keep at least the
