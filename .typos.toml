@@ -1,0 +1,41 @@
+# typos config — see https://github.com/crate-ci/typos
+# Project-wide false positives to silence.
+
+[default.extend-words]
+# Hyphenated English compounds and acronyms that typos mis-flags
+mis = "mis"
+PN = "PN"
+# Postgres / DB index types and tech terms
+BRIN = "BRIN"        # Block Range Index, real Postgres index type
+Hashi = "Hashi"      # HashiCorp
+Nd = "Nd"            # 2nd, 3rd, 4th abbreviations
+# Commonly hit infra terms
+fo = "fo"            # `info` substring mistake
+testnet = "testnet"
+mainnet = "mainnet"
+
+[default.extend-identifiers]
+# Domain-specific abbreviations / commit shas / package names go here
+# (none yet)
+
+[files]
+extend-exclude = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/.git/**",
+  "**/sessions/**",            # ~/.pi/agent/sessions are user content
+  "**/memories.json",
+  "**/*.lock",
+  "**/*.lockb",
+  "**/package-lock.json",
+  "**/pnpm-lock.yaml",
+  "**/yarn.lock",
+  "**/bun.lockb",
+  "**/Cargo.lock",
+  "**/go.sum",
+  # frozen lists of package names — typos here are intentional (e.g. `tre`, `certifi`)
+  "**/pacman_list.txt",
+  "**/yay_list.txt",
+  "**/brew_packages_list.txt",
+  "**/packages/**",
+]

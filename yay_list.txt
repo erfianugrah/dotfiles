@@ -1,4 +1,12 @@
+comby-bin
+git-absorb
 google-chrome
 kubelogin
+kubescape
+noseyparker
+scc-bin
+semgrep-bin
+srgn
+trufflehog
 yay
 yay-debug
