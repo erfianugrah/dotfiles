@@ -32,6 +32,11 @@
  *   bash sed -i ... <big-file>  → suggest sd or ast-grep for >100KB files
  *   bash find <huge-tree>       → suggest rg --files for speed
  *
+ * apply_patch envelopes:
+ *   Each Add/Update/Delete/Move File: line is extracted and every target
+ *   path is checked against WRITE_RULES (so .env / .git / lockfiles /
+ *   node_modules can't be bypassed via apply_patch).
+ *
  * To disable a specific guard: edit DISABLED below.
  */
 
@@ -50,6 +55,10 @@ const DISABLED: Set<string> = new Set();
 // We track recent search-family calls per-session. If the SAME search tool is
 // called 3+ times in a window with no drill-in tool used between them, the
 // 4th call is blocked with a redirect.
+//
+// State is keyed by session file path so different pi sessions on the same
+// process don't share counters (verified bug — pi /new keeps the extension
+// module loaded, so module-scope state survived across sessions).
 //
 // Search tools (call counts toward the loop):
 const SEARCH_TOOLS = new Set([
@@ -77,7 +86,15 @@ type LoopState = {
   recentSearches: Array<{ tool: string; ts: number }>;
   lastDrillInTs: number;
 };
-const loopState: LoopState = { recentSearches: [], lastDrillInTs: 0 };
+const loopStates = new Map<string, LoopState>();
+function stateFor(sessionKey: string): LoopState {
+  let s = loopStates.get(sessionKey);
+  if (!s) {
+    s = { recentSearches: [], lastDrillInTs: 0 };
+    loopStates.set(sessionKey, s);
+  }
+  return s;
+}
 
 // Hard-block rules: regex on bash command, plus a redirect message.
 type BlockRule = {
@@ -183,22 +200,10 @@ const BASH_RULES: BlockRule[] = [
       "For services managed by composer.erfi.io, prefer the composer API for logs (gives you tail + filter + structured response). `docker logs` direct is fine if SSH'd into the host running the container.",
     segment: true,
   },
-  {
-    id: "docker_compose_no_file",
-    // Running docker compose subcmds from a non-compose dir without -f is a common mistake when working across stacks.
-    pattern: /^\s*docker\s+compose\s+(up|down|restart|pull|logs|exec)\b/,
-    reason:
-      "You're running a docker compose subcommand. If you're in the stack's directory, this works — otherwise add `-f /path/to/docker-compose.yml`. Common mistake when working across multiple stacks (~/servarr-compose, ~/keycloak-compose, etc.).",
-    segment: true,
-  },
-  {
-    id: "cat_pipe_tool",
-    // 'cat file | tool' is a useless use of cat in 99% of cases.
-    pattern: /^\s*cat\s+[^|&;]*\|/,
-    reason:
-      "Useless use of cat. Either `tool < file` (most tools accept stdin) or `tool file` (most tools accept a path arg). `cat file | tool` adds a process for no reason.",
-    segment: true,
-  },
+  // dropped (2026-05-23, audit):
+  //   - docker_compose_no_file: fired on canonical `cd ~/stack-dir && docker compose up`,
+  //     which IS the correct invocation. Block message admitted the false-positive.
+  //   - cat_pipe_tool: fired on legitimate `cat file | head/jq/...` quick-look idioms.
   {
     id: "head_full_file",
     // 'head -<huge_number> file' or 'head -n 99999 file' is just cat with extra steps.
@@ -224,14 +229,10 @@ const BASH_RULES: BlockRule[] = [
       "`@tanstack/router` is not the scaffolder. Use `bun create tsrouter-app@latest <name>` (or `npx create-tsrouter-app@latest <name>`). Supports `--template file-router`, `--framework solid`, `--add-ons shadcn,tanstack-query`, `--toolchain biome`. See the `frontend-stack` skill.",
     segment: true,
   },
-  {
-    id: "docker_image_latest",
-    // Pulling :latest in a compose context (where pinning is mandatory per infra-stack skill).
-    pattern: /image:\s*\S+:latest\b/,
-    reason:
-      "Don't pin to `:latest` in compose YAML (per infra-stack skill). Latest upgrades silently and breaks things. Use `oci_tags image=<image> semver:true` to find the current stable tag, then pin explicitly (e.g. `postgres:18.1-alpine`).",
-    segment: false,
-  },
+  // dropped (2026-05-23, audit): docker_image_latest fired on any bash command
+  // mentioning `image: foo:latest` substring including `echo`, `grep`, and the
+  // agent's own reasoning about a fix. Catches the wrong cases. The pin-rule
+  // lives in the infra-stack skill prose instead.
   {
     id: "sudo_systemctl_restart",
     // The user runs services via docker compose (and composer/k3s/Proxmox). Direct systemctl restart
@@ -352,32 +353,38 @@ function checkWebfetchDocs(url: string): string | null {
   return null;
 }
 
-function splitSegments(command: string): string[] {
+// Exported for unit tests. Splits a bash command into best-effort segments
+// at shell operators — && || ; | — so per-segment rules don't miss patterns
+// hidden behind chaining (e.g. `cd /repo && git commit`). Not a full shell
+// parser; quoted strings containing these operators may be mis-split (false
+// positive, which is acceptable for a deny-confirmation gate).
+export function splitSegments(command: string): string[] {
   return command.split(/&&|\|\||;|\|/);
 }
 
-function checkReformulationLoop(toolName: string): string | null {
+function checkReformulationLoop(toolName: string, sessionKey: string): string | null {
   const now = Date.now();
+  const state = stateFor(sessionKey);
 
   if (DRILL_IN_TOOLS.has(toolName)) {
-    loopState.lastDrillInTs = now;
+    state.lastDrillInTs = now;
     return null;
   }
 
   if (!SEARCH_TOOLS.has(toolName)) return null;
 
   // Filter to recent searches AFTER the last drill-in
-  loopState.recentSearches = loopState.recentSearches.filter(
-    (s) => s.ts > loopState.lastDrillInTs,
+  state.recentSearches = state.recentSearches.filter(
+    (s) => s.ts > state.lastDrillInTs,
   );
-  loopState.recentSearches.push({ tool: toolName, ts: now });
+  state.recentSearches.push({ tool: toolName, ts: now });
 
-  if (loopState.recentSearches.length >= LOOP_THRESHOLD + 1) {
+  if (state.recentSearches.length >= LOOP_THRESHOLD + 1) {
     const counts = new Map<string, number>();
-    for (const s of loopState.recentSearches) {
+    for (const s of state.recentSearches) {
       counts.set(s.tool, (counts.get(s.tool) ?? 0) + 1);
     }
-    const total = loopState.recentSearches.length;
+    const total = state.recentSearches.length;
     const breakdown = [...counts.entries()].map(([t, n]) => `${t}×${n}`).join(", ");
     return `Reformulation loop detected: ${total} search calls (${breakdown}) since the last drill-in. STOP rewording. Open the most likely result with the appropriate drill-in tool: docs_search → docs_read, websearch → webfetch or web_research, codesearch → read on the linked file, context7_resolve → context7_query_docs. If results genuinely don't fit your need, ask the user to clarify rather than searching again.`;
   }
@@ -385,11 +392,40 @@ function checkReformulationLoop(toolName: string): string | null {
   return null;
 }
 
+// Extract every target path from an apply_patch envelope. Mirrors
+// apply-patch.ts's parsePatch but bail-fast — we only need the file paths,
+// not the hunks. Any line matching `*** (Add|Update|Delete|Move) File: <path>`
+// contributes a path. (`Move to:` lines also count as a write target.)
+// Exported for unit tests.
+export function extractPatchPaths(patchText: string): string[] {
+  if (typeof patchText !== "string") return [];
+  const out: string[] = [];
+  for (const line of patchText.split(/\r?\n/)) {
+    const m = line.match(/^\*\*\* (?:Add|Update|Delete|Move(?: to)?) File: (.+)$/);
+    if (m) out.push(m[1].trim());
+  }
+  return out;
+}
+
 export default function (pi: ExtensionAPI) {
-  pi.on("tool_call", async (event, _ctx) => {
+  // Reset per-session loop state when sessions transition. Pi keeps the
+  // extension module loaded across /new, /resume, /fork — module-scope
+  // state survives. Without this, search counters leak across sessions.
+  pi.on("session_shutdown", async (_event, ctx) => {
+    try {
+      const key = ctx.sessionManager.getSessionFile?.() ?? "default";
+      loopStates.delete(key);
+    } catch { /* ignore */ }
+  });
+
+  pi.on("tool_call", async (event, ctx) => {
+    const sessionKey = (() => {
+      try { return ctx.sessionManager.getSessionFile?.() ?? "default"; } catch { return "default"; }
+    })();
+
     // Reformulation-loop guard runs on every tool call (search families only)
     if (!DISABLED.has("reformulation_loop")) {
-      const loopMsg = checkReformulationLoop(event.toolName);
+      const loopMsg = checkReformulationLoop(event.toolName, sessionKey);
       if (loopMsg) return { block: true, reason: `tool-guard[reformulation_loop]: ${loopMsg}` };
     }
 
@@ -422,6 +458,25 @@ export default function (pi: ExtensionAPI) {
         if (DISABLED.has(rule.id)) continue;
         if (rule.pattern.test(filePath)) {
           return { block: true, reason: `tool-guard[${rule.id}]: ${rule.reason}` };
+        }
+      }
+      return undefined;
+    }
+
+    // apply_patch — writes via fs.writeFile, bypasses the write/edit guard
+    // surface. Parse the envelope, run WRITE_RULES on every target path.
+    if (event.toolName === "apply_patch") {
+      const patchText = (event.input as { patchText?: string }).patchText;
+      const paths = extractPatchPaths(patchText ?? "");
+      for (const p of paths) {
+        for (const rule of WRITE_RULES) {
+          if (DISABLED.has(rule.id)) continue;
+          if (rule.pattern.test(p)) {
+            return {
+              block: true,
+              reason: `tool-guard[${rule.id}]: apply_patch target "${p}" — ${rule.reason}`,
+            };
+          }
         }
       }
       return undefined;

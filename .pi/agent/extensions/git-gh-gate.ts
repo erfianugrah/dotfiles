@@ -112,9 +112,22 @@ function splitCommandSegments(command: string): string[] {
 const GIT_INTERNAL_PATTERNS: RegExp[] = [/(^|\/)\.git(\/|$)/];
 
 // ── tools that write/edit files we want to gate ────────────────────────────
-// Pi's built-in mutating tools: write, edit. (No apply_patch in Pi core.)
-// Custom tools that mutate files should also be added here as you discover them.
+// Pi's built-in mutating tools: write, edit. apply_patch is registered locally
+// (see extensions/apply-patch.ts) and writes via fs.writeFile, so we have to
+// inspect its envelope separately (see WRITE_TOOLS_ENVELOPE below).
 const WRITE_TOOLS = new Set(["write", "edit"]);
+
+// Extract target paths from an apply_patch envelope so we can run the same
+// .git-internals check we'd run on a write/edit.
+function extractPatchPaths(patchText: string): string[] {
+  if (typeof patchText !== "string") return [];
+  const out: string[] = [];
+  for (const line of patchText.split(/\r?\n/)) {
+    const m = line.match(/^\*\*\* (?:Add|Update|Delete|Move(?: to)?) File: (.+)$/);
+    if (m) out.push(m[1].trim());
+  }
+  return out;
+}
 
 function matchesBashGate(command: string): RegExp | undefined {
   const segments = splitCommandSegments(command);
@@ -206,6 +219,26 @@ export default function (pi: ExtensionAPI) {
       if (choice !== "Yes") {
         return { block: true, reason: "Blocked by user" };
       }
+      return undefined;
+    }
+
+    // apply_patch writes via fs.writeFile, bypassing the write/edit hook.
+    // Inspect each target path in the envelope for .git internals.
+    if (event.toolName === "apply_patch") {
+      const patchText = (event.input as { patchText?: string }).patchText;
+      const paths = extractPatchPaths(patchText ?? "");
+      const offending = paths.find((p) => matchesGitInternal(p));
+      if (!offending) return undefined;
+
+      if (!ctx.hasUI) {
+        return { block: true, reason: `apply_patch → .git internals blocked (no UI): ${offending}` };
+      }
+
+      const choice = await ctx.ui.select(
+        `⚠️  apply_patch targets .git internals:\n\n  ${styleBody(offending)}\n\nAllow?`,
+        ["Yes", "No"],
+      );
+      if (choice !== "Yes") return { block: true, reason: "Blocked by user" };
       return undefined;
     }
 

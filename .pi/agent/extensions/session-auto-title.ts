@@ -24,8 +24,25 @@
 
 import { complete, getModel } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+
+// models.json doesn't change at runtime (the user edits it, then /reload).
+// Cache the parsed candidates list keyed by mtime so we don't re-read +
+// re-parse on every session_start. Negligible on its own, but cheap to do.
+let modelsCache: { mtimeMs: number; data: unknown } | null = null;
+function loadModelsJson(): unknown {
+  const path = join(process.env.HOME ?? "", ".pi", "agent", "models.json");
+  try {
+    const st = statSync(path);
+    if (modelsCache && modelsCache.mtimeMs === st.mtimeMs) return modelsCache.data;
+    const data = JSON.parse(readFileSync(path, "utf8"));
+    modelsCache = { mtimeMs: st.mtimeMs, data };
+    return data;
+  } catch {
+    return null;
+  }
+}
 
 const MARKER_TYPE = "session-auto-title";
 const MAX_INPUT_CHARS = 4000;
@@ -103,19 +120,16 @@ async function pickTitleModel(ctx: ExtensionContext) {
 
   type Candidate = { provider: string; id: string; weight: number };
   const candidates: Candidate[] = [];
-  try {
-    const path = join(process.env.HOME ?? "", ".pi", "agent", "models.json");
-    const data = JSON.parse(readFileSync(path, "utf8")) as {
-      providers?: Record<string, { models?: Array<{ id?: string }> }>;
-    };
+  const data = loadModelsJson() as
+    | { providers?: Record<string, { models?: Array<{ id?: string }> }> }
+    | null;
+  if (data) {
     for (const [prov, pd] of Object.entries(data.providers ?? {})) {
       for (const m of pd.models ?? []) {
         if (!m.id) continue;
         candidates.push({ provider: prov, id: m.id, weight: weightOf(prov, m.id) });
       }
     }
-  } catch {
-    // No models.json or unreadable — fall through to current-model fallback
   }
   candidates.sort((a, b) => a.weight - b.weight);
 

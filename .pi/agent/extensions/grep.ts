@@ -37,7 +37,9 @@ async function rgSearch(
   signal?: AbortSignal,
 ): Promise<RgFileMatch[]> {
   return new Promise((resolve, reject) => {
-    const args = ["--no-config", "-n", "--no-heading", "--column=false", "-H"];
+    // ripgrep 15 rejects `--column=false` (the flag is boolean and takes no
+            // value). Columns aren't shown by default anyway, so just omit it.
+    const args = ["--no-config", "-n", "--no-heading", "-H"];
     if (ignoreCase) args.push("-i");
     if (include) args.push("-g", include);
     args.push("--", pattern, ".");

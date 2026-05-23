@@ -27,22 +27,42 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import { randomBytes } from "crypto";
 
 const MEMORIES_FILE = join(getAgentDir(), "memories.json");
 
+// Cap how many bytes of memory content we'll inject per LLM call. Above
+// this, oldest memories are dropped from the injected block first (the
+// user still keeps them in the file; they're just not in-context this turn).
+// Override with MEMORY_INJECT_MAX_BYTES env.
+const INJECT_MAX_BYTES = Number(process.env.MEMORY_INJECT_MAX_BYTES ?? 8000);
+
 type Memory = { id: string; content: string; created_at: string };
 
 // ── storage ───────────────────────────────────────────────────────────────
 
+// load() runs on every `context` event (once per LLM call) so a fresh disk
+// read per turn is wasted I/O. Stat-based mtime cache lets us reuse the
+// parsed array across consecutive turns where memories.json hasn't changed.
+let cache: { mtimeMs: number; size: number; memories: Memory[] } | null = null;
+
 function load(): Memory[] {
-  if (!existsSync(MEMORIES_FILE)) return [];
+  if (!existsSync(MEMORIES_FILE)) {
+    cache = null;
+    return [];
+  }
   try {
+    const st = statSync(MEMORIES_FILE);
+    if (cache && cache.mtimeMs === st.mtimeMs && cache.size === st.size) {
+      return cache.memories;
+    }
     const raw = readFileSync(MEMORIES_FILE, "utf-8");
     const parsed = JSON.parse(raw) as { memories?: Memory[] };
-    return parsed.memories ?? [];
+    const memories = parsed.memories ?? [];
+    cache = { mtimeMs: st.mtimeMs, size: st.size, memories };
+    return memories;
   } catch {
     return [];
   }
@@ -50,6 +70,9 @@ function load(): Memory[] {
 
 function persist(memories: Memory[]) {
   writeFileSync(MEMORIES_FILE, JSON.stringify({ memories }, null, 2) + "\n");
+  // Invalidate cache so the next load() sees the new content even within
+  // the same second (mtime resolution on some filesystems is 1s).
+  cache = null;
 }
 
 // Crockford-style ULID-ish id: 10-char timestamp + 16 hex chars.
@@ -181,14 +204,40 @@ const memoryTool = defineTool({
 
 // ── context injection ─────────────────────────────────────────────────────
 
+// Build the system-message block. If total content exceeds INJECT_MAX_BYTES,
+// drop oldest memories first (sort by id which is ULID-like timestamp-prefixed)
+// and prepend a truncation note so the model knows the list isn't complete.
 function memoryBlock(memories: Memory[]): string {
   if (memories.length === 0) return "";
-  const lines = memories.map((m) => `- ${m.content}`).join("\n");
-  return `# Memories (from past sessions)\n${lines}`;
+  // Newest first, then trim until under the cap.
+  const sorted = [...memories].sort((a, b) => (a.id < b.id ? 1 : -1));
+  const kept: Memory[] = [];
+  let bytes = 0;
+  let dropped = 0;
+  for (const m of sorted) {
+    const line = `- ${m.content}\n`;
+    if (bytes + line.length > INJECT_MAX_BYTES && kept.length > 0) {
+      dropped++;
+      continue;
+    }
+    kept.push(m);
+    bytes += line.length;
+  }
+  const truncNote = dropped > 0
+    ? `\n[${dropped} older memories omitted to stay under ${INJECT_MAX_BYTES}-byte inject cap. Use the memory tool with action="list" to see all.]`
+    : "";
+  // Re-sort kept oldest-first for stable presentation
+  kept.sort((a, b) => (a.id < b.id ? -1 : 1));
+  const lines = kept.map((m) => `- ${m.content}`).join("\n");
+  return `# Memories (from past sessions)\n${lines}${truncNote}`;
 }
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool(memoryTool);
+
+  // Kill switch for non-Anthropic providers (no prompt caching = per-turn
+  // cost). Mirrors SUPERPOWERS_OFF=1.
+  if (process.env.MEMORY_OFF === "1") return;
 
   // Inject memories as a system message at the top of every LLM call.
   // Anthropic + OpenAI prompt caching means the cost is paid once per session
