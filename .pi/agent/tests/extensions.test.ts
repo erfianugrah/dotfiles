@@ -21,6 +21,12 @@ import {
   tokenise,
 } from "../extensions/session-search.ts";
 import { toFtsQuery } from "../extensions/session-fts/index.ts";
+import { parseOsvJson } from "../extensions/osv-scan.ts";
+import { parseGitleaksJson, parseNoseyparkerJsonl } from "../extensions/secret-scan.ts";
+import { parseHurlJson } from "../extensions/hurl-test.ts";
+import { parseGoTestJson } from "../extensions/go-test.ts";
+import { parseHyperfineJson } from "../extensions/bench.ts";
+import { fmtDuration, makeSlug, makeSessionName } from "../extensions/bg-tasks.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -352,5 +358,373 @@ describe("session-fts.toFtsQuery", () => {
 
   test("single word stays single", () => {
     expect(toFtsQuery("supabase")).toBe("supabase");
+  });
+});
+
+// ── osv-scan: parseOsvJson ────────────────────────────────────────
+
+describe("osv-scan.parseOsvJson", () => {
+  test("empty results return []", () => {
+    expect(parseOsvJson('{"results":[]}')).toEqual([]);
+  });
+
+  test("flattens one vuln correctly", () => {
+    const raw = JSON.stringify({
+      results: [
+        {
+          source: { path: "/repo/go.mod" },
+          packages: [
+            {
+              package: { name: "foo", version: "1.0.0", ecosystem: "Go" },
+              vulnerabilities: [
+                {
+                  id: "GO-2024-001",
+                  aliases: ["CVE-2024-1234"],
+                  summary: "Buffer overflow",
+                  database_specific: { severity: "HIGH" },
+                  affected: [{ ranges: [{ events: [{ fixed: "1.0.1" }] }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const result = parseOsvJson(raw);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      package: "foo",
+      version: "1.0.0",
+      ecosystem: "Go",
+      id: "GO-2024-001",
+      aliases: ["CVE-2024-1234"],
+      severity: "HIGH",
+      fixed: "1.0.1",
+      summary: "Buffer overflow",
+      source: "/repo/go.mod",
+    });
+  });
+
+  test("missing optional fields default cleanly", () => {
+    const raw = JSON.stringify({
+      results: [
+        {
+          source: { path: "a" },
+          packages: [
+            {
+              package: { name: "x", version: "1", ecosystem: "npm" },
+              vulnerabilities: [{ id: "GHSA-xxxx" }],
+            },
+          ],
+        },
+      ],
+    });
+    const result = parseOsvJson(raw);
+    expect(result[0]).toMatchObject({
+      package: "x",
+      id: "GHSA-xxxx",
+      severity: null,
+      fixed: null,
+      summary: "",
+      aliases: [],
+    });
+  });
+
+  test("invalid JSON returns []", () => {
+    expect(parseOsvJson("not json")).toEqual([]);
+    expect(parseOsvJson("")).toEqual([]);
+  });
+
+  test("falls back to CVSS score if no database_specific.severity", () => {
+    const raw = JSON.stringify({
+      results: [
+        {
+          source: { path: "a" },
+          packages: [
+            {
+              package: { name: "y", version: "2", ecosystem: "PyPI" },
+              vulnerabilities: [
+                {
+                  id: "PYSEC-1",
+                  severity: [{ type: "CVSS_V3", score: "9.8" }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(parseOsvJson(raw)[0].severity).toBe("9.8");
+  });
+});
+
+// ── secret-scan parsers ──────────────────────────────────────────────
+
+describe("secret-scan.parseGitleaksJson", () => {
+  test("returns truncated secret prefix, never full value", () => {
+    const raw = JSON.stringify([
+      {
+        RuleID: "aws-access-key",
+        File: "/secrets.txt",
+        StartLine: 5,
+        EndLine: 5,
+        Secret: "AKIAIOSFODNN7EXAMPLE",
+        Description: "AWS access key",
+      },
+    ]);
+    const r = parseGitleaksJson(raw);
+    expect(r).toHaveLength(1);
+    expect(r[0].secretPrefix).toContain("AKIAIOSFODNN");
+    expect(r[0].secretPrefix).toContain("20 chars");
+    // The full secret value should NOT appear
+    expect(r[0].secretPrefix).not.toContain("AKIAIOSFODNN7EXAMPLE");
+  });
+
+  test("empty array input", () => {
+    expect(parseGitleaksJson("[]")).toEqual([]);
+  });
+
+  test("invalid JSON returns []", () => {
+    expect(parseGitleaksJson("oops")).toEqual([]);
+  });
+
+  test("preserves commit when present", () => {
+    const raw = JSON.stringify([
+      { RuleID: "x", File: "f", StartLine: 1, Secret: "s", Commit: "abc123def456" },
+    ]);
+    expect(parseGitleaksJson(raw)[0].commit).toBe("abc123def456");
+  });
+});
+
+describe("secret-scan.parseNoseyparkerJsonl", () => {
+  test("parses one finding per line", () => {
+    const jsonl = JSON.stringify({
+      rule_name: "AWS Key",
+      matches: [
+        {
+          provenance: [{ path: "/repo/.env" }],
+          location: { source_span: { start: { line: 12 } } },
+          snippet: { matching: "AKIAIOSFODNN7EXAMPLE" },
+        },
+      ],
+    });
+    const r = parseNoseyparkerJsonl(jsonl);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({
+      rule: "AWS Key",
+      file: "/repo/.env",
+      line: 12,
+    });
+    expect(r[0].secretPrefix).toContain("AKIAIOSFODNN");
+    expect(r[0].secretPrefix).not.toContain("AKIAIOSFODNN7EXAMPLE");
+  });
+
+  test("skips malformed lines without crashing", () => {
+    const jsonl = `{"valid":true}\nnotjson\n${JSON.stringify({
+      rule_name: "R",
+      matches: [{ provenance: [{ path: "f" }], location: { source_span: { start: { line: 1 } } }, snippet: { matching: "x" } }],
+    })}`;
+    expect(parseNoseyparkerJsonl(jsonl)).toHaveLength(1);
+  });
+});
+
+// ── hurl-test: parseHurlJson ────────────────────────────────────────
+
+describe("hurl-test.parseHurlJson", () => {
+  test("all-success run", () => {
+    const raw = JSON.stringify({
+      success: true,
+      entries: [
+        {
+          index: 1,
+          request: { method: "GET", url: "https://example.com" },
+          response: { status: 200 },
+          time: 42,
+          asserts: [{ success: true }],
+        },
+      ],
+    });
+    const r = parseHurlJson(raw);
+    expect(r.allSuccess).toBe(true);
+    expect(r.entries).toHaveLength(1);
+    expect(r.entries[0].success).toBe(true);
+    expect(r.entries[0].failedAsserts).toEqual([]);
+  });
+
+  test("failed assert is captured", () => {
+    const raw = JSON.stringify({
+      success: false,
+      entries: [
+        {
+          index: 1,
+          request: { method: "POST", url: "http://api/x" },
+          response: { status: 500 },
+          time: 100,
+          asserts: [
+            {
+              success: false,
+              predicate: { kind: "equal" },
+              expected: 200,
+              actual: 500,
+              message: "status equals 200",
+            },
+          ],
+        },
+      ],
+    });
+    const r = parseHurlJson(raw);
+    expect(r.allSuccess).toBe(false);
+    expect(r.entries[0].success).toBe(false);
+    expect(r.entries[0].failedAsserts).toHaveLength(1);
+    expect(r.entries[0].failedAsserts[0].kind).toBe("equal");
+  });
+
+  test("handles array-of-runs input", () => {
+    const raw = JSON.stringify([
+      { success: true, entries: [{ index: 1, request: { method: "GET", url: "a" }, response: { status: 200 }, asserts: [] }] },
+      { success: true, entries: [{ index: 1, request: { method: "GET", url: "b" }, response: { status: 200 }, asserts: [] }] },
+    ]);
+    expect(parseHurlJson(raw).entries).toHaveLength(2);
+  });
+
+  test("invalid JSON", () => {
+    const r = parseHurlJson("not json");
+    expect(r.entries).toEqual([]);
+    expect(r.allSuccess).toBe(false);
+  });
+});
+
+// ── go-test: parseGoTestJson ────────────────────────────────────────
+
+describe("go-test.parseGoTestJson", () => {
+  test("all-pass run", () => {
+    const events = [
+      { Time: "t", Action: "run", Package: "pkg/x", Test: "TestA" },
+      { Time: "t", Action: "output", Package: "pkg/x", Test: "TestA", Output: "PASS\n" },
+      { Time: "t", Action: "pass", Package: "pkg/x", Test: "TestA", Elapsed: 0.01 },
+      { Time: "t", Action: "pass", Package: "pkg/x", Elapsed: 0.02 },
+    ];
+    const jsonl = events.map((e) => JSON.stringify(e)).join("\n");
+    const s = parseGoTestJson(jsonl);
+    expect(s.totalTests).toBe(1);
+    expect(s.passed).toBe(1);
+    expect(s.failed).toBe(0);
+    expect(s.failures).toEqual([]);
+  });
+
+  test("captures failure with output excerpt", () => {
+    const events = [
+      { Action: "run", Package: "pkg/y", Test: "TestFail" },
+      { Action: "output", Package: "pkg/y", Test: "TestFail", Output: "=== RUN   TestFail\n" },
+      { Action: "output", Package: "pkg/y", Test: "TestFail", Output: "   foo_test.go:10: expected 1 got 2\n" },
+      { Action: "output", Package: "pkg/y", Test: "TestFail", Output: "--- FAIL: TestFail (0.00s)\n" },
+      { Action: "fail", Package: "pkg/y", Test: "TestFail", Elapsed: 0.0 },
+    ];
+    const jsonl = events.map((e) => JSON.stringify(e)).join("\n");
+    const s = parseGoTestJson(jsonl);
+    expect(s.failed).toBe(1);
+    expect(s.failures).toHaveLength(1);
+    expect(s.failures[0].test).toBe("TestFail");
+    expect(s.failures[0].outputExcerpt).toContain("expected 1 got 2");
+    // Should strip the === RUN scaffold line
+    expect(s.failures[0].outputExcerpt).not.toContain("=== RUN");
+  });
+
+  test("skips invalid JSON lines without crashing", () => {
+    const jsonl = `{"Action":"run","Package":"x","Test":"T"}\nNOT JSON\n{"Action":"pass","Package":"x","Test":"T"}`;
+    const s = parseGoTestJson(jsonl);
+    expect(s.passed).toBe(1);
+  });
+});
+
+// ── bench: parseHyperfineJson ───────────────────────────────────────
+
+describe("bench.parseHyperfineJson", () => {
+  test("identifies winner and speedup", () => {
+    const raw = JSON.stringify({
+      results: [
+        { command: "slow", mean: 1.0, stddev: 0.1, min: 0.9, max: 1.1, median: 1.0, times: [1, 1, 1, 1] },
+        { command: "fast", mean: 0.5, stddev: 0.05, min: 0.45, max: 0.55, median: 0.5, times: [0.5, 0.5] },
+      ],
+    });
+    const r = parseHyperfineJson(raw);
+    expect(r.winner).toBe("fast");
+    expect(r.speedupX).toBeCloseTo(2.0, 5);
+    expect(r.results).toHaveLength(2);
+  });
+
+  test("single result returns no speedup", () => {
+    const raw = JSON.stringify({
+      results: [{ command: "one", mean: 1.0, stddev: 0, min: 1, max: 1, median: 1, times: [1] }],
+    });
+    const r = parseHyperfineJson(raw);
+    expect(r.winner).toBe("one");
+    expect(r.speedupX).toBe(1);
+  });
+
+  test("invalid JSON", () => {
+    expect(parseHyperfineJson("bad")).toEqual({ results: [], winner: null, speedupX: null });
+  });
+});
+
+// ── bg-tasks pure helpers ────────────────────────────────────────────
+
+describe("bg-tasks.fmtDuration", () => {
+  test("sub-second", () => {
+    expect(fmtDuration(0)).toBe("0ms");
+    expect(fmtDuration(42)).toBe("42ms");
+    expect(fmtDuration(999)).toBe("999ms");
+  });
+  test("seconds", () => {
+    expect(fmtDuration(1000)).toBe("1s");
+    expect(fmtDuration(59_000)).toBe("59s");
+  });
+  test("minutes", () => {
+    expect(fmtDuration(60_000)).toBe("1m00s");
+    expect(fmtDuration(125_000)).toBe("2m05s");
+    expect(fmtDuration(59 * 60_000)).toBe("59m00s");
+  });
+  test("hours", () => {
+    expect(fmtDuration(60 * 60_000)).toBe("1h00m");
+    expect(fmtDuration(125 * 60_000)).toBe("2h05m");
+  });
+  test("negative", () => {
+    expect(fmtDuration(-1)).toBe("-");
+  });
+});
+
+describe("bg-tasks.makeSlug", () => {
+  test("basic lowercase + hyphen", () => {
+    expect(makeSlug("Refactor auth module")).toBe("refactor-auth-module");
+  });
+  test("strips punctuation", () => {
+    expect(makeSlug("Run TS!! tests, please.")).toBe("run-ts-tests-please");
+  });
+  test("caps at 4 tokens", () => {
+    expect(makeSlug("one two three four five six")).toBe("one-two-three-four");
+  });
+  test("caps at 30 chars", () => {
+    const slug = makeSlug("superlongwordoneverywhereyouevervisit anotherreallylongword");
+    expect(slug.length).toBeLessThanOrEqual(30);
+  });
+  test("fallback when empty", () => {
+    expect(makeSlug("!!! ??? ...")).toBe("task");
+    expect(makeSlug("")).toBe("task");
+  });
+  test("drops 1-char tokens", () => {
+    expect(makeSlug("a be c done")).toBe("be-done");
+  });
+});
+
+describe("bg-tasks.makeSessionName", () => {
+  test("has prefix + slug + timestamp", () => {
+    const n = makeSessionName("foo");
+    expect(n).toMatch(/^pi-bg-foo-\d+$/);
+  });
+  test("different calls produce different names (1s apart)", async () => {
+    const n1 = makeSessionName("x");
+    await new Promise((r) => setTimeout(r, 1100));
+    const n2 = makeSessionName("x");
+    expect(n1).not.toBe(n2);
   });
 });
