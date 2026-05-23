@@ -24,6 +24,37 @@ const MAX_RESPONSE_SIZE = 5 * 1024 * 1024; // 5MB
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 
+// Auto-escalation to the research crawler (Playwright-backed) for SPA-shell
+// pages. The crawler runs locally at :8889/fetch and accepts {url, force_js}.
+// We only escalate when the static fetch produced <500 visible chars on an
+// HTML response — the typical signature of a JS-rendered page.
+const CRAWLER_URL = process.env.CRAWLER_URL ?? "http://localhost:8889";
+const SPA_SHELL_CHAR_THRESHOLD = 500;
+
+async function fetchViaCrawler(url: string, timeoutMs: number): Promise<string | null> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${CRAWLER_URL}/fetch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        url,
+        force_js: true,
+        timeout: Math.floor(timeoutMs / 1000),
+      }),
+      signal: ctl.signal,
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { content?: string; error?: string };
+    return j.content ?? null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 const HONEST_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
 
@@ -255,9 +286,31 @@ const webfetchTool = defineTool({
     else if (format === "text") output = isHtml ? await extractText(html) : html;
     else output = isHtml ? htmlToMarkdown(html) : html;
 
+    // SPA-shell escalation: HTML response with very little visible text
+    // is almost always JavaScript-rendered. Try the local research crawler
+    // (Playwright) before returning the shell to the agent. Only attempts
+    // it for non-HTML format requests since the user explicitly asked for
+    // markdown / text content. If the crawler isn't reachable or also
+    // produces less, we keep the static result.
+    let escalated = false;
+    if (isHtml && format !== "html" && output.length < SPA_SHELL_CHAR_THRESHOLD) {
+      const crawled = await fetchViaCrawler(params.url, timeoutMs);
+      if (crawled && crawled.length > output.length) {
+        output = crawled;
+        escalated = true;
+      }
+    }
+
     return {
       content: [{ type: "text", text: output }],
-      details: { url: params.url, format, contentType, bytes: buf.byteLength, title },
+      details: {
+        url: params.url,
+        format,
+        contentType,
+        bytes: buf.byteLength,
+        title,
+        ...(escalated ? { via: "crawler+js" } : {}),
+      },
     };
   },
 });

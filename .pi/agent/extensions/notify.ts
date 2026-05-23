@@ -50,8 +50,18 @@ function windowsToast(title: string, body: string): void {
 }
 
 function notify(title: string, body: string): void {
-  if (process.env.WT_SESSION) windowsToast(title, body);
-  else if (process.env.KITTY_WINDOW_ID) osc99(title, body);
+  // Non-TTY stdout means we're inside `pi -p --mode json` (e.g. spawned by the
+  // task tool). Writing OSC sequences there corrupts the JSON event stream
+  // — OSC 777 ends with BEL (\x07) and OSC 99 with ST (\x1b\\), neither of
+  // which is \n, so the bytes land mid-line and break JSON.parse upstream.
+  // Skip the notification rather than pollute the stream.
+  // Windows toast doesn't write to stdout so it's safe regardless.
+  if (process.env.WT_SESSION) {
+    windowsToast(title, body);
+    return;
+  }
+  if (!process.stdout.isTTY) return;
+  if (process.env.KITTY_WINDOW_ID) osc99(title, body);
   else osc777(title, body);
 }
 

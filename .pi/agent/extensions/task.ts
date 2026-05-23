@@ -29,14 +29,31 @@
  */
 
 import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn } from "child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
-// Subagent type → tool whitelist (matches opencode fork's subagent presets)
-const SUBAGENT_PRESETS: Record<string, { tools: string[]; description: string }> = {
+// Subagent type → tool whitelist + flags (matches opencode fork's subagent presets)
+//
+// `minimal` = pass --no-extensions --no-skills --no-prompt-templates so the
+// subagent process skips loading the parent's full extension surface. Only
+// the `--tools` whitelist is available. Big startup-tax saving for read-only
+// exploration: no FTS5 worker, no tool-routing inject, no memory inject, no
+// superpowers regex match, etc.
+//
+// `loadExtensions` = explicit list of extension files to re-include via
+// `-e <path>` (still works alongside --no-extensions per pi --help). Use
+// for extensions that provide tools listed in the whitelist (docs_* etc).
+const SUBAGENT_PRESETS: Record<
+  string,
+  { tools: string[]; description: string; minimal?: boolean; loadExtensions?: string[] }
+> = {
   explore: {
-    tools: ["read", "grep", "find", "ls", "docs_search", "docs_read", "docs_grep", "docs_find", "docs_summary", "docs_sources"],
+    tools: ["read", "grep", "glob", "docs_search", "docs_read", "docs_grep", "docs_find", "docs_summary", "docs_sources"],
     description: "Read-only exploration. Can read files, search code, browse docs. Cannot edit, write, or run bash.",
+    minimal: true,
+    loadExtensions: ["docs.ts"],
   },
   general: {
     tools: [], // empty = no restriction (all tools available)
@@ -70,6 +87,18 @@ async function runSubagent(args: {
   const preset = SUBAGENT_PRESETS[args.subagentType] ?? SUBAGENT_PRESETS.general;
   const flags = ["-p", args.prompt, "--mode", "json", "--no-session"];
   if (preset.tools.length > 0) flags.push("--tools", preset.tools.join(","));
+  if (preset.minimal) {
+    // Re-include only the extensions the whitelist actually needs (e.g.
+    // docs.ts for docs_*) via explicit -e paths — those still load even
+    // with --no-extensions. Everything else stays unloaded so the subagent
+    // boots roughly as fast as a vanilla pi -p.
+    const extDir = join(getAgentDir(), "extensions");
+    for (const name of preset.loadExtensions ?? []) {
+      const path = join(extDir, name);
+      if (existsSync(path)) flags.push("-e", path);
+    }
+    flags.push("--no-extensions", "--no-skills", "--no-prompt-templates");
+  }
 
   return await new Promise((resolve) => {
     const proc = spawn("pi", flags, { stdio: ["ignore", "pipe", "pipe"] });

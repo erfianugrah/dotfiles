@@ -29,27 +29,37 @@
  *   - No file rename (*** Move to:) — use Update with full content for now.
  *   - No BOM/encoding fancy handling — UTF-8 assumed.
  *
- * If a patch fails, NO changes are applied (atomic per call — we stage all
- * changes in memory, write only if every hunk applies cleanly).
+ * Atomicity:
+ *   1. Parse + apply all hunks in memory. If any hunk fails, NO file IO.
+ *   2. Two-phase commit: write every new/updated file to <path>.applypatch-<rand>
+ *      first; if all tmps succeed, rename each tmp over its target and run
+ *      deletes. Rename within a single filesystem is POSIX-atomic. Roll
+ *      back tmps on a write-phase failure.
+ *
+ * The only window where partial state is possible is mid-promote (rename
+ * over target) — which on a healthy filesystem essentially can't fail
+ * once the tmp is on disk.
  */
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve as pathResolve, relative as pathRelative } from "node:path";
+import { randomBytes } from "node:crypto";
 
-type FileOp =
+export type FileOp =
   | { type: "add"; path: string; content: string }
   | { type: "delete"; path: string }
   | { type: "update"; path: string; hunks: Hunk[] };
 
-type Hunk = {
+export type Hunk = {
   context: string; // line after @@
   oldLines: string[]; // lines starting with '-'
   newLines: string[]; // lines starting with '+'
 };
 
-function parsePatch(text: string): FileOp[] {
+// Exported for unit tests. Pure function: input string → list of file ops.
+export function parsePatch(text: string): FileOp[] {
   const normalised = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = normalised.split("\n");
 
@@ -293,17 +303,83 @@ const applyPatchTool = defineTool({
       staged.push({ type: "write", path: abs, content: newContent, isNew: false });
     }
 
-    // All staged — commit atomically (best-effort; if a later write fails, we don't roll back earlier ones)
-    const summary: string[] = [];
-    for (const s of staged) {
-      if (s.type === "write") {
-        await mkdir(dirname(s.path), { recursive: true });
-        await writeFile(s.path, s.content, "utf8");
-        summary.push(`${s.isNew ? "added" : "updated"} ${pathRelative(ctx.cwd, s.path)}`);
-      } else {
-        await unlink(s.path);
-        summary.push(`deleted ${pathRelative(ctx.cwd, s.path)}`);
+    // Two-phase commit so a mid-batch failure rolls every change back:
+    //   1. WRITE phase: each new/updated path goes to a <path>.tmp-<rand>.
+    //      Deletes are noted but not yet performed. If any tmp-write fails,
+    //      unlink the tmps we've made so far and abort.
+    //   2. PROMOTE phase: rename tmps over their targets, then unlink the
+    //      to-be-deleted files. Rename within a single filesystem is atomic
+    //      per the POSIX guarantee, so a crash leaves either old or new.
+    //
+    // This is stronger than the previous "sequential await writeFile" loop
+    // that left half-applied state on partial failure.
+    const tmpSuffix = `.applypatch-${randomBytes(4).toString("hex")}`;
+    const tmpFiles: Array<{ tmp: string; final: string; isNew: boolean }> = [];
+    const deletes: string[] = [];
+
+    try {
+      // Phase 1: write all tmps
+      for (const s of staged) {
+        if (s.type === "write") {
+          await mkdir(dirname(s.path), { recursive: true });
+          const tmp = `${s.path}${tmpSuffix}`;
+          await writeFile(tmp, s.content, "utf8");
+          tmpFiles.push({ tmp, final: s.path, isNew: s.isNew });
+        } else {
+          deletes.push(s.path);
+        }
       }
+    } catch (err) {
+      // Roll back any tmps we wrote
+      for (const { tmp } of tmpFiles) {
+        await unlink(tmp).catch(() => {});
+      }
+      return {
+        isError: true,
+        content: [{ type: "text", text: `apply_patch write phase failed (no changes applied): ${(err as Error).message}` }],
+        details: { failedAt: "write-phase", ops: staged.length },
+      };
+    }
+
+    // Phase 2: promote tmps, then run deletes. If a promote fails partway,
+    // we DO have partial state for the files already renamed — but renames
+    // within the same filesystem very rarely fail after the tmp is on disk
+    // (no ENOSPC, no permission issues that weren't caught in phase 1). On
+    // failure we still clean up the remaining unpromoted tmps so they don't
+    // leak on disk.
+    const summary: string[] = [];
+    let promoted = 0;
+    try {
+      for (let i = 0; i < tmpFiles.length; i++) {
+        const { tmp, final, isNew } = tmpFiles[i];
+        await rename(tmp, final);
+        summary.push(`${isNew ? "added" : "updated"} ${pathRelative(ctx.cwd, final)}`);
+        promoted = i + 1;
+      }
+      for (const p of deletes) {
+        await unlink(p);
+        summary.push(`deleted ${pathRelative(ctx.cwd, p)}`);
+      }
+    } catch (err) {
+      // Partial-promote failure — surface what we did and what was left.
+      // Don't try to roll back already-renamed files (we'd need a backup).
+      // Clean up unpromoted tmps so they don't leak as `*.applypatch-XXXX`.
+      for (let i = promoted; i < tmpFiles.length; i++) {
+        await unlink(tmpFiles[i].tmp).catch(() => {});
+      }
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text:
+              `apply_patch promote phase failed: ${(err as Error).message}\n` +
+              `Applied before failure:\n  - ${summary.join("\n  - ") || "(none)"}\n` +
+              `${tmpFiles.length - promoted} pending tmp file(s) cleaned up. You may need to recover the partially-applied changes manually.`,
+          },
+        ],
+        details: { failedAt: "promote-phase", ops: staged.length },
+      };
     }
 
     return {

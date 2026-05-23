@@ -160,7 +160,17 @@ async function runBatch(limit: number) {
   const t0 = Date.now();
   let files = 0;
   let entries = 0;
-  const queue = listFilesNeedingIndex(limit);
+  let queue: FileToIndex[];
+  try {
+    queue = listFilesNeedingIndex(limit);
+  } catch (err) {
+    // listFilesNeedingIndex can throw if the DB is corrupt or the sessions
+    // directory is in a weird state. Always post a terminal message so the
+    // parent's workerBusy flag clears — otherwise indexing wedges.
+    postMessage({ type: "error", message: `listFiles failed: ${(err as Error).message}` });
+    postMessage({ type: "done", files: 0, entries: 0, ms: Date.now() - t0 });
+    return;
+  }
   for (let i = 0; i < queue.length; i++) {
     try {
       const c = await indexFile(queue[i]);
@@ -195,10 +205,19 @@ async function indexOne(path: string) {
 
 async function rebuild() {
   const t0 = Date.now();
-  db.exec("DELETE FROM msg_fts");
-  db.exec("DELETE FROM indexed_files");
-  // Process ALL files. Big job. Worker-thread, so still off the main loop.
-  const queue = listFilesNeedingIndex(1_000_000);
+  let queue: FileToIndex[];
+  try {
+    db.exec("DELETE FROM msg_fts");
+    db.exec("DELETE FROM indexed_files");
+    // Process ALL files. Big job. Worker-thread, so still off the main loop.
+    queue = listFilesNeedingIndex(1_000_000);
+  } catch (err) {
+    // Pre-loop failure (DB corrupt, schema mismatch after a Bun upgrade,
+    // disk full) needs a terminal message or workerBusy stays true forever.
+    postMessage({ type: "error", message: `rebuild setup failed: ${(err as Error).message}` });
+    postMessage({ type: "done", files: 0, entries: 0, ms: Date.now() - t0 });
+    return;
+  }
   let files = 0;
   let entries = 0;
   for (let i = 0; i < queue.length; i++) {
@@ -240,6 +259,17 @@ function gc() {
 
 declare const self: { onmessage: (e: MessageEvent) => void };
 
+// Wrap each async handler so unhandled rejections still produce a terminal
+// done/error pair — otherwise the parent's workerBusy flag never clears.
+async function runSafe(name: string, fn: () => Promise<void>) {
+  try {
+    await fn();
+  } catch (err) {
+    postMessage({ type: "error", message: `${name} crashed: ${(err as Error).message}` });
+    postMessage({ type: "done", files: 0, entries: 0, ms: 0 });
+  }
+}
+
 self.onmessage = (e: MessageEvent) => {
   const msg = e.data as {
     cmd: "index-batch" | "index-file" | "rebuild" | "gc" | "shutdown";
@@ -248,16 +278,19 @@ self.onmessage = (e: MessageEvent) => {
   };
   switch (msg.cmd) {
     case "index-batch":
-      void runBatch(msg.limit ?? 100);
+      void runSafe("index-batch", () => runBatch(msg.limit ?? 100));
       break;
     case "index-file":
-      if (msg.path) void indexOne(msg.path);
+      if (msg.path) void runSafe("index-file", () => indexOne(msg.path!));
       break;
     case "rebuild":
-      void rebuild();
+      void runSafe("rebuild", () => rebuild());
       break;
     case "gc":
-      gc();
+      try { gc(); } catch (err) {
+        postMessage({ type: "error", message: `gc crashed: ${(err as Error).message}` });
+        postMessage({ type: "done", files: 0, entries: 0, ms: 0 });
+      }
       break;
     case "shutdown":
       try { db.close(); } catch { /* ignore */ }

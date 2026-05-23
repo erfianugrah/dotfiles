@@ -30,13 +30,15 @@ type Hit = {
 	snippet: string;
 };
 
+// Exported for unit tests.
 // Filename pattern: 2026-05-20T22-19-40-639Z_<uuid>.jsonl
-function dateFromName(filename: string): string {
+export function dateFromName(filename: string): string {
 	const m = filename.match(/^(\d{4}-\d{2}-\d{2})/);
 	return m ? m[1] : "?";
 }
 
-function extractText(content: unknown): string {
+// Exported for unit tests.
+export function extractText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return content
@@ -56,8 +58,8 @@ function extractText(content: unknown): string {
 //     through unchanged as a single pattern
 //   - otherwise split on whitespace + common separators, dedupe
 // Each resulting token becomes a separate `-e <pattern>` arg to rg, which
-// ORs them automatically.
-function tokenise(input: string): string[] {
+// ORs them automatically. Exported for unit tests.
+export function tokenise(input: string): string[] {
 	const trimmed = input.trim();
 	if (!trimmed) return [];
 	if (/\b(OR|AND|NOT)\b|[*"]/.test(trimmed)) return [trimmed];

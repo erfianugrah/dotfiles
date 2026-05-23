@@ -338,10 +338,17 @@ const docsSources = defineTool({
     filter: Type.Optional(Type.String({ description: "Filter source names (e.g. 'postgres', 'supabase')" })),
   }),
   async execute(_id, params) {
+    // Derive counts from the pre-built /docs/_index.tsv (one line per file,
+    // path starts with `<source>/...`) rather than walking the entire /docs
+    // tree with `find -mindepth 2 -type f`. On 158 sources × thousands of
+    // files each the find-walk takes seconds; awk on the index is ~ms.
+    //
+    // Fallback: if _index.tsv is missing or has no rows for some reason,
+    // we fall back to the legacy find walk so this tool still produces a
+    // useful answer.
     const filterCmd = params.filter ? ` | rg -i '${sq(params.filter)}'` : "";
-    const result = await ssh(
-      `find /docs -mindepth 2 -type f 2>/dev/null | awk -F/ '{c[$3]++} END{for (d in c) printf "%s: %d files\\n", d, c[d]}' | sort${filterCmd}`,
-    );
+    const indexCmd = `if [ -s /docs/_index.tsv ]; then awk -F/ '{c[$1]++} END{for (d in c) printf "%s: %d files\\n", d, c[d]}' /docs/_index.tsv | sort${filterCmd}; else find /docs -mindepth 2 -type f 2>/dev/null | awk -F/ '{c[$3]++} END{for (d in c) printf "%s: %d files\\n", d, c[d]}' | sort${filterCmd}; fi`;
+    const result = await ssh(indexCmd);
     return { content: [{ type: "text", text: result }], details: { filter: params.filter } };
   },
 });

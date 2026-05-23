@@ -13,7 +13,8 @@ import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // ── registry parse ────────────────────────────────────────────────────────
 
-function parse(image: string): { registry: string; repo: string } {
+// Exported for unit tests.
+export function parseImage(image: string): { registry: string; repo: string } {
   // Strip @digest and :tag suffixes
   const clean = image.replace(/@.*$/, "").replace(/:([^/]*)$/, "");
   const first = clean.split("/")[0];
@@ -72,7 +73,8 @@ async function tags(registry: string, repo: string, auth: string | undefined): P
 
 // ── version-aware sort ────────────────────────────────────────────────────
 
-function versionCompare(a: string, b: string): number {
+// Exported for unit tests.
+export function versionCompare(a: string, b: string): number {
   const pa = a.replace(/^v/, "").split(/[.\-]/);
   const pb = b.replace(/^v/, "").split(/[.\-]/);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
@@ -114,7 +116,7 @@ const ociTagsTool = defineTool({
   }),
 
   async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-    const { registry, repo } = parse(params.image);
+    const { registry, repo } = parseImage(params.image);
     const normalized = registry === "docker.io" ? "registry-1.docker.io" : registry;
     const auth = await token(normalized, repo);
     const all = await tags(normalized, repo, auth);

@@ -170,26 +170,41 @@ export function searchFts(query: string, role: string | undefined, limit: number
   }
 }
 
+// Cache the filesystem walk for pendingFiles. /status calls and
+// session-search fallback decisions hit indexStats() on the hot path —
+// don't re-walk the sessions tree more than once every few seconds.
+let pendingCache: { ts: number; count: number } | null = null;
+const PENDING_CACHE_TTL_MS = 5_000;
+
+function countSessionFiles(): number {
+  if (!existsSync(SESSIONS_ROOT)) return 0;
+  let total = 0;
+  try {
+    for (const e of readdirSync(SESSIONS_ROOT, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      try {
+        for (const f of readdirSync(join(SESSIONS_ROOT, e.name))) {
+          if (f.endsWith(".jsonl")) total++;
+        }
+      } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+  return total;
+}
+
 export function indexStats(): { totalRows: number; totalFiles: number; pendingFiles: number; workerBusy: boolean; lastCommand: string | null } {
   const d = openReadDb();
   const totalRows = d.query<{ c: number }, []>("SELECT COUNT(*) as c FROM msg_fts").get()?.c ?? 0;
   const totalFiles = d.query<{ c: number }, []>("SELECT COUNT(*) as c FROM indexed_files").get()?.c ?? 0;
-  // Approximate pending count without enumerating every file (which is a
-  // synchronous main-thread walk we're trying to avoid). Use filesystem
-  // count vs indexed_files count.
+  // Approximate pending count without enumerating every file on every
+  // call — cache the FS walk for PENDING_CACHE_TTL_MS.
+  const now = Date.now();
   let pendingFiles = 0;
-  if (existsSync(SESSIONS_ROOT)) {
-    let total = 0;
-    try {
-      for (const e of readdirSync(SESSIONS_ROOT, { withFileTypes: true })) {
-        if (!e.isDirectory()) continue;
-        try {
-          for (const f of readdirSync(join(SESSIONS_ROOT, e.name))) {
-            if (f.endsWith(".jsonl")) total++;
-          }
-        } catch { /* ignore */ }
-      }
-    } catch { /* ignore */ }
+  if (pendingCache && now - pendingCache.ts < PENDING_CACHE_TTL_MS) {
+    pendingFiles = Math.max(0, pendingCache.count - totalFiles);
+  } else {
+    const total = countSessionFiles();
+    pendingCache = { ts: now, count: total };
     pendingFiles = Math.max(0, total - totalFiles);
   }
   return { totalRows, totalFiles, pendingFiles, workerBusy, lastCommand };
