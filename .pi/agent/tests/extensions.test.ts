@@ -939,3 +939,42 @@ describe("yank.parseCodeBlocks", () => {
     expect(r[0].body.split("\n")).toHaveLength(2);
   });
 });
+
+import { parseYankArgs } from "../extensions/yank.ts";
+
+describe("yank.parseYankArgs", () => {
+  test("empty → block 1, latest message", () => {
+    expect(parseYankArgs("")).toMatchObject({ n: 1, back: 0, list: false });
+  });
+  test("numeric → block N", () => {
+    expect(parseYankArgs("2")).toMatchObject({ n: 2, back: 0, list: false });
+  });
+  test("negative → from-end indexing", () => {
+    expect(parseYankArgs("-1")).toMatchObject({ n: -1, back: 0, list: false });
+  });
+  test("? → list mode", () => {
+    expect(parseYankArgs("?")).toMatchObject({ n: null, back: 0, list: true });
+  });
+  test("^ → one message back", () => {
+    expect(parseYankArgs("^")).toMatchObject({ n: 1, back: 1, list: false });
+  });
+  test("^^^ → three messages back", () => {
+    expect(parseYankArgs("^^^")).toMatchObject({ n: 1, back: 3, list: false });
+  });
+  test("2^ → block 2, one back", () => {
+    expect(parseYankArgs("2^")).toMatchObject({ n: 2, back: 1, list: false });
+  });
+  test("?^^ → list, two back", () => {
+    expect(parseYankArgs("?^^")).toMatchObject({ n: null, back: 2, list: true });
+  });
+  test("legacy 'back N' still works", () => {
+    expect(parseYankArgs("back 2")).toMatchObject({ n: 1, back: 2, list: false });
+    expect(parseYankArgs("list back 1")).toMatchObject({ n: null, back: 1, list: true });
+  });
+  test("unknown token → error", () => {
+    expect(parseYankArgs("xyz").error).toContain("unknown");
+  });
+  test("too many args → error", () => {
+    expect(parseYankArgs("1 2").error).toContain("too many");
+  });
+});
