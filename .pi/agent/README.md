@@ -12,7 +12,7 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 ├── AGENTS.md          → ~/dotfiles/.config/opencode/AGENTS.md (shared with opencode)
 ├── APPEND_SYSTEM.md   → ~/dotfiles/.pi/agent/APPEND_SYSTEM.md (commit/safety rules)
 ├── models.json        → ~/dotfiles/.pi/agent/models.json (llama-server + 8 local models)
-├── skills/            → ~/.config/opencode/skills (zero-copy: 15 top-level + 14 superpowers subskills)
+├── skills/            → ~/.config/opencode/skills (zero-copy: 18 top-level + 14 superpowers subskills)
 ├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (37 single-file + lsp/ + session-fts/)
 ├── tests/             → ~/dotfiles/.pi/agent/tests/ (bun unit tests for pure helpers)
 ├── settings.json      → ~/dotfiles/.pi/agent/settings.json (defaultProvider/Model + theme)
@@ -69,7 +69,7 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `hurl-test.ts` | `hurl --test --json <file>` | Compact pass/fail summary. On failure: per-entry method/URL/status + the assertion that failed. Variable substitution supported. |
 | `go-test.ts` | `go test -json ./...` | Filters to failed tests + last 30 output lines per failure. Supports `run`, `race`, `count`, `short`, `timeout`. |
 | `bench.ts` | `hyperfine --export-json` | Statistical benchmark across N commands. Returns mean/stddev/min/max/winner/speedup. |
-| `bg-tasks.ts` (3 tools) | `tmux new-session -d` + `pi -p` | Detached parallel pi tasks. `bg_task` spawns, `bg_list` enumerates, `bg_status` drills in. Plus `/bg-list` and `/bg-kill` slash commands. Skips amux's Claude-Code lock-in. |
+| `bg-tasks.ts` (4 tools) | `tmux new-session -d` + `pi -p` / `bash` | Detached parallel work. `bg_task` spawns a pi subprocess, `bg_bash` runs any shell command (polling loops, long builds, slow downloads — anything past pi's 30s bash timeout), `bg_list` enumerates with kind glyphs (π/$), `bg_status` drills in. Plus `/bg-list` and `/bg-kill` slash commands. Skips amux's Claude-Code lock-in. |
 
 ### Event / behavior extensions (no LLM-visible tool surface)
 
@@ -129,10 +129,13 @@ List loaded at startup; each has its own `SKILL.md` with the actual rules.
 | `comfyui` | ComfyUI image-gen via llm-compose proxy on `localhost:11434`. |
 | `composer` | Self-hosted Docker Compose management platform (composer.erfi.io). |
 | `design-utilitarian` | McMaster-Carr-style information-dense UI ethos. |
+| `docker` | Dockerfile authoring, buildx (multi-arch + cache mounts + secrets), image inspection, registry workflows, container debugging. Companion to `infrastructure-stack` (Compose) and `composer` (GitOps). |
 | `favicons-and-icons` | Favicon + PWA icon set generation. |
+| `fly` | Fly.io app lifecycle via `flyctl` — deploy, secrets (Vaultwarden → flyctl set), certs + DNS, machines, volumes, scaling, debug, cost knobs. |
 | `frontend-stack` | Astro/React/Next scaffolding with biome + tanstack + shadcn. |
-| `gh-search` | GitHub code/issue/PR/repo search via `gh` CLI. |
-| `infrastructure-stack` | Docker Compose with bridge-network + static-IP + host-mode-Caddy. |
+| `gh` | Full GitHub CLI workflow — PR lifecycle, issue ops, releases with assets, Actions runs + cache, auth scopes, repo ops, extensions. Sibling to `gh-search`. |
+| `gh-search` | Cross-repo GitHub code/issue/PR search via `gh search`. Sibling to `gh` (which covers everything-but-search). |
+| `infrastructure-stack` | Docker Compose with bridge-network + static-IP + host-mode-Caddy.
 | `lora-train` | kohya sd-scripts LoRA training via proxy on `localhost:11434`. |
 | `mermaid-d2` | mermaid / d2 diagram authoring + render via local CLIs. |
 | `research` | SearXNG (`:8888`) + Playwright crawler (`:8889`) + OSINT (`:8890`). |
