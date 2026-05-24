@@ -126,6 +126,7 @@ List loaded at startup; each has its own `SKILL.md` with the actual rules.
 | Skill | Purpose |
 |---|---|
 | `ci-workflows` | GitHub / Gitea Actions workflows, action pinning, CI patterns. |
+| `cloudflare` | Cloudflare API + `wrangler` CLI (Workers / Pages / R2 / D1 / KV / Tunnels) + bulk Python automation + `cf-terraforming` import workflow. Pairs with `terraform`. |
 | `comfyui` | ComfyUI image-gen via llm-compose proxy on `localhost:11434`. |
 | `composer` | Self-hosted Docker Compose management platform (composer.erfi.io). |
 | `design-utilitarian` | McMaster-Carr-style information-dense UI ethos. |
@@ -140,8 +141,9 @@ List loaded at startup; each has its own `SKILL.md` with the actual rules.
 | `mermaid-d2` | mermaid / d2 diagram authoring + render via local CLIs. |
 | `research` | SearXNG (`:8888`) + Playwright crawler (`:8889`) + OSINT (`:8890`). |
 | `software-architecture` | DDD-lite system design for Go backends + full-stack apps. |
-| `supabase` | Supabase SDK + RLS + Auth patterns. |
-| `supabase-postgres-best-practices` | Postgres perf + schema design. |
+| `supabase` | Supabase products (Database / Auth / Storage / Realtime / Edge Functions / pgvector / pgmq / Branching) + `@supabase/server` BFF patterns + RLS + migrations + connection pooling + Postgres extensions. |
+| `supabase-postgres-best-practices` | Postgres perf + index choice + connection management + RLS patterns. |
+| `terraform` | OpenTofu / Terraform — module structure, R2/S3 state backends, SOPS+age secrets, `import` blocks, Cloudflare provider patterns, `for_each` + `dynamic` block recipes. |
 | `whisper` | whisper-transcribe HTTP API on `localhost:7860`. |
 | `superpowers/` | 14 subskills (obra/superpowers v5.1.0 via `superpowers-sync`): brainstorming, TDD, systematic-debugging, writing-plans, executing-plans, receiving / requesting code review, finishing-a-development-branch, using-git-worktrees, dispatching-parallel-agents, subagent-driven-development, verification-before-completion, writing-skills, using-superpowers. |
 
