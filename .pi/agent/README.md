@@ -77,7 +77,7 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 |---|---|
 | `bookmark.ts` | `/bookmark` + `/unbookmark` for `/tree` navigation in long sessions. |
 | `compaction-progress.ts` | Spinner + token-delta toast during `/compact` and auto-compaction. |
-| `yank.ts` | `/yank [N\|list] [back M]` — copy ONE code block from the last assistant message to the system clipboard intact, bypassing terminal wrap. Sibling to built-in `/copy` (which grabs the whole assistant message). Probes clip.exe (WSL), pbcopy, wl-copy, xclip, xsel, termux, OSC 52 fallback. |
+| `yank.ts` | `/y` (alias `/yank`) — copy ONE code block from the last assistant message to the system clipboard intact, bypassing terminal wrap. Terse syntax: `/y` (block 1), `/y 2` (block 2), `/y -1` (last), `/y ?` (list), `/y ^` (previous message), `/y 2^^` (block 2, two messages back). Probes clip.exe (WSL) → pbcopy → wl-copy → xclip → xsel → termux → OSC 52 fallback. Sibling to built-in `/copy` (which grabs the whole message). |
 | `git-gh-gate.ts` | Confirms mutating git/gh commands; protects `.git/` from direct writes; **also inspects apply\_patch envelopes** so apply\_patch can't bypass the gate. |
 | `inline-bash.ts` | Expand `!{cmd}` patterns inside user prompts before send. |
 | `local-model-rules.ts` | Per-model rules for gemma/qwen (LaTeX ban, parallelism, anti-loop). |

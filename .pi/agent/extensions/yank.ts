@@ -12,10 +12,17 @@
  * exactly the bytes the LLM wrote.
  *
  * Usage:
- *   /yank             copy the FIRST code block from the last assistant message
- *   /yank 2           copy the 2nd code block
- *   /yank list        list all code blocks with previews (no copy)
- *   /yank back 1      look 1 assistant message further back (default: 0)
+ * Usage (short form — both `/y` and `/yank` work):
+ *   /y                copy the FIRST code block from the last assistant message
+ *   /y 2              copy the 2nd code block
+ *   /y -1             copy the LAST code block (negative = from end)
+ *   /y ?              list all code blocks with previews (no copy)
+ *   /y ^              copy first block from PREVIOUS assistant message
+ *   /y ^^             two messages back; ^^^ = three back; etc.
+ *   /y 2^             block 2 from previous message
+ *   /y ?^             list blocks from previous message
+ *
+ * Legacy verbose form still accepted: `/yank back 1`, `/yank list`.
  *
  * Clipboard transport (probed in order):
  *   - WSL              clip.exe
@@ -39,6 +46,82 @@ import { existsSync } from "node:fs";
 interface CodeBlock {
   language: string; // "powershell" | "bash" | "" | ...
   body: string; // intact, no trailing newline
+}
+
+// ── argument parser ───────────────────────────────────────────────────────
+
+export interface YankSpec {
+  /** Block selector: positive (1-indexed from start) or negative (-1 = last) */
+  n: number | null;
+  /** Number of messages to go back (0 = latest assistant, 1 = previous, ...) */
+  back: number;
+  /** List mode — print blocks instead of copying */
+  list: boolean;
+  /** Parse error, if any */
+  error?: string;
+}
+
+/**
+ * Parse `/yank` / `/y` arguments. Accepts:
+ *   ""            → { n: 1, back: 0 }
+ *   "2"           → { n: 2, back: 0 }
+ *   "-1"          → { n: -1, back: 0 }    (last block)
+ *   "?"           → { n: null, back: 0, list: true }
+ *   "list"        → same as ?
+ *   "^"           → { n: 1, back: 1 }
+ *   "^^"          → { n: 1, back: 2 }
+ *   "2^"          → { n: 2, back: 1 }
+ *   "?^"          → { n: null, back: 1, list: true }
+ *   "back 2"      → { n: 1, back: 2 }    (legacy)
+ *   "list back 1" → { n: null, back: 1, list: true }   (legacy)
+ */
+export function parseYankArgs(raw: string): YankSpec {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { n: 1, back: 0, list: false };
+
+  // Legacy: "back N" anywhere in the args
+  const tokens = trimmed.split(/\s+/);
+  let back = 0;
+  const kept: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] === "back" && i + 1 < tokens.length) {
+      const m = Number.parseInt(tokens[i + 1], 10);
+      if (!Number.isNaN(m) && m >= 0) {
+        back = m;
+        i++;
+        continue;
+      }
+    }
+    kept.push(tokens[i]);
+  }
+
+  // Now we have at most one positional token (numeric, `?`, `list`, `^^^...`, or `N^^^`)
+  const verb = kept[0] ?? "";
+  if (kept.length > 1) {
+    return { n: null, back: 0, list: false, error: `too many arguments: "${raw}"` };
+  }
+  if (verb === "") {
+    return { n: 1, back, list: false };
+  }
+
+  // Strip trailing carets and count them as back-steps
+  const caretMatch = verb.match(/^([^\^]*)(\^+)$/);
+  let body = verb;
+  if (caretMatch) {
+    body = caretMatch[1];
+    back += caretMatch[2].length;
+  }
+
+  // Now `body` is one of: "", "?", "list", "ls", or a number (with optional minus)
+  if (body === "") return { n: 1, back, list: false };
+  if (body === "?" || body === "list" || body === "ls") {
+    return { n: null, back, list: true };
+  }
+  const n = Number.parseInt(body, 10);
+  if (Number.isNaN(n) || String(n) !== body || n === 0) {
+    return { n: null, back: 0, list: false, error: `unknown argument: "${verb}"` };
+  }
+  return { n, back, list: false };
 }
 
 /**
@@ -240,97 +323,86 @@ function preview(s: string, n = 60): string {
 
 // ── extension ─────────────────────────────────────────────────────────────
 
+async function handleYank(args: string, ctx: {
+  sessionManager: { getEntries: () => unknown };
+  ui: { notify: (msg: string, level: string) => void };
+}) {
+  const spec = parseYankArgs(args);
+  if (spec.error) {
+    ctx.ui.notify(`${spec.error}\nusage: /y [N|?|^] (e.g. /y, /y 2, /y -1, /y ?, /y ^^, /y 2^)`, "warning");
+    return;
+  }
+
+  const entries = ctx.sessionManager.getEntries() as Array<{
+    id: string;
+    type: string;
+    message?: { role?: string; content?: unknown[] };
+  }>;
+  const texts = collectAssistantTexts(entries);
+  if (texts.length === 0) {
+    ctx.ui.notify("no assistant messages yet", "warning");
+    return;
+  }
+  if (spec.back >= texts.length) {
+    ctx.ui.notify(`only ${texts.length} assistant message(s) available—can't go back ${spec.back}`, "warning");
+    return;
+  }
+
+  const target = texts[spec.back];
+  const blocks = parseCodeBlocks(target.text);
+  if (blocks.length === 0) {
+    ctx.ui.notify(
+      spec.back === 0
+        ? "no code blocks in last assistant message (try /y ^)"
+        : `no code blocks ${spec.back} message(s) back`,
+      "warning",
+    );
+    return;
+  }
+
+  if (spec.list) {
+    const header = spec.back === 0
+      ? `${blocks.length} block(s) in last message:`
+      : `${blocks.length} block(s) ${spec.back} message(s) back:`;
+    const lines = blocks.map(
+      (b, i) => `  ${i + 1}. [${b.language || "plain"}] ${b.body.length}B  —  ${preview(b.body)}`,
+    );
+    ctx.ui.notify([header, ...lines].join("\n"), "info");
+    return;
+  }
+
+  // Resolve negative indices (-1 = last block)
+  if (spec.n === null) {
+    ctx.ui.notify("internal: no block selected", "warning");
+    return;
+  }
+  const idx = spec.n > 0 ? spec.n - 1 : blocks.length + spec.n;
+  if (idx < 0 || idx >= blocks.length) {
+    ctx.ui.notify(
+      `only ${blocks.length} block(s) available (you asked for #${spec.n})`,
+      "warning",
+    );
+    return;
+  }
+
+  const block = blocks[idx];
+  const result = await copyToClipboard(block.body);
+  if (!result.ok) {
+    ctx.ui.notify(`copy failed via ${result.via}: ${result.err ?? "unknown"}`, "error");
+    return;
+  }
+
+  const lang = block.language || "plain";
+  const tag = spec.back === 0 ? "" : ` ←${spec.back}`;
+  ctx.ui.notify(
+    `yanked #${idx + 1}/${blocks.length} [${lang}] — ${block.body.length}B${tag}`,
+    "info",
+  );
+}
+
 export default function (pi: ExtensionAPI) {
-  pi.registerCommand("yank", {
-    description: "Copy a code block from the last assistant message (usage: /yank [N|list] [back M])",
-    handler: async (args, ctx) => {
-      const tokens = args.trim().split(/\s+/).filter(Boolean);
+  const desc = "Copy a code block from the last assistant message. /y [N|?|^]";
 
-      // Parse "back M" anywhere in args
-      let back = 0;
-      let parsedTokens: string[] = [];
-      for (let i = 0; i < tokens.length; i++) {
-        if (tokens[i] === "back" && i + 1 < tokens.length) {
-          const m = Number.parseInt(tokens[i + 1], 10);
-          if (!Number.isNaN(m) && m >= 0) {
-            back = m;
-            i++;
-            continue;
-          }
-        }
-        parsedTokens.push(tokens[i]);
-      }
-
-      const verb = parsedTokens[0] ?? "1";
-      const listMode = verb === "list" || verb === "ls";
-
-      // Collect assistant texts
-      const entries = ctx.sessionManager.getEntries() as Array<{
-        id: string;
-        type: string;
-        message?: { role?: string; content?: unknown[] };
-      }>;
-      const texts = collectAssistantTexts(entries);
-      if (texts.length === 0) {
-        ctx.ui.notify("no assistant messages yet", "warning");
-        return;
-      }
-      if (back >= texts.length) {
-        ctx.ui.notify(`only ${texts.length} assistant message(s) available`, "warning");
-        return;
-      }
-      const target = texts[back];
-      const blocks = parseCodeBlocks(target.text);
-      if (blocks.length === 0) {
-        ctx.ui.notify(
-          back === 0
-            ? "no code blocks in last assistant message (try /yank back 1)"
-            : `no code blocks in assistant message ${back} step(s) back`,
-          "warning",
-        );
-        return;
-      }
-
-      if (listMode) {
-        const lines = blocks.map(
-          (b, i) =>
-            `  ${i + 1}. [${b.language || "plain"}] ${b.body.length}B  —  ${preview(b.body)}`,
-        );
-        ctx.ui.notify(
-          [`code blocks in assistant message (back=${back}):`, ...lines].join("\n"),
-          "info",
-        );
-        return;
-      }
-
-      // Numeric selection
-      const n = Number.parseInt(verb, 10);
-      if (Number.isNaN(n) || n < 1) {
-        ctx.ui.notify(`usage: /yank [N|list] [back M]  (got: "${args}")`, "warning");
-        return;
-      }
-      if (n > blocks.length) {
-        ctx.ui.notify(
-          `only ${blocks.length} block(s) in target message (you asked for #${n})`,
-          "warning",
-        );
-        return;
-      }
-
-      const block = blocks[n - 1];
-      const result = await copyToClipboard(block.body);
-      if (!result.ok) {
-        ctx.ui.notify(`copy failed via ${result.via}: ${result.err ?? "unknown"}`, "error");
-        return;
-      }
-
-      const lang = block.language || "plain";
-      const sz = block.body.length;
-      const tag = back === 0 ? "" : ` (back=${back})`;
-      ctx.ui.notify(
-        `yanked block #${n} [${lang}] — ${sz}B via ${result.via}${tag}`,
-        "info",
-      );
-    },
-  });
+  pi.registerCommand("y", { description: desc, handler: handleYank });
+  pi.registerCommand("yank", { description: desc, handler: handleYank });
 }
