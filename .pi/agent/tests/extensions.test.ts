@@ -877,3 +877,65 @@ describe("superpowers.looksLikeSpec", () => {
     expect(looksLikeSpec(`\`\`\`\ncode\n\`\`\`\n${"x".repeat(500)}`)).toBe(true);
   });
 });
+
+// ── yank: code-block extraction ───────────────────────────────────────────
+
+import { parseCodeBlocks } from "../extensions/yank.ts";
+
+describe("yank.parseCodeBlocks", () => {
+  test("simple bash fence", () => {
+    const r = parseCodeBlocks("Hello\n```bash\necho one\n```\nWorld");
+    expect(r).toEqual([{ language: "bash", body: "echo one" }]);
+  });
+
+  test("powershell one-liner stays single line (the user's pain case)", () => {
+    const cmd =
+      "New-Item -Path 'foo' -Force | Out-Null; Set-Content -Path 'bar' -Value 'baz'";
+    const r = parseCodeBlocks("```powershell\n" + cmd + "\n```");
+    expect(r[0].body).toBe(cmd);
+    expect(r[0].body.includes("\n")).toBe(false);
+  });
+
+  test("multiple blocks preserved in order", () => {
+    const r = parseCodeBlocks(
+      "First:\n```js\nconst a = 1;\n```\nSecond:\n```py\nprint(2)\n```",
+    );
+    expect(r).toHaveLength(2);
+    expect(r[0].language).toBe("js");
+    expect(r[1].language).toBe("py");
+  });
+
+  test("nested fences via 4-backtick outer", () => {
+    const r = parseCodeBlocks("````md\n```js\nx\n```\n````");
+    expect(r).toHaveLength(1);
+    expect(r[0].language).toBe("md");
+    expect(r[0].body).toContain("```js");
+  });
+
+  test("tilde fence accepted", () => {
+    const r = parseCodeBlocks("~~~bash\nls\n~~~");
+    expect(r[0].body).toBe("ls");
+  });
+
+  test("no language tag yields empty language", () => {
+    const r = parseCodeBlocks("```\nplain text\n```");
+    expect(r[0].language).toBe("");
+    expect(r[0].body).toBe("plain text");
+  });
+
+  test("empty input yields no blocks", () => {
+    expect(parseCodeBlocks("")).toEqual([]);
+    expect(parseCodeBlocks("just prose, no code")).toEqual([]);
+  });
+
+  test("trailing blank lines trimmed inside block", () => {
+    const r = parseCodeBlocks("```\nbody\n\n\n```");
+    expect(r[0].body).toBe("body");
+  });
+
+  test("multi-line bash preserved with internal newlines", () => {
+    const r = parseCodeBlocks("```bash\necho one\necho two\n```");
+    expect(r[0].body).toBe("echo one\necho two");
+    expect(r[0].body.split("\n")).toHaveLength(2);
+  });
+});
