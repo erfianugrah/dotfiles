@@ -22,6 +22,18 @@
  *   /y 2^             block 2 from previous message
  *   /y ?^             list blocks from previous message
  *
+ * Flatten suffix `!` — collapse shell line-continuations into a single line:
+ *   /y !              copy block 1, flattened
+ *   /y 2!             copy block 2, flattened
+ *   /y -1!^           last block of previous message, flattened
+ *
+ * Why flatten exists: PowerShell evaluates pasted lines as they arrive.
+ * A multi-line `cmd | <newline>  cmd2 | <newline>  cmd3` pasted into PS can
+ * trip 'empty pipe element' errors because PS sees the trailing `|` then a
+ * blank line before the next pipeline stage materialises. Flattening joins
+ * the lines with spaces (semantically identical for shell pipelines) so the
+ * clipboard contains one robust line.
+ *
  * Legacy verbose form still accepted: `/yank back 1`, `/yank list`.
  *
  * Clipboard transport (probed in order):
@@ -57,6 +69,8 @@ export interface YankSpec {
   back: number;
   /** List mode — print blocks instead of copying */
   list: boolean;
+  /** Flatten shell line-continuations into a single line before copy */
+  flatten: boolean;
   /** Parse error, if any */
   error?: string;
 }
@@ -77,7 +91,7 @@ export interface YankSpec {
  */
 export function parseYankArgs(raw: string): YankSpec {
   const trimmed = raw.trim();
-  if (trimmed === "") return { n: 1, back: 0, list: false };
+  if (trimmed === "") return { n: 1, back: 0, list: false, flatten: false };
 
   // Legacy: "back N" anywhere in the args
   const tokens = trimmed.split(/\s+/);
@@ -95,33 +109,86 @@ export function parseYankArgs(raw: string): YankSpec {
     kept.push(tokens[i]);
   }
 
-  // Now we have at most one positional token (numeric, `?`, `list`, `^^^...`, or `N^^^`)
   const verb = kept[0] ?? "";
   if (kept.length > 1) {
-    return { n: null, back: 0, list: false, error: `too many arguments: "${raw}"` };
+    return { n: null, back: 0, list: false, flatten: false, error: `too many arguments: "${raw}"` };
   }
   if (verb === "") {
-    return { n: 1, back, list: false };
+    return { n: 1, back, list: false, flatten: false };
+  }
+
+  // Strip trailing `!` (flatten flag). May appear BEFORE or AFTER caret stack.
+  let body = verb;
+  let flatten = false;
+  if (body.endsWith("!")) {
+    flatten = true;
+    body = body.slice(0, -1);
   }
 
   // Strip trailing carets and count them as back-steps
-  const caretMatch = verb.match(/^([^\^]*)(\^+)$/);
-  let body = verb;
+  const caretMatch = body.match(/^([^\^]*)(\^+)$/);
   if (caretMatch) {
     body = caretMatch[1];
     back += caretMatch[2].length;
   }
 
+  // Allow `!` after the caret stack too: `/y 2^!` is the same as `/y 2!^`
+  if (body.endsWith("!")) {
+    flatten = true;
+    body = body.slice(0, -1);
+  }
+
   // Now `body` is one of: "", "?", "list", "ls", or a number (with optional minus)
-  if (body === "") return { n: 1, back, list: false };
+  if (body === "") return { n: 1, back, list: false, flatten };
   if (body === "?" || body === "list" || body === "ls") {
-    return { n: null, back, list: true };
+    return { n: null, back, list: true, flatten };
   }
   const n = Number.parseInt(body, 10);
   if (Number.isNaN(n) || String(n) !== body || n === 0) {
-    return { n: null, back: 0, list: false, error: `unknown argument: "${verb}"` };
+    return { n: null, back: 0, list: false, flatten: false, error: `unknown argument: "${verb}"` };
   }
-  return { n, back, list: false };
+  return { n, back, list: false, flatten };
+}
+
+// ── shell line-continuation flattener ──────────────────────────────────────
+
+/**
+ * Does `body` look like shell code where every non-last line ends with a
+ * continuation marker (pipe, backslash, PS backtick)? If so it's a safe
+ * candidate for flattening to a single line — the semantics of `cmd1 | cmd2`
+ * are the same whether on one line or three.
+ *
+ * Used both for the `!` flag (force-flatten) and for the discoverability
+ * hint shown in the toast when the yanked block matches this shape.
+ */
+export function isFlattenable(body: string): boolean {
+  const lines = body.split("\n");
+  if (lines.length < 2) return false;
+  for (let i = 0; i < lines.length - 1; i++) {
+    const t = lines[i].trimEnd();
+    if (t.length === 0) return false; // blank line in the middle — not a clean pipeline
+    const last = t[t.length - 1];
+    if (last !== "|" && last !== "\\" && last !== "`") return false;
+  }
+  return true;
+}
+
+/**
+ * Collapse `cmd1 |\n    cmd2 |\n    cmd3` into `cmd1 | cmd2 | cmd3`.
+ * Also handles `cmd \\\n    next` (bash backslash) and `cmd `\n    next`
+ * (PowerShell backtick). Internal whitespace around the join points is
+ * normalised to a single space.
+ */
+export function flattenLineContinuations(body: string): string {
+  return body
+    // bash backslash-continuation: \<spaces>\n<indent>  →  " "
+    .replace(/\\\s*\n\s*/g, " ")
+    // PowerShell backtick-continuation: `<spaces>\n<indent>  →  " "
+    .replace(/`\s*\n\s*/g, " ")
+    // Pipe-continuation: |<spaces>\n<indent>  →  " | "
+    .replace(/\|\s*\n\s*/g, " | ")
+    // Collapse any incidental double-spaces from the joins
+    .replace(/  +/g, " ");
 }
 
 /**
@@ -329,7 +396,7 @@ async function handleYank(args: string, ctx: {
 }) {
   const spec = parseYankArgs(args);
   if (spec.error) {
-    ctx.ui.notify(`${spec.error}\nusage: /y [N|?|^] (e.g. /y, /y 2, /y -1, /y ?, /y ^^, /y 2^)`, "warning");
+    ctx.ui.notify(`${spec.error}\nusage: /y [N|?|^]  add ! to flatten line-continuations`, "warning");
     return;
   }
 
@@ -386,7 +453,21 @@ async function handleYank(args: string, ctx: {
   }
 
   const block = blocks[idx];
-  const result = await copyToClipboard(block.body);
+  const flattenable = isFlattenable(block.body);
+
+  let payload = block.body;
+  let flattenedBy = "";
+  if (spec.flatten && flattenable) {
+    const before = block.body.split("\n").length;
+    payload = flattenLineContinuations(block.body);
+    flattenedBy = ` · flattened ${before}→1 line`;
+  } else if (spec.flatten && !flattenable) {
+    // User asked to flatten but the block isn't a clean shell pipeline.
+    // Copy as-is and warn so they know nothing changed.
+    flattenedBy = " · ⚠ not flattenable (no continuation markers)";
+  }
+
+  const result = await copyToClipboard(payload);
   if (!result.ok) {
     ctx.ui.notify(`copy failed via ${result.via}: ${result.err ?? "unknown"}`, "error");
     return;
@@ -394,8 +475,12 @@ async function handleYank(args: string, ctx: {
 
   const lang = block.language || "plain";
   const tag = spec.back === 0 ? "" : ` ←${spec.back}`;
+  const hint =
+    !spec.flatten && flattenable
+      ? `  (multi-line; /y ${spec.n}${spec.back > 0 ? "^".repeat(spec.back) : ""}! to flatten)`
+      : "";
   ctx.ui.notify(
-    `yanked #${idx + 1}/${blocks.length} [${lang}] — ${block.body.length}B${tag}`,
+    `yanked #${idx + 1}/${blocks.length} [${lang}] — ${payload.length}B${tag}${flattenedBy}${hint}`,
     "info",
   );
 }
