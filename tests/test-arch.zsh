@@ -99,8 +99,9 @@ _t_eq "${ANSIBLE_PLAYBOOK_DIR##*/}" "my-playbooks" "ANSIBLE_PLAYBOOK_DIR"
 _t_eq "$BW_SERVE_PORT" "8087" "BW_SERVE_PORT"
 _t_eq "$_TF_CACHE_TTL" "300" "_TF_CACHE_TTL"
 paru_line=$(grep -n "command -v paru" "$DOTFILES/functions.d/system.zsh" | head -1 | cut -d: -f1)
-yay_line=$(grep -n "command -v yay" "$DOTFILES/functions.d/system.zsh" | head -1 | cut -d: -f1)
-(( paru_line < yay_line )) && _t_pass "paru before yay ($paru_line<$yay_line)" || _t_fail "paru after yay"
+yay_refs=$(grep -c "\byay\b" "$DOTFILES/functions.d/system.zsh")
+[[ -n "$paru_line" ]] && _t_pass "paru AUR helper detected (line $paru_line)" || _t_fail "paru not referenced in system.zsh"
+(( yay_refs == 0 )) && _t_pass "no stale yay references (yay nuked)" || _t_fail "yay still mentioned $yay_refs times"
 
 # ── Subcommand dispatch ───────────────────────
 _t_section "Dispatch"
