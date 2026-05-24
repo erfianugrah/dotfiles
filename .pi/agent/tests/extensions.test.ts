@@ -1056,3 +1056,114 @@ describe("yank.flattenLineContinuations", () => {
     expect(flattenLineContinuations(flat)).toBe(flat);
   });
 });
+
+import {
+  asciiFold,
+  isShellLang,
+  stripCommentLines,
+  joinStatements,
+  isJoinable,
+  makePasteFriendly,
+} from "../extensions/yank.ts";
+
+describe("yank.asciiFold", () => {
+  test("em-dash to hyphen", () => {
+    expect(asciiFold("a — b")).toEqual({ out: "a - b", folded: 1 });
+  });
+  test("en-dash to hyphen", () => {
+    expect(asciiFold("1 – 5")).toEqual({ out: "1 - 5", folded: 1 });
+  });
+  test("smart double quotes", () => {
+    expect(asciiFold("say “foo”")).toEqual({ out: 'say "foo"', folded: 2 });
+  });
+  test("ellipsis", () => {
+    expect(asciiFold("wait…")).toEqual({ out: "wait...", folded: 1 });
+  });
+  test("nbsp", () => {
+    expect(asciiFold("a b")).toEqual({ out: "a b", folded: 1 });
+  });
+  test("zero-width chars removed", () => {
+    expect(asciiFold("a​b‍c")).toEqual({ out: "abc", folded: 2 });
+  });
+  test("plain ASCII unchanged", () => {
+    expect(asciiFold("hello world")).toEqual({ out: "hello world", folded: 0 });
+  });
+});
+
+describe("yank.isShellLang", () => {
+  test("powershell variants", () => {
+    expect(isShellLang("powershell")).toBe(true);
+    expect(isShellLang("ps")).toBe(true);
+    expect(isShellLang("pwsh")).toBe(true);
+    expect(isShellLang("PowerShell")).toBe(true);
+  });
+  test("unix shells", () => {
+    expect(isShellLang("bash")).toBe(true);
+    expect(isShellLang("zsh")).toBe(true);
+    expect(isShellLang("fish")).toBe(true);
+  });
+  test("non-shell rejected", () => {
+    expect(isShellLang("python")).toBe(false);
+  });
+});
+
+describe("yank.stripCommentLines", () => {
+  test("strips full-line # comments", () => {
+    expect(stripCommentLines("# c1\nfoo\n  # c2\nbar")).toEqual({ out: "foo\nbar", stripped: 2 });
+  });
+  test("preserves mid-line #", () => {
+    expect(stripCommentLines("foo  # trailing")).toEqual({ out: "foo  # trailing", stripped: 0 });
+  });
+});
+
+describe("yank.joinStatements", () => {
+  test("joins multi-line", () => {
+    expect(joinStatements("a\nb\nc")).toBe("a ; b ; c");
+  });
+  test("strips trailing semicolons", () => {
+    expect(joinStatements("a;\nb;\nc")).toBe("a ; b ; c");
+  });
+});
+
+describe("yank.isJoinable", () => {
+  test("PS multi-statement is joinable", () => {
+    expect(isJoinable("$x = 1\nif (-not $x) { Write-Host 'no' }\n\"x: $x\"", "powershell")).toBe(true);
+  });
+  test("unclosed brace across lines NOT joinable", () => {
+    expect(isJoinable("function Foo {\n  Write-Host 'hi'\n}", "powershell")).toBe(false);
+  });
+  test("non-shell rejected", () => {
+    expect(isJoinable("a\nb\nc", "python")).toBe(false);
+  });
+});
+
+describe("yank.makePasteFriendly", () => {
+  test("full pipeline on cdb-style block", () => {
+    const body = "# Find cdb.exe — winget installs it\n$cdb = (Get-ChildItem \"x\").FullName\nif (-not $cdb) { $cdb = \"y\" }\n\"cdb at: $cdb\"";
+    const r = makePasteFriendly(body, "powershell");
+    expect(r.out.includes("\n")).toBe(false);
+    expect(r.out.includes("—")).toBe(false);
+    expect(r.out.includes("# Find")).toBe(false);
+    expect(r.out.includes(" ; ")).toBe(true);
+    expect(r.steps.some((s) => s.includes("Unicode"))).toBe(true);
+    expect(r.steps.some((s) => s.includes("comment"))).toBe(true);
+    expect(r.steps.some((s) => s.includes("joined"))).toBe(true);
+  });
+  test("pipeline block flattens (not joins)", () => {
+    const r = makePasteFriendly("Get-Foo |\n  Where-Object {$_.X} |\n  Format-List", "powershell");
+    expect(r.out.includes("\n")).toBe(false);
+    expect(r.out.includes(" | Where-Object")).toBe(true);
+    expect(r.steps.some((s) => s.includes("flattened"))).toBe(true);
+  });
+  test("non-shell language: ASCII-fold only", () => {
+    const r = makePasteFriendly("# python\nx = 1\ny = 2", "python");
+    expect(r.out.includes("# python")).toBe(true);
+    expect(r.out.includes("\n")).toBe(true);
+  });
+  test("clean block: no-op", () => {
+    const r = makePasteFriendly("echo hello", "bash");
+    expect(r.out).toBe("echo hello");
+    expect(r.steps).toEqual([]);
+  });
+});
+
