@@ -27,10 +27,26 @@
  */
 
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { randomBytes, randomUUID } from "crypto";
+import { createHash, randomBytes } from "crypto";
+
+/**
+ * Derive a stable v5-style UUID from the opencode session id so re-running
+ * the migration produces the SAME filename and the existsSync() idempotency
+ * check actually triggers. The previous version used randomUUID() per run
+ * which made the dedup check a no-op and bloated ~/.pi/agent/sessions by 5x
+ * after a few re-runs.
+ */
+function deterministicUuid(opencodeId: string): string {
+  const h = createHash("sha1").update(`opencode-to-pi:${opencodeId}`).digest("hex");
+  // RFC 4122-ish layout: set version nibble to 5, variant nibble to 8/9/a/b.
+  const v = "5" + h.slice(13, 16);
+  const variantNibble = ((parseInt(h[16], 16) & 0x3) | 0x8).toString(16);
+  const r = variantNibble + h.slice(17, 20);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${v}-${r}-${h.slice(20, 32)}`;
+}
 
 // ── arg parsing (no deps) ─────────────────────────────────────────────────
 
@@ -141,7 +157,7 @@ function convertSession(db: Database, sessionRow: { id: string; directory: strin
   if (messages.length < MIN_MESSAGES) return null;
 
   const lines: string[] = [];
-  const sessionUuid = randomUUID();
+  const sessionUuid = deterministicUuid(sessionRow.id);
 
   // SessionHeader
   lines.push(
@@ -338,14 +354,22 @@ for (const sessionRow of sessionRows) {
   const filename = `${timestampForFilename(sessionRow.time_created)}_${result.sessionUuid}.jsonl`;
   const outPath = join(subDir, filename);
 
-  // Idempotency check — skip if an existing file already has this session's content
-  // (we use the UUID in filename so collisions essentially can't happen unless
-  // re-running on the same DB; in that case we get a new UUID, so the check is
-  // really only "have we ever migrated this opencode session id before").
-  // Simple approach: check whether any file in the cwd dir contains this opencode
-  // session id as a comment. For migration robustness, we skip only when an exact
-  // file path exists — re-running creates new files for re-migration.
-  if (existsSync(outPath)) {
+  // Idempotency check — skip if ANY file in the cwd dir starts with this
+  // timestamp prefix. Two reasons we don't just check `outPath`:
+  //   1. Older versions of this script generated random UUIDs per run, so
+  //      legacy files have different UUIDs from what we'd write now.
+  //   2. Even with the new deterministic UUID derived from sessionRow.id,
+  //      the timestamp prefix alone is millisecond-precise and unique per
+  //      opencode session, so a prefix match is sufficient and avoids
+  //      re-migration churn.
+  // Force re-migration by deleting the matching JSONL file(s).
+  const timestampPrefix = `${timestampForFilename(sessionRow.time_created)}_`;
+  const alreadyMigrated =
+    existsSync(subDir) &&
+    readdirSync(subDir).some(
+      (name) => name.startsWith(timestampPrefix) && name.endsWith(".jsonl"),
+    );
+  if (alreadyMigrated) {
     skippedExists++;
     continue;
   }
