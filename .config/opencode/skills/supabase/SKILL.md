@@ -380,3 +380,310 @@ WHERE id IN (
 ```
 
 Batching at 1000 caps lock-hold time; pg-cron picks up the rest on the next cycle. Rows past `expires_at` are not user-visible (every read path should filter `expires_at > now()`) so spreading cleanup across cycles is invisible.
+
+## Connection pooling (Workers / Edge Functions)
+
+Supabase exposes three ports per project — picking the wrong one breaks Workers/Edge Functions in subtle ways.
+
+| Port | Mode | When to use |
+|---|---|---|
+| `5432` | Direct (session) | Long-lived processes, migrations, `psql`, anything that needs `SET` / `LISTEN`. NEVER from Workers/Edge Functions. |
+| `6543` | Transaction (Supavisor) | **Default for Workers, Edge Functions, serverless.** Each query/transaction gets a fresh backend connection from the pool. |
+| `5432` (Supavisor) | Session-pooled | Long sessions through Supavisor's session-mode endpoint. Rare. |
+
+**Why it matters**: Workers spin up + tear down per request. Direct connections to `5432` exhaust Postgres `max_connections` in minutes under load. The transaction-mode pooler (`6543`) recycles connections per transaction.
+
+**Connection string**:
+
+```
+postgres://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+                                                                          ^^^^ <-- transaction pooler port
+```
+
+**Edge Function gotcha**: `pg` (`node-postgres`) prepared statements break under transaction mode pooling because the prepared statement is bound to the backend connection, but the pool gives you a different backend on the next request. Either:
+
+- Disable prepared statements: `new Pool({ ..., max: 1, statement_timeout: 30000, query_timeout: 30000 })` and use `client.query()` without `pgp.prepare()`, OR
+- Use the official `@supabase/postgres-js` (`postgres.js`) which negotiates prepared statements correctly under Supavisor, OR
+- Use the PostgREST surface (`supabase.from('table')...`) which is HTTP — pooling not your problem.
+
+If `@supabase/server` is wiring your client, you get the right config for free.
+
+## Realtime channels (subscribe / broadcast / presence)
+
+Three channel modes — different infrastructure, different costs.
+
+```ts
+// 1. postgres_changes — listens to DB CDC events (INSERT/UPDATE/DELETE)
+//    Cost: counts toward your Realtime "messages" quota PER ROW per subscriber.
+//    Requires the table to be in supabase_realtime publication.
+const channel = supabase
+  .channel('todos-changes')
+  .on('postgres_changes',
+    { event: '*', schema: 'public', table: 'todos', filter: `user_id=eq.${userId}` },
+    (payload) => {
+      console.log(payload.eventType, payload.new, payload.old)
+    })
+  .subscribe()
+
+// Required (run once): enable the table in the publication
+//   ALTER PUBLICATION supabase_realtime ADD TABLE public.todos;
+// Required: RLS policy on todos for SELECT — Realtime respects RLS
+
+// 2. broadcast — pub/sub between clients, NO DB involvement
+//    Cost: only counts the messages you send.
+channel.on('broadcast', { event: 'cursor' }, ({ payload }) => {
+  console.log('cursor:', payload.x, payload.y)
+})
+channel.send({ type: 'broadcast', event: 'cursor', payload: { x: 100, y: 200 } })
+
+// 3. presence — tracks online users in a channel
+channel.on('presence', { event: 'sync' }, () => {
+  const state = channel.presenceState()  // { userId: [{ presence_ref, ... }] }
+})
+channel.track({ userId, online_at: new Date().toISOString() })
+
+// Cleanup
+supabase.removeChannel(channel)
+```
+
+**Auth for Realtime**: pass the user JWT during channel creation so RLS-protected `postgres_changes` work:
+
+```ts
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { headers: { Authorization: `Bearer ${userJwt}` } },
+  realtime: { params: { eventsPerSecond: 10 } },   // client-side throttle
+})
+```
+
+**Free-tier quota** is small (200 concurrent + 2M messages/month). `postgres_changes` on a busy table burns through it fast — broadcast is cheaper if you only need fan-out, not DB CDC.
+
+## Storage (BFF upload pattern)
+
+For the Worker BFF stack (browser never sees the JWT), upload via Worker:
+
+```ts
+// Worker (Hono / Bun / Edge Function) — accepts multipart, proxies to Storage
+import { withSupabase } from '@supabase/server'
+
+export default {
+  fetch: withSupabase({ auth: 'user' }, async (req, ctx) => {
+    const { supabase, userClaims } = ctx
+    const form = await req.formData()
+    const file = form.get('file') as File
+
+    // Path with user ID prefix — RLS policy enforces user can only write to own dir
+    const path = `${userClaims.id}/${crypto.randomUUID()}-${file.name}`
+
+    const { data, error } = await supabase
+      .storage
+      .from('uploads')
+      .upload(path, file, { cacheControl: '3600', upsert: false })
+
+    if (error) return Response.json({ error: error.message }, { status: 400 })
+    return Response.json({ path: data.path })
+  }),
+}
+```
+
+**RLS policies on storage.objects** (must enable in dashboard or migration):
+
+```sql
+-- Users can read/write only their own files
+CREATE POLICY "user_owns_path" ON storage.objects
+  FOR ALL TO authenticated
+  USING ((storage.foldername(name))[1] = auth.uid()::text)
+  WITH CHECK ((storage.foldername(name))[1] = auth.uid()::text);
+```
+
+**Public reads** for an avatar-style bucket: create the bucket as public, then anyone can GET via `https://<ref>.supabase.co/storage/v1/object/public/<bucket>/<path>`. RLS still gates writes.
+
+**Signed URLs** for time-limited private downloads:
+
+```ts
+const { data } = await supabase.storage.from('private').createSignedUrl(path, 60)
+// data.signedUrl is valid for 60s
+```
+
+## pgvector (semantic search)
+
+```sql
+-- One-time: enable extension
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Table for embeddings (OpenAI text-embedding-3-small = 1536 dims)
+CREATE TABLE documents (
+  id        bigserial PRIMARY KEY,
+  content   text,
+  embedding vector(1536),
+  user_id   uuid REFERENCES auth.users
+);
+
+-- HNSW index (better recall than IVFFlat for most queries)
+CREATE INDEX ON documents USING hnsw (embedding vector_cosine_ops);
+
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own_docs" ON documents FOR ALL USING (user_id = auth.uid());
+```
+
+**Query** (RPC for vector args; supabase-js can't bind `vector` natively):
+
+```sql
+CREATE OR REPLACE FUNCTION match_documents(
+  query_embedding vector(1536),
+  match_count int DEFAULT 5
+) RETURNS TABLE (id bigint, content text, similarity float)
+LANGUAGE sql STABLE
+AS $$
+  SELECT
+    d.id, d.content,
+    1 - (d.embedding <=> query_embedding) AS similarity
+  FROM documents d
+  WHERE d.user_id = auth.uid()
+  ORDER BY d.embedding <=> query_embedding
+  LIMIT match_count;
+$$;
+```
+
+```ts
+// Client
+const { data } = await supabase.rpc('match_documents', {
+  query_embedding: embedding,    // number[] of length 1536
+  match_count: 10
+})
+```
+
+**Index choice**:
+- **HNSW** — better recall, slower build, more memory. Default.
+- **IVFFlat** — faster build, lower memory, lower recall on small datasets. Use when corpus < 100k rows or memory-constrained.
+
+## pgmq (queues — for background work behind RLS)
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgmq;
+
+-- Create a queue
+SELECT pgmq.create('image_processing');
+
+-- Enqueue
+SELECT pgmq.send('image_processing', '{"path": "uploads/abc.jpg", "user_id": "uuid"}');
+
+-- Consume (in a pg_cron job or Edge Function)
+SELECT * FROM pgmq.read('image_processing', 30, 5);
+-- 30 = visibility timeout (seconds); 5 = max messages to read
+
+-- Acknowledge
+SELECT pgmq.delete('image_processing', <msg_id>);
+
+-- Or: archive instead of delete (keeps history)
+SELECT pgmq.archive('image_processing', <msg_id>);
+```
+
+**RLS via wrapper functions** — `pgmq.send`/`read` run as the queue owner. Don't expose them directly to PostgREST; instead wrap:
+
+```sql
+CREATE OR REPLACE FUNCTION enqueue_image(p_path text)
+RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  msg_id bigint;
+BEGIN
+  -- RLS-equivalent check
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'unauthenticated'; END IF;
+  SELECT pgmq.send('image_processing', jsonb_build_object(
+    'path', p_path, 'user_id', auth.uid()
+  )) INTO msg_id;
+  RETURN msg_id;
+END $$;
+```
+
+**Worker pattern**: pg_cron job every minute reads up to N messages, calls an Edge Function (`pg_net.http_post`), Edge Function acks via `pgmq.delete`. Failed Edge Function returns leave the message visible after the 30s VT — automatic retry.
+
+## Database webhooks
+
+Supabase Database Webhooks send HTTP requests on INSERT/UPDATE/DELETE. Backed by `pg_net.http_post` from a trigger. Two flavours:
+
+```sql
+-- 1. Built-in Webhooks UI (Dashboard → Database → Webhooks)
+--    Manages the trigger + function for you. Use for simple "notify on insert".
+
+-- 2. Direct pg_net (full control)
+CREATE OR REPLACE FUNCTION public.notify_external() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  PERFORM net.http_post(
+    url := 'https://example.com/webhook',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'X-Signature', encode(hmac(row_to_json(NEW)::text, 'shared-secret', 'sha256'), 'hex')
+    ),
+    body := row_to_json(NEW)::jsonb,
+    timeout_milliseconds := 5000
+  );
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER on_new_thing
+  AFTER INSERT ON public.things
+  FOR EACH ROW EXECUTE FUNCTION public.notify_external();
+```
+
+**Caveat**: webhook delivery is fire-and-forget. `pg_net` retries on connection error but NOT on 5xx. For at-least-once delivery, write to `pgmq` first and have a consumer call the webhook with its own retry logic.
+
+## Branching (preview environments)
+
+Supabase Branching creates ephemeral project clones for PR previews. Per-branch:
+
+- Fresh Postgres with the production schema (no data unless you opt in)
+- Separate API keys, URL, JWT secret
+- Auto-runs migrations from the branch's `supabase/migrations/`
+
+```sh
+# Create a branch (CLI v1.131+)
+supabase branches create feature-x --persistent
+
+# List
+supabase branches list
+
+# Push schema to branch
+supabase db push --branch feature-x
+
+# Get connection details (URL + anon key)
+supabase branches get feature-x
+```
+
+**GitHub integration**: enable in dashboard → branches auto-create on PR open and tear down on PR close/merge. Each PR gets its own Supabase project with the PR's schema.
+
+**Cost**: branches are full projects — Free tier allows 2 concurrent branches. Persistent branches stay until manually deleted; preview branches auto-expire.
+
+## Auth flows quick reference
+
+```ts
+// Magic link (passwordless email)
+await supabase.auth.signInWithOtp({ email: 'user@example.com',
+  options: { emailRedirectTo: 'https://<host>/auth/callback' } })
+
+// OAuth (Google, GitHub, etc. — configured in Dashboard → Authentication → Providers)
+await supabase.auth.signInWithOAuth({
+  provider: 'github',
+  options: { redirectTo: 'https://<host>/auth/callback' }
+})
+
+// Password
+await supabase.auth.signInWithPassword({ email, password })
+
+// MFA enrollment (TOTP)
+const { data } = await supabase.auth.mfa.enroll({ factorType: 'totp' })
+// data.totp.qr_code → show QR; user scans
+await supabase.auth.mfa.challengeAndVerify({ factorId: data.id, code: userCode })
+
+// SignOut
+await supabase.auth.signOut({ scope: 'local' })   // or 'global' to revoke all sessions
+```
+
+**Callback handling for SSR/BFF**: the callback URL receives `?code=...` (PKCE flow). Exchange via:
+
+```ts
+const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+// data.session has access_token + refresh_token. Set HttpOnly cookies on the response.
+```
+
+`@supabase/ssr` handles this automatically for Next.js / SvelteKit. `@supabase/server` doesn't — you write the callback handler yourself (it's <20 lines).
