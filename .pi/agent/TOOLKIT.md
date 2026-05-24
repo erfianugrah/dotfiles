@@ -15,6 +15,7 @@ For higher-level config (settings, themes, prompts, env vars) see
 - [Binary toolkit](#binary-toolkit) — 33 tools, what each does, canonical invocation
 - [pi extension wrappers](#pi-extension-wrappers) — 6 extensions that wrap the binaries
 - [Background tasks pattern](#background-tasks-pattern) — parallel pi via tmux
+- [Clipboard & paste](#clipboard--paste) — `/y` for surgical code-block copy that bypasses terminal wrap
 - [Workflows](#workflows) — real flows that combine multiple tools
 - [When to use each editing strategy](#when-to-use-each-editing-strategy)
 - [Adding new pi extensions](#adding-new-pi-extensions) — pattern for future wrappers
@@ -191,6 +192,11 @@ implementations, comparing model invocations.
 Four tools + two slash commands. Detailed in
 [Background tasks pattern](#background-tasks-pattern) below.
 
+### `yank` — clipboard copy that survives terminal wrap
+
+Not a binary wrapper — a slash-command extension. Detailed in
+[Clipboard & paste](#clipboard--paste) below.
+
 ## Background tasks pattern
 
 Two spawn tools (`bg_task` for pi sessions, `bg_bash` for arbitrary shell
@@ -289,6 +295,136 @@ No daemon, no DB, no port. Just files + tmux. The state files are GC'd 24h
 after `completed_at`. Truly orphaned tmux sessions (tmux session exists but
 state file is gone) won't be listed — that's fine, you can `tmux ls` to
 find them.
+
+## Clipboard & paste
+
+### The problem
+
+When pi renders a long single-line command, the TUI wraps it visually to
+fit the terminal width. Selecting-and-dragging from the terminal grabs
+those **visual** wrap breaks as **real** newlines. Pasting the result into
+a shell drops mid-string newlines and breaks the command.
+
+Concrete failure modes seen in the wild:
+
+1. **PowerShell unclosed quote** — a 396-byte `Set-Content ... -Value
+   'rclone mount ...'` one-liner gets broken across 3 PowerShell lines
+   on paste. The `'` never closes → PS drops into the `>>` continuation
+   prompt and the user has to Ctrl+C out.
+
+2. **PowerShell empty pipe stage** — a 3-line `Get-WinEvent ... |\n
+   Where-Object ... |\n Format-List` pipeline pasted into pwsh raises
+   `At line:2 char:118 ... An empty pipe element is not allowed.`. PS
+   evaluates pasted lines as they arrive; after the second `|` the next
+   stage hasn't been delivered yet, so PS sees a complete-looking
+   "cmd | empty" and errors before line 3 lands.
+
+Both happen even when the LLM wrote a perfectly valid command — the
+corruption is purely between **what's on screen** and **what hits the
+clipboard**.
+
+### `/y` — surgical code-block copy
+
+`/y` (alias `/yank`) reads the code block directly from pi's session
+entries (the structured pre-render form via
+`ctx.sessionManager.getEntries()`), so terminal wrap is never involved.
+The clipboard receives exactly the bytes the LLM wrote.
+
+```
+/y              copy block 1 from last assistant message
+/y 2            copy block 2
+/y -1           copy the LAST block (negative = from-end indexing)
+/y -2           copy second-to-last
+/y ?            list all blocks with language + size + preview
+/y ^            same as `/y back 1` — previous assistant message
+/y ^^           two messages back; ^^^ = three back; etc.
+/y 2^           block 2 from one message back
+/y ?^           list blocks in the previous message
+```
+
+Legacy verbose syntax still works for muscle-memory backward compat:
+`/y back 2`, `/y list`, `/y list back 1`.
+
+### `!` flag — flatten shell line-continuations
+
+For multi-line pipelines that fail the PS-paste race, append `!` to
+collapse line-continuations into a single line:
+
+```
+/y !            copy block 1, flattened
+/y 2!           copy block 2, flattened
+/y -1!          copy last block, flattened
+/y 2^!          block 2 from prev message, flattened
+/y 2!^          same — `!` and `^` are commutative
+```
+
+Recognised continuation patterns (replaced with a single space):
+
+| Source | Continuation | Becomes |
+|---|---|---|
+| bash / zsh | `\<newline><indent>` | ` ` |
+| PowerShell | `` ` <newline><indent>`` | ` ` |
+| Any shell pipe chain | `\|<newline><indent>` | ` \| ` |
+
+The detector `isFlattenable(body)` only marks blocks as flat-candidates
+when **every non-last line ends with a continuation marker** AND there
+are no internal blank lines. Multi-line scripts (`for/do/done`,
+`if/then/fi`, function definitions) stay untouched even with `!`, and
+the toast warns `⚠ not flattenable (no continuation markers)` to make
+the no-op explicit.
+
+### Discoverability hint
+
+When you yank a multi-line block **without** `!`, the toast appends a
+hint so you don't have to remember the flag exists:
+
+```
+yanked #1/1 [powershell] — 229B  (multi-line; /y 1! to flatten)
+```
+
+When you do use `!`, the toast confirms how much was collapsed:
+
+```
+yanked #1/1 [powershell] — 221B · flattened 3→1 line
+```
+
+The `←1` arrow appears when the block came from a past assistant message
+via `^` carets:
+
+```
+yanked #2/3 [bash] — 30B ←2
+                          ↑
+                          2 messages back
+```
+
+### Clipboard transport (probed in order)
+
+The extension auto-detects the right clipboard backend for your
+platform:
+
+| Order | Detector | Tool | Where it works |
+|---|---|---|---|
+| 1 | `/proc/version` contains `microsoft` | `clip.exe` | WSL1 / WSL2 |
+| 2 | `process.platform === "darwin"` | `pbcopy` | macOS |
+| 3 | `$WAYLAND_DISPLAY` set | `wl-copy` | Wayland (Sway, Hyprland, GNOME, KDE Plasma 6) |
+| 4 | `$DISPLAY` set | `xclip -selection clipboard` | X11 |
+| 5 | `$DISPLAY` set | `xsel --clipboard --input` | X11 fallback |
+| 6 | `termux-clipboard-set` on PATH | (same) | Termux on Android |
+| 7 | always | OSC 52 escape | Kitty, WezTerm, Ghostty, iTerm2, foot, alacritty (configured); tmux passthrough wrapped automatically |
+
+The toast reports which transport was used: `yanked ... via clip.exe`.
+
+### `/y` vs built-in `/copy`
+
+Pi ships a built-in `/copy` that copies the **entire last assistant
+message** (prose + all code blocks + markdown formatting) to the
+clipboard. That's useful for sharing a whole answer.
+
+`/y` is for surgical extraction of **one** code block at a time so you
+can paste it directly into a shell / editor without trimming
+surrounding prose by hand.
+
+Use `/copy` for sharing; use `/y` for executing.
 
 ## Workflows
 
