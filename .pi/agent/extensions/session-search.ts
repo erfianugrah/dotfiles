@@ -201,6 +201,12 @@ function searchWithRipgrep(
 const sessionSearchTool = defineTool({
 	name: "session_search",
 	label: "Session Search",
+	promptSnippet:
+		"session_search — FTS5+ripgrep search across past pi sessions. Use when the user references prior work ('how did we do X last time?').",
+	promptGuidelines: [
+		"Multi-word auto-OR; quote a phrase for literal match. NO stemming (use 'test' not 'testing').",
+		"Sub-50ms via FTS5; falls back to ripgrep for un-indexed sessions.",
+	],
 	description: [
 		"Search past session content using ripgrep with opencode-style multi-word OR semantics.",
 		"",

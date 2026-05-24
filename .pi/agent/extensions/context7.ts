@@ -35,6 +35,11 @@ function authHeaders(): Record<string, string> {
 const resolveLibraryId = defineTool({
   name: "context7_resolve_library_id",
   label: "Context7 Resolve Library ID",
+  promptSnippet:
+    "context7_resolve_library_id — search context7 for a library by name, returns the /org/project ID needed for context7_query_docs.",
+  promptGuidelines: [
+    "Call FIRST when the user provides a library NAME (Next.js, Bun, Supabase). Skip if they gave a /org/project ID directly.",
+  ],
   description: [
     "Resolves a package/product name to a context7-compatible library ID and returns matching libraries.",
     "",
@@ -104,6 +109,12 @@ const resolveLibraryId = defineTool({
 const queryDocs = defineTool({
   name: "context7_query_docs",
   label: "Context7 Query Docs",
+  promptSnippet:
+    "context7_query_docs — fetch up-to-date library docs + code examples for a /org/project ID. Use for npm/framework APIs not in docs.erfi.io.",
+  promptGuidelines: [
+    "Resolve the ID first with context7_resolve_library_id unless the user gave /org/project.",
+    "Token budget defaults 5000 (balanced); 1000-2000 for focused, 10000-50000 for comprehensive.",
+  ],
   description: [
     "Retrieves up-to-date documentation + code examples from context7 for a programming library or framework.",
     "",

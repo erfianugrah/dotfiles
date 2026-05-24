@@ -32,6 +32,12 @@ const DONE_OPTION_LABEL = "(done — finish selecting)";
 const questionTool = defineTool({
   name: "question",
   label: "Question",
+  promptSnippet:
+    "question — ask the user multiple-choice or open-ended questions mid-execution. Use when blocked on a decision the user must make, NOT for chatting.",
+  promptGuidelines: [
+    "Use ONLY when you genuinely need user input to proceed.",
+    "Prefer single-question with a small options array; bundle related questions into one call.",
+  ],
   description: [
     "Use this tool when you need to ask the user questions during execution. This allows you to:",
     "1. Gather user preferences or requirements",
