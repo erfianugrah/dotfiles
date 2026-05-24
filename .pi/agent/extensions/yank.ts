@@ -22,17 +22,32 @@
  *   /y 2^             block 2 from previous message
  *   /y ?^             list blocks from previous message
  *
- * Flatten suffix `!` — collapse shell line-continuations into a single line:
- *   /y !              copy block 1, flattened
- *   /y 2!             copy block 2, flattened
- *   /y -1!^           last block of previous message, flattened
+ * Paste-friendly suffix `!` — make the block paste cleanly into a shell:
+ *   /y !              copy block 1, paste-friendly
+ *   /y 2!             copy block 2, paste-friendly
+ *   /y -1!^           last block of previous message, paste-friendly
  *
- * Why flatten exists: PowerShell evaluates pasted lines as they arrive.
- * A multi-line `cmd | <newline>  cmd2 | <newline>  cmd3` pasted into PS can
- * trip 'empty pipe element' errors because PS sees the trailing `|` then a
- * blank line before the next pipeline stage materialises. Flattening joins
- * the lines with spaces (semantically identical for shell pipelines) so the
- * clipboard contains one robust line.
+ * `!` applies (in order):
+ *   1. ASCII-fold cosmetic Unicode (em/en-dash → -, smart quotes → ASCII,
+ *      … → ..., NBSP → space, zero-width chars → removed). Defends
+ *      against PowerShell consoles whose input codepage is CP437 / CP1252
+ *      and mojibakes UTF-8 multi-byte sequences on paste.
+ *   2. Strip comment-only lines (`# ...` in shell, removes the most common
+ *      source of mojibake-prone Unicode in LLM output).
+ *   3. Flatten line-continuations (pipe `|\n`, bash `\\\n`, PS backtick).
+ *      Same semantics, one robust line.
+ *   4. For shell-family languages still multi-line after step 3, join
+ *      statements with `;` so PowerShell / bash parses the whole block
+ *      atomically instead of line-by-line (which trips `>>` continuation
+ *      prompts and breaks chains where each line depends on the previous).
+ *
+ * Why this exists: PowerShell evaluates pasted lines as they arrive.
+ * A multi-line block whose statements depend on each other often fails
+ * because PS shows `>>` prompts between lines, or treats each line as a
+ * standalone interactive submission. Joining with `;` makes the whole
+ * block one syntactic unit.
+ *
+ * Shell-family languages: powershell, ps, ps1, pwsh, bash, sh, zsh, fish.
  *
  * Legacy verbose form still accepted: `/yank back 1`, `/yank list`.
  *
@@ -189,6 +204,164 @@ export function flattenLineContinuations(body: string): string {
     .replace(/\|\s*\n\s*/g, " | ")
     // Collapse any incidental double-spaces from the joins
     .replace(/  +/g, " ");
+}
+
+// ── ASCII-fold + comment-strip + statement-join helpers ─────────────────────
+
+/**
+ * Fold cosmetic Unicode to its ASCII equivalent. Targets the typography
+ * characters LLMs frequently emit in comments and prose that get mangled
+ * by non-UTF-8 console codepages (CP437 on Windows PowerShell, CP1252 on
+ * legacy Windows). Safe in shell context because shell syntax never
+ * relies on these characters.
+ */
+export function asciiFold(s: string): { out: string; folded: number } {
+  let folded = 0;
+  const count = (re: RegExp): number => (s.match(re) || []).length;
+  folded += count(/[\u2013\u2014]/g);       // en-dash, em-dash
+  folded += count(/[\u2018\u2019]/g);       // smart single quotes
+  folded += count(/[\u201C\u201D]/g);       // smart double quotes
+  folded += count(/\u2026/g);                // horizontal ellipsis
+  folded += count(/\u00A0/g);                // non-breaking space
+  folded += count(/[\u200B-\u200D\uFEFF]/g); // zero-width chars
+  const out = s
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/\u2026/g, "...")
+    .replace(/\u00A0/g, " ")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "");
+  return { out, folded };
+}
+
+const SHELL_LANGS = new Set([
+  "powershell", "ps", "ps1", "pwsh",
+  "bash", "sh", "zsh", "fish",
+]);
+
+export function isShellLang(lang: string): boolean {
+  return SHELL_LANGS.has(lang.toLowerCase());
+}
+
+/**
+ * Strip lines that are only a `#` comment (with optional leading whitespace).
+ * Keeps lines where `#` appears AFTER content (those would mid-line truncate
+ * after a `;`-join, but we can't reliably parse to detect those without a
+ * real shell parser). Returns the cleaned body + count of lines stripped.
+ */
+export function stripCommentLines(body: string): { out: string; stripped: number } {
+  const lines = body.split("\n");
+  const kept: string[] = [];
+  let stripped = 0;
+  for (const line of lines) {
+    if (/^\s*#/.test(line)) {
+      stripped++;
+      continue;
+    }
+    kept.push(line);
+  }
+  return { out: kept.join("\n"), stripped };
+}
+
+/**
+ * Join multi-statement shell code with `;` separators so the whole block
+ * pastes as ONE command instead of N independent submissions. Skips blank
+ * lines, trims trailing `;` to avoid `;;` doubling, normalises whitespace.
+ *
+ * Safe for: assignments, function calls, `if/else`, `foreach`, anything
+ * that's a complete statement per line. NOT safe for: lines that open a
+ * block on one line and continue the block body on the next (e.g.
+ * `function Foo {\n    ...\n}`). For those, `!` would mangle the
+ * structure — the detector below excludes such blocks.
+ */
+export function joinStatements(body: string): string {
+  return body
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((l) => l.replace(/;+$/, ""))
+    .join(" ; ");
+}
+
+/**
+ * Could this body be safely joined with `;` separators? True only when:
+ *   - language is shell-family
+ *   - every line (after blank-trim) is balanced w.r.t. brackets
+ *   - no line opens a multi-line construct that's closed on a later line
+ */
+export function isJoinable(body: string, lang: string): boolean {
+  if (!isShellLang(lang)) return false;
+  const lines = body.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length < 2) return false;
+
+  // Reject here-strings and heredocs outright — these MUST stay multi-line.
+  if (/@["']/.test(body) || /<<[-~]?\s*[A-Za-z_]/.test(body)) return false;
+
+  // Each LINE must end with bracket depth 0. If a line opens a block that's
+  // closed on a later line, joining with `;` would shove a separator inside
+  // the block (e.g. `function Foo {` + `;` + `body` + `;` + `}` works in PS
+  // but pollutes the function body, and breaks in bash for `if/then/fi`).
+  for (const line of lines) {
+    let depth = 0;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      // skip strings (single + double + backtick)
+      if (c === '"' || c === "'" || c === "`") {
+        const q = c;
+        i++;
+        while (i < line.length && line[i] !== q) {
+          if (line[i] === "\\") i++;
+          i++;
+        }
+        continue;
+      }
+      if (c === "#") break; // rest of line is comment
+      if (c === "(" || c === "{" || c === "[") depth++;
+      else if (c === ")" || c === "}" || c === "]") depth--;
+    }
+    if (depth !== 0) return false; // line straddles a syntactic group
+  }
+  return true;
+}
+
+export interface PasteFriendlyResult {
+  out: string;
+  steps: string[]; // human-readable list of what happened (for toast)
+}
+
+/**
+ * Apply the full paste-friendly pipeline. Returns the transformed text
+ * plus a step-by-step note suitable for the toast message.
+ */
+export function makePasteFriendly(body: string, lang: string): PasteFriendlyResult {
+  const steps: string[] = [];
+  let work = body;
+
+  const folded = asciiFold(work);
+  if (folded.folded > 0) {
+    work = folded.out;
+    steps.push(`folded ${folded.folded} Unicode char${folded.folded === 1 ? "" : "s"}`);
+  }
+
+  if (isShellLang(lang)) {
+    const stripped = stripCommentLines(work);
+    if (stripped.stripped > 0) {
+      work = stripped.out;
+      steps.push(`stripped ${stripped.stripped} comment line${stripped.stripped === 1 ? "" : "s"}`);
+    }
+  }
+
+  if (isFlattenable(work)) {
+    const before = work.split("\n").length;
+    work = flattenLineContinuations(work);
+    steps.push(`flattened ${before}→1 line`);
+  } else if (isJoinable(work, lang)) {
+    const before = work.split("\n").filter((l) => l.trim().length > 0).length;
+    work = joinStatements(work);
+    steps.push(`joined ${before} statements with ' ; '`);
+  }
+
+  return { out: work, steps };
 }
 
 /**
@@ -454,17 +627,19 @@ async function handleYank(args: string, ctx: {
 
   const block = blocks[idx];
   const flattenable = isFlattenable(block.body);
+  const joinable = isJoinable(block.body, block.language);
+  const pasteFriendlyAvailable = flattenable || joinable;
 
   let payload = block.body;
-  let flattenedBy = "";
-  if (spec.flatten && flattenable) {
-    const before = block.body.split("\n").length;
-    payload = flattenLineContinuations(block.body);
-    flattenedBy = ` · flattened ${before}→1 line`;
-  } else if (spec.flatten && !flattenable) {
-    // User asked to flatten but the block isn't a clean shell pipeline.
-    // Copy as-is and warn so they know nothing changed.
-    flattenedBy = " · ⚠ not flattenable (no continuation markers)";
+  let summary = "";
+  if (spec.flatten) {
+    const r = makePasteFriendly(block.body, block.language);
+    payload = r.out;
+    if (r.steps.length > 0) {
+      summary = ` · ${r.steps.join(", ")}`;
+    } else {
+      summary = " · ⚠ nothing to do (already paste-friendly)";
+    }
   }
 
   const result = await copyToClipboard(payload);
@@ -476,11 +651,11 @@ async function handleYank(args: string, ctx: {
   const lang = block.language || "plain";
   const tag = spec.back === 0 ? "" : ` ←${spec.back}`;
   const hint =
-    !spec.flatten && flattenable
-      ? `  (multi-line; /y ${spec.n}${spec.back > 0 ? "^".repeat(spec.back) : ""}! to flatten)`
+    !spec.flatten && pasteFriendlyAvailable
+      ? `  (multi-line; /y ${spec.n}${spec.back > 0 ? "^".repeat(spec.back) : ""}! for paste-friendly)`
       : "";
   ctx.ui.notify(
-    `yanked #${idx + 1}/${blocks.length} [${lang}] — ${payload.length}B${tag}${flattenedBy}${hint}`,
+    `yanked #${idx + 1}/${blocks.length} [${lang}] — ${payload.length}B${tag}${summary}${hint}`,
     "info",
   );
 }

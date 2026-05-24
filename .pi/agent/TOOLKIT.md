@@ -345,33 +345,50 @@ The clipboard receives exactly the bytes the LLM wrote.
 Legacy verbose syntax still works for muscle-memory backward compat:
 `/y back 2`, `/y list`, `/y list back 1`.
 
-### `!` flag — flatten shell line-continuations
+### `!` flag — paste-friendly transform
 
-For multi-line pipelines that fail the PS-paste race, append `!` to
-collapse line-continuations into a single line:
+`!` makes the block paste cleanly into a shell. It applies (in order):
+
+1. **ASCII-fold cosmetic Unicode** — em/en-dash → `-`, smart quotes →
+   ASCII, `…` → `...`, NBSP → space, zero-width chars removed.
+   Defends against PowerShell consoles whose input codepage is CP437 /
+   CP1252 and mojibakes UTF-8 multi-byte sequences on paste (the
+   `—` → `ÔÇô` bug).
+2. **Strip comment-only lines** (`# ...` in shell). Removes the most
+   common source of mojibake-prone Unicode in LLM output.
+3. **Flatten line-continuations** — pipe `|\n`, bash `\\\n`, PS backtick
+   `` ` ``+`\n` — collapse into a single line with proper joins.
+4. **For shell-family languages still multi-line**, join statements
+   with ` ; ` so PowerShell parses the whole block atomically instead of
+   line-by-line. This is what fixes the `>>` continuation-prompt noise
+   when each line is an independent statement.
 
 ```
-/y !            copy block 1, flattened
-/y 2!           copy block 2, flattened
-/y -1!          copy last block, flattened
-/y 2^!          block 2 from prev message, flattened
+/y !            copy block 1, paste-friendly
+/y 2!           copy block 2, paste-friendly
+/y -1!          copy last block, paste-friendly
+/y 2^!          block 2 from prev message, paste-friendly
 /y 2!^          same — `!` and `^` are commutative
 ```
 
-Recognised continuation patterns (replaced with a single space):
+**Shell-family languages**: `powershell`, `ps`, `ps1`, `pwsh`, `bash`,
+`sh`, `zsh`, `fish`. For other languages (Python, JS, Rust…) `!`
+still applies the ASCII-fold + comment-strip + flatten passes but
+skips the statement-join (those languages need newlines as statement
+separators).
 
-| Source | Continuation | Becomes |
-|---|---|---|
-| bash / zsh | `\<newline><indent>` | ` ` |
-| PowerShell | `` ` <newline><indent>`` | ` ` |
-| Any shell pipe chain | `\|<newline><indent>` | ` \| ` |
+**When statement-joining is rejected** (block is multi-line shell BUT
+not joinable):
 
-The detector `isFlattenable(body)` only marks blocks as flat-candidates
-when **every non-last line ends with a continuation marker** AND there
-are no internal blank lines. Multi-line scripts (`for/do/done`,
-`if/then/fi`, function definitions) stay untouched even with `!`, and
-the toast warns `⚠ not flattenable (no continuation markers)` to make
-the no-op explicit.
+- Body contains a here-string (`@"..."@` in PS) or heredoc (`<<EOF`
+  in bash) — these MUST stay multi-line.
+- Any line opens a bracket that closes on a later line — e.g.
+  `function Foo {\n  body\n}` would get `;` shoved between `{` and
+  the body. Multi-line function defs / `if/then/fi` / `for/do/done`
+  blocks stay as-is.
+
+In those cases `!` still does ASCII-fold + comment-strip + continuation
+flatten if applicable, but leaves newlines.
 
 ### Discoverability hint
 
@@ -379,10 +396,16 @@ When you yank a multi-line block **without** `!`, the toast appends a
 hint so you don't have to remember the flag exists:
 
 ```
-yanked #1/1 [powershell] — 229B  (multi-line; /y 1! to flatten)
+yanked #1/1 [powershell] — 417B  (multi-line; /y 1! for paste-friendly)
 ```
 
-When you do use `!`, the toast confirms how much was collapsed:
+When you use `!`, the toast itemises what changed:
+
+```
+yanked #1/1 [powershell] — 369B · folded 1 Unicode char, stripped 1 comment line, joined 4 statements with ' ; '
+```
+
+or for pure pipe-flatten cases:
 
 ```
 yanked #1/1 [powershell] — 221B · flattened 3→1 line
