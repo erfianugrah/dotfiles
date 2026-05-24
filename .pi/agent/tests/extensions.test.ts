@@ -978,3 +978,81 @@ describe("yank.parseYankArgs", () => {
     expect(parseYankArgs("1 2").error).toContain("too many");
   });
 });
+
+import { isFlattenable, flattenLineContinuations } from "../extensions/yank.ts";
+
+describe("yank.parseYankArgs flatten flag", () => {
+  test("'!' alone → flatten + defaults", () => {
+    expect(parseYankArgs("!")).toMatchObject({ n: 1, back: 0, list: false, flatten: true });
+  });
+  test("'2!' → block 2 flattened", () => {
+    expect(parseYankArgs("2!")).toMatchObject({ n: 2, flatten: true });
+  });
+  test("'!^' → flatten + 1 back", () => {
+    expect(parseYankArgs("!^")).toMatchObject({ n: 1, back: 1, flatten: true });
+  });
+  test("'2^!' → flatten allowed AFTER carets", () => {
+    expect(parseYankArgs("2^!")).toMatchObject({ n: 2, back: 1, flatten: true });
+  });
+  test("'2!^' → flatten allowed BEFORE carets too", () => {
+    expect(parseYankArgs("2!^")).toMatchObject({ n: 2, back: 1, flatten: true });
+  });
+  test("'?!' → list mode with flatten flag", () => {
+    expect(parseYankArgs("?!")).toMatchObject({ list: true, flatten: true });
+  });
+  test("no '!' → flatten false", () => {
+    expect(parseYankArgs("2").flatten).toBe(false);
+    expect(parseYankArgs("?^").flatten).toBe(false);
+  });
+});
+
+describe("yank.isFlattenable", () => {
+  test("real user pain case: 3-line PS pipeline ending in |", () => {
+    const body = "Get-WinEvent -FilterHashtable @{x=1} -MaxEvents 5 |\n    Where-Object {$_.Foo} |\n    Format-List X";
+    expect(isFlattenable(body)).toBe(true);
+  });
+  test("bash backslash-continuation chain", () => {
+    expect(isFlattenable("docker run \\\n  --rm \\\n  alpine ls")).toBe(true);
+  });
+  test("PowerShell backtick continuation", () => {
+    expect(isFlattenable("Get-Foo `\n  | Where-Object")).toBe(true);
+  });
+  test("single line → not flattenable", () => {
+    expect(isFlattenable("echo hello")).toBe(false);
+  });
+  test("multi-line script without continuation markers", () => {
+    expect(isFlattenable("for f in *.txt; do\n  echo $f\ndone")).toBe(false);
+  });
+  test("blank line in middle → not flattenable (would inject empty pipe stage)", () => {
+    expect(isFlattenable("echo a |\n\n  echo b")).toBe(false);
+  });
+  test("empty string → not flattenable", () => {
+    expect(isFlattenable("")).toBe(false);
+  });
+});
+
+describe("yank.flattenLineContinuations", () => {
+  test("PS pipeline → single line with ' | ' joins", () => {
+    const ps = "Get-WinEvent -FilterHashtable @{x=1} |\n    Where-Object {$_.Foo} |\n    Format-List";
+    const flat = flattenLineContinuations(ps);
+    expect(flat.includes("\n")).toBe(false);
+    expect(flat).toContain("| Where-Object");
+    expect(flat).toContain("| Format-List");
+  });
+  test("bash backslash → joined with space, no leftover backslash", () => {
+    const flat = flattenLineContinuations("docker run \\\n  --rm \\\n  alpine ls");
+    expect(flat.includes("\n")).toBe(false);
+    expect(flat.includes("\\")).toBe(false);
+    expect(flat).toBe("docker run --rm alpine ls");
+  });
+  test("PS backtick → joined with space, no leftover backtick", () => {
+    const flat = flattenLineContinuations("Get-Foo `\n  -Name 'x' `\n  -Path 'y'");
+    expect(flat.includes("\n")).toBe(false);
+    expect(flat.includes("`")).toBe(false);
+    expect(flat).toBe("Get-Foo -Name 'x' -Path 'y'");
+  });
+  test("idempotent on already-flat input", () => {
+    const flat = "echo one two three";
+    expect(flattenLineContinuations(flat)).toBe(flat);
+  });
+});
