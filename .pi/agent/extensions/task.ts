@@ -207,6 +207,12 @@ async function runSubagent(args: {
 const taskTool = defineTool({
   name: "task",
   label: "Task",
+  promptSnippet:
+    "task — spawn a `pi -p` subagent in isolated context. Use for read-only deep-dives (subagent_type=explore) or full multi-step research that pollutes parent context. Blocks parent until done; for fire-and-forget use bg_task.",
+  promptGuidelines: [
+    "explore preset is minimal (--no-extensions --no-skills + just docs.ts) — cheap and fast for code reading.",
+    "general preset has full extension set — use for actual work that needs the wrapped tools.",
+  ],
   description: [
     "Launch a fresh Pi subprocess to handle a delegated task in isolated context.",
     "",

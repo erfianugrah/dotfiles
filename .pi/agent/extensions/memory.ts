@@ -88,6 +88,12 @@ function newId(): string {
 const memoryTool = defineTool({
   name: "memory",
   label: "Memory",
+  promptSnippet:
+    "memory — persistent cross-session memory. Save user preferences / project conventions / recurring patterns. list / save / update / delete.",
+  promptGuidelines: [
+    "Save to `memory` when: user states a preference, you discover a project convention, you spot a recurring pattern.",
+    "`list` first to avoid duplicates; `update` rather than create when overlap.",
+  ],
   description: [
     "Manage persistent memories that survive across sessions.",
     "",

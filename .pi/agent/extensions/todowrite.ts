@@ -54,6 +54,12 @@ function statusGlyph(todos: Todo[]): string {
 const todowriteTool = defineTool({
   name: "todowrite",
   label: "TodoWrite",
+  promptSnippet:
+    "todowrite — session-scoped structured todo list. Use for complex multistep tasks (3+ distinct steps). Pass the FULL updated list each call (replaces, not appends).",
+  promptGuidelines: [
+    "ONE task as in_progress at a time. Mark complete IMMEDIATELY after finishing (don't batch).",
+    "Skip for trivial single-step tasks; this is overhead unless the work genuinely spans multiple stages.",
+  ],
   description: [
     "Use this tool to create and manage a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness.",
     "",
