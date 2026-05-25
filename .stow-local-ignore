@@ -1,5 +1,6 @@
 .git
 README.md
+AGENTS.md
 brew_packages_list.txt
 pacman_list.txt
 yay_list.txt
