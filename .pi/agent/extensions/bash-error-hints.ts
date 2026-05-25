@@ -100,6 +100,26 @@ const HINTS: Hint[] = [
       "Probe with `ls -la $1; stat $1; id` to see ownership vs current user. Don't blanket-sudo — fix the perms or run as the owning user.",
   },
 
+  // ── secret-leak hazards (output captured into session log) ──────────────
+  {
+    // dig prints a `; TSIG: <key>` header line when -y is used. With stderr
+    // unredirected this lands in the session log verbatim. Caught
+    // 2026-05-25 leaking the erfi.io AXFR TSIG; rotation required after.
+    pattern: /;\s*TSIG\s*[:=]\s*\S+/,
+    hint:
+      "dig leaked the TSIG key into stdout/stderr (`; TSIG: <name>` header line). The full base64 secret is now in the session JSONL on disk. " +
+      "Rotate now: `openssl rand -base64 32`, push as Fly secret, update via knotc, save new value to Vaultwarden. " +
+      "Future calls: `dig ... -y \"hmac-sha256:<key>:$SECRET\" 2>/dev/null` to suppress, or use `kdig --tsig=<file>` which doesn't echo the secret.",
+  },
+  {
+    // Common shape: Authorization headers captured into curl -v / -i output.
+    pattern: /Authorization:\s*(Bearer|token)\s+[A-Za-z0-9_\-.~+/]{20,}/,
+    hint:
+      "Authorization header captured into output — token now in the session log. " +
+      "Rotate at the issuer (`gh auth refresh`, `flyctl tokens revoke`, etc.). " +
+      "Future curl calls: avoid `-v` with secret headers, or pipe through `sed 's/Bearer [A-Za-z0-9._-]*/Bearer REDACTED/'`.",
+  },
+
   // ── pi / agent internals ────────────────────────────────────────────────
   {
     // Anthropic stream cutoff (already auto-retries in pi 0.74.1+, but
@@ -108,6 +128,12 @@ const HINTS: Hint[] = [
     hint:
       "Upstream stream-cutoff. Pi 0.74.1+ auto-retries this; if it's still surfacing, the retry budget was exhausted. " +
       "Just retry the same prompt — different edge node usually succeeds. If it persists, file at earendil-works/pi referencing #4433.",
+  },
+  {
+    // Fly cert validation pending — common retry-loop trap. Caught 2026-05-25.
+    pattern: /Status\s*[:=]\s*Awaiting (?:configuration|certificates)|No (?:A|AAAA) records were found/i,
+    hint:
+      "Fly cert validation pending — do NOT loop `flyctl certs check`/`remove`/`add`. Let's Encrypt rate-limits per-domain orders (5/week per registered base+domain), and Fly's verifier polls every ~5-10 min anyway. Most common cause is the recursive resolver caching the old answer for the full TTL window. Wait 15-20 min, then check ONCE.",
   },
 ];
 
