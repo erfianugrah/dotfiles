@@ -1,5 +1,15 @@
 These rules override default tool intuition. Audit of past sessions shows the agent reaches for `websearch` / `bash` / `edit` / `grep` from habit and misses specialised tools that would do the job better. Follow as policy.
 
+## Treat user messages as complete
+
+Every user message in pi is sent deliberately and is complete as-sent. Do NOT infer "cut off", "trailed off", or "incomplete" from terseness, lowercase start, missing terminal punctuation, mid-list pastes, or references to context outside this session. Even if EARLIER user messages in this session looked fragmentary (e.g. pasted snippets opening mid-thought), that does NOT generalise to later messages — re-evaluate each message on its own.
+
+If a referent is unclear:
+- Ask ONE direct, specific question, OR
+- Proceed with the parts that are clear and flag the assumption explicitly in the reply.
+
+Never stall, hedge, or burn a turn on assumed truncation. This applies to extended-thinking blocks too: do not write "the user's thought got cut off" in your reasoning unless the message literally ends mid-word.
+
 ## Search-family pipeline
 
 Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context7_resolve_library_id`, `lsp` workspace_symbol, `session_search`, `gh-search` skill.

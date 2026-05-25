@@ -234,13 +234,13 @@ Use this for anything that would otherwise hit pi's `bash` tool timeout
 bg_bash({
   command: `
     for i in $(seq 1 20); do
-      status=$(flyctl certs check ntfy.erfi.io 2>&1 | grep -E "Status\\s+=" | awk -F= '{print $2}' | xargs)
+      status=$(flyctl certs check <your-host> 2>&1 | grep -E "Status\\s+=" | awk -F= '{print $2}' | xargs)
       echo "attempt $i: status = $status"
       [ "$status" = "Ready" ] && break
       sleep 10
     done
     echo "=== HTTPS check ==="
-    curl -sS https://ntfy.erfi.io/v1/health
+    curl -sS https://<your-host>/v1/health
   `,
   name: "flyctl-cert-wait",
   cwd: "/home/erfi/servarr-compose/ntfy-fly"
@@ -537,7 +537,7 @@ bench({ commands: ["./oldbin -input=large.json", "./newbin -input=large.json"], 
 
 hurl_test({
   file: "tests/composer.hurl",
-  variables: { base_url: "https://composer.erfi.io", api_key: "${COMPOSER_API_KEY}" }
+  variables: { base_url: "https://<your-composer-host>", api_key: "${COMPOSER_API_KEY}" }
 })
 ```
 

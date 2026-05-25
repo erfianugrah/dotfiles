@@ -126,10 +126,11 @@ List loaded at startup; each has its own `SKILL.md` with the actual rules.
 
 | Skill | Purpose |
 |---|---|
+| `caddy` | Custom xcaddy build + WAF management stack (Caddyfile snippet idiom, TSIG/rfc2136 secret chain, wafctl, Authelia, the `make restart` vs `make restart-caddy` SOPS footgun). Sibling to `knot-dns`. |
 | `ci-workflows` | GitHub / Gitea Actions workflows, action pinning, CI patterns. |
 | `cloudflare` | Cloudflare API + `wrangler` CLI (Workers / Pages / R2 / D1 / KV / Tunnels) + bulk Python automation + `cf-terraforming` import workflow. Pairs with `terraform`. |
 | `comfyui` | ComfyUI image-gen via llm-compose proxy on `localhost:11434`. |
-| `composer` | Self-hosted Docker Compose management platform (composer.erfi.io). |
+| `composer` | Self-hosted Docker Compose management platform (your deployed instance). |
 | `design-utilitarian` | McMaster-Carr-style information-dense UI ethos. |
 | `docker` | Dockerfile authoring, buildx (multi-arch + cache mounts + secrets), image inspection, registry workflows, container debugging. Companion to `infrastructure-stack` (Compose) and `composer` (GitOps). |
 | `favicons-and-icons` | Favicon + PWA icon set generation. |
@@ -137,13 +138,16 @@ List loaded at startup; each has its own `SKILL.md` with the actual rules.
 | `frontend-stack` | Astro/React/Next scaffolding with biome + tanstack + shadcn. |
 | `gh` | Full GitHub CLI workflow — PR lifecycle, issue ops, releases with assets, Actions runs + cache, auth scopes, repo ops, extensions. Sibling to `gh-search`. |
 | `gh-search` | Cross-repo GitHub code/issue/PR search via `gh search`. Sibling to `gh` (which covers everything-but-search). |
+| `gloryhole` | Self-built DNS server `glory-hole` — Go binary + embedded Unbound + Astro/React dashboard. Pi-hole-style filtering, expr policy engine, sharded LRU cache, REST/WS API, DoT/DoH. Home + Fly deploy profiles. |
 | `infrastructure-stack` | Docker Compose with bridge-network + static-IP + host-mode-Caddy.
+| `knot-dns` | Self-hosted authoritative DNS — Knot DNS on Fly anycast, TSIG/rfc2136 to Caddy, CF→Knot migration. Sibling to `fly`, `cloudflare`, `caddy`. |
 | `lora-train` | kohya sd-scripts LoRA training via proxy on `localhost:11434`. |
 | `mermaid-d2` | mermaid / d2 diagram authoring + render via local CLIs. |
 | `research` | SearXNG (`:8888`) + Playwright crawler (`:8889`) + OSINT (`:8890`). |
 | `software-architecture` | DDD-lite system design for Go backends + full-stack apps. |
 | `supabase` | Supabase products (Database / Auth / Storage / Realtime / Edge Functions / pgvector / pgmq / Branching) + `@supabase/server` BFF patterns + RLS + migrations + connection pooling + Postgres extensions. |
 | `supabase-postgres-best-practices` | Postgres perf + index choice + connection management + RLS patterns. |
+| `tailscale-homelab` | SSH into and operate the homelab over Tailscale — identity-file convention, dual `10.0.X.Y` / `10.68.X.Y` alias pattern, MagicDNS, ACL grants, failure-mode diagnostic order. Cross-references every other infra skill. |
 | `terraform` | OpenTofu / Terraform — module structure, R2/S3 state backends, SOPS+age secrets, `import` blocks, Cloudflare provider patterns, `for_each` + `dynamic` block recipes. |
 | `whisper` | whisper-transcribe HTTP API on `localhost:7860`. |
 | `superpowers/` | 14 subskills (obra/superpowers v5.1.0 via `superpowers-sync`): brainstorming, TDD, systematic-debugging, writing-plans, executing-plans, receiving / requesting code review, finishing-a-development-branch, using-git-worktrees, dispatching-parallel-agents, subagent-driven-development, verification-before-completion, writing-skills, using-superpowers. |
