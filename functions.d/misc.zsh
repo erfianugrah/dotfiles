@@ -1,4 +1,34 @@
 # ---------------------------------------------------------------------------
+# Local Model Loader — wait for llm-compose proxy models to load into VRAM
+# ---------------------------------------------------------------------------
+
+wait_for_model() {
+    local model_preset="${1:-gemma4}"
+    local url="http://localhost:11434/v1/models"
+    local timeout=60
+    local elapsed=0
+
+    echo -n "Waiting for model '$model_preset' to load... "
+    while true; do
+        # Check if the model with the given preset is marked as 'loaded: true'
+        local loaded=$(curl -s "$url" | jq -r ".data[] | select(.meta.preset == \"$model_preset\") | .meta.loaded" 2>/dev/null)
+        if [[ "$loaded" == "true" ]]; then
+            echo -e "\r\033[32m✓ Loaded\033[0m"
+            return 0
+        fi
+        if [[ $elapsed -ge $timeout ]]; then
+            echo -e "\r\033[31m✗ Timeout after ${timeout}s\033[0m"
+            return 1
+        fi
+        echo -n "."
+        sleep 1
+        ((elapsed++))
+    done
+}
+
+alias wait_model='wait_for_model'
+
+# ---------------------------------------------------------------------------
 # Ansible shortcuts
 # ---------------------------------------------------------------------------
 
