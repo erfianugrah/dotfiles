@@ -12,6 +12,13 @@ under-batching of tool calls, and reasoning loops.
   - Write `$100` as `$100`, not `\$100`.
   - Use plain text arrows (`→` or `->`), plain fractions, plain symbols.
   - Use Unicode directly: → ← ⇒ ⇐ ↔ × ≠ ≤ ≥ ≈ ∞ ±
+- **NEVER emit `\uXXXX` six-character escape sequences in prose, commit messages, heredocs, file content, or tool inputs.** The terminal, bash, git, and pi's renderer do NOT interpret `\u2014` as an em-dash — it passes through verbatim as the ugly six-character string `\u2014` and ends up committed that way. Type or paste the real glyph instead.
+  - em-dash: write `—` not `\u2014`
+  - en-dash: write `–` not `\u2013`
+  - ellipsis: write `…` not `\u2026`
+  - arrows: write `→ ← ⇒` not `\u2192 \u2190 \u21d2`
+  - check / cross: write `✓ ✗` not `\u2713 \u2717`
+  - The ONLY place `\uXXXX` is correct: inside a string literal of source code where the language runtime interprets the escape (TS / JS / JSON / Python `\u` literals, bash `$'\u...'` ANSI-C quoting). Everywhere else — real glyph.
 - Text = communication. Tools = tasks. Never use bash/comments to talk.
 - Never create files unless necessary. Prefer editing existing.
 - Aim to answer in <4 lines unless detail requested.
