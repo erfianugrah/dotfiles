@@ -14,6 +14,13 @@ import {
   extractPatchPaths,
 } from "../extensions/tool-guard.ts";
 import { parsePatch } from "../extensions/apply-patch.ts";
+import {
+  HARD_CAP_BYTES,
+  SOFT_WARN_BYTES,
+  SIDECAR_SUFFIX,
+  sidecarPath,
+  validateChunk,
+} from "../extensions/write-stream.ts";
 import { parseImage, versionCompare } from "../extensions/oci-tags.ts";
 import {
   dateFromName,
@@ -1134,6 +1141,79 @@ describe("yank.isJoinable", () => {
   });
   test("non-shell rejected", () => {
     expect(isJoinable("a\nb\nc", "python")).toBe(false);
+  });
+});
+
+// ── write-stream: validateChunk ─────────────────────────────────
+
+describe("write-stream.sidecarPath", () => {
+  test("appends .write-stream.tmp suffix", () => {
+    expect(sidecarPath("/tmp/foo.md")).toBe(`/tmp/foo.md${SIDECAR_SUFFIX}`);
+    expect(sidecarPath("./a/b/c")).toBe(`./a/b/c${SIDECAR_SUFFIX}`);
+  });
+});
+
+describe("write-stream.validateChunk", () => {
+  test("size cap: under hard cap returns null", () => {
+    expect(validateChunk("only", HARD_CAP_BYTES - 1, false, false)).toBeNull();
+    expect(validateChunk("first", HARD_CAP_BYTES - 1, false, false)).toBeNull();
+  });
+
+  test("size cap: at hard cap returns null (boundary inclusive)", () => {
+    expect(validateChunk("only", HARD_CAP_BYTES, false, false)).toBeNull();
+  });
+
+  test("size cap: above hard cap returns split-further error", () => {
+    const err = validateChunk("only", HARD_CAP_BYTES + 1, false, false);
+    expect(err).toBeTruthy();
+    expect(err).toContain("above the");
+    expect(err).toContain("per-chunk cap");
+    expect(err).toContain("Split this chunk");
+  });
+
+  test("soft warn threshold is below hard cap", () => {
+    expect(SOFT_WARN_BYTES).toBeLessThan(HARD_CAP_BYTES);
+  });
+
+  test("only: errors when sidecar already exists", () => {
+    const err = validateChunk("only", 100, true, false);
+    expect(err).toBeTruthy();
+    expect(err).toContain("sidecar already exists");
+  });
+
+  test("only: ok when sidecar absent (target may exist or not)", () => {
+    expect(validateChunk("only", 100, false, false)).toBeNull();
+    expect(validateChunk("only", 100, false, true)).toBeNull();
+  });
+
+  test("first: always ok (truncates any existing sidecar)", () => {
+    expect(validateChunk("first", 100, false, false)).toBeNull();
+    expect(validateChunk("first", 100, true, false)).toBeNull();
+    expect(validateChunk("first", 100, true, true)).toBeNull();
+  });
+
+  test("middle: requires existing sidecar", () => {
+    const err = validateChunk("middle", 100, false, false);
+    expect(err).toBeTruthy();
+    expect(err).toContain("no stream sidecar exists");
+    expect(err).toContain('chunk="first"');
+    expect(validateChunk("middle", 100, true, false)).toBeNull();
+  });
+
+  test("last: requires existing sidecar", () => {
+    const err = validateChunk("last", 100, false, false);
+    expect(err).toBeTruthy();
+    expect(err).toContain("no stream sidecar exists");
+    expect(validateChunk("last", 100, true, false)).toBeNull();
+  });
+
+  test("size cap takes precedence over state errors", () => {
+    // Even with a valid state (sidecar exists for middle), oversized chunk
+    // should hit the cap error first — the agent needs to fix size before
+    // anything else matters.
+    const err = validateChunk("middle", HARD_CAP_BYTES + 1, true, false);
+    expect(err).toBeTruthy();
+    expect(err).toContain("per-chunk cap");
   });
 });
 
