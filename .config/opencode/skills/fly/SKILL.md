@@ -32,7 +32,7 @@ primary_region = "fra"                # closest to your users — pick once
   image = "<registry>/<image>:<pinned-tag>"   # NEVER `latest` (mirror compose discipline)
 
 [env]
-  TZ = "Europe/Berlin"
+  TZ = "<your-tz>"           # e.g. UTC, Europe/Berlin, America/Los_Angeles
   PUBLIC_BASE_URL = "https://<host>.example.com"
   DATA_DIR = "/data"
 

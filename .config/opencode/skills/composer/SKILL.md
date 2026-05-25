@@ -1,6 +1,6 @@
 ---
 name: composer
-description: Drive the user's self-hosted Docker Compose management platform (`composer` at /home/erfi/composer, deployed at composer.erfi.io). Use when the user mentions composer, composerd, stack deployment via API, GitOps pipelines, or wants to drive Docker Compose stacks programmatically rather than via direct `docker compose` commands. Covers the REST API (106 endpoints under /api/v1), auth (API keys / cookies), release workflow, pipeline footguns, and the hard "don't run composerd on dev" rule.
+description: Drive the user's self-hosted Docker Compose management platform (repo at `~/composer/`, deployed instance at `composer.<your-zone>`). Use when the user mentions composer, composerd, stack deployment via API, GitOps pipelines, or wants to drive Docker Compose stacks programmatically rather than via direct `docker compose` commands. Covers the REST API (~109 endpoints under /api/v1), auth (API keys / cookies / first-admin splash bootstrap), release workflow, pipeline footguns, and the hard "don't run composerd on dev" rule.
 ---
 
 # composer skill
@@ -27,15 +27,16 @@ Self-hosted compose-mgmt platform. Go + Astro. REST API only — no end-user CLI
 When the API spec matters, the **live source of truth** is the daemon itself. Both JSON and YAML are served publicly:
 
 ```bash
-curl -s composer.erfi.io/openapi.json | jq '.paths | keys'   # endpoint list
-curl -s composer.erfi.io/openapi.json | jq '.paths."/api/v1/stacks/{name}".put'
-curl -s composer.erfi.io/openapi.yaml | yq '.paths'           # YAML view
-# interactive: open composer.erfi.io/docs in browser
+curl -s $COMPOSER/openapi.json | jq '.paths | keys'   # endpoint list
+curl -s $COMPOSER/openapi.json | jq '.paths."/api/v1/stacks/{name}".put'
+curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
+# interactive: open $COMPOSER/docs in browser
+# Set COMPOSER=https://<your-composer-host> first.
 ```
 
 ## API basics
 
-- Base: `composer.erfi.io/api/v1` (prod). Local dev: `localhost:8080/api/v1`.
+- Base: `$COMPOSER/api/v1` (prod, your deployed instance). Local dev: `localhost:8080/api/v1`.
 - Version constant: `0.14.0` (`version.go`).
 - Spec: OpenAPI **3.1.0**. Served at `GET /openapi.json` AND `GET /openapi.yaml`. Interactive docs at `/docs` (Stoplight Elements). All public — no auth.
 - Surface: **106 Huma-registered endpoints** under 19 tags + a few raw chi routes (WebSocket terminal/compose, OAuth begin/callback, webhook receiver). Tags: system, auth, users, keys, registries, stacks, git, containers, networks, volumes, images, docker, pipelines, webhooks, jobs, audit, templates, sse, oauth.
@@ -52,7 +53,7 @@ curl -s composer.erfi.io/openapi.yaml | yq '.paths'           # YAML view
 
 ```bash
 export COMPOSER_API_KEY=ck_…           # from /api/v1/keys POST
-export BASE=https://composer.erfi.io/api/v1
+export BASE=https://<your-composer-host>/api/v1
 
 # list stacks
 curl -s -H "X-API-Key: $COMPOSER_API_KEY" "$BASE/stacks" | jq
@@ -163,7 +164,7 @@ Do NOT hand-edit `web/src/lib/api/openapi.{json,yaml}` or `types.ts` — always 
 - CI lint runs `make generate` then `git diff --exit-code` on **all three** generated files (json, yaml, types.ts). Any stale artifact breaks lint.
 - CI also runs `make generate-lint` (redocly) as a separate step — schema errors fail the build.
 - `go vet` reads `static.go` which embeds `web/dist`. No dist → vet fails.
-- `release.yml` on `v*` tag builds + pushes multi-arch image to `ghcr.io/erfianugrah/composer:<tag>`.
+- `release.yml` on `v*` tag builds + pushes multi-arch image to `ghcr.io/<your-gh-namespace>/composer:<tag>`.
 
 ## Repo layout (one-line each)
 
@@ -219,7 +220,7 @@ version.go            const Version — currently 0.14.0; bump first on release
 
 ## Tool-routing for composer questions
 
-1. Source-of-truth spec → `curl composer.erfi.io/openapi.json | jq` (or `localhost:8080` in dev). Do NOT guess endpoint shapes.
+1. Source-of-truth spec → `curl $COMPOSER/openapi.json | jq` (or `localhost:8080` in dev). Do NOT guess endpoint shapes.
 2. Architecture / design → `read /home/erfi/composer/docs/architecture.md` or `docs/design.md`.
 3. Endpoint reference → `read /home/erfi/composer/docs/api-reference.md`.
 4. Code spelunking → `grep` / `lsp` on `internal/{domain,app,api,infra}/`. Use `lsp` for symbol navigation (Go LSP is accurate).

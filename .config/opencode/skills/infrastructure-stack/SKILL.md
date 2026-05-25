@@ -13,7 +13,7 @@ The user runs ~12 self-hosted services as discrete Docker Compose stacks. Every 
 2. **Each stack gets a dedicated bridge network** with a `/24` subnet (or `/28` for small stacks) and **static `ipv4_address` assignments** per container.
 3. **No port publishing for backend services** — use `expose: <port>` only. Public exposure happens at Caddy in another stack.
 4. **Caddy runs in `network_mode: host`** in `~/ergo/caddy-compose/` and reverse-proxies to the bridge static IPs via kernel routing.
-5. **Caddyfile pins to static IPs**, not service hostnames (e.g. `reverse_proxy 172.19.1.2:7878`).
+5. **Caddyfile pins to static IPs**, not service hostnames (e.g. `reverse_proxy 172.19.X.Y:7878`).
 6. **Bind-mounts over named volumes** for bulk data; absolute host paths only.
 7. **PUID/PGID/UMASK = 1000/100/0002** on LinuxServer.io images. Containers that don't honour them use `user: 1000:100`.
 8. **Per-service `healthcheck:`** with `CMD-SHELL` curl probe + 30s interval / 3 retries.
@@ -23,20 +23,12 @@ The user runs ~12 self-hosted services as discrete Docker Compose stacks. Every 
 
 ## Subnet allocation
 
-The user's existing `/24` allocations under the `172.19.0.0/16` block. **When adding a new stack, pick the next unused `/24` and document it in your stack's `AGENTS.md`.**
+The user allocates one `/24` per stack under the `172.19.0.0/16` block. **When adding a new stack, pick a free `/24` and document the allocation in that stack's `AGENTS.md`.** Don't hard-code the full allocation map in a public file — grep the live stacks' `compose.yaml` (`rg 'subnet:' ~/*-compose ~/ergo/*-compose 2>/dev/null`) when you need a current view.
 
-| Subnet | Stack | Notes |
-|---|---|---|
-| `172.19.1.0/24` | servarr | Sonarr, Radarr, Bazarr, Jellyfin, etc. |
-| `172.19.2.0/24` | servarr/tracearr_backend | `internal: true` |
-| `172.19.4.0/24` | vaultwarden | |
-| `172.19.12.0/24` | keycloak | Auth IdP |
-| `172.19.22.0/24` | immich | |
-| `172.19.30.0/24` | servarr/media | Cross-stack shared (jellyfin consumers) |
-| `172.19.98.0/24` | (caddy upstream) | |
-| `172.19.99.0/24` | caddy/forward_auth_net | Authelia + Caddy WAF |
-| `172.40.0.0/28` | gitea | Older /28 — keep as-is, don't replicate |
-| Free | `172.19.5-11.0/24`, `172.19.13-21.0/24`, `172.19.23-29.0/24`, `172.19.31-97.0/24` | Pick any |
+Rules of thumb:
+- `172.19.X.0/24` per stack, X picked from whatever is documented as free.
+- Reserve a high-X range for Caddy's WAF / forward-auth bridges so the host-mode Caddy can `extra_hosts` route to them deterministically.
+- A small handful of historical stacks use `/28` instead of `/24` — keep them as-is, don't replicate.
 
 ## docker-compose.yml template
 
@@ -117,7 +109,7 @@ networks:
 In `~/ergo/caddy-compose/Caddyfile`, add a virtual host pointing to the static IP:
 
 ```caddyfile
-myservice.erfi.io {
+myservice.<your-zone> {
     encode zstd gzip
     reverse_proxy 172.19.X.2:8080 {
         import proxy_headers
@@ -145,7 +137,7 @@ Every compose stack has its own `AGENTS.md` documenting the conventions. Copy th
 | `myservice` | `172.19.X.0/24` | Main service network |
 | `myservice_backend` | `172.19.X+1.0/24` | DB + cache (internal: true) |
 
-Caddy entry: `~/ergo/caddy-compose/Caddyfile` → `myservice.erfi.io` → `172.19.X.2:8080`.
+Caddy entry: `~/ergo/caddy-compose/Caddyfile` → `myservice.<your-zone>` → `172.19.X.2:8080`.
 
 ## Static IP allocation in `myservice` (172.19.X.0/24)
 
@@ -174,13 +166,13 @@ Sourced from `.env` (not committed). Vaultwarden vault has the canonical copies 
 1. Bump image tag in `docker-compose.yml`.
 2. Commit + push (composer pulls automatically).
 3. `composer reload myservice` (or `docker compose pull && up -d` on host).
-4. Verify `<svc>.erfi.io` returns 200.
+4. Verify `<svc>.<your-zone>` returns 200.
 ```
 
 ## Common pitfalls
 
 - **`ports: "8080:8080"` for backend services**: don't. Caddy host-mode reaches static IPs directly. Publishing ports adds unnecessary attack surface and can collide with host services. Only publish ports for services that need direct external access (rare — Caddy is the front door).
-- **Forgetting to add the Caddyfile entry**: stack runs but `<svc>.erfi.io` returns 502. Always pair compose-stack changes with Caddyfile entries.
+- **Forgetting to add the Caddyfile entry**: stack runs but `<svc>.<your-zone>` returns 502. Always pair compose-stack changes with Caddyfile entries.
 - **Mismatched IP between compose and Caddyfile**: change one, forget the other. The static IP in `ipv4_address:` MUST equal the IP in `reverse_proxy`. Search both files when changing IPs.
 - **Mixing `network_mode: host` with custom networks**: a service can't have both. Caddy uses host-mode; everything else uses bridge networks with static IPs.
 - **Using named volumes for bulk data**: under Docker Desktop on WSL2, named volumes cache through stale hash paths in `/run/desktop/mnt/...` and break on reboot. Always bind-mount with absolute host paths.

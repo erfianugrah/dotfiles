@@ -194,10 +194,10 @@ const BASH_RULES: BlockRule[] = [
   {
     id: "docker_logs_servarr",
     // The user has composer (gitops manager) that exposes logs via API. Direct docker logs on Unraid is fine,
-    // but on the dev machine the canonical lookup is composer.erfi.io API.
+    // but on the dev machine the canonical lookup is the user's composer API.
     pattern: /^\s*docker\s+logs\s+\S/,
     reason:
-      "For services managed by composer.erfi.io, prefer the composer API for logs (gives you tail + filter + structured response). `docker logs` direct is fine if SSH'd into the host running the container.",
+      "For services managed by the user's composer instance, prefer the composer API for logs (gives you tail + filter + structured response). `docker logs` direct is fine if SSH'd into the host running the container.",
     segment: true,
   },
   // dropped (2026-05-23, audit):

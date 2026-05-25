@@ -1,11 +1,11 @@
 ---
 name: knot-dns
-description: Deploy self-hosted authoritative DNS — Knot DNS 3.5 on Fly.io anycast, with TSIG-keyed RFC 2136 ACME (Caddy), AXFR/IXFR primary↔secondary, and the Cloudflare → Knot migration path. Covers nameserver choice (Knot vs NSD vs PowerDNS vs CoreDNS), Fly machine sizing and the PROXY-on-TCP-is-broken trap, knotc confdb operations, ACME ACL pattern (the `sub-or-equal` vs `pattern` mismatch for `_acme-challenge`), Namecheap glue + in-bailiwick NS, the CF outgoing-AXFR migration (NOTIFY source IPs documented-wrong vs the real anycast list, Fly edge NAT rewriting source to 172.16.x), TTL pre-lowering, registry NS swap timing per TLD, and the post-migration Caddy `dns cloudflare` → `dns rfc2136` cutover. Sibling to `fly` (platform), `cloudflare` (when CF is in or coming out of the path), `infrastructure-stack` (Caddy stack consuming the TSIG path). Reference deployment lives at `~/knot-fly/deploy/knot-only/` — `knot-fly-mvp` app in `fra` serves `erfi.io` end-to-end since 2026-05-24.
+description: Deploy self-hosted authoritative DNS — Knot DNS 3.5 on Fly.io anycast, with TSIG-keyed RFC 2136 ACME (Caddy), AXFR/IXFR primary↔secondary, and the Cloudflare → Knot migration path. Covers nameserver choice (Knot vs NSD vs PowerDNS vs CoreDNS), Fly machine sizing and the PROXY-on-TCP-is-broken trap, knotc confdb operations, ACME ACL pattern (the `sub-or-equal` vs `pattern` mismatch for `_acme-challenge`), Namecheap glue + in-bailiwick NS, the CF outgoing-AXFR migration (NOTIFY source IPs documented-wrong vs the real anycast list, Fly edge NAT rewriting source to 172.16.x), TTL pre-lowering, registry NS swap timing per TLD, and the post-migration Caddy `dns cloudflare` → `dns rfc2136` cutover. Sibling to `fly` (platform), `cloudflare` (when CF is in or coming out of the path), `infrastructure-stack` (Caddy stack consuming the TSIG path). Reference deployment lives at `~/knot-fly/deploy/knot-only/` — `<your-knot-app>` app in your primary region serves `<your-zone>` end-to-end since 2026-05-24.
 ---
 
 # knot-dns — authoritative DNS on Fly
 
-The reference deployment is `~/knot-fly/deploy/knot-only/`. It runs as the `knot-fly-mvp` Fly app in `fra` (single region; SIN secondary deferred to Phase 2), serves `erfi.io` + `lab.erfi.io`, and issues real Let's Encrypt certs for 36 Caddy sites via `dns rfc2136`. Every snippet below is from that working tree. Read `~/knot-fly/AGENTS.md` for the 21-gotcha list this skill condenses.
+The reference deployment is `~/knot-fly/deploy/knot-only/`. It runs as the `<your-knot-app>` Fly app in your primary region (single region; secondary-region deferred to Phase 2), serves `<your-zone>` + `lab.<your-zone>`, and issues real Let's Encrypt certs for 36 Caddy sites via `dns rfc2136`. Every snippet below is from that working tree. Read `~/knot-fly/AGENTS.md` for the canonical gotcha list this skill condenses.
 
 ## Why self-host
 
@@ -13,7 +13,7 @@ Two real wins, one accepted tax:
 
 - **DNS-01 ACME without giving a third party API access to your zones.** Caddy talks TSIG to your own Knot. No `CF_API_TOKEN` in `.env`, no CF rate limits during cert storms.
 - **No DNS provider in the critical path.** Fly's edge is the failure domain you already accept for the rest of your stack.
-- **Tax**: you now operate a nameserver. Single Fly region = single point of failure for the DNS plane. Plan a second region (SIN/IAD) before treating it as production.
+- **Tax**: you now operate a nameserver. Single Fly region = single point of failure for the DNS plane. Plan a second region (another region) before treating it as production.
 
 ## Stack choice — Knot
 
@@ -33,17 +33,17 @@ Knot wins for this stack because:
 
 ## Fly is the anycast layer
 
-You don't run BGP. Fly's edge announces your app's dedicated v4 + v6 anycast from every PoP. Deploy to N regions, the same `169.155.56.21` resolves to the closest. Glue at the registrar points at those two IPs.
+You don't run BGP. Fly's edge announces your app's dedicated v4 + v6 anycast from every PoP. Deploy to N regions, the same `<knot-anycast-ip>` resolves to the closest. Glue at the registrar points at those two IPs.
 
-Two regions is the minimum for "not a single point of failure": one primary (FRA), one secondary (SIN/IAD) pulling via AXFR over Fly's `.internal` mesh. Single anycast IP, two machines, Knot's `master/notify` directives wire them up.
+Two regions is the minimum for "not a single point of failure": one primary, one secondary in a different region pulling via AXFR over Fly's `.internal` mesh. Single anycast IP, two machines, Knot's `master/notify` directives wire them up.
 
 ## fly.toml — the shape
 
 `~/knot-fly/deploy/knot-only/fly.toml`. Two ports, no PROXY protocol on TCP. The PROXY-on-TCP omission is **load-bearing**.
 
 ```toml
-app = "knot-fly-mvp"
-primary_region = "fra"
+app = "<your-knot-app>"
+primary_region = "<your-primary-region>"
 
 [build]
   dockerfile = "Dockerfile.knot"
@@ -158,7 +158,7 @@ server:
     answer-rotation: on
     automatic-acl:   off
     edns-client-subnet: off
-    nsid: "knot-fly-mvp"
+    nsid: "<your-knot-app>"
     # NO `proxy-allowlist` — see fly.toml TCP comment.
 
 # Knot 3.4+ split storage into its own section. The OLD `server.storage` path
@@ -246,21 +246,21 @@ Add more `.*` entries if you issue certs deeper than two levels under the zone.
 ```bash
 # From inside the machine. Wrap every multi-statement edit in conf-begin/commit.
 knotc conf-begin
-knotc conf-set   "zone[lab.erfi.io]"                  # step 1: bare id
-knotc conf-set   "zone[lab.erfi.io].template" default # step 2: attributes
+knotc conf-set   "zone[lab.<your-zone>]"                  # step 1: bare id
+knotc conf-set   "zone[lab.<your-zone>].template" default # step 2: attributes
 knotc conf-commit
 
-knotc zone-begin   lab.erfi.io
-knotc zone-set     lab.erfi.io @ 3600 SOA "ns1.lab.erfi.io. admin.lab.erfi.io. $(date +%s) 86400 900 691200 3600"
-knotc zone-set     lab.erfi.io @ 3600 NS  "ns1.lab.erfi.io."
-knotc zone-commit  lab.erfi.io
+knotc zone-begin   lab.<your-zone>
+knotc zone-set     lab.<your-zone> @ 3600 SOA "ns1.lab.<your-zone>. admin.lab.<your-zone>. $(date +%s) 86400 900 691200 3600"
+knotc zone-set     lab.<your-zone> @ 3600 NS  "ns1.lab.<your-zone>."
+knotc zone-commit  lab.<your-zone>
 ```
 
 From your dev box via the `~/knot-fly/deploy/knot-only/Makefile`:
 
 ```bash
 cd ~/knot-fly/deploy/knot-only
-make bootstrap-zone ZONE=lab.erfi.io NS_FQDN=ns1.lab.erfi.io
+make bootstrap-zone ZONE=lab.<your-zone> NS_FQDN=ns1.lab.<your-zone>
 ```
 
 SOA serial defaults to `$(date +%s)`. **Once committed, the semantic-check at `zone-commit` is hard-coded and ignores `template[].semantic-checks: off`** — see foot-gun #11. Pick a serial scheme you can live with.
@@ -274,20 +274,20 @@ Add the provider to your Caddy build (`~/ergo/caddy-compose/Dockerfile`):
 --with github.com/caddy-dns/rfc2136@v1.0.0 \
 ```
 
-Site block (the working `test.lab.erfi.io` template):
+Site block (the working `test.lab.<your-zone>` template):
 
 ```caddyfile
-test.lab.erfi.io {
+test.lab.<your-zone> {
     tls {
         issuer acme {
             dns rfc2136 {
                 key_name "caddy-acme."
                 key_alg  "hmac-sha256"
                 key      {$TSIG_CADDY_ACME}
-                server   "169.155.56.21:53"
+                server   "<knot-anycast-ip>:53"
             }
             propagation_delay 30s
-            resolvers 169.155.56.21
+            resolvers <knot-anycast-ip>
         }
     }
     respond "knot-fly is authoritative for this name" 200
@@ -301,8 +301,8 @@ test.lab.erfi.io {
 ## Smoke-test the TSIG path (one-liner)
 
 ```bash
-KNOTFLY_HOST=169.155.56.21
-ZONE=lab.erfi.io
+KNOTFLY_HOST=<knot-anycast-ip>
+ZONE=lab.<your-zone>
 printf 'server %s\nzone %s\nupdate add _acme-challenge.smoke.%s 60 TXT "hi"\nsend\n' \
     "$KNOTFLY_HOST" "$ZONE" "$ZONE" \
   | nsupdate -y "hmac-sha256:caddy-acme.:$TSIG_CADDY_ACME"
@@ -315,7 +315,7 @@ Key name in `-y` includes the trailing dot. Algorithm separator is `:`, not `-`.
 
 For zone `<zone>` served by your Fly app:
 
-1. **Register host glue at the registrar.** Namecheap → Domain List → Manage → Advanced DNS → Personal DNS Server. Add `ns1` and `ns2` (or `ns1` + `ns2` of a different bailiwick) pointing at the Fly v4 anycast IP. Namecheap requires two glue names per domain. The same IP for both is acceptable as long as the names differ — `ns1.<zone>` and `ns2.<zone>` both → `169.155.56.21`.
+1. **Register host glue at the registrar.** Namecheap → Domain List → Manage → Advanced DNS → Personal DNS Server. Add `ns1` and `ns2` (or `ns1` + `ns2` of a different bailiwick) pointing at the Fly v4 anycast IP. Namecheap requires two glue names per domain. The same IP for both is acceptable as long as the names differ — `ns1.<zone>` and `ns2.<zone>` both → `<knot-anycast-ip>`.
 2. **Set NS at the registrar.** Domain → Nameservers → Custom DNS → `ns1.<zone>`, `ns2.<zone>`.
 3. **Put matching in-zone A records** for `ns1` and `ns2` inside the zone served by Knot. The zone is self-referential by design (in-bailiwick) — without these, recursive resolvers can't validate the delegation.
 
@@ -340,13 +340,13 @@ One command does the whole bootstrap (`~/knot-fly/deploy/knot-only/scripts/cf-ax
 ```bash
 export CLOUDFLARE_API_TOKEN=...
 cd ~/knot-fly/deploy/knot-only
-./scripts/cf-axfr-setup.sh erfi.io
+./scripts/cf-axfr-setup.sh <your-zone>
 ```
 
 What it does (idempotent on re-run):
 
 1. Pulls live CF anycast CIDRs from `https://api.cloudflare.com/client/v4/ips`. **Do not hardcode this list.** See NOTIFY foot-gun below.
-2. Creates a TSIG on the CF account (`POST /accounts/{aid}/secondary_dns/tsigs`) or reuses by name. Secret is captured **once at create time** and persisted to `~/.knot-fly-mvp.env` (mode 0600). Lose it → recreate the TSIG.
+2. Creates a TSIG on the CF account (`POST /accounts/{aid}/secondary_dns/tsigs`) or reuses by name. Secret is captured **once at create time** and persisted to `~/.<your-knot-app>.env` (mode 0600). Lose it → recreate the TSIG.
 3. Creates a CF peer (`POST /accounts/{aid}/secondary_dns/peers`) pointing at the Knot anycast v4, linked to that TSIG.
 4. `knotc conf-set` adds the TSIG, `remote[cloudflare]` (CF's transfer-out IP is `172.65.64.6@53`), an ACL for incoming NOTIFY, and registers the zone with `template: secondary` and `master: cloudflare`.
 5. `POST /zones/{zid}/secondary_dns/outgoing` links peer → zone, `/enable`, `/force_notify`.
@@ -354,7 +354,7 @@ What it does (idempotent on re-run):
 
 ### NOTIFY source IPs — the documented list is WRONG
 
-CF's docs list `104.30.167.163`, `104.30.167.173`, `2a09:bac0:1000:c47::/64` as post-Dec 2026 outbound NOTIFY sources. **Verified 2026-05-24 against `erfi.io`: actual NOTIFYs arrive from CF's full anycast ranges** (e.g. `104.22.242.42` in `104.16.0.0/13`) AND from `172.16.x.x` because Fly's edge proxy relays inbound TCP and rewrites the source IP.
+CF's docs list `104.30.167.163`, `104.30.167.173`, `2a09:bac0:1000:c47::/64` as post-Dec 2026 outbound NOTIFY sources. **Verified 2026-05-24 against `<your-zone>`: actual NOTIFYs arrive from CF's full anycast ranges** (e.g. `104.22.242.42` in `104.16.0.0/13`) AND from `172.16.x.x` because Fly's edge proxy relays inbound TCP and rewrites the source IP.
 
 Symptom: Knot logs `ACL, denied, action notify`. NOTIFY/IXFR silently fails. Zone falls behind CF until the next SOA-refresh-interval AXFR (~3h on CF's defaults).
 
@@ -380,12 +380,12 @@ When diffing zones during validation, **always use specific record types**:
 
 ```bash
 # Wrong:
-diff <(dig @169.155.56.21 ANY erfi.io +noall +answer) \
-     <(dig @1.1.1.1       ANY erfi.io +noall +answer)
+diff <(dig @<knot-anycast-ip> ANY <your-zone> +noall +answer) \
+     <(dig @1.1.1.1       ANY <your-zone> +noall +answer)
 # Right:
 for t in A AAAA MX TXT NS SOA CNAME CAA SRV; do
-    diff <(dig @169.155.56.21 $t erfi.io +noall +answer) \
-         <(dig @1.1.1.1       $t erfi.io +noall +answer)
+    diff <(dig @<knot-anycast-ip> $t <your-zone> +noall +answer) \
+         <(dig @1.1.1.1       $t <your-zone> +noall +answer)
 done
 ```
 
@@ -414,13 +414,13 @@ Reversible up to Phase C.
 ### Phase B — flip Knot to primary (reversible within the daemon)
 
 ```bash
-fly ssh console -a knot-fly-mvp -C "sh -c '
+fly ssh console -a <your-knot-app> -C "sh -c '
 knotc conf-begin
-knotc conf-set zone[erfi.io].template default
-knotc conf-unset zone[erfi.io].master
-knotc conf-unset zone[erfi.io].acl cf_axfr_in
-knotc conf-set zone[erfi.io].acl acme_update
-knotc conf-set zone[erfi.io].acl ddns_update
+knotc conf-set zone[<your-zone>].template default
+knotc conf-unset zone[<your-zone>].master
+knotc conf-unset zone[<your-zone>].acl cf_axfr_in
+knotc conf-set zone[<your-zone>].acl acme_update
+knotc conf-set zone[<your-zone>].acl ddns_update
 knotc conf-commit
 '"
 ```
@@ -431,14 +431,14 @@ Before committing, disable CF outgoing (`POST /zones/{zid}/secondary_dns/outgoin
 
 Two patterns at the registrar:
 
-- **In-bailiwick + glue** (used for `erfi.io`): NS = `ns1.<zone>` / `ns2.<zone>`, register A glue at the registrar pointing at Knot's anycast IPs. Zone itself must contain matching A records.
+- **In-bailiwick + glue** (used for `<your-zone>`): NS = `ns1.<zone>` / `ns2.<zone>`, register A glue at the registrar pointing at Knot's anycast IPs. Zone itself must contain matching A records.
 - **Out-of-bailiwick**: NS = names in a different zone you control. No glue at the parent.
 
 Soak the parent NS TTL (3600 s on `.io`, 86400 s on `.com` / `.dev` — the upper bound on how long old delegations linger in recursive caches; some caches hold longer).
 
 Once propagation is verified across multiple resolvers, decide CF's role: drop the zone entirely, or keep CF as a Knot-secondary by giving CF an AXFR-out TSIG against Knot.
 
-**Overlap vs full-swap**: the safe path is to add new NS alongside old, verify, then remove. The `erfi.io` migration on 2026-05-24 was full-swap in one Namecheap edit and worked — Knot was fully sync'd from CF before the flip, glue was pre-registered, and exposure was ~15 min until TLD propagated. For DNSSEC'd zones or high-traffic zones, do overlap.
+**Overlap vs full-swap**: the safe path is to add new NS alongside old, verify, then remove. The `<your-zone>` migration on 2026-05-24 was full-swap in one Namecheap edit and worked — Knot was fully sync'd from CF before the flip, glue was pre-registered, and exposure was ~15 min until TLD propagated. For DNSSEC'd zones or high-traffic zones, do overlap.
 
 ## Post-migration: Caddy `dns cloudflare` → `dns rfc2136`
 
@@ -448,23 +448,23 @@ Migration recipe per site block (can be done one at a time during the soak windo
 
 ```caddyfile
 # Before
-foo.erfi.io {
+foo.<your-zone> {
     import tls_config            # snippet using dns cloudflare {$CF_API_TOKEN}
     ...
 }
 
 # After
-foo.erfi.io {
+foo.<your-zone> {
     tls {
         issuer acme {
             dns rfc2136 {
                 key_name "caddy-acme."
                 key_alg  "hmac-sha256"
                 key      {$TSIG_CADDY_ACME}
-                server   "169.155.56.21:53"
+                server   "<knot-anycast-ip>:53"
             }
             propagation_delay 30s
-            resolvers 169.155.56.21
+            resolvers <knot-anycast-ip>
         }
     }
     ...
@@ -476,7 +476,7 @@ Caddy renews ~30 days before expiry. Don't put this off; force-renew at least on
 ### Force-renewal recipe (verified 2026-05-24, ~40 s end-to-end)
 
 ```bash
-HOST=caddy.erfi.io
+HOST=caddy.<your-zone>
 CERT_DIR=/mnt/cache/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/$HOST
 
 ssh servarr "openssl x509 -in $CERT_DIR/$HOST.crt -noout -dates"
@@ -507,15 +507,15 @@ When to skip:
 
 - Personal zones whose records are reachable only via HTTPS-with-CT. DNSSEC adds operational risk (key rollovers, DS coordination with the registrar) for limited additional safety.
 
-Multi-signer transitions (live DNSSEC'd zone moving between providers) is the genuinely-hard variant. `erfi.dev` and `erfianugrah.com` are still on CF DNSSEC for that reason. Plan an explicit multi-signer window: import the new signer's ZSK into the active zone, dual-signed propagation, swap DS at registrar, retire old signer's ZSK.
+Multi-signer transitions (live DNSSEC'd zone moving between providers) is the genuinely-hard variant. `<your-secondary-zone>` and `<your-tertiary-zone>` are still on CF DNSSEC for that reason. Plan an explicit multi-signer window: import the new signer's ZSK into the active zone, dual-signed propagation, swap DS at registrar, retire old signer's ZSK.
 
 ## Day-2 operations
 
 ```bash
 # from your dev box
-fly status --app knot-fly-mvp
-fly logs   --app knot-fly-mvp
-fly ssh console --app knot-fly-mvp                # interactive shell
+fly status --app <your-knot-app>
+fly logs   --app <your-knot-app>
+fly ssh console --app <your-knot-app>                # interactive shell
 
 # inside the machine
 knotc status                                       # daemon health
@@ -529,7 +529,7 @@ knotc zone-retransfer <zone>                       # force AXFR from primary (se
 # 1. generate new secret
 openssl rand -base64 32
 # 2. push as Fly secret (restarts machine; rendered knot.conf on volume is unchanged)
-fly secrets set --app knot-fly-mvp TSIG_CADDY_ACME='<new>'
+fly secrets set --app <your-knot-app> TSIG_CADDY_ACME='<new>'
 # 3. inside the machine
 knotc conf-begin
 knotc conf-set 'key[caddy-acme.].secret' '<new>'
@@ -541,17 +541,17 @@ knotc conf-commit
 
 ```bash
 # external auth resolution
-dig +short @169.155.56.21 SOA erfi.io
-dig +short SOA erfi.io @1.1.1.1                    # via public resolver (proves delegation)
+dig +short @<knot-anycast-ip> SOA <your-zone>
+dig +short SOA <your-zone> @1.1.1.1                    # via public resolver (proves delegation)
 
 # delegation state at TLD (use AUTHORITY section, +short returns empty)
-dig +noall +authority +additional @a0.nic.io erfi.io NS
+dig +noall +authority +additional @a0.nic.io <your-zone> NS
 
 # AXFR test (requires TSIG)
-kdig -y "hmac-sha256:axfr-out.:$TSIG_AXFR_OUT" +tcp @169.155.56.21 erfi.io AXFR
+kdig -y "hmac-sha256:axfr-out.:$TSIG_AXFR_OUT" +tcp @<knot-anycast-ip> <your-zone> AXFR
 
 # trace from root
-dig +trace SOA erfi.io
+dig +trace SOA <your-zone>
 ```
 
 ## Foot-guns — the running list
@@ -573,7 +573,7 @@ Distilled from `~/knot-fly/AGENTS.md`. Each is a real failure mode with a real f
 13. **`update-owner-match: sub-or-equal` does NOT match ACME challenges.** `_acme-challenge` is the leftmost label, not a parent. Use `pattern` with explicit per-depth entries (see ACL section above).
 14. **`caddy-dns/rfc2136` validates `key` at parse time.** Empty `{$TSIG_*}` crashes startup with `rfc2136: missing key`. Other CF / route53 providers defer; rfc2136 doesn't.
 15. **CF's documented NOTIFY source IPs are WRONG.** Use the full anycast list from `api.cloudflare.com/client/v4/ips` + Fly internal CIDRs. TSIG is the actual gate.
-16. **Adding a TSIG-driven Caddy site is a three-edit change** across `~/.knot-fly-mvp.env` (operator-only, 0600), `~/ergo/caddy-compose/.env` (SOPS), and the Caddyfile site block.
+16. **Adding a TSIG-driven Caddy site is a three-edit change** across `~/.<your-knot-app>.env` (operator-only, 0600), `~/ergo/caddy-compose/.env` (SOPS), and the Caddyfile site block.
 17. **`knotc conf-set` requires a two-step protocol for new identifiers.** Bare ID first, attributes second. Skipping yields `error: (invalid identifier)`.
 18. **`knotc zone-commit` semantic-check is NOT controlled by `semantic-checks: off`.** Some hard consistency rule always fires. Last-resort recovery: `zone-flush` → `zone-purge +journal +kaspdb +catalog +expired` → re-add zone → re-import records. Drops journal history.
 19. **`dig +short @<tld-ns> NS <zone>` returns EMPTY.** TLD delegation lives in AUTHORITY + ADDITIONAL, not ANSWER. Use `dig +noall +authority +additional`.

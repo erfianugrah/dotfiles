@@ -235,7 +235,7 @@ Decision: compose stack. Need: upstream image tag, Caddy domain.
 
 Ask one batched message:
 - "Image tag pin? (latest, or a specific version like `ghcr.io/karakeep-app/karakeep:0.20.0`?)"
-- "Caddy domain? (e.g. `karakeep.erfi.io`)"
+- "Caddy domain? (e.g. `<service>.<your-zone>`)"
 
 Read: `infrastructure-stack`, `composer`, `docker` (only if a wrap-Dockerfile is needed).
 
