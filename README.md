@@ -53,7 +53,7 @@ bin/
     opencode.json              # MCP servers (context7, gh-grep, whisper, comfyui, lora-train, research)
     plugins/output-rules.ts    # prepends AGENTS.md output rules to system prompt
     tools/docs.ts              # docs.erfi.io SSH tool (docs_search/read/grep/find/summary/sources)
-    skills/                    # 11 skills (see Coding-agents section)
+    skills/                    # 23 skills (see Coding-agents section)
 
 .pi/agent/                     # pi AI coding agent (sibling to opencode)
   APPEND_SYSTEM.md             # appended to system prompt: Commit/PR + Safety only
@@ -642,29 +642,76 @@ ast-grep for large edits, lockfile guards).
 
 ### Skills (`.config/opencode/skills/`)
 
+Harness audit 2026-05-25: superpowers methodology gates (using-superpowers,
+brainstorming, executing-plans, dispatching-parallel-agents,
+receiving-code-review, using-git-worktrees, test-driven-development,
+finishing-a-development-branch) renamed `SKILL.md.disabled` after the
+closed brainstorm → plan → execute loop was found to actively forbid handoff
+to the user's concrete-tech skills. Replaced by `scaffold-new-project`
+orchestrator + tightened descriptions on the survivors so they only fire
+on explicit invoke. See commit message of the audit refactor for full
+rationale.
+
+**Scaffolding + process** (the orchestrators):
+
 | Skill | Purpose |
 |---|---|
-| `superpowers` | obra/superpowers methodology (brainstorming → plans → TDD) |
-| `frontend-stack` | Scaffold Astro 6 / React (tsrouter) / Next.js with biome / shadcn v4 / Tailwind v4 / zod v4 / tanstack-form+query+router |
-| `design-utilitarian` | McMaster-Carr visual + interaction ethos for ANY web UI work (info density, tables over cards, no animation tax, two-color palette, no marketing prose in product surfaces) |
-| `software-architecture` | Backend/system design — bounded contexts, interface-driven deps, REST+WS surface, Postgres+Valkey persistence, slog+Prometheus observability |
+| `scaffold-new-project` | Triggers on "start / build / scaffold a new X" — routes to the relevant concrete-tech skills below, asks at most 3 batched questions, produces project skeleton + repo-level AGENTS.md cross-referencing user-level skills. **No design doc, no plan doc** — just code with conventions baked in |
+| `software-architecture` | Backend/system design — DDD bounded contexts, interface-driven deps, REST+WS surface with correlation IDs, Postgres+Valkey persistence (with the user's signature flat-single-binary go:embed full-stack Go pattern documented), slog+Prometheus observability |
+| `superpowers` (residual) | obra/superpowers — only `verification-before-completion` (always-on), `writing-plans`, `subagent-driven-development`, `systematic-debugging`, `requesting-code-review`, `writing-skills` survive (opt-in only). Conditional injection extension defaults to OFF; opt back in per-session via `SUPERPOWERS_ON=1` |
+
+**Frontend + UI**:
+
+| Skill | Purpose |
+|---|---|
+| `frontend-stack` | Astro 6 / React (tsrouter) / Next.js with biome / shadcn v4 / Tailwind v4 / zod v4 / tanstack-form+query+router — includes embedded-into-Go-binary Astro pattern for full-stack Go |
+| `design-utilitarian` | McMaster-Carr visual + interaction ethos for ANY web UI work — info density, tables over cards, no animation tax, two-color palette, no marketing prose in product surfaces |
+| `mermaid-d2` | Diagram language picker + render via `render_diagram` tool |
+| `favicons-and-icons` | SVG-first or ComfyUI-raster → `build_favicon_set` → full PWA favicon set |
+
+**Infrastructure + deploy**:
+
+| Skill | Purpose |
+|---|---|
 | `infrastructure-stack` | Self-hosted Docker Compose stacks — bridge networks + static IPs, expose-not-ports, host-mode Caddy, PUID/PGID, cross-stack shared networks |
+| `composer` | Self-hosted Docker Compose mgmt platform at composer.erfi.io — 106-endpoint REST API, auth, pipeline footguns, release workflow |
+| `docker` | Dockerfile authoring, buildx multi-arch + cache, image inspection, registry workflows, BuildKit cache mounts / secrets / SSH |
+| `fly` | Fly.io app lifecycle — deploy, secrets, certs, machines, volumes, scale + auto-stop, .internal DNS |
+| `terraform` | OpenTofu (preferred) / Terraform — module structure, state backends, SOPS+age secrets, `terraform import` + `cf-terraforming` for adopting existing resources |
+| `cloudflare` | CF API + wrangler + bulk Python automation — zones / DNS / rulesets / Workers / R2 / Pages / Zero Trust |
+| `knot-dns` | Self-hosted authoritative DNS — Knot 3.5 on Fly anycast, TSIG-keyed RFC 2136 ACME for Caddy, AXFR/IXFR primary↔secondary, the CF → Knot migration path with all the documented-IPs-are-wrong gotchas |
 | `ci-workflows` | GitHub + Gitea Actions YAML — verified-current action pins, language setup, Docker build+push, pages deploy |
-| `composer` | User's self-hosted Docker Compose mgmt platform at composer.erfi.io — 106-endpoint REST API, auth, pipeline footguns, release workflow |
+| `gh` | gh CLI ops: PR/issue/release lifecycle, Actions runs + cache, repo + auth, gh extensions — token-efficient `--json` + `--jq` patterns |
+| `gh-search` | Cross-repo GitHub code/issue/PR search via `gh` CLI |
+
+**Database + data**:
+
+| Skill | Purpose |
+|---|---|
 | `supabase` | All Supabase products (db, auth, edge fns, storage, realtime, ssr) |
 | `supabase-postgres-best-practices` | Postgres query/schema/index patterns from Supabase |
+
+**Local services + AI**:
+
+| Skill | Purpose |
+|---|---|
 | `research` | Multi-engine search + Playwright crawler + OSINT (SearXNG :8888, crawler :8889, OSINT :8890) |
-| `gh-search` | Public-GitHub code/issues/PRs via `gh` CLI |
 | `comfyui` | SDXL / Illustrious / Flux image generation via llm-compose proxy |
 | `lora-train` | LoRA fine-tuning for SDXL / Flux via kohya sd-scripts |
 | `whisper` | WhisperX audio/video transcription (YouTube, local files) |
-| `mermaid-d2` | Diagram language picker + render via `render_diagram` tool |
-| `favicons-and-icons` | SVG-first or ComfyUI-raster → `build_favicon_set` → full PWA favicon set |
+
+**Diagnostics**:
+
+| Skill | Purpose |
+|---|---|
+| `git-troubleshooting` | Diagnostic battery for `git mv` / `git add` / pathspec failures — gitignore-first hypothesis, the symptom → cause table, recovery patterns |
 
 `bin/superpowers-sync` keeps `superpowers/` synced from
 obra/superpowers upstream; see `.config/opencode/skills/superpowers/.sync.json`
 for the pinned ref/sha. Run `--status`, `--check`, `--ref <tag|sha>`,
-`--main`.
+`--main`. **Note**: the sync only refreshes upstream skills; it doesn't
+undo the `.disabled` renames from the audit — those are intentional
+local overrides.
 
 ### pi extensions (`.pi/agent/extensions/`)
 
@@ -679,6 +726,7 @@ DB access, session lifecycle hooks).
 | Extension | Provides |
 |---|---|
 | `docs.ts` (symlink) | docs.erfi.io SSH tools: `docs_search` / `read` / `grep` / `find` / `summary` / `sources` |
+| `bash-error-hints.ts` | Decorates bash tool results with one-line hints when stderr matches a known footgun (gitignore traps, pathspec mismatch, mv ENOENT, permission denied, Anthropic stream cutoff) — the agent sees actionable next-probe text appended to the error, no context cost when no pattern fires |
 | `exa.ts` | `websearch` + `codesearch` via mcp.exa.ai |
 | `webfetch.ts` | URL → markdown / text / html (5MB cap, Cloudflare retry) |
 | `web-research.ts` | Exa + auto-fetch top results + optional SearXNG cross-check; eliminates snippet-only reasoning |
