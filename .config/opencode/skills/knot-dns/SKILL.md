@@ -579,6 +579,7 @@ Distilled from `~/knot-fly/AGENTS.md`. Each is a real failure mode with a real f
 19. **`dig +short @<tld-ns> NS <zone>` returns EMPTY.** TLD delegation lives in AUTHORITY + ADDITIONAL, not ANSWER. Use `dig +noall +authority +additional`.
 20. **Post-migration: Caddy `dns cloudflare` sites under the migrated zone silently break at next renewal.** Migrate every site block to `dns rfc2136` within the soak window.
 21. **CF outgoing AXFR flattens CNAMEs to resolved A/AAAA at the edge.** Wire form differs from API logical view but answers identically. Compare by resolved content, not record type, when verifying sync.
+22. **`knotc zone-unset` / `zone-set` take the RELATIVE owner name, not the FQDN** — even though `zone-read` prints absolute form (`[erfi.io.] gloryhole.erfi.io. 300 CNAME ...`). Passing the FQDN fails with the misleading `error: (no such node in zone found) [zone] owner RTYPE`. The node IS there; the lookup key is wrong. Use `knotc zone-unset erfi.io gloryhole CNAME`, not `knotc zone-unset erfi.io gloryhole.erfi.io CNAME`. `@` is the apex. Note `zone-begin` doesn't validate names — the error only surfaces on the first `zone-set`/`zone-unset` inside the transaction. Abort with `knotc zone-abort <zone>` before retrying.
 
 ## Cost
 
