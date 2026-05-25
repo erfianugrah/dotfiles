@@ -59,6 +59,7 @@ Don't use `task` for: reading 1-3 known files, simple `grep`, work needing paren
 - Multi-file pattern rewrites (5+ files): `ast-grep --rewrite` for AST precision, `sd` for plain text. Single `edit` per file is the slow path.
 - Lockfiles (package-lock.json, pnpm-lock.yaml, Cargo.lock, poetry.lock): query with `jq` / `yq` / `rg`, NEVER full-read.
 - Probe before reading unknown files: `wc -l file` or `stat file`. >300 lines → `read` with `offset` / `limit`, not full-file.
+- **Batch diagnostics in one bash call.** When investigating a failure with multiple cheap probes (`git status` + `git ls-files` + `git check-ignore`; `ps` + `ss` + `journalctl`; `df` + `du` + `lsblk`), separate them with `;` or newlines in a single call. Three-round-trip sequential probing is the most common cause of "five-minute investigation that should have taken thirty seconds". For git-specific failures see the `git-troubleshooting` skill.
 
 ## CLI-wrapped pi tools (prefer over raw `bash`)
 
@@ -80,6 +81,14 @@ When a task will take >30s OR you want pi to keep working in parallel, use the b
 - **Read-only deep dive that must complete before continuing** → existing `task subagent_type="explore"` (blocks parent; cheaper than bg_task).
 - **Check on running / recent tasks** → `bg_list` (one line per task with kind glyph π/$, status, elapsed). `bg_status name=...` for details + last N lines of output.
 - **Anti-pattern**: a `bash` call with `sleep N` loops or `for i in $(seq 1 N); do ... done` that runs >30s — use `bg_bash` instead.
+- **Context-hygiene**: when a single session is interleaving 2+ unrelated problem domains (e.g. git reorganization + storage rebuild + DNS debugging), park one via `bg_task` or a `task` subagent. Thrashing both in shared context degrades attention on each.
+
+## Implementation discipline
+
+- **TDD where useful**: write tests before non-trivial business logic, complex algorithms, anything with multiple branches, or bug fixes (red test reproduces the bug, green test fixes it). Skip TDD for scaffolding, glue code, CLI plumbing, infra config, one-off scripts, prototypes you'll throw away. "No exceptions" TDD mandates fight pragmatism — the goal is correct code with appropriate test coverage, not ritual.
+- **Verification before completion**: never claim "done" / "fixed" / "passing" without running the verification command in the same turn and quoting the relevant output. Evidence before assertions. The `verification-before-completion` skill has the full checklist when invoked deliberately.
+- **Worktree cleanup**: only `git worktree remove` paths under `.worktrees/`, `worktrees/`, or `~/.config/superpowers/worktrees/`. `cd` to the main repo root before removing. Verify the path with `git worktree list` first. Never `rm -rf` a worktree directly — it leaves a stale entry in `.git/worktrees/` that confuses git.
+- **Scaffolding new projects**: when the user asks to start / scaffold / build a new project, invoke the `scaffold-new-project` skill rather than running an ad-hoc question loop. That skill orchestrates the relevant concrete-tech skills (`frontend-stack`, `infrastructure-stack`, `software-architecture`, `design-utilitarian`, `ci-workflows`) so user defaults are applied without re-asking.
 
 ## Documentation
 

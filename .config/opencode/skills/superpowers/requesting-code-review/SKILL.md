@@ -1,6 +1,6 @@
 ---
 name: requesting-code-review
-description: Use when completing tasks, implementing major features, or before merging to verify work meets requirements
+description: Use ONLY when the user explicitly asks for a pre-merge code review pass via reviewer subagent. Dispatches the reviewer with diff + plan context. For solo work the user prefers shipping without a per-PR review subagent.
 ---
 
 # Requesting Code Review

@@ -195,7 +195,7 @@ service-name/
 │   ├── <context1>/         Bounded context
 │   ├── <context2>/
 │   └── storage/            sqlc generated + pool helpers
-├── migrations/             Goose SQL files, embedded
+├── migrations/             Goose SQL files, embedded via //go:embed at process startup
 ├── deploy/                 docker-compose.yml, k8s manifests, Caddyfile snippet
 ├── docs/
 │   ├── DEVELOPING.md       Build/run/test for humans
@@ -205,6 +205,42 @@ service-name/
 ├── go.mod / go.sum
 └── Makefile                make build/test/run/lint
 ```
+
+### Full-stack Go (single binary, embedded frontend) — user's signature pattern
+
+When the frontend is co-shipped with the backend (one repo, one deployable, no
+separate web service), prefer the **flat single-binary** layout over a monorepo
+split. The frontend builds into `web/dist/` and is `//go:embed`ed by the Go
+binary, which serves both API and static assets from a single port. This is the
+shape the user defaults to for full-stack Go projects (see `~/bonkled/AGENTS.md`
+for the canonical example).
+
+```
+project-name/
+├── cmd/<binary>/main.go    Entry point
+├── internal/               Business code, bounded contexts
+│   ├── api/                HTTP/WS handlers
+│   ├── <context>/
+│   └── storage/
+├── migrations/             goose SQL files
+├── web/                    Astro/React frontend (its own package.json + bun.lock)
+│   ├── src/
+│   ├── dist/               build output (gitignored, populated by `bun run build`)
+│   └── package.json
+├── static.go               //go:embed all:web/dist — wires web/dist into http.FileServer
+├── deploy/                 compose.yaml, Caddy snippet
+├── Makefile                web-build → go build → docker (canonical chain)
+└── ...
+```
+
+When to deviate from flat:
+- Frontend and backend deploy independently (different SLAs, scale-out paths) → monorepo with `apps/web/` + `services/<svc>/`.
+- Frontend is in a different language stack (e.g. SvelteKit + Rust backend) where shared bun.lock makes no sense → monorepo.
+- Multiple frontends share a backend (web + mobile + desktop) → monorepo or split repos.
+- Otherwise, prefer flat. One container, one port, one TLS cert, one deploy step. The container image is smaller because there's no nginx layer, and ops-side debugging is easier because there's only one process to look at.
+
+`make web-build` runs `bun run build` in `web/`, then `go build` picks up the
+refreshed `web/dist/` via `//go:embed`. Pre-commit gate should run both.
 
 ### TypeScript service (Astro/Next/Hono backend)
 

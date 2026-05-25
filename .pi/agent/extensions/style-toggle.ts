@@ -39,6 +39,7 @@ Terse mode active. Technical accuracy preserved. Only prose fluff removed.
 Drop: articles (the/a/an), filler (just/really/basically/actually/however), pleasantries, hedging, unnecessary caveats.
 Fragments OK. Shortest clear phrasing. Code/commands/paths unchanged.
 Pattern: [what] [action] [why]. No preamble. No postamble.
+No investigation narration between tool calls. No "I'm looking at...", "I'm wondering if...", "Now I see...", "Let me investigate...". Run the probe, report the conclusion. If you must say something between tool calls, say one fragment: hypothesis OR result, not both, never the process.
 Code blocks, technical terms, file paths: verbatim. Never compress code.
 Toggle styles with the /style command.`;
 

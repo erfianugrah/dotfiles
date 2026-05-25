@@ -1,7 +1,22 @@
 /**
  * superpowers — conditional injection of obra/superpowers methodology.
  *
- * Two-tier system:
+ * **Disabled by default as of 2026-05-25 audit.** The methodology gates
+ * (using-superpowers' "1% chance → MUST invoke" enforcer, brainstorming's
+ * HARD-GATE on every creative task, the brainstorm → plan → execute closed
+ * loop that explicitly forbids handoff to concrete-tech skills) fight
+ * the user's stated workflow: concise system prompt + concrete-tech skills
+ * (frontend-stack, infrastructure-stack, software-architecture,
+ * design-utilitarian, etc.) orchestrated by a thin scaffold-new-project
+ * skill. The 8 worst-offender SKILL.md files have been renamed to
+ * .disabled; the survivors (writing-plans, subagent-driven-development,
+ * systematic-debugging, writing-skills, requesting-code-review,
+ * verification-before-completion) had their auto-fire descriptions
+ * tightened so they only trigger on explicit user request.
+ *
+ * Re-enable per-session by exporting SUPERPOWERS_ON=1.
+ *
+ * Two-tier system (only relevant when SUPERPOWERS_ON=1):
  *
  *   FULL     — inject the using-superpowers bootstrap + tool mapping
  *              (~1.4k tokens with the slim variant). Pi prompt-cache
@@ -31,8 +46,9 @@
  *   7. Otherwise                               → skip
  *
  * Controls (env):
- *   SUPERPOWERS_OFF=1             disable entirely
- *   SUPERPOWERS_MINIMAL=1         inject the 250-token essentials only
+ *   SUPERPOWERS_ON=1              re-enable the extension (default: off)
+ *   SUPERPOWERS_OFF=1             legacy explicit-disable (no-op while default is off)
+ *   SUPERPOWERS_MINIMAL=1         inject the 250-token essentials only (when ON=1)
  *   SUPERPOWERS_BOOTSTRAP=<path>  override using-superpowers SKILL.md path
  *   SUPERPOWERS_INTENT=<regex>    override the intent regex (advanced)
  *
@@ -250,6 +266,9 @@ function firstUserText(messages: PiMessage[]): string | undefined {
 // ── extension entry ───────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+  // Disabled by default as of 2026-05-25 audit — see header comment.
+  // Opt back in with SUPERPOWERS_ON=1.
+  if (process.env.SUPERPOWERS_ON !== "1") return;
   if (process.env.SUPERPOWERS_OFF === "1") return;
 
   // Optional regex override from env

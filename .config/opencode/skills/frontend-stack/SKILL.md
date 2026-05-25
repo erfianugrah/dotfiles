@@ -140,6 +140,25 @@ export default defineConfig({
 
 Then the **Common foundation steps** above (`shadcn init -t astro`, etc.).
 
+#### Embedded into a Go binary (full-stack Go signature pattern)
+
+When the frontend is shipped inside a Go binary via `//go:embed` (the user's
+default for full-stack Go projects — see `~/bonkled/` and the
+`software-architecture` skill's "Full-stack Go" layout), Astro is doubly
+natural: `astro build` produces a static `dist/` directory that
+`//go:embed all:web/dist` wraps directly into the Go binary, served by
+`http.FileServer(http.FS(...))`. No nginx layer, no separate frontend container.
+
+Layout: `web/` lives at the repo root next to `cmd/` and `internal/`; `web/dist/`
+is gitignored and rebuilt by `make web-build` before `go build`. The Astro
+config stays the same as above; the only Astro-side concern is that any
+client-side routing must be SPA-mode (`output: 'static'`) so deep links resolve
+on page refresh — the Go static handler serves `index.html` as the fallback.
+
+Default to this shape for full-stack Go projects unless the frontend has
+independent deploy needs (different cache TTLs, separate scale-out, multiple
+frontends sharing one backend).
+
 ### React SPA via create-tsrouter-app
 
 This bundles router + tailwind + shadcn + tanstack-query in one command:
