@@ -61,12 +61,24 @@ export default function (pi: ExtensionAPI) {
     const messages = (event as { messages: PiMessage[] }).messages;
     if (!messages?.length) return undefined;
 
-    // Pi exposes ctx.model when a model is selected.
-    const model = (ctx as { model?: { id?: string; provider?: string } }).model;
-    if (!model) return undefined;
-
-    const provider = model.provider ?? "";
-    const modelId = model.id ?? "";
+    // Pi exposes ctx.model as a getter that calls into the active session.
+    // After a session reload (/reload, /resume, switchSession, fork) the
+    // ctx captured by pi's event dispatcher can be stale, and accessing
+    // .model throws an `assertActive` error
+    // (see opencode-fork ctx lifecycle: a getter on the captured ctx may
+    // outlive the session it was captured against). Guard the access so
+    // a stale-ctx call doesn't crash the extension — we just skip the
+    // injection on this turn; the next event call gets a fresh ctx.
+    let provider = "";
+    let modelId = "";
+    try {
+      const model = (ctx as { model?: { id?: string; provider?: string } }).model;
+      if (!model) return undefined;
+      provider = model.provider ?? "";
+      modelId = model.id ?? "";
+    } catch {
+      return undefined;
+    }
 
     if (!shouldApply(provider, modelId)) return undefined;
 
