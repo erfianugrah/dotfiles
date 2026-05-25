@@ -1,6 +1,6 @@
 ---
 name: subagent-driven-development
-description: Use when executing implementation plans with independent tasks in the current session
+description: Use ONLY when explicitly dispatching a large multi-task plan that benefits from per-task subagent isolation plus code-review subagents. Heavyweight workflow (3 subagents per task). Do not auto-fire — user invokes deliberately when the plan size justifies the orchestration.
 ---
 
 # Subagent-Driven Development

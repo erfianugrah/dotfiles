@@ -1,6 +1,6 @@
 ---
 name: writing-plans
-description: Use when you have a spec or requirements for a multi-step task, before touching code
+description: Use ONLY when the user explicitly asks for a written implementation plan or design document. Produces docs/plans/YYYY-MM-DD-X.md with per-file TDD checkpoints. Heavy artifact — do not auto-fire on every multi-step task; the user usually prefers to dive in directly.
 ---
 
 # Writing Plans

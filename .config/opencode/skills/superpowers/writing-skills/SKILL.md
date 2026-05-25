@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: Use when creating new skills, editing existing skills, or verifying skills work before deployment
+description: Use when creating a new SKILL.md or making substantial structural edits to an existing one. Reference for skill authoring conventions, frontmatter format, description-trigger calibration, and pressure-testing skills with subagents. Do not auto-fire on minor description tweaks.
 ---
 
 # Writing Skills

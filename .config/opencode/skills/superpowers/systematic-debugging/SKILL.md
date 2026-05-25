@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
+description: Use AFTER an initial fix attempt has failed, or when investigating a recurring/intermittent bug whose root cause is not obvious from the error message. Adds 4-phase root-cause investigation discipline. For straightforward errors, prefer the AGENTS.md batch-diagnostic rule or the git-troubleshooting skill first.
 ---
 
 # Systematic Debugging
