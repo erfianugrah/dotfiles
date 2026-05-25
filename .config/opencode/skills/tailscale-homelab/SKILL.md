@@ -132,10 +132,17 @@ The user's tailnet uses **Grants** (newer ACL syntax). The relevant ACL idioms:
 
 ## Failure-mode diagnostic order
 
-When `ssh <alias>` fails, work cheapest probes first:
+**WSL caveat (read first):** the user's primary workstation is **WSL2 on Windows**. Tailscale runs on the **Windows host**, not inside WSL. Consequences:
+
+- `tailscale` CLI is **not installed in WSL** — `which tailscale` returns nothing. Don't conclude "tailscale is down".
+- `ping 100.x.y.z` to tailnet IPs **fails from WSL** — ICMP doesn't traverse the Windows→WSL NAT cleanly. Don't conclude "peer offline".
+- `ssh <alias>` **works fine** because WSL inherits Windows DNS + routes packets via the Windows TCP stack, which knows the tailnet. **The first probe when something looks down should be `ssh <alias> true`, not ping.**
+- If you genuinely need the tailscale CLI from WSL: `'/mnt/c/Program Files/Tailscale/tailscale.exe' status`. Use sparingly — most diagnostics are easier done by ssh'ing into a real tailnet member and running `tailscale` there.
+
+When `ssh <alias>` itself fails, work cheapest probes first:
 
 1. **Alias mapped?** `grep -A2 "Host $HOST" ~/.ssh/config`. If absent, use `<host>.<your-tailnet>.ts.net` directly or add a Host block.
-2. **Tailscale up locally?** `tailscale status` — if it says `Tailscale is stopped`, that's the problem. `sudo tailscale up`.
+2. **Tailscale up locally?** `tailscale status` — if it says `Tailscale is stopped`, that's the problem. `sudo tailscale up`. (On WSL: check Windows-side via `'/mnt/c/Program Files/Tailscale/tailscale.exe' status` instead.)
 3. **Peer online?** `tailscale status | grep $HOST` — `offline` means the peer is down. `idle` is fine. `-` (no last-seen) = never connected.
 4. **MagicDNS resolving?** `tailscale ip -4 $HOST` should return a `100.x` IP. If not, MagicDNS is off — use the LAN `10.0.x.y` IP directly.
 5. **Wrong key offered?** `ssh -v $HOST 2>&1 | grep -E 'Offering|Authentications'`. `IdentitiesOnly yes` means only the pinned key is offered. Fix the `Host` block; don't `ssh-add` more keys.
@@ -156,6 +163,7 @@ Order matters: 1-2 are local, 3-4 are tailnet API, 5-6 require touching the remo
 6. **DERP-relay use is a red flag for direct-connection failure**. `tailscale ping` reports `via DERP` instead of `via 100.x.y.z:port`. Diagnose with `tailscale netcheck` — usually a strict-NAT or firewall issue at one end.
 7. **Quarantined nodes (shared from other tailnets, including Mullvad exit nodes) cannot establish inbound connections.** Use `autogroup:danger-all` cautiously — it includes them.
 8. **Pre-auth keys (`tskey-auth-*`) are scoped + expiring** — generate per-fleet in the admin console with appropriate tags. Don't bake long-lived keys into images.
+9. **WSL `ping` / `tailscale` CLI both fail → not a tailnet outage**. WSL has no tailscaled and ICMP-to-100.x doesn't survive the Windows NAT. The authoritative liveness probe from WSL is `ssh <alias> true`; if that succeeds the tailnet is fine even though `ping` and the (non-existent) local `tailscale` CLI both fail.
 
 ## Cross-references
 
