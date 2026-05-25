@@ -82,6 +82,12 @@ const DRILL_IN_TOOLS = new Set([
 ]);
 const LOOP_THRESHOLD = 3;
 
+// Bedrock / certain Claude proxies return generic 500s once the tool-use
+// input crosses ~80-100 KB. Set the guard 5 KB below the conservative
+// floor so even a chatty surrounding turn stays under. Calibrated to the
+// same numbers used inside write-stream.ts.
+const WRITE_TOO_LARGE_BYTES = 75_000;
+
 type LoopState = {
   recentSearches: Array<{ tool: string; ts: number }>;
   lastDrillInTs: number;
@@ -451,13 +457,41 @@ export default function (pi: ExtensionAPI) {
 
     // write / edit on protected paths
     if (event.toolName === "write" || event.toolName === "edit") {
-      const input = event.input as { path?: string; file_path?: string };
+      const input = event.input as {
+        path?: string;
+        file_path?: string;
+        content?: string;
+      };
       const filePath = input.path ?? input.file_path;
       if (typeof filePath !== "string") return undefined;
       for (const rule of WRITE_RULES) {
         if (DISABLED.has(rule.id)) continue;
         if (rule.pattern.test(filePath)) {
           return { block: true, reason: `tool-guard[${rule.id}]: ${rule.reason}` };
+        }
+      }
+
+      // write_too_large — Bedrock and certain Claude proxies 500 on tool-use
+      // inputs above ~80-100 KB. The standard `write` tool packs the entire
+      // file content into a single tool-call argument, so big-file writes
+      // silently fail upstream and pi's relay swallows the error. Redirect
+      // to write_stream which is designed for this case.
+      if (
+        event.toolName === "write" &&
+        !DISABLED.has("write_too_large") &&
+        typeof input.content === "string"
+      ) {
+        const bytes = Buffer.byteLength(input.content, "utf-8");
+        if (bytes > WRITE_TOO_LARGE_BYTES) {
+          const kb = (bytes / 1024).toFixed(1);
+          return {
+            block: true,
+            reason:
+              `tool-guard[write_too_large]: write content is ${kb} KB — above the ${WRITE_TOO_LARGE_BYTES / 1024} KB ceiling where ` +
+              `the upstream tool-call-input path 500s (silently, in pi's relay). ` +
+              `Use the \`write_stream\` tool instead: send the content in chunks of ≤60 KB with ` +
+              `chunk='first' → 'middle' (repeat) → 'last'. Same atomicity as write, no upstream 500.`,
+          };
         }
       }
       return undefined;
