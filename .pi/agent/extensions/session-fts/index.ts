@@ -95,6 +95,12 @@ function ensureWorker(onMessage: (msg: WorkerMessage) => void): Worker {
     workerBusy = false;
     // Don't kill the worker on transient errors — let the next request retry
   };
+  // Don't keep the parent process alive for this worker. Indexer state
+  // lives in SQLite (WAL mode — safe against unclean exit), so on /quit pi
+  // can exit immediately even if the worker is mid-batch. Without unref,
+  // a 4 GB FTS5 DB mid-INSERT can stall shutdown for several seconds while
+  // Bun waits for synchronous native code to return.
+  try { (worker as unknown as { unref?: () => void }).unref?.(); } catch { /* ignore */ }
   return worker;
 }
 
@@ -259,9 +265,17 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
+    // Fire-and-forget shutdown. The worker is unref'd at creation, so the
+    // parent process is free to exit regardless of whether the worker has
+    // actually stopped. We still send `shutdown` (best effort, lets the
+    // worker close its DB cleanly if idle) and `terminate()` (returns a
+    // Promise we deliberately don't await — awaiting blocks process exit
+    // until the worker's current synchronous SQLite call returns, which
+    // on a multi-GB FTS5 index can take several seconds). WAL mode means
+    // an abrupt worker stop is recoverable on next start.
     if (worker) {
       try { worker.postMessage({ cmd: "shutdown" }); } catch { /* ignore */ }
-      try { worker.terminate(); } catch { /* ignore */ }
+      try { void worker.terminate(); } catch { /* ignore */ }
       worker = null;
     }
     if (readDb) {
