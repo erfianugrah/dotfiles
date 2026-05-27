@@ -19,8 +19,11 @@
  *      messages — safe to mutate, returns to all subsequent handlers).
  *   2. Walk messages from newest → oldest.
  *   3. For each `toolResult` message, byte-count its text content.
- *      - If cumulative ≤ PROTECT_BYTES: keep verbatim, accumulate.
- *      - If cumulative >  PROTECT_BYTES: replace content with a short marker.
+ *      - The NEWEST non-pruned result is ALWAYS kept verbatim, even if
+ *        its size alone exceeds PROTECT_BYTES. Bytes don't count toward
+ *        cumulative — see rationale on `prune()` below.
+ *      - For older results: if cumulative + size ≤ PROTECT_BYTES, keep
+ *        verbatim and accumulate. Otherwise replace with marker.
  *   4. Skip already-pruned messages (idempotent — important because `context`
  *      fires every turn on the same prefix).
  *   5. Skip protected tool names (PROTECTED_TOOLS) — for skill outputs etc.
@@ -78,7 +81,7 @@ const PRUNED_MARKER = "[tool-output-prune] ";
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
-type AnyMessage = {
+export type AnyMessage = {
   role?: string;
   content?: unknown;
   toolCallId?: string;
@@ -140,6 +143,83 @@ function buildMarker(msg: AnyMessage, originalBytes: number): TextPart {
   };
 }
 
+// ── core prune algorithm (pure, testable) ─────────────────────────────────
+
+export interface PruneStats {
+  prunedCount: number;
+  reclaimedBytes: number;
+  /** True if at least one tool result existed and was protected as newest. */
+  keptNewest: boolean;
+}
+
+export interface PruneOptions {
+  protectBytes?: number;
+  protectedTools?: Set<string>;
+}
+
+/**
+ * Mutate `messages` in place: replace older tool-result content with a
+ * short marker once the cumulative byte budget is exceeded. Returns stats.
+ *
+ * Rules (iterating newest → oldest):
+ *   1. Skip non-toolResult, protected-tool, already-pruned, empty messages.
+ *   2. The FIRST non-skipped tool result is ALWAYS kept verbatim, even if
+ *      bigger than the protect window. The model just requested it.
+ *      Its bytes are NOT charged to `cumulative` — the window protects
+ *      OLDER results from the newest's bulk, not from itself.
+ *   3. Subsequent results that fit (cumulative + size ≤ protect): kept.
+ *   4. Otherwise: content replaced with a marker text part.
+ *
+ * Why rule 2 exists: a single image `read` returns ~200KB (a 148KB PNG
+ * gets wrapped as a base64 envelope). Without this exception that read
+ * gets pruned on the SAME turn it was issued, because cumulative(0) +
+ * size(200KB) already exceeds the 160KB protect window. The agent then
+ * can't see what it just asked for, falls back to compressing + re-reading,
+ * and the new read gets pruned the same way — the manual `magick` dance
+ * the user originally complained about. clipboard-image-shrink papered
+ * over this by making most pastes small enough to fit, but the underlying
+ * algorithm bug bit any read larger than the protect window.
+ */
+export function prune(
+  messages: AnyMessage[],
+  opts: PruneOptions = {},
+): PruneStats {
+  const protectBytes = opts.protectBytes ?? PROTECT_BYTES;
+  const protectedTools = opts.protectedTools ?? PROTECTED_TOOLS;
+
+  let cumulative = 0;
+  let prunedCount = 0;
+  let reclaimedBytes = 0;
+  let keptNewest = false;
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m || m.role !== "toolResult") continue;
+    if (m.toolName && protectedTools.has(m.toolName)) continue;
+    if (alreadyPruned(m)) continue;
+
+    const size = bytesOfContent(m.content);
+    if (size === 0) continue;
+
+    // Rule 2: newest non-pruned result is always protected. Bytes not counted.
+    if (!keptNewest) {
+      keptNewest = true;
+      continue;
+    }
+
+    if (cumulative + size <= protectBytes) {
+      cumulative += size;
+      continue;
+    }
+
+    reclaimedBytes += size;
+    prunedCount += 1;
+    m.content = [buildMarker(m, size)];
+  }
+
+  return { prunedCount, reclaimedBytes, keptNewest };
+}
+
 // ── extension ─────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
@@ -149,43 +229,12 @@ export default function (pi: ExtensionAPI) {
     const messages = (event as { messages?: AnyMessage[] }).messages;
     if (!Array.isArray(messages) || messages.length === 0) return;
 
-    let cumulative = 0;
-    let prunedCount = 0;
-    let reclaimedBytes = 0;
+    const { prunedCount, reclaimedBytes } = prune(messages);
 
-    // Walk newest → oldest. The first PROTECT_BYTES of tool-result content
-    // we encounter are kept verbatim; everything older gets the marker.
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (!m || m.role !== "toolResult") continue;
-      if (m.toolName && PROTECTED_TOOLS.has(m.toolName)) continue;
-      if (alreadyPruned(m)) continue;
-
-      const size = bytesOfContent(m.content);
-      if (size === 0) continue;
-
-      if (cumulative + size <= PROTECT_BYTES) {
-        cumulative += size;
-        continue;
-      }
-
-      // Beyond the protect window — replace.
-      reclaimedBytes += size;
-      prunedCount += 1;
-      m.content = [buildMarker(m, size)];
-    }
-
-    // Don't bother emitting an update if reclaim is below the floor.
-    // Note: even though we already mutated `messages` in place, returning
-    // undefined still propagates our changes (pi's docs say messages are a
-    // "deep copy, safe to modify"). To be safe and explicit, we always
-    // return when we did anything.
-    if (reclaimedBytes < PRUNE_MIN_BYTES) {
-      // Roll back our mutations? No — they're already applied to the deep
-      // copy and don't affect the on-disk session. The pruning is harmless
-      // at small scales; just don't notify.
-      return;
-    }
+    // Reclaim floor: stay silent on small reclaims to avoid notification
+    // churn. Mutations are already applied to the deep-copy messages
+    // array; nothing to roll back.
+    if (reclaimedBytes < PRUNE_MIN_BYTES) return;
 
     if (VERBOSE && ctx.hasUI) {
       const human =

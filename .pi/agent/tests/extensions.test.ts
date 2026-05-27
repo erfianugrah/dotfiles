@@ -39,6 +39,7 @@ import { _internals as osint } from "../extensions/osint.ts";
 import { safePath } from "../extensions/docs.ts";
 import { extractCdTargets, decideTarget } from "../extensions/cd-agents-reload.ts";
 import { rewriteClipboardPaths, shrunkSibling } from "../extensions/clipboard-image-shrink.ts";
+import { prune, type AnyMessage } from "../extensions/tool-output-prune.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -2065,6 +2066,135 @@ describe("clipboard-image-shrink.rewriteClipboardPaths", () => {
     );
     const { decisions } = rewriteClipboardPaths(txt, null);
     expect(decisions).toHaveLength(5);
+  });
+});
+
+// ── tool-output-prune: pure algorithm ──────────────────────────────
+
+/** Build a fake toolResult message with `size` bytes of text content. */
+function toolResult(toolName: string, size: number, callId = "call_x"): AnyMessage {
+  return {
+    role: "toolResult",
+    toolName,
+    toolCallId: callId,
+    content: [{ type: "text", text: "x".repeat(size) }],
+  };
+}
+
+function firstTextPart(m: AnyMessage): string {
+  if (!Array.isArray(m.content)) return "";
+  const p = m.content[0] as { type?: string; text?: string };
+  return p?.type === "text" ? p.text ?? "" : "";
+}
+
+describe("tool-output-prune.prune", () => {
+  test("empty messages array → no-op", () => {
+    const stats = prune([]);
+    expect(stats).toEqual({ prunedCount: 0, reclaimedBytes: 0, keptNewest: false });
+  });
+
+  test("single tool result is ALWAYS kept, even when >protectBytes (the regression fix)", () => {
+    // 200KB single result, protect window 160KB. Old algorithm would prune.
+    const msgs: AnyMessage[] = [toolResult("read", 200_000)];
+    const before = firstTextPart(msgs[0]);
+    const stats = prune(msgs, { protectBytes: 160_000 });
+    expect(stats.prunedCount).toBe(0);
+    expect(stats.reclaimedBytes).toBe(0);
+    expect(stats.keptNewest).toBe(true);
+    expect(firstTextPart(msgs[0])).toBe(before); // unchanged
+  });
+
+  test("newest result protected, older results pruned when over budget", () => {
+    // Newest (last in array) is 200KB; older 100KB pushes cumulative over
+    // the 160KB window once the newest is protected (newest doesn't count).
+    // After protecting newest: cumulative=0, then older 100KB → fits (cum=100K).
+    // Add ANOTHER 100KB older: 100K+100K=200K > 160K → pruned.
+    const msgs: AnyMessage[] = [
+      toolResult("bash", 100_000, "old1"),  // oldest
+      toolResult("bash", 100_000, "old2"),
+      toolResult("read", 200_000, "newest"), // newest
+    ];
+    const stats = prune(msgs, { protectBytes: 160_000 });
+    expect(stats.keptNewest).toBe(true);
+    expect(stats.prunedCount).toBe(1);
+    expect(firstTextPart(msgs[2])).toBe("x".repeat(200_000)); // newest untouched
+    expect(firstTextPart(msgs[1])).toBe("x".repeat(100_000)); // 2nd-newest fits
+    expect(firstTextPart(msgs[0])).toMatch(/\[tool-output-prune\] bash/); // oldest pruned
+  });
+
+  test("protected tool names skipped entirely, don't consume newest slot", () => {
+    // `memory` is in PROTECTED_TOOLS — it should be skipped in the iteration,
+    // so the newest non-protected result still counts as `keptNewest`.
+    const msgs: AnyMessage[] = [
+      toolResult("bash", 50_000, "big-old"),
+      toolResult("bash", 200_000, "big-newer"),
+      toolResult("memory", 500_000, "newest-but-protected"),
+    ];
+    const stats = prune(msgs, { protectBytes: 100_000 });
+    // memory message untouched (protected by name)
+    expect(firstTextPart(msgs[2])).toBe("x".repeat(500_000));
+    // the bash 200KB result IS the newest non-protected → kept
+    expect(firstTextPart(msgs[1])).toBe("x".repeat(200_000));
+    // the bash 50KB result is older; cumulative(0)+50K=50K ≤ 100K → kept
+    expect(firstTextPart(msgs[0])).toBe("x".repeat(50_000));
+    expect(stats.keptNewest).toBe(true);
+    expect(stats.prunedCount).toBe(0);
+  });
+
+  test("already-pruned messages are idempotent (no double-prune)", () => {
+    const alreadyPrunedMarker: AnyMessage = {
+      role: "toolResult",
+      toolName: "bash",
+      toolCallId: "old",
+      content: [{ type: "text", text: "[tool-output-prune] bash — 50KB of output pruned" }],
+    };
+    const msgs: AnyMessage[] = [
+      alreadyPrunedMarker,
+      toolResult("read", 50_000, "newest"),
+    ];
+    const stats = prune(msgs, { protectBytes: 10_000 });
+    expect(stats.prunedCount).toBe(0);
+    expect(stats.keptNewest).toBe(true);
+    // already-pruned msg unchanged
+    expect(firstTextPart(msgs[0])).toMatch(/^\[tool-output-prune\]/);
+  });
+
+  test("empty content / non-toolResult messages skipped", () => {
+    const msgs: AnyMessage[] = [
+      { role: "user", content: "hello" },
+      { role: "toolResult", toolName: "bash", content: [] },
+      toolResult("read", 200_000, "newest"),
+    ];
+    const stats = prune(msgs, { protectBytes: 1000 });
+    expect(stats.keptNewest).toBe(true);
+    expect(stats.prunedCount).toBe(0); // nothing eligible to prune
+  });
+
+  test("custom protectBytes honored", () => {
+    const msgs: AnyMessage[] = [
+      toolResult("bash", 5_000, "old1"),
+      toolResult("bash", 5_000, "old2"),
+      toolResult("bash", 5_000, "old3"),
+      toolResult("read", 100_000, "newest"),
+    ];
+    // Tight 8KB window: newest protected (free), then 5K fits (cum=5K),
+    // then 5K → cum 10K > 8K → pruned, then 5K → same fate.
+    const stats = prune(msgs, { protectBytes: 8_000 });
+    expect(stats.keptNewest).toBe(true);
+    expect(stats.prunedCount).toBe(2);
+    expect(firstTextPart(msgs[3])).toBe("x".repeat(100_000));
+    expect(firstTextPart(msgs[2])).toBe("x".repeat(5_000));
+    expect(firstTextPart(msgs[1])).toMatch(/\[tool-output-prune\]/);
+    expect(firstTextPart(msgs[0])).toMatch(/\[tool-output-prune\]/);
+  });
+
+  test("keptNewest=false when no tool results exist", () => {
+    const msgs: AnyMessage[] = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    ];
+    const stats = prune(msgs);
+    expect(stats.keptNewest).toBe(false);
   });
 });
 
