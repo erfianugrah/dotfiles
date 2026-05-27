@@ -53,7 +53,7 @@ the loader without deleting it.
 | `task.ts` | Spawn a `pi -p` subagent in isolated context. `explore` preset boots minimal (`--no-extensions --no-skills --no-prompt-templates` + `-e docs.ts`) for cheap read-only deep-dives. |
 | `todowrite.ts` | TodoWrite tool surface; persists per-session JSON + status indicator. |
 | `web-research.ts` | Exa search + auto-fetch top pages with Playwright fallback. Modes: default / local / fresh / crosscheck. |
-| `webfetch.ts` | Fetch URL → markdown/text/html (5MB cap). Auto-escalates to crawler `:8889/fetch` with `force_js:true` on SPA-shell responses (<500 visible chars). |
+| `webfetch.ts` | Fetch URL → markdown/text/html (5MB cap). Auto-escalates to crawler `:8889/extract` with `force_js:true` on SPA-shell responses (<500 visible chars). |
 
 ### CLI-wrapping tool extensions (token-efficient JSON output)
 

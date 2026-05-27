@@ -7,6 +7,15 @@ description: Drive the user's self-hosted Docker Compose management platform (re
 
 Self-hosted compose-mgmt platform. Go + Astro. REST API only — no end-user CLI. Repo: `/home/erfi/composer`. Daemon: single Go binary `composerd`. Frontend: Astro 6 + React 19 + Tailwind 4 + shadcn (embedded via `static.go`).
 
+## When this skill does NOT apply
+
+Composer manages a single set of stacks on the **servarr** host. It does NOT see:
+- Local dev compose stacks (`~/llm-compose/`, `~/composer/deploy/`, `~/knot-fly/`, any compose file the user is editing on the dev box).
+- Stacks on other servers the user hasn't onboarded.
+- Anything reached via plain `docker ...` on the dev machine.
+
+For local stacks, use `docker compose -f <path> {logs,ps,restart}` directly. Don't reach for the composer API just because the word "compose" appears — verify the target host first (`docker context show`, or check whether the container name appears in `curl $COMPOSER/api/v1/services | jq -r '.[].name'`).
+
 ## Hard safety rules
 
 - **NEVER run `./composerd` or `go run ./cmd/composerd/` on the dev machine.** Startup hook AES-256-GCM encrypts every key under `$HOME/.ssh` using a key stored in `COMPOSER_DATA_DIR`. Default `COMPOSER_DATA_DIR=/tmp` → reboot loses the key → SSH keys unrecoverable. Use `go test`, `make test-unit`, or `docker compose -f deploy/compose.yaml up` (isolated `/home/composer/.ssh`). `cmd/decryptssh/` exists for emergency recovery.

@@ -20,6 +20,26 @@ canonical Python client; this skill documents the underlying HTTP API.
 
 URLs configurable: `SEARXNG_URL`, `CRAWLER_URL`, `OSINT_URL`.
 
+### Public endpoints (default for off-box callers)
+
+Production stack runs on `servarr` and is fronted by Caddy at three
+subdomains, gated by `Authorization: Bearer $RESEARCH_TOKEN`:
+
+| Service | Public URL                |
+|---------|---------------------------|
+| SearXNG | `https://searxng.erfi.io` |
+| Crawler | `https://crawler.erfi.io` |
+| OSINT   | `https://osint.erfi.io`   |
+
+`RESEARCH_TOKEN` is loaded into the user's shell from Bitwarden
+(`~/dotfiles/functions.d/bitwarden.zsh`), so pi / opencode inherit it.
+From any dev box (incl. WSL) prefer the public URL + bearer over
+`ssh servarr 'curl localhost:888x ...'`. Local dev against the dockerised
+stack still works — override `*_URL` to `http://localhost:888x` and unset
+`RESEARCH_TOKEN`. The pi `web_research` / `webfetch` extensions and the
+opencode `research` MCP server already default to the public URLs and
+attach the bearer when `RESEARCH_TOKEN` is set.
+
 ## Search (SearXNG)
 
 ```bash
@@ -36,19 +56,23 @@ SearXNG result shape: `{ results: [ {title, url, content, engine}, ... ] }`.
 
 ## Fetch clean content
 
+Endpoint is `POST /extract`; response field is `markdown`.
+
 ```bash
 # Boilerplate-stripped markdown (default)
-curl -s -X POST http://localhost:8889/fetch \
+curl -s -X POST http://localhost:8889/extract \
   -H 'content-type: application/json' \
-  -d '{"url":"https://example.com","max_chars":8000}' | jq -r .content
+  -d '{"url":"https://example.com","max_chars":8000}' | jq -r .markdown
 
 # Force Playwright (JS-rendered SPAs)
-curl -s -X POST http://localhost:8889/fetch \
+curl -s -X POST http://localhost:8889/extract \
   -H 'content-type: application/json' \
   -d '{"url":"https://example.com","force_js":true,"timeout":30}' | jq
 
-# Raw HTML (debug only — prefer /fetch for normal use)
-curl -s "http://localhost:8889/fetch/raw?url=https://example.com"
+# Raw HTML (debug only — prefer /extract for normal use)
+curl -s -X POST http://localhost:8889/raw \
+  -H 'content-type: application/json' \
+  -d '{"url":"https://example.com","timeout":10}' | jq -r .html
 ```
 
 Cap is `max_chars` (default 8000, max 64000). Trafilatura is fast path;
@@ -58,12 +82,12 @@ Playwright fallback for JS-heavy pages.
 
 ```bash
 # Summary (top 15 subdomains, fast)
-curl -sX POST http://localhost:8890/osint/domain \
+curl -sX POST http://localhost:8890/investigate/domain \
   -H 'content-type: application/json' \
   -d '{"domain":"example.com","mode":"summary"}' | jq
 
 # Full mode (all subdomains, slower)
-curl -sX POST http://localhost:8890/osint/domain \
+curl -sX POST http://localhost:8890/investigate/domain \
   -H 'content-type: application/json' \
   -d '{"domain":"example.com","mode":"full"}'
 
@@ -75,7 +99,7 @@ Aggregates DNS, certificate-transparency (crt.sh), subfinder, WHOIS.
 ## OSINT — IP
 
 ```bash
-curl -sX POST http://localhost:8890/osint/ip \
+curl -sX POST http://localhost:8890/investigate/ip \
   -H 'content-type: application/json' \
   -d '{"ip":"1.2.3.4","include_shared_hosts":true}'
 ```
@@ -87,7 +111,7 @@ Set `include_shared_hosts:false` for fast geo-only.
 ## OSINT — email
 
 ```bash
-curl -sX POST http://localhost:8890/osint/email \
+curl -sX POST http://localhost:8890/investigate/email \
   -H 'content-type: application/json' \
   -d '{"email":"target@example.com","include_breach":true}'
 ```
@@ -99,11 +123,11 @@ Holehe (120+ services for platform registrations). HIBP breach check if
 
 ```bash
 # fast (Sherlock, ~30s, 400 sites)
-curl -sX POST http://localhost:8890/osint/username \
+curl -sX POST http://localhost:8890/investigate/username \
   -d '{"username":"torvalds","mode":"fast"}'
 
 # deep (Maigret, ~5min, 3000+ sites with metadata + pivots)
-curl -sX POST http://localhost:8890/osint/username \
+curl -sX POST http://localhost:8890/investigate/username \
   -d '{"username":"torvalds","mode":"deep","show_all":true}'
 ```
 
@@ -114,18 +138,18 @@ Default caps hits at 30 to stay token-cheap; `show_all:true` for full list
 
 ```bash
 # Query existing scans (fast)
-curl -sX POST http://localhost:8890/osint/url \
+curl -sX POST http://localhost:8890/investigate/url \
   -d '{"url":"https://suspicious.example/"}'
 
 # Submit fresh scan (~30s)
-curl -sX POST http://localhost:8890/osint/url \
+curl -sX POST http://localhost:8890/investigate/url \
   -d '{"url":"https://suspicious.example/","submit":true}'
 ```
 
 ## OSINT — phone (libphonenumber)
 
 ```bash
-curl -sX POST http://localhost:8890/osint/phone \
+curl -sX POST http://localhost:8890/investigate/phone \
   -d '{"phone":"+14155552671"}'
 ```
 
@@ -135,7 +159,7 @@ Uses Google libphonenumber locally — instant, free, no API key.
 ## OSINT — VirusTotal reputation
 
 ```bash
-curl -sX POST http://localhost:8890/osint/threat \
+curl -sX POST http://localhost:8890/investigate/threat \
   -d '{"target":"https://suspicious.example/"}'
 # Auto-detects hash (MD5/SHA1/SHA256), URL (with scheme), IP, or domain
 # Requires VT_API_KEY env on OSINT service (free tier: 500/day, 4/min)
@@ -144,7 +168,7 @@ curl -sX POST http://localhost:8890/osint/threat \
 ## OSINT — CVE lookup
 
 ```bash
-curl -sX POST http://localhost:8890/osint/cve \
+curl -sX POST http://localhost:8890/investigate/cve \
   -d '{"cve_id":"CVE-2021-44228"}'
 ```
 
@@ -154,11 +178,11 @@ Pass `NVD_API_KEY` env to bump rate limit (5 → 50 req/30s).
 ## OSINT — theHarvester (broader sweep)
 
 ```bash
-curl -sX POST http://localhost:8890/osint/harvest \
+curl -sX POST http://localhost:8890/investigate/harvest \
   -d '{"domain":"example.com","limit":500,"sources":"bing,duckduckgo,crtsh,hackertarget,otx,rapiddns,urlscan"}'
 ```
 
-Slower and noisier than `/osint/domain` — use when you want the broad sweep.
+Slower and noisier than `/investigate/domain` — use when you want the broad sweep.
 
 ## Long-running jobs
 

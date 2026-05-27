@@ -28,18 +28,26 @@ const BASE_URL = process.env.EXA_API_KEY
   ? `https://mcp.exa.ai/mcp?exaApiKey=${encodeURIComponent(process.env.EXA_API_KEY)}`
   : "https://mcp.exa.ai/mcp";
 
-// SearXNG fallback: when Exa returns empty / errors out, hit the local
-// SearXNG instance the research skill exposes. Same approach as
-// web-research.ts but only when Exa fails — keeps the primary path
-// unchanged.
-const SEARXNG_URL = process.env.SEARXNG_URL ?? "http://localhost:8888";
+// SearXNG fallback: when Exa returns empty / errors out, hit the SearXNG
+// instance the research skill exposes. Same approach as web-research.ts but
+// only when Exa fails — keeps the primary path unchanged. Production stack
+// lives at https://searxng.erfi.io (Caddy + bearer); local dev at :8888.
+const SEARXNG_URL = process.env.SEARXNG_URL ?? "https://searxng.erfi.io";
+
+function researchAuthHeaders(): Record<string, string> {
+  const tok = process.env.RESEARCH_TOKEN?.trim();
+  return tok ? { authorization: `Bearer ${tok}` } : {};
+}
 
 async function searxngFallback(query: string, timeoutMs = 12_000): Promise<string | undefined> {
   const params = new URLSearchParams({ q: query, format: "json", safesearch: "0" });
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${SEARXNG_URL}/search?${params}`, { signal: ctl.signal });
+    const res = await fetch(`${SEARXNG_URL}/search?${params}`, {
+      headers: researchAuthHeaders(),
+      signal: ctl.signal,
+    });
     if (!res.ok) return undefined;
     const j = (await res.json()) as {
       results?: Array<{ title: string; url: string; content: string; engine: string }>;
