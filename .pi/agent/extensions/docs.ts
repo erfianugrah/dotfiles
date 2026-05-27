@@ -46,7 +46,39 @@ function resolvePath(args: { path?: string; filePath?: string }): string {
   return v;
 }
 
-function safePath(p: string): string {
+// Common local-filesystem prefixes. Catching these before SSHing the docs
+// server prevents the confusing "bash: /docs/home/erfi/...: No such file"
+// failure mode when the agent forgets these tools target docs.erfi.io and
+// not the local FS. Update this list when adding new common roots.
+const LOCAL_FS_PREFIXES = [
+  "/home/",
+  "/root/",
+  "/Users/",
+  "/etc/",
+  "/var/",
+  "/tmp/",
+  "/opt/",
+  "/srv/",
+  "/mnt/",
+  "/private/",
+  "/usr/",
+  "/dev/",
+  "/proc/",
+  "/sys/",
+];
+
+function looksLikeLocalPath(p: string): boolean {
+  if (p.startsWith("~") || p.startsWith("./") || p.startsWith("../")) return true;
+  // bare /docs/<localprefix>/... — agent prepended /docs to a local absolute
+  // path (e.g. resolvePath(filePath=/home/erfi/foo.md) → /docs/home/erfi/foo.md).
+  for (const prefix of LOCAL_FS_PREFIXES) {
+    if (p.startsWith(prefix)) return true;
+    if (p.startsWith(`/docs${prefix}`)) return true;
+  }
+  return false;
+}
+
+export function safePath(p: string): string {
   if (typeof p !== "string" || p.length === 0) {
     throw new Error("path is required (string).");
   }
@@ -58,10 +90,42 @@ function safePath(p: string): string {
     prev = cleaned;
     cleaned = cleaned.replace(/\.\.\//g, "").replace(/\.\.\\/g, "").replace(/\/\/+/g, "/");
   } while (cleaned !== prev);
+  if (looksLikeLocalPath(cleaned)) {
+    throw new Error(
+      `'${p}' looks like a local filesystem path, not a docs.erfi.io source path. ` +
+        `These tools (docs_read/docs_summary/docs_grep/docs_find/docs_search) only target docs.erfi.io; ` +
+        `for files on this machine use the built-in 'read' tool instead. ` +
+        `Docs paths look like /docs/<source>/... — list sources with docs_sources.`,
+    );
+  }
   if (!cleaned.startsWith("/docs/")) {
     return `/docs/${cleaned.replace(/^\/+/, "")}`;
   }
   return cleaned;
+}
+
+// Small wrapper: resolve + validate a path argument, returning either the
+// resolved pair or a discriminated error so each tool's execute() can return
+// a clean isError result instead of letting safePath's throw bubble up as a
+// generic tool failure.
+function resolveAndValidate(
+  params: { path?: string; filePath?: string },
+): { argPath: string; p: string } | { error: string } {
+  try {
+    const argPath = resolvePath(params);
+    const p = safePath(argPath);
+    return { argPath, p };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+function errorResult(message: string) {
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: `[error] ${message}` }],
+    details: { error: message },
+  };
 }
 
 function capOutput(text: string, path?: string): string {
@@ -186,7 +250,12 @@ const docsSearch = defineTool({
       `rg -i '${sq(params.query)}' /docs/_index.tsv ${filter} | awk -v lim=${limit} '{ n++; if (n<=lim) print } END { if (n>lim) print "[showing "lim" of "n" results — refine query or add source filter]" }'`,
     );
     if (!result.trim()) {
-      const dir = params.source ? safePath(`/docs/${sq(params.source)}/`) : "/docs/";
+      let dir: string;
+      try {
+        dir = params.source ? safePath(`/docs/${sq(params.source)}/`) : "/docs/";
+      } catch (e) {
+        return errorResult((e as Error).message);
+      }
       const [fileMatch, contentMatch] = await Promise.all([
         ssh(`find '${dir}' -type f -iname '*${sq(params.query)}*' | head -${limit}`),
         ssh(`rg -il '${sq(params.query)}' '${dir}' 2>/dev/null | head -${limit}`),
@@ -220,8 +289,9 @@ const docsRead = defineTool({
     offset: Type.Optional(Type.Number({ description: "Start line (1-indexed)." })),
   }),
   async execute(_id, params) {
-    const argPath = resolvePath(params);
-    const p = safePath(argPath);
+    const v = resolveAndValidate(params);
+    if ("error" in v) return errorResult(v.error);
+    const { argPath, p } = v;
     let cmd: string;
     if (params.offset) {
       const start = Math.max(1, Math.floor(params.offset));
@@ -253,7 +323,12 @@ const docsFind = defineTool({
     maxResults: Type.Optional(Type.Number({ description: "Max results (default: 30)" })),
   }),
   async execute(_id, params) {
-    const dir = params.source ? safePath(`/docs/${sq(params.source)}/`) : "/docs/";
+    let dir: string;
+    try {
+      dir = params.source ? safePath(`/docs/${sq(params.source)}/`) : "/docs/";
+    } catch (e) {
+      return errorResult((e as Error).message);
+    }
     const limit = params.maxResults ?? 30;
     const result = await ssh(`find '${dir}' -name '${sq(params.pattern)}' -type f | head -${limit}`);
     return { content: [{ type: "text", text: result }], details: { pattern: params.pattern, source: params.source } };
@@ -276,8 +351,9 @@ const docsGrep = defineTool({
   }),
   async execute(_id, params) {
     const ctx = Math.abs(Math.floor(params.context ?? 3));
-    const argPath = resolvePath(params);
-    const p = safePath(argPath);
+    const v = resolveAndValidate(params);
+    if ("error" in v) return errorResult(v.error);
+    const { argPath, p } = v;
     const [jsonResult, countResult] = await Promise.all([
       ssh(`rg -i --json -C${ctx} '${sq(params.query)}' '${sq(p)}' | head -500`),
       ssh(`rg -ic '${sq(params.query)}' '${sq(p)}' 2>/dev/null | awk -F: '{s+=$NF}END{print s+0}'`),
@@ -316,8 +392,9 @@ const docsSummary = defineTool({
     filePath: Type.Optional(Type.String({ description: "Alias for 'path'. Accepted for compatibility with built-in Read tool." })),
   }),
   async execute(_id, params) {
-    const argPath = resolvePath(params);
-    const p = safePath(argPath);
+    const v = resolveAndValidate(params);
+    if ("error" in v) return errorResult(v.error);
+    const { argPath, p } = v;
     const [headings, lineCount, byteCount] = await Promise.all([
       ssh(`rg -n '^#' '${sq(p)}'`),
       ssh(`wc -l < '${sq(p)}'`),
