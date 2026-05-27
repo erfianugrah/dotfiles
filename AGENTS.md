@@ -4,6 +4,49 @@ Project-specific guidance for an agent working in `~/dotfiles`. The global
 agent rules live in `.config/opencode/AGENTS.md` (which `~/.pi/agent/AGENTS.md`
 symlinks to); the notes here are repo-shape only.
 
+## What's running here (pi vs opencode disambiguation)
+
+"opencode" is overloaded in this tree. Three different things share the
+name; the agent has historically conflated them. Use these meanings
+exactly:
+
+- **pi** — the harness binary at `/opt/pi-coding-agent/pi`. This is what
+  is running RIGHT NOW. Owns the TUI, extensions, skills loader, sessions,
+  tool dispatch, clipboard paste handling, image pruning. When the user
+  says "the agent", "the harness", "this session", or asks about
+  extensions / commands / TUI behaviour, the answer is about **pi**.
+  Source: `/opt/pi-coding-agent/`, docs at `/opt/pi-coding-agent/docs/`.
+
+- **opencode-zen** — the AI gateway service the user self-hosts. Pi
+  registers it as a provider literally named `"opencode"` (see
+  `~/.pi/agent/auth.json` and `~/.pi/agent/settings.json`
+  `defaultProvider: "opencode"`). It proxies model inference (Anthropic /
+  OpenAI / etc.) behind a single endpoint with the user's API key. When
+  the user mentions "the provider", "the gateway", model routing, API
+  keys, or rate-limit handling, the answer is about **opencode-zen** —
+  NOT the harness, NOT the legacy TUI.
+
+- **opencode (legacy TUI)** — the standalone `opencode` TUI app the user
+  ran BEFORE migrating to pi. Configs still live in `.config/opencode/`
+  in this repo and are partially shared with pi via symlink
+  (`~/.pi/agent/skills` → `~/.config/opencode/skills`). The legacy app is
+  NOT running. Only reach for opencode docs / source when answering a
+  question about the upstream project this codebase forked patterns from
+  (e.g. the `tool-output-prune` algorithm is a port from
+  `~/opencode/packages/opencode/src/session/compaction.ts`).
+
+**Rule when writing**:
+- Talking about harness behaviour → say **pi**, never "opencode".
+- Talking about model gateway / API auth → say **opencode-zen** (or
+  "the `opencode` provider in pi's auth"), never bare "opencode".
+- Talking about historical patterns / forked code → say **opencode**
+  with a qualifier like "upstream opencode" or "opencode TUI".
+
+**Quick check**: if you find yourself writing "opencode handles X" or
+"opencode prunes Y" about live behaviour — STOP and replace with "pi".
+The legacy opencode TUI is not the thing pruning your tool output; the
+`tool-output-prune.ts` extension running inside pi is.
+
 ## Layout & symlink convention
 
 This repo is the **source of truth** for everything in `~/.pi/agent/`,
