@@ -1,6 +1,6 @@
 ---
 name: composer
-description: Drive the user's self-hosted Docker Compose management platform (repo at `~/composer/`, deployed instance at `composer.<your-zone>`). Use when the user mentions composer, composerd, stack deployment via API, GitOps pipelines, or wants to drive Docker Compose stacks programmatically rather than via direct `docker compose` commands. Covers the REST API (~109 endpoints under /api/v1), auth (API keys / cookies / first-admin splash bootstrap), release workflow, pipeline footguns, and the hard "don't run composerd on dev" rule.
+description: Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/composer/`, instance at `composer.<your-zone>`). Triggers: deploying / updating / restarting / removing a stack via API; designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); querying or scripting against the Composer REST API; touching `composerd` source or the Astro frontend; release workflow. Covers ~109 endpoints under /api/v1, auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard "NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh" safety rule.
 ---
 
 # composer skill
