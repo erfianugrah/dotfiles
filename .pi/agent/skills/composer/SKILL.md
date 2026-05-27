@@ -1,6 +1,6 @@
 ---
 name: composer
-description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/composer/`, instance at `composer.<your-zone>`). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~109 endpoints under /api/v1, auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
+description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/composer/`, instance at `composer.erfi.io`). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~109 endpoints under /api/v1, auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
 ---
 
 # composer skill
@@ -40,7 +40,7 @@ curl -s $COMPOSER/openapi.json | jq '.paths | keys'   # endpoint list
 curl -s $COMPOSER/openapi.json | jq '.paths."/api/v1/stacks/{name}".put'
 curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 # interactive: open $COMPOSER/docs in browser
-# Set COMPOSER=https://<your-composer-host> first.
+# Set COMPOSER=https://composer.erfi.io first.
 ```
 
 ## API basics
@@ -60,17 +60,36 @@ curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 
 ## Auth quick-start (agent driving the API)
 
-```bash
-export COMPOSER_API_KEY=ck_…           # from /api/v1/keys POST
-export BASE=https://<your-composer-host>/api/v1
+The production instance is `composer.erfi.io`. The API key is **not** stored in any
+shell rcfile — the canonical source is the user's Vaultwarden vault
+(`vault.erfi.io`), entry name `composer-api-key` (or similar; search by 'composer').
 
-# list stacks
-curl -s -H "X-API-Key: $COMPOSER_API_KEY" "$BASE/stacks" | jq
+```bash
+# unlock vault if locked, then fetch the key
+bw status | jq -r .status        # 'unlocked' | 'locked' | 'unauthenticated'
+bw unlock                        # if locked; outputs export BW_SESSION=...
+# eval the export, OR set BW_SESSION in your shell yourself
+
+export COMPOSER_API_KEY=$(bw get password composer-api-key)   # or whatever the entry is named
+export BASE=https://composer.erfi.io/api/v1
+
+# verify the key works (returns array on 200, RFC 9457 problem on 401/403)
+curl -sf -H "X-API-Key: $COMPOSER_API_KEY" "$BASE/stacks" | jq -r '.[].name' | head
 
 # deploy a stack
-curl -s -X POST -H "X-API-Key: $COMPOSER_API_KEY" \
+curl -sf -X POST -H "X-API-Key: $COMPOSER_API_KEY" \
   "$BASE/stacks/my-stack/up?async=true" | jq .job_id
 ```
+
+**Failure modes the agent should know about:**
+- Empty `$COMPOSER_API_KEY` — curl sends `X-API-Key:` (no value) and the server
+  returns 401. The 401 body is JSON, so a downstream `jq '.[]'` blows up with
+  "Cannot iterate over object". Always use `curl -sf` (fail on non-2xx) and
+  inspect the response BEFORE piping into `jq`.
+- Wrong host — if you typed `composer.erfi.dev` (it does not exist) curl errors
+  out with "Could not resolve host". The correct host is `composer.erfi.io`.
+- Vault locked — `bw get` returns nothing and the key stays empty. Run
+  `bw unlock` and `eval` the printed `export BW_SESSION=...` line first.
 
 For async ops, poll `GET /api/v1/jobs/{id}`. Jobs auto-cleanup after 1h. Max 100 listed.
 
@@ -173,7 +192,7 @@ Do NOT hand-edit `web/src/lib/api/openapi.{json,yaml}` or `types.ts` — always 
 - CI lint runs `make generate` then `git diff --exit-code` on **all three** generated files (json, yaml, types.ts). Any stale artifact breaks lint.
 - CI also runs `make generate-lint` (redocly) as a separate step — schema errors fail the build.
 - `go vet` reads `static.go` which embeds `web/dist`. No dist → vet fails.
-- `release.yml` on `v*` tag builds + pushes multi-arch image to `ghcr.io/<your-gh-namespace>/composer:<tag>`.
+- `release.yml` on `v*` tag builds + pushes multi-arch image to `ghcr.io/erfianugrah/composer:<tag>`.
 
 ## Repo layout (one-line each)
 
