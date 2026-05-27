@@ -9,3 +9,10 @@
 .ssh/id*
 .ssh/known_hosts*
 
+# external binaries dropped under bin/ for PATH convenience but built elsewhere
+bin/knotctl
+
+# python bytecode caches anywhere in the tree
+__pycache__/
+*.pyc
+

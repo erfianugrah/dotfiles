@@ -6,5 +6,9 @@
   "defaultThinkingLevel": "high",
   "compaction": {
     "enabled": true
-  }
+  },
+  "enabledModels": [
+    "llama-server/qwen36",
+    "llama-server/gemma4"
+  ]
 }
