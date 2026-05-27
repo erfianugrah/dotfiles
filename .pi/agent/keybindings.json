@@ -1,0 +1,4 @@
+{
+  "app.interrupt": ["escape", "ctrl+c"],
+  "app.clear": ["ctrl+c"]
+}
