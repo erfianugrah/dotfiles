@@ -38,6 +38,7 @@ import { decideInjection, matchesIntent, looksLikeSpec } from "../extensions/sup
 import { _internals as osint } from "../extensions/osint.ts";
 import { safePath } from "../extensions/docs.ts";
 import { extractCdTargets, decideTarget } from "../extensions/cd-agents-reload.ts";
+import { rewriteClipboardPaths, shrunkSibling } from "../extensions/clipboard-image-shrink.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -2009,6 +2010,61 @@ describe("osint.authHeaders", () => {
     // restore
     if (orig === undefined) delete process.env.RESEARCH_TOKEN;
     else process.env.RESEARCH_TOKEN = orig;
+  });
+});
+
+// ── clipboard-image-shrink: pure helpers ──────────────────────────────────
+
+describe("clipboard-image-shrink.shrunkSibling", () => {
+  test("appends -small before extension (png)", () => {
+    expect(
+      shrunkSibling("/tmp/pi-clipboard-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.png"),
+    ).toBe("/tmp/pi-clipboard-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee-small.png");
+  });
+  test("preserves jpg extension", () => {
+    expect(
+      shrunkSibling("/tmp/pi-clipboard-11111111-2222-3333-4444-555555555555.jpg"),
+    ).toBe("/tmp/pi-clipboard-11111111-2222-3333-4444-555555555555-small.jpg");
+  });
+});
+
+describe("clipboard-image-shrink.rewriteClipboardPaths", () => {
+  test("text without any clipboard path returns unchanged", () => {
+    const { text, decisions } = rewriteClipboardPaths("hello, no images here", null);
+    expect(text).toBe("hello, no images here");
+    expect(decisions).toEqual([]);
+  });
+
+  test("nonexistent clipboard path is a no-op (skip, not rewrite)", () => {
+    // Path looks clipboard-shaped but doesn't exist → decision is no-op.
+    const fake = "/tmp/pi-clipboard-deadbeef-dead-beef-dead-beefdeadbeef.png";
+    const { text, decisions } = rewriteClipboardPaths(`look at ${fake}`, null);
+    expect(text).toBe(`look at ${fake}`);
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0].decision.shrunk).toBe(false);
+  });
+
+  test("non-clipboard /tmp paths are ignored", () => {
+    // Plain /tmp/foo.png doesn't match the UUID-shaped clipboard regex.
+    const txt = "see /tmp/foo.png and /tmp/pi-clipboard-not-a-uuid.png";
+    const { text, decisions } = rewriteClipboardPaths(txt, null);
+    expect(text).toBe(txt);
+    expect(decisions).toEqual([]);
+  });
+
+  test("duplicate paths in one message dedupe to one decision", () => {
+    const p = "/tmp/pi-clipboard-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.png";
+    const { decisions } = rewriteClipboardPaths(`${p} and again ${p}`, null);
+    expect(decisions).toHaveLength(1);
+  });
+
+  test("matches all five supported extensions", () => {
+    const base = "/tmp/pi-clipboard-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const txt = [`${base}.png`, `${base}.jpg`, `${base}.jpeg`, `${base}.webp`, `${base}.gif`].join(
+      " ",
+    );
+    const { decisions } = rewriteClipboardPaths(txt, null);
+    expect(decisions).toHaveLength(5);
   });
 });
 
