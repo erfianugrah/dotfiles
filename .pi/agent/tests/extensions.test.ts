@@ -40,6 +40,7 @@ import { safePath } from "../extensions/docs.ts";
 import { extractCdTargets, decideTarget } from "../extensions/cd-agents-reload.ts";
 import { rewriteClipboardPaths, shrunkSibling } from "../extensions/clipboard-image-shrink.ts";
 import { prune, type AnyMessage } from "../extensions/tool-output-prune.ts";
+import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -2198,3 +2199,73 @@ describe("tool-output-prune.prune", () => {
   });
 });
 
+// ── slash-typo-guard ──────────────────────────────────────────────────────
+
+describe("slash-typo-guard.levenshtein", () => {
+  test("equal strings → 0", () => {
+    expect(levenshtein("quit", "quit")).toBe(0);
+  });
+  test("empty vs non-empty → length", () => {
+    expect(levenshtein("", "quit")).toBe(4);
+    expect(levenshtein("quit", "")).toBe(4);
+  });
+  test("single insertion", () => {
+    expect(levenshtein("quit", "qauit")).toBe(1); // /qauit → /quit
+  });
+  test("single transposition counts as 2", () => {
+    expect(levenshtein("quti", "quit")).toBe(2); // pure Levenshtein, no Damerau
+  });
+  test("compaction typo", () => {
+    expect(levenshtein("comapct", "compact")).toBe(2); // transposition
+    expect(levenshtein("compac", "compact")).toBe(1);
+  });
+  test("far apart", () => {
+    expect(levenshtein("hotkeys", "quit")).toBeGreaterThan(2);
+  });
+});
+
+describe("slash-typo-guard.closestCommand", () => {
+  const known = new Set([
+    "quit", "compact", "model", "settings", "tree", "fork", "clone",
+    "new", "name", "session", "resume", "reload", "hotkeys", "changelog",
+  ]);
+
+  test("/qauit → /quit (dist 1)", () => {
+    expect(closestCommand("qauit", known)).toEqual({ name: "quit", dist: 1 });
+  });
+  test("/comapct → /compact (dist 2)", () => {
+    expect(closestCommand("comapct", known)).toEqual({ name: "compact", dist: 2 });
+  });
+  test("/quti → /quit (dist 2)", () => {
+    expect(closestCommand("quti", known)).toEqual({ name: "quit", dist: 2 });
+  });
+  test("/foo at dist 2 finds /fork (caller must restrict for short cmds)", () => {
+    // 3-letter 'foo' is 2 edits from 'fork' (insert 'r', insert 'k').
+    // closestCommand itself returns it at default maxDist=2; the input
+    // handler protects against false positives by passing maxDist=1
+    // for cmd.length ≤ 3.
+    expect(closestCommand("foo", known)).toEqual({ name: "fork", dist: 2 });
+    expect(closestCommand("foo", known, 1)).toBeNull();
+  });
+  test("/dance → null (intentional plain text)", () => {
+    expect(closestCommand("dance", known)).toBeNull();
+  });
+  test("exact match returns dist 0", () => {
+    expect(closestCommand("quit", known)).toEqual({ name: "quit", dist: 0 });
+  });
+  test("respects custom maxDist", () => {
+    // "quti" → "quit" is 2 edits; with maxDist=1 should reject.
+    expect(closestCommand("quti", known, 1)).toBeNull();
+  });
+  test("length pre-filter doesn't hide near matches", () => {
+    // "newm" → "new" is 1, "name" is 2 → should pick "new"
+    expect(closestCommand("newm", known)).toEqual({ name: "new", dist: 1 });
+  });
+  test("ties broken by name for stability", () => {
+    const small = new Set(["aaa", "bbb"]);
+    // "ccc" is dist 3 from both, beyond default maxDist → null
+    expect(closestCommand("ccc", small)).toBeNull();
+    // "aab" is dist 1 from "aaa", dist 2 from "bbb" → "aaa"
+    expect(closestCommand("aab", small)).toEqual({ name: "aaa", dist: 1 });
+  });
+});
