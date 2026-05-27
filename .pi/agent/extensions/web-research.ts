@@ -26,8 +26,15 @@
  *
  * Endpoints:
  *   - Exa MCP:        https://mcp.exa.ai/mcp  (anonymous tier ok)
- *   - SearXNG:        http://localhost:8888/search
- *   - Research crawl: http://localhost:8889/fetch
+ *   - SearXNG:        https://searxng.erfi.io/search   (Caddy bearer)
+ *   - Research crawl: https://crawler.erfi.io/extract  (Caddy bearer)
+ *
+ * The research stack lives on `servarr` and is fronted by Caddy at the
+ * three `*.erfi.io` subdomains, gated by `Authorization: Bearer
+ * $RESEARCH_TOKEN`. The token is loaded into the user's shell from
+ * Bitwarden by `~/dotfiles/functions.d/bitwarden.zsh`, so pi inherits it.
+ * Override SEARXNG_URL / CRAWLER_URL for local dev against the dockerised
+ * stack at :8888 / :8889 — bearer is sent only when RESEARCH_TOKEN is set.
  */
 
 import { Type } from "@earendil-works/pi-ai";
@@ -38,8 +45,26 @@ import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const EXA_URL = process.env.EXA_API_KEY
   ? `https://mcp.exa.ai/mcp?exaApiKey=${encodeURIComponent(process.env.EXA_API_KEY)}`
   : "https://mcp.exa.ai/mcp";
-const SEARXNG_URL = process.env.SEARXNG_URL ?? "http://localhost:8888";
-const CRAWLER_URL = process.env.CRAWLER_URL ?? "http://localhost:8889";
+const SEARXNG_URL = process.env.SEARXNG_URL ?? "https://searxng.erfi.io";
+const CRAWLER_URL = process.env.CRAWLER_URL ?? "https://crawler.erfi.io";
+const RESEARCH_DEFAULTS_IN_USE =
+  process.env.SEARXNG_URL === undefined && process.env.CRAWLER_URL === undefined;
+
+/** Bearer header for the Caddy-fronted research stack. Empty when unset. */
+function researchAuthHeaders(): Record<string, string> {
+  const tok = process.env.RESEARCH_TOKEN?.trim();
+  return tok ? { authorization: `Bearer ${tok}` } : {};
+}
+
+// One-shot warning when the default public endpoints are in use but no bearer
+// is set — the Caddy gate will 401 every request, producing confusing empty
+// results instead of an obvious config error.
+if (RESEARCH_DEFAULTS_IN_USE && !process.env.RESEARCH_TOKEN?.trim()) {
+  console.warn(
+    `[web-research] RESEARCH_TOKEN unset; ${SEARXNG_URL} / ${CRAWLER_URL} will 401. ` +
+      `Set RESEARCH_TOKEN or point SEARXNG_URL/CRAWLER_URL at a local instance.`,
+  );
+}
 
 const HONEST_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
@@ -215,9 +240,9 @@ async function fetchViaCrawler(
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${CRAWLER_URL}/fetch`, {
+    const res = await fetch(`${CRAWLER_URL}/extract`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...researchAuthHeaders() },
       body: JSON.stringify({
         url,
         force_js: forceJs,
@@ -235,8 +260,10 @@ async function fetchViaCrawler(
         note: `crawler HTTP ${res.status}`,
       };
     }
-    const j = (await res.json()) as { content?: string; error?: string };
-    if (j.error || !j.content) {
+    // Crawler /extract returns { url, title, author, date, markdown, ... }.
+    // The skill doc historically called the field `content` — it's `markdown`.
+    const j = (await res.json()) as { markdown?: string; error?: string };
+    if (j.error || !j.markdown) {
       return {
         url,
         ok: false,
@@ -249,7 +276,7 @@ async function fetchViaCrawler(
       url,
       ok: true,
       via: forceJs ? "crawler+js" : "crawler",
-      content: j.content.slice(0, FETCH_CHAR_CAP),
+      content: j.markdown.slice(0, FETCH_CHAR_CAP),
     };
   } catch (err) {
     return {
@@ -277,7 +304,10 @@ async function searxng(
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${SEARXNG_URL}/search?${params}`, { signal: ctl.signal });
+    const res = await fetch(`${SEARXNG_URL}/search?${params}`, {
+      headers: researchAuthHeaders(),
+      signal: ctl.signal,
+    });
     if (!res.ok) return [];
     const j = (await res.json()) as { results?: Array<{ title: string; url: string; content: string; engine: string }> };
     return (j.results ?? []).slice(0, 8);

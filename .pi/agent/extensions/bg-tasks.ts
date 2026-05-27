@@ -740,7 +740,254 @@ const bgStatusTool = defineTool({
   },
 });
 
-// ── helpers (exported for tests) ──────────────────────────────────────────
+// ── tool: bg_wait ────────────────────────────────────────────────────────
+//
+// Block inside ONE tool call until a condition fires on a bg task. Replaces
+// the re-prompt loop pattern ("check the logs" → "now check again" → "and
+// again") with a single in-tool wait. Conditions: regex match in tail output,
+// task exit, or timeout. Any one of them wins.
+
+/**
+ * Pure decision helper — takes a snapshot and reports whether a wait should
+ * resolve now. Extracted for unit tests; the execute() loop calls this on
+ * every poll tick.
+ */
+export function decideWaitResult(args: {
+  state: TaskState | null;
+  output: string;
+  live: boolean;
+  pattern?: RegExp;
+  untilExit: boolean;
+}): { result: "matched" | "exited" | "pending"; matchLine?: string } {
+  if (args.pattern) {
+    const m = args.output.match(args.pattern);
+    if (m) return { result: "matched", matchLine: m[0] };
+  }
+  // Treat completion as "exited" only when the caller asked for it OR when
+  // they only supplied a pattern and the task ended without matching (caller
+  // needs to know it can't match anymore). If neither condition was asked
+  // for that's a config error caught upstream.
+  if (!args.live || args.state?.completed_at !== undefined) {
+    if (args.untilExit || args.pattern) return { result: "exited" };
+  }
+  return { result: "pending" };
+}
+
+const bgWaitTool = defineTool({
+  name: "bg_wait",
+  label: "Background Task Wait",
+  promptSnippet:
+    "bg_wait — block until a bg task matches a regex, exits, or times out. Avoids re-prompt loops.",
+  promptGuidelines: [
+    "Use when you spawned bg_bash/bg_task and need to wait for a specific event (a log line, task completion). Replaces a chain of bg_status polls + user re-prompts.",
+    "Pass `pattern` to wait for a regex in the captured tail; `until_exit=true` to wait for the task to finish; pass both for match-OR-exit.",
+    "Default timeout 60s, max 600s. The tool returns as soon as ANY condition fires.",
+    "Regex is JS syntax with the `m` flag (multiline). Common: 'ERROR|FATAL', 'listening on \\d+', 'job complete'.",
+  ],
+  description: [
+    "Block until a regex matches output, the task exits, or timeout elapses.",
+    "",
+    "Returns the final status snapshot plus `waitResult`: 'matched' | 'exited' | 'timeout'. Use this instead of bg_status-in-a-loop — the wait happens server-side, no re-prompts needed.",
+  ].join("\n"),
+  parameters: Type.Object({
+    name: Type.String({
+      description: "tmux session name returned by bg_task / bg_bash.",
+    }),
+    pattern: Type.Optional(
+      Type.String({
+        description:
+          "Regex (JS syntax, multiline). Matched against the captured tail on each poll tick. First match resolves the wait.",
+      }),
+    ),
+    until_exit: Type.Optional(
+      Type.Boolean({
+        description: "Resolve when the task exits (regardless of pattern). Default: false.",
+      }),
+    ),
+    timeout: Type.Optional(
+      Type.Number({
+        description:
+          "Max seconds to wait. Default 120, min 1, max 600. Bump generously for long log tails / slow builds — the tool returns early as soon as the condition fires, so over-estimating is free.",
+      }),
+    ),
+    poll_interval: Type.Optional(
+      Type.Number({
+        description: "Seconds between polls. Default 2, min 0.5.",
+      }),
+    ),
+    lines: Type.Optional(
+      Type.Number({
+        description: "Tail size scanned for the pattern. Default 200.",
+      }),
+    ),
+  }),
+  async execute(_id, params, signal, onUpdate, ctx) {
+    const state0 = loadState(params.name);
+    if (!state0) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `No state file for ${params.name}. Either the task never existed or it was GC'd (>24h).`,
+          },
+        ],
+        details: { error: "no-state", name: params.name },
+      };
+    }
+    const untilExit = params.until_exit ?? false;
+    if (!params.pattern && !untilExit) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "Pass at least one of `pattern` or `until_exit=true` — otherwise this tool has no condition to wait on.",
+          },
+        ],
+        details: { error: "no-condition" },
+      };
+    }
+    let re: RegExp | undefined;
+    if (params.pattern) {
+      try {
+        re = new RegExp(params.pattern, "m");
+      } catch (e) {
+        return {
+          isError: true,
+          content: [
+            { type: "text", text: `Invalid regex: ${(e as Error).message}` },
+          ],
+          details: { error: "bad-regex", pattern: params.pattern },
+        };
+      }
+    }
+    const timeoutMs = Math.min(Math.max(params.timeout ?? 120, 1), 600) * 1000;
+    const intervalMs = Math.max((params.poll_interval ?? 2) * 1000, 500);
+    const linesWanted = Math.min(Math.max(params.lines ?? 200, 1), 5000);
+    const deadline = Date.now() + timeoutMs;
+    const startedAt = Date.now();
+
+    let waitResult: "matched" | "exited" | "timeout" = "timeout";
+    let matchLine: string | undefined;
+    let lastOutput = "";
+    let pollCount = 0;
+    const statusKey = `bg-wait-${params.name}`;
+
+    // Poll loop. Sleep is broken by AbortSignal so user can cancel.
+    while (true) {
+      if (signal?.aborted) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Wait on ${params.name} cancelled.` }],
+          details: { error: "aborted", name: params.name },
+        };
+      }
+      const state = loadState(params.name);
+      const live = tmuxHasSession(params.name);
+      // tmuxCapture errors silently on a dead session — keep the previous tail.
+      const cap = live ? tmuxCapture(params.name, linesWanted) : lastOutput;
+      if (cap) lastOutput = cap;
+
+      const verdict = decideWaitResult({
+        state,
+        output: lastOutput,
+        live,
+        pattern: re,
+        untilExit,
+      });
+      pollCount++;
+      if (verdict.result === "matched") {
+        waitResult = "matched";
+        matchLine = verdict.matchLine;
+        break;
+      }
+      if (verdict.result === "exited") {
+        waitResult = "exited";
+        break;
+      }
+
+      // Stream progress so the user (and the agent inspecting tool state)
+      // can see we're alive. Without this the TUI just shows "Working..."
+      // for the full timeout, which feels broken.
+      const elapsedS = Math.floor((Date.now() - startedAt) / 1000);
+      const remainingS = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      const tailLines = lastOutput
+        .split("\n")
+        .filter((l) => l.length > 0)
+        .slice(-3);
+      const conditionDesc = re
+        ? `pattern /${re.source}/`
+        : `task exit`;
+      const progressText = [
+        `waiting on ${params.name} — ${conditionDesc}`,
+        `elapsed ${elapsedS}s, ${remainingS}s left, poll #${pollCount}`,
+        tailLines.length > 0
+          ? `last:\n${tailLines.map((l) => `  ${l}`).join("\n")}`
+          : `(no output yet)`,
+      ].join("\n");
+      onUpdate?.({
+        content: [{ type: "text", text: progressText }],
+        details: { elapsedS, remainingS, pollCount, live },
+      });
+      ctx?.ui?.setStatus?.(
+        statusKey,
+        `bg_wait ${params.name}: ${elapsedS}s / ${elapsedS + remainingS}s`,
+      );
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break; // timeout
+      const sleepFor = Math.min(intervalMs, remaining);
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, sleepFor);
+        const onAbort = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        if (signal) signal.addEventListener("abort", onAbort, { once: true });
+        // Note: we don't bother removing the listener — promise resolves once,
+        // and the signal's lifetime is bounded by this tool call.
+      });
+    }
+
+    // Clear the footer status line.
+    ctx?.ui?.setStatus?.(statusKey, undefined);
+
+    const finalState = loadState(params.name) ?? state0;
+    const live = tmuxHasSession(params.name);
+    const elapsedMs = (finalState.completed_at ?? Date.now()) - finalState.started_at;
+    const exitCode = finalState.exit_code;
+    const matchPreview = matchLine
+      ? ` (matched: ${matchLine.replace(/\n/g, " ").slice(0, 100)})`
+      : "";
+
+    const text = [
+      `name:        ${finalState.name}`,
+      `waitResult:  ${waitResult}${matchPreview}`,
+      `live:        ${live}`,
+      `exitCode:    ${exitCode ?? "—"}`,
+      `elapsed:     ${fmtDuration(elapsedMs)}`,
+      "",
+      `output (last ${linesWanted} lines):`,
+      lastOutput.trimEnd() || "(empty)",
+    ].join("\n");
+
+    return {
+      content: [{ type: "text", text }],
+      details: {
+        name: finalState.name,
+        waitResult,
+        matched: matchLine ?? null,
+        live,
+        exitCode: exitCode ?? null,
+        elapsedMs,
+        timedOut: waitResult === "timeout",
+      },
+    };
+  },
+});
+
+// ── helpers (exported for tests) ────────────────────────────────────────────
 
 export function fmtDuration(ms: number): string {
   if (ms < 0) return "-";
@@ -764,6 +1011,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(bgBashTool);
   pi.registerTool(bgListTool);
   pi.registerTool(bgStatusTool);
+  pi.registerTool(bgWaitTool);
 
   // Convenience slash command: `/bg-list` for human use (same as the LLM tool)
   pi.registerCommand("bg-list", {

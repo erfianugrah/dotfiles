@@ -25,19 +25,38 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 
 // Auto-escalation to the research crawler (Playwright-backed) for SPA-shell
-// pages. The crawler runs locally at :8889/fetch and accepts {url, force_js}.
-// We only escalate when the static fetch produced <500 visible chars on an
-// HTML response — the typical signature of a JS-rendered page.
-const CRAWLER_URL = process.env.CRAWLER_URL ?? "http://localhost:8889";
+// pages. Endpoint is `POST /extract` (response field `markdown`). Production
+// stack lives at https://crawler.erfi.io behind Caddy with `Authorization:
+// Bearer $RESEARCH_TOKEN`; CRAWLER_URL override + unsetting RESEARCH_TOKEN
+// drops back to local dev at :8889. We escalate when the static fetch
+// produced <500 visible chars on an HTML response — typical signature of a
+// JS-rendered page.
+const CRAWLER_URL = process.env.CRAWLER_URL ?? "https://crawler.erfi.io";
+const CRAWLER_URL_IS_DEFAULT = process.env.CRAWLER_URL === undefined;
 const SPA_SHELL_CHAR_THRESHOLD = 500;
+
+function researchAuthHeaders(): Record<string, string> {
+  const tok = process.env.RESEARCH_TOKEN?.trim();
+  return tok ? { authorization: `Bearer ${tok}` } : {};
+}
+
+// One-shot warning when the default public crawler is in use but no bearer is
+// set — fetchViaCrawler() would silently return null on the resulting 401,
+// making SPA-escalation appear broken.
+if (CRAWLER_URL_IS_DEFAULT && !process.env.RESEARCH_TOKEN?.trim()) {
+  console.warn(
+    `[webfetch] RESEARCH_TOKEN unset; ${CRAWLER_URL} will 401 SPA escalations. ` +
+      `Set RESEARCH_TOKEN or point CRAWLER_URL at a local instance.`,
+  );
+}
 
 async function fetchViaCrawler(url: string, timeoutMs: number): Promise<string | null> {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${CRAWLER_URL}/fetch`, {
+    const res = await fetch(`${CRAWLER_URL}/extract`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...researchAuthHeaders() },
       body: JSON.stringify({
         url,
         force_js: true,
@@ -46,8 +65,8 @@ async function fetchViaCrawler(url: string, timeoutMs: number): Promise<string |
       signal: ctl.signal,
     });
     if (!res.ok) return null;
-    const j = (await res.json()) as { content?: string; error?: string };
-    return j.content ?? null;
+    const j = (await res.json()) as { markdown?: string; error?: string };
+    return j.markdown ?? null;
   } catch {
     return null;
   } finally {
@@ -176,7 +195,7 @@ const webfetchTool = defineTool({
   label: "Web Fetch",
   promptSnippet: "webfetch — fetch a known URL as markdown / text / html.",
   promptGuidelines: [
-    "If response is SPA-shell / empty, escalate to research crawler :8889/fetch with force_js:true.",
+    "If response is SPA-shell / empty, escalate to research crawler :8889/extract with force_js:true.",
   ],
   description:
     "Fetch URL as markdown (default) / text / html. 5MB cap, 30s default timeout (max 120s), 1 retry on CF 403.",

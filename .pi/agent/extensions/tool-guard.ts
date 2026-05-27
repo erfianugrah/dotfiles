@@ -199,11 +199,13 @@ const BASH_RULES: BlockRule[] = [
   },
   {
     id: "docker_logs_servarr",
-    // The user has composer (gitops manager) that exposes logs via API. Direct docker logs on Unraid is fine,
-    // but on the dev machine the canonical lookup is the user's composer API.
-    pattern: /^\s*docker\s+logs\s+\S/,
+    // Composer only manages containers on the user's servarr host. Fire ONLY when the agent is
+    // SSH-tunneling into servarr to read logs (the canonical lookup is then the composer API).
+    // Bare `docker logs` on the dev box targets LOCAL stacks (~/llm-compose, ~/composer/, etc.)
+    // which composer does NOT manage — those must not trip this guard.
+    pattern: /^\s*ssh\s+[\s\S]*?\bservarr\b[\s\S]*?\bdocker\s+logs\b/,
     reason:
-      "For services managed by the user's composer instance, prefer the composer API for logs (gives you tail + filter + structured response). `docker logs` direct is fine if SSH'd into the host running the container.",
+      "For containers on servarr (composer-managed), prefer the composer API for logs — `curl $COMPOSER/api/v1/services/<id>/logs?tail=...` gives tail + filter + structured response. `ssh servarr docker logs` is fine when you specifically need raw stderr that composer hasn't captured. Local-host docker (this dev box, ~/llm-compose, etc.) is not in composer — bare `docker logs` there is correct.",
     segment: true,
   },
   // dropped (2026-05-23, audit):

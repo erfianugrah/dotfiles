@@ -23,7 +23,7 @@ Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context
 - BEFORE reaching for `websearch` / `webfetch` / `web_research` on any technical topic, do a one-shot `docs_sources <topic>` check (or `docs_sources` with a 1-token filter like 'keycloak', 'cloudflare', 'tailwind'). If the source exists on docs.erfi.io (≥1 file), prefer `docs_*` first. Escalate to web tools when docs returns nothing useful, the topic is current-events / latest-versions / external state (npm registry, GitHub API), or after one drill-in proves docs lack the specific detail.
 - Making a recommendation / asserting a fact / answering a disputed question → `web_research` (auto search + fetch top results).
 - Quick discovery only, no claims yet → `websearch`.
-- Known URL → `webfetch`. If it returns empty/SPA-shell content, escalate to research crawler `:8889/fetch` with `force_js:true`.
+- Known URL → `webfetch`. If it returns empty/SPA-shell content, escalate to research crawler `:8889/extract` with `force_js:true`.
 - Local business / maps / reviews / opening hours → `web_research` with `mode: "local"` (forces Playwright on JS-heavy hosts).
 - Freshness-sensitive (<1 week) → `web_research` with `mode: "fresh"` (livecrawl=preferred + SearXNG cross-check).
 - Exa returns 0 useful results or errors twice → fall back to research SearXNG `:8888`.
@@ -90,7 +90,8 @@ When a task will take >30s OR you want pi to keep working in parallel, use the b
 - **Delegated pi work** (multi-step task that benefits from another LLM brain, expected >5 min) → `bg_task prompt="..."`. Same lifecycle as bg_bash but spawns `pi -p` instead of bash. Pass `minimal=true` for read-only exploration with no extensions/skills loaded.
 - **Read-only deep dive that must complete before continuing** → existing `task subagent_type="explore"` (blocks parent; cheaper than bg_task).
 - **Check on running / recent tasks** → `bg_list` (one line per task with kind glyph π/$, status, elapsed). `bg_status name=...` for details + last N lines of output.
-- **Anti-pattern**: a `bash` call with `sleep N` loops or `for i in $(seq 1 N); do ... done` that runs >30s — use `bg_bash` instead.
+- **Wait for an event on a bg task** → `bg_wait name=... pattern="..." timeout=...` (or `until_exit=true`). Blocks server-side until the regex matches output, the task exits, or timeout elapses — replaces the re-prompt loop of `bg_status` → "check again" → `bg_status`. Use this whenever you spawned a bg task and the next step depends on something appearing in its output.
+- **Anti-pattern**: a `bash` call with `sleep N` loops or `for i in $(seq 1 N); do ... done` that runs >30s — use `bg_bash` instead. Likewise, polling `bg_status` in successive turns is the anti-pattern `bg_wait` exists to fix.
 - **Context-hygiene**: when a single session is interleaving 2+ unrelated problem domains (e.g. git reorganization + storage rebuild + DNS debugging), park one via `bg_task` or a `task` subagent. Thrashing both in shared context degrades attention on each.
 
 ## Implementation discipline

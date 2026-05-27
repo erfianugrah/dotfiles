@@ -33,8 +33,11 @@ import { parseGitleaksJson, parseNoseyparkerJsonl } from "../extensions/secret-s
 import { parseHurlJson } from "../extensions/hurl-test.ts";
 import { parseGoTestJson } from "../extensions/go-test.ts";
 import { parseHyperfineJson } from "../extensions/bench.ts";
-import { fmtDuration, makeSlug, makeSessionName } from "../extensions/bg-tasks.ts";
+import { fmtDuration, makeSlug, makeSessionName, decideWaitResult } from "../extensions/bg-tasks.ts";
 import { decideInjection, matchesIntent, looksLikeSpec } from "../extensions/superpowers.ts";
+import { _internals as osint } from "../extensions/osint.ts";
+import { safePath } from "../extensions/docs.ts";
+import { extractCdTargets, decideTarget } from "../extensions/cd-agents-reload.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -1244,6 +1247,768 @@ describe("yank.makePasteFriendly", () => {
     const r = makePasteFriendly("echo hello", "bash");
     expect(r.out).toBe("echo hello");
     expect(r.steps).toEqual([]);
+  });
+});
+
+// ── osint: pure formatters ───────────────────────────────────────────────
+//
+// formatters consume the `Investigation` shape returned by osint.erfi.io and
+// emit terse markdown. The grouping/sort/cap logic is non-trivial enough to
+// regress silently — cover the per-formatter happy path + key edge cases.
+
+// ── cd-agents-reload ───────────────────────────────────────────────────────
+//
+// Pi doesn't re-load AGENTS.md on `cd` mid-session. This extension catches
+// the bash call and surfaces the target dir's AGENTS.md before the command
+// runs. Pure helpers `extractCdTargets` + `decideTarget` carry the logic.
+
+describe("cd-agents-reload.extractCdTargets", () => {
+  test("plain cd at start of command", () => {
+    expect(extractCdTargets("cd /home/erfi/whisper-transcribe && docker compose up")).toEqual([
+      "/home/erfi/whisper-transcribe",
+    ]);
+  });
+  test("home-shortcut cd", () => {
+    expect(extractCdTargets("cd ~/whisper-transcribe && make build")).toEqual([
+      "~/whisper-transcribe",
+    ]);
+  });
+  test("chained cds across &&", () => {
+    expect(extractCdTargets("cd ~/a && do-thing && cd ~/b && do-other")).toEqual([
+      "~/a",
+      "~/b",
+    ]);
+  });
+  test("semicolon-separated cds", () => {
+    expect(extractCdTargets("cd /tmp/foo; cd /tmp/bar; cd /tmp/baz")).toEqual([
+      "/tmp/foo",
+      "/tmp/bar",
+      "/tmp/baz",
+    ]);
+  });
+  test("quoted target with spaces", () => {
+    expect(extractCdTargets("cd '/home/erfi/has space/repo' && ls")).toEqual([
+      "/home/erfi/has space/repo",
+    ]);
+    expect(extractCdTargets('cd "/home/erfi/has space/repo" && ls')).toEqual([
+      "/home/erfi/has space/repo",
+    ]);
+  });
+  test("subshell cd", () => {
+    // `( cd foo && cmd )` — the inner segment starts after `(` whitespace.
+    // Our regex tolerates leading whitespace and `(` is its own segment.
+    expect(extractCdTargets("(cd /home/erfi/repo && make test)")).toEqual([]);
+    // Variant that does parse — split on pipes too
+    expect(extractCdTargets("true | cd /home/erfi/repo && make test")).toEqual([
+      "/home/erfi/repo",
+    ]);
+  });
+  test("skips cd with no arg, cd -, cd /, cd $VAR", () => {
+    expect(extractCdTargets("cd && ls")).toEqual([]);
+    expect(extractCdTargets("cd - && pwd")).toEqual([]);
+    expect(extractCdTargets("cd / && ls")).toEqual([]);
+    expect(extractCdTargets("cd $HOME && ls")).toEqual([]);
+    expect(extractCdTargets('cd "$REPO_ROOT" && make')).toEqual([]);
+  });
+  test("no cd in command → empty", () => {
+    expect(extractCdTargets("docker compose up -d")).toEqual([]);
+    expect(extractCdTargets("ls -la")).toEqual([]);
+  });
+  test("cd in the middle of a chain that's not segment-aligned is missed (acceptable)", () => {
+    // We only match `cd` at segment start. `echo cd foo` is not a real cd.
+    expect(extractCdTargets("echo cd /tmp/foo")).toEqual([]);
+  });
+});
+
+describe("cd-agents-reload.decideTarget", () => {
+  const startupLoaded = new Set(["/home/erfi/dotfiles", "/home/erfi", "/"]);
+  const warned = new Set<string>();
+
+  test("skips when target is in startup-loaded set (ancestor of session cwd)", () => {
+    expect(
+      decideTarget({
+        target: "/home/erfi",
+        startupLoaded,
+        alreadyWarned: warned,
+        fsExists: () => true,
+      }),
+    ).toBeNull();
+  });
+  test("skips when already warned this session", () => {
+    expect(
+      decideTarget({
+        target: "/home/erfi/whisper-transcribe",
+        startupLoaded,
+        alreadyWarned: new Set(["/home/erfi/whisper-transcribe"]),
+        fsExists: () => true,
+      }),
+    ).toBeNull();
+  });
+  test("returns AGENTS.md path when present and unloaded", () => {
+    const target = "/home/erfi/whisper-transcribe";
+    expect(
+      decideTarget({
+        target,
+        startupLoaded,
+        alreadyWarned: warned,
+        fsExists: (p) => p === `${target}/AGENTS.md`,
+      }),
+    ).toBe(`${target}/AGENTS.md`);
+  });
+  test("falls back to CLAUDE.md when AGENTS.md absent", () => {
+    const target = "/home/erfi/legacy-repo";
+    expect(
+      decideTarget({
+        target,
+        startupLoaded,
+        alreadyWarned: warned,
+        fsExists: (p) => p === `${target}/CLAUDE.md`,
+      }),
+    ).toBe(`${target}/CLAUDE.md`);
+  });
+  test("prefers AGENTS.md over CLAUDE.md when both exist", () => {
+    const target = "/home/erfi/both";
+    expect(
+      decideTarget({
+        target,
+        startupLoaded,
+        alreadyWarned: warned,
+        fsExists: () => true,
+      }),
+    ).toBe(`${target}/AGENTS.md`);
+  });
+  test("returns null when no instruction file exists", () => {
+    expect(
+      decideTarget({
+        target: "/home/erfi/no-instructions",
+        startupLoaded,
+        alreadyWarned: warned,
+        fsExists: () => false,
+      }),
+    ).toBeNull();
+  });
+});
+
+// ── docs: safePath ─────────────────────────────────────────────────────────
+//
+// docs_* tools target docs.erfi.io over SSH. If the agent passes a LOCAL
+// absolute path by mistake (forgetting /docs/<source>/ prefix), the SSH
+// command would silently fail with "bash: /docs/home/...: No such file".
+// safePath() catches this up front with a clear error.
+
+describe("docs.safePath", () => {
+  test("normalises a relative-looking docs source to /docs/<source>/...", () => {
+    expect(safePath("supabase/guides/auth.md")).toBe("/docs/supabase/guides/auth.md");
+  });
+  test("passes through a well-formed /docs/<source>/... path", () => {
+    expect(safePath("/docs/postgres/ddl-rowsecurity.md")).toBe("/docs/postgres/ddl-rowsecurity.md");
+  });
+  test("strips traversal ../ segments", () => {
+    expect(safePath("/docs/foo/../bar/baz.md")).toBe("/docs/foo/bar/baz.md");
+  });
+  test("strips repeated slashes", () => {
+    expect(safePath("/docs//foo///bar.md")).toBe("/docs/foo/bar.md");
+  });
+  test("preserves bare '..' inside legitimate filenames", () => {
+    expect(safePath("/docs/mdn/do..while/index.md")).toBe("/docs/mdn/do..while/index.md");
+  });
+  test("rejects bare local absolute path (/home/...)", () => {
+    expect(() => safePath("/home/erfi/gloryhole/notes.md")).toThrow(/local filesystem path/);
+  });
+  test("rejects /docs-prefixed local absolute path (the actual bug)", () => {
+    // This is the scenario from the bug report: resolvePath got
+    // /home/erfi/gloryhole/... and safePath used to prepend /docs blindly.
+    expect(() => safePath("/docs/home/erfi/gloryhole/docs/plans/foo.md")).toThrow(
+      /local filesystem path/,
+    );
+  });
+  test("rejects all common local roots when /docs-prefixed", () => {
+    for (const root of ["home", "root", "Users", "etc", "var", "tmp", "opt", "srv", "mnt", "usr", "dev", "proc", "sys", "private"]) {
+      expect(() => safePath(`/docs/${root}/foo`)).toThrow(/local filesystem path/);
+      expect(() => safePath(`/${root}/foo`)).toThrow(/local filesystem path/);
+    }
+  });
+  test("rejects tilde-prefixed paths (~/foo)", () => {
+    expect(() => safePath("~/gloryhole/notes.md")).toThrow(/local filesystem path/);
+  });
+  test("./-prefixed paths get traversal-stripped then normalised (agent likely meant a docs source)", () => {
+    // Defensive: `../foo/bar` gets `../` stripped first, then normalised.
+    // We don't reject these — they're ambiguous, not clearly local.
+    expect(safePath("../foo/bar.md")).toBe("/docs/foo/bar.md");
+  });
+  test("error message names the offending input and points at 'read' / docs_sources", () => {
+    try {
+      safePath("/home/erfi/foo.md");
+      throw new Error("should have thrown");
+    } catch (e) {
+      const msg = (e as Error).message;
+      expect(msg).toContain("/home/erfi/foo.md");
+      expect(msg).toContain("'read' tool");
+      expect(msg).toContain("docs_sources");
+    }
+  });
+  test("rejects empty / non-string", () => {
+    expect(() => safePath("")).toThrow(/required/);
+    // @ts-expect-error — intentionally bad input
+    expect(() => safePath(undefined)).toThrow(/required/);
+  });
+});
+
+// ── bg-tasks: decideWaitResult ────────────────────────────────────────
+
+describe("bg-tasks.decideWaitResult", () => {
+  const baseState = {
+    name: "pi-bg-x-1",
+    slug: "x",
+    started_at: 1,
+    cwd: "/",
+    kind: "bash" as const,
+    command: "sleep 1",
+  };
+  test("pattern match wins even if task still running", () => {
+    const r = decideWaitResult({
+      state: baseState,
+      output: "booting...\nlistening on 8080\n",
+      live: true,
+      pattern: /listening on \d+/,
+      untilExit: false,
+    });
+    expect(r.result).toBe("matched");
+    expect(r.matchLine).toBe("listening on 8080");
+  });
+  test("pattern match wins over completion when both true", () => {
+    const r = decideWaitResult({
+      state: { ...baseState, completed_at: 5, exit_code: 0 },
+      output: "job complete\n",
+      live: false,
+      pattern: /job complete/,
+      untilExit: true,
+    });
+    expect(r.result).toBe("matched");
+  });
+  test("untilExit resolves on completion when pattern absent", () => {
+    const r = decideWaitResult({
+      state: { ...baseState, completed_at: 5, exit_code: 0 },
+      output: "",
+      live: false,
+      untilExit: true,
+    });
+    expect(r.result).toBe("exited");
+  });
+  test("pattern given + task exited without match → 'exited' so caller knows it can't match", () => {
+    const r = decideWaitResult({
+      state: { ...baseState, completed_at: 5, exit_code: 1 },
+      output: "some unrelated output\n",
+      live: false,
+      pattern: /will never appear/,
+      untilExit: false,
+    });
+    expect(r.result).toBe("exited");
+  });
+  test("still running + no match → pending", () => {
+    const r = decideWaitResult({
+      state: baseState,
+      output: "warming up...\n",
+      live: true,
+      pattern: /listening/,
+      untilExit: false,
+    });
+    expect(r.result).toBe("pending");
+  });
+  test("untilExit=false, no pattern, task still running → pending", () => {
+    const r = decideWaitResult({
+      state: baseState,
+      output: "...",
+      live: true,
+      untilExit: false,
+    });
+    expect(r.result).toBe("pending");
+  });
+  test("untilExit=false, no pattern, task done → pending (no condition asked for, never resolves)", () => {
+    // Defensive: execute() rejects this combination upstream, but the pure
+    // helper must still behave — returning 'pending' lets timeout fire.
+    const r = decideWaitResult({
+      state: { ...baseState, completed_at: 5, exit_code: 0 },
+      output: "done",
+      live: false,
+      untilExit: false,
+    });
+    expect(r.result).toBe("pending");
+  });
+  test("null state + dead tmux pane + untilExit → exited (handles GC'd state)", () => {
+    const r = decideWaitResult({
+      state: null,
+      output: "",
+      live: false,
+      untilExit: true,
+    });
+    expect(r.result).toBe("exited");
+  });
+});
+
+describe("osint.groupByKind", () => {
+  test("groups by finding kind, preserves insertion order", () => {
+    const out = osint.groupByKind([
+      { kind: "a", value: "1" },
+      { kind: "b", value: "2" },
+      { kind: "a", value: "3" },
+    ]);
+    expect(Object.keys(out)).toEqual(["a", "b"]);
+    expect(out.a.map((f) => f.value)).toEqual(["1", "3"]);
+    expect(out.b.map((f) => f.value)).toEqual(["2"]);
+  });
+  test("undefined and empty input return {}", () => {
+    expect(osint.groupByKind(undefined)).toEqual({});
+    expect(osint.groupByKind([])).toEqual({});
+  });
+});
+
+describe("osint.metaFooter", () => {
+  test("renders sources + elapsed, no errors line when clean", () => {
+    const out = osint.metaFooter({
+      sources_queried: ["subfinder", "crtsh"],
+      elapsed_ms: 1234,
+    });
+    expect(out).toContain("subfinder, crtsh");
+    expect(out).toContain("1234ms");
+    expect(out).not.toContain("Issues");
+  });
+  test("adds Issues line when errors present (truncated to 3)", () => {
+    const out = osint.metaFooter({
+      sources_queried: [],
+      errors: ["e1", "e2", "e3", "e4"],
+    });
+    expect(out).toContain("(none)"); // empty sources fallback
+    expect(out).toContain("Issues: e1; e2; e3");
+    expect(out).not.toContain("e4");
+  });
+  test("appends extras lines", () => {
+    const out = osint.metaFooter({ elapsed_ms: 10 }, ["hint A", "hint B"]);
+    expect(out).toContain("hint A");
+    expect(out).toContain("hint B");
+  });
+});
+
+describe("osint.formatDomain", () => {
+  const inv = {
+    entity: "example.com",
+    findings: [
+      { kind: "dns_record", value: "93.184.216.34", extra: { type: "A" } },
+      { kind: "dns_record", value: "2606:2800:220:1::1", extra: { type: "AAAA" } },
+      { kind: "dns_record", value: "a.iana-servers.net", extra: { type: "NS" } },
+      { kind: "dns_record", value: "b.iana-servers.net", extra: { type: "NS" } },
+      { kind: "subdomain", value: "www.example.com" },
+      { kind: "subdomain", value: "mail.example.com" },
+      { kind: "subdomain", value: "www.example.com" }, // dup — must dedupe
+      {
+        kind: "certificate",
+        value: "sha1",
+        extra: {
+          total_certs: 42,
+          issuer: "DigiCert TLS RSA SHA256 2020 CA1",
+          not_before: "2024-01-01T00:00:00",
+          not_after: "2025-01-01T00:00:00",
+        },
+      },
+      { kind: "whois_field", value: "RESERVED-Internet", extra: { field: "registrar" } },
+      { kind: "whois_field", value: "1995-08-14", extra: { field: "created" } },
+      { kind: "whois_field", value: "IGNORED", extra: { field: "random_unwanted" } },
+    ],
+    sources_queried: ["subfinder"],
+    elapsed_ms: 100,
+  };
+  test("summary mode renders header + sections + dedupes subdomains", () => {
+    const out = osint.formatDomain(inv, "summary");
+    expect(out).toMatch(/^# Domain investigation: example\.com/);
+    expect(out).toContain("## DNS");
+    expect(out).toContain("A: 93.184.216.34");
+    expect(out).toContain("## Subdomains (2 unique)");
+    expect(out).toContain("mail.example.com, www.example.com"); // sorted
+    expect(out).toContain("## Certificates (crt.sh)");
+    expect(out).toContain("Total: 42");
+    expect(out).toContain("Valid 2024-01-01 \u2192 2025-01-01");
+    expect(out).toContain("registrar=RESERVED-Internet");
+    expect(out).not.toContain("random_unwanted"); // unknown WHOIS fields dropped
+  });
+  test("summary mode caps subdomains at 15 with 'showing X of Y' note", () => {
+    const many = {
+      entity: "e.com",
+      findings: Array.from({ length: 30 }, (_, i) => ({
+        kind: "subdomain",
+        value: `s${String(i).padStart(2, "0")}.e.com`,
+      })),
+    };
+    const out = osint.formatDomain(many, "summary");
+    expect(out).toContain("## Subdomains (30 unique)");
+    expect(out).toContain("showing 15 of 30");
+    expect(out).toContain('mode="full"');
+  });
+  test("full mode emits every subdomain, no truncation note", () => {
+    const many = {
+      entity: "e.com",
+      findings: Array.from({ length: 30 }, (_, i) => ({
+        kind: "subdomain",
+        value: `s${String(i).padStart(2, "0")}.e.com`,
+      })),
+    };
+    const out = osint.formatDomain(many, "full");
+    expect(out).not.toContain("showing 15 of");
+    expect(out).toContain("s29.e.com");
+  });
+  test("empty findings still renders header + footer", () => {
+    const out = osint.formatDomain({ entity: "e.com" }, "summary");
+    expect(out).toContain("# Domain investigation: e.com");
+    expect(out).toContain("_Sources:");
+  });
+});
+
+describe("osint.formatIp", () => {
+  test("separates CVE tags from plain tags, sorts + dedupes ports", () => {
+    const out = osint.formatIp({
+      entity: "1.2.3.4",
+      findings: [
+        {
+          kind: "geolocation",
+          value: "US",
+          extra: { country: "US", city: "Ashburn", org: "Amazon" },
+        },
+        { kind: "hostname", value: "a.example" },
+        { kind: "hostname", value: "a.example" }, // dup
+        { kind: "open_port", value: "443" },
+        { kind: "open_port", value: "22" },
+        { kind: "open_port", value: "443" }, // dup
+        { kind: "vuln_tag", value: "self-signed" },
+        { kind: "vuln_tag", value: "CVE-2024-1234", extra: { is_cve: true } },
+      ],
+    });
+    expect(out).toContain("US \u00b7 Ashburn \u00b7 Amazon");
+    expect(out).toContain("## Hostnames\na.example");
+    expect(out).toContain("## Open ports");
+    expect(out).toMatch(/22, 443/); // sorted asc, deduped
+    expect(out).toContain("## Tags\nself-signed");
+    expect(out).toContain("## CVEs\nCVE-2024-1234");
+  });
+  test("caps shared_host at 15 with CDN hint", () => {
+    const out = osint.formatIp({
+      entity: "1.1.1.1",
+      findings: Array.from({ length: 50 }, (_, i) => ({
+        kind: "shared_host",
+        value: `host${String(i).padStart(3, "0")}.example`,
+      })),
+    });
+    expect(out).toContain("## Shared hosts (50 unique)");
+    expect(out).toContain("showing 15 of 50");
+    expect(out).toContain("may be a shared CDN");
+  });
+});
+
+describe("osint.formatEmail", () => {
+  test("renders Holehe hits + HIBP breaches", () => {
+    const out = osint.formatEmail({
+      entity: "a@b.com",
+      findings: [
+        { kind: "platform_registration", value: "github" },
+        { kind: "platform_registration", value: "twitter" },
+        {
+          kind: "breach",
+          value: "linkedin-2012",
+          extra: {
+            title: "LinkedIn",
+            breach_date: "2012-05-05",
+            pwn_count: 164_611_595,
+            data_classes: ["emails", "passwords", "a", "b", "c", "d"],
+          },
+        },
+      ],
+      sources_queried: ["holehe", "haveibeenpwned"],
+    });
+    expect(out).toContain("Registered on 2 services");
+    expect(out).toContain("github, twitter");
+    expect(out).toContain("Breaches (HIBP) \u2014 1 known");
+    expect(out).toContain("**LinkedIn**");
+    expect(out).toContain("164611595 accounts");
+    // data_classes capped at 5
+    expect(out).toContain("emails, passwords, a, b, c");
+    expect(out).not.toMatch(/, d\b/);
+  });
+  test("HIBP-not-queried: hints at missing API key", () => {
+    const out = osint.formatEmail({
+      entity: "a@b.com",
+      sources_queried: ["holehe"], // no haveibeenpwned
+    });
+    expect(out).toContain("No platform registrations");
+    expect(out).toContain("HIBP_API_KEY");
+  });
+  test("HIBP queried but no breaches: explicit 'No breaches found'", () => {
+    const out = osint.formatEmail({
+      entity: "a@b.com",
+      sources_queried: ["holehe", "haveibeenpwned"],
+    });
+    expect(out).toContain("No breaches found");
+  });
+});
+
+describe("osint.formatUsername", () => {
+  test("fast mode caps at 30, hints at show_all + deep mode", () => {
+    const accounts = Array.from({ length: 50 }, (_, i) => ({
+      kind: "account",
+      value: `https://example.com/u${i}`,
+      extra: { platform: `site${i}` },
+    }));
+    const out = osint.formatUsername(
+      { entity: "alice", findings: accounts },
+      "fast",
+      false,
+    );
+    expect(out).toContain("(fast)");
+    expect(out).toContain("(50 hits)");
+    expect(out).toContain("showing top 30, pass show_all=true");
+    expect(out).toContain("site29"); // boundary, included
+    expect(out).not.toContain("site30"); // first dropped
+    expect(out).toContain('Run with mode="deep"'); // hint only in fast mode
+  });
+  test("deep mode + show_all dumps everything, no deep-hint", () => {
+    const accounts = Array.from({ length: 50 }, (_, i) => ({
+      kind: "account",
+      value: `https://example.com/u${i}`,
+      extra: { platform: `site${i}` },
+    }));
+    const out = osint.formatUsername(
+      { entity: "alice", findings: accounts },
+      "deep",
+      true,
+    );
+    expect(out).toContain("site49");
+    expect(out).not.toContain("showing top");
+    expect(out).not.toContain('mode="deep"');
+  });
+  test("no accounts: explicit message", () => {
+    const out = osint.formatUsername({ entity: "alice" }, "fast", false);
+    expect(out).toContain("No accounts found");
+  });
+});
+
+describe("osint.formatThreat", () => {
+  test("verdict line reflects malicious > suspicious > clean", () => {
+    const mk = (m: number, s: number) =>
+      osint.formatThreat({
+        entity: "sha",
+        entity_kind: "hash",
+        findings: [
+          {
+            kind: "reputation",
+            value: "sha",
+            extra: { malicious: m, suspicious: s, harmless: 50, undetected: 10, total: 70 },
+          },
+        ],
+      });
+    expect(mk(3, 1)).toContain("\u26a0 malicious");
+    expect(mk(0, 2)).toContain("? suspicious");
+    expect(mk(0, 0)).toContain("clean");
+  });
+  test("missing VT_API_KEY info \u2192 explicit explanation", () => {
+    const out = osint.formatThreat({
+      entity: "x",
+      entity_kind: "hash",
+      info: ["vt: VT_API_KEY not set"],
+    });
+    expect(out).toContain("VT_API_KEY not set");
+  });
+  test("unclassifiable target \u2192 'could not auto-detect' message", () => {
+    const out = osint.formatThreat({
+      entity: "???",
+      entity_kind: "unknown",
+      info: ["vt: could not classify"],
+    });
+    expect(out).toContain("Could not auto-detect");
+  });
+  test("facts and tags rendered when present", () => {
+    const out = osint.formatThreat({
+      entity: "hash",
+      entity_kind: "hash",
+      findings: [
+        {
+          kind: "reputation",
+          value: "x",
+          extra: {
+            malicious: 1,
+            suspicious: 0,
+            harmless: 0,
+            total: 1,
+            magic: "PE32 executable",
+            size: 4096,
+            tags: ["signed", "upx"],
+          },
+        },
+      ],
+    });
+    expect(out).toContain("type: PE32 executable");
+    expect(out).toContain("size (B): 4096");
+    expect(out).toContain("## Tags\nsigned, upx");
+  });
+});
+
+describe("osint.formatCve", () => {
+  test("renders score, severity, dates, truncates long description", () => {
+    const longDesc = "a".repeat(900);
+    const out = osint.formatCve({
+      entity: "CVE-2021-44228",
+      findings: [
+        {
+          kind: "cve",
+          value: "CVE-2021-44228",
+          extra: {
+            cvss_score: 10.0,
+            cvss_severity: "CRITICAL",
+            cvss_version: "3.1",
+            cvss_vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+            published: "2021-12-10T10:15:00",
+            modified: "2024-02-01T00:00:00",
+            description: longDesc,
+            cwes: ["CWE-20", "CWE-502"],
+            references: ["https://nvd.nist.gov/x", "https://logging.apache.org/log4j"],
+            ref_total: 99,
+          },
+        },
+      ],
+    });
+    expect(out).toContain("# CVE lookup: CVE-2021-44228");
+    expect(out).toContain("CVSS v3.1: **10 (CRITICAL)**");
+    expect(out).toContain("Published: 2021-12-10");
+    expect(out).toContain("Modified: 2024-02-01");
+    expect(out).toContain("\u2026"); // ellipsis on truncated description
+    // proves trimming happened: the description SECTION should be capped at
+    // ~700 chars + ellipsis, well under the 900-char input.
+    const descSection = out.split("## Description\n")[1].split("\n\n")[0];
+    expect(descSection.length).toBeLessThanOrEqual(701); // 700 + ellipsis
+    expect(out).toContain("CWE-20, CWE-502");
+    expect(out).toContain("## References (99)");
+    expect(out).toContain("showing 5 of 99"); // only 2 refs given, but ref_total > cap
+  });
+  test("invalid CVE id \u2192 format hint", () => {
+    const out = osint.formatCve({
+      entity: "foo",
+      info: ["nvd: not a valid CVE id"],
+    });
+    expect(out).toContain("not a valid CVE id");
+    expect(out).toContain("CVE-YYYY-NNNNN");
+  });
+  test("unknown CVE \u2192 'no record' message", () => {
+    const out = osint.formatCve({
+      entity: "CVE-9999-99999",
+      info: ["nvd: no record for"],
+    });
+    expect(out).toContain("NVD has no record");
+  });
+});
+
+describe("osint.formatHarvest", () => {
+  test("renders emails + hosts sections with cap-at-30", () => {
+    const out = osint.formatHarvest({
+      entity: "e.com",
+      findings: [
+        ...Array.from({ length: 40 }, (_, i) => ({
+          kind: "harvested_email",
+          value: `u${String(i).padStart(2, "0")}@e.com`,
+        })),
+        { kind: "harvested_host", value: "a.e.com" },
+        { kind: "harvested_host", value: "b.e.com" },
+      ],
+    });
+    expect(out).toContain("## Emails (40)");
+    expect(out).toContain("showing 30 of 40");
+    expect(out).toContain("## Hosts (2)");
+    expect(out).toContain("a.e.com, b.e.com");
+  });
+  test("empty harvest \u2192 explicit message", () => {
+    const out = osint.formatHarvest({ entity: "e.com" });
+    expect(out).toContain("No emails or hosts harvested");
+  });
+});
+
+describe("osint.formatUrl", () => {
+  test("empty scans \u2192 submit hint", () => {
+    const out = osint.formatUrl({ entity: "https://e.com" });
+    expect(out).toContain("No urlscan.io scans found");
+    expect(out).toContain("`submit=true`");
+  });
+  test("renders scan results with malicious badge", () => {
+    const out = osint.formatUrl({
+      entity: "https://e.com",
+      findings: [
+        {
+          kind: "scan_result",
+          value: "scan1",
+          extra: {
+            url: "https://e.com/path",
+            ip: "1.2.3.4",
+            country: "US",
+            asn: "AS13335",
+            asnname: "Cloudflare",
+            scan_time: "2025-01-01",
+            malicious: true,
+          },
+        },
+      ],
+    });
+    expect(out).toContain("https://e.com/path");
+    expect(out).toContain("AS13335 Cloudflare");
+    expect(out).toContain("\u26a0 malicious");
+  });
+});
+
+describe("osint.formatPhone", () => {
+  test("empty findings \u2192 free-tier hint", () => {
+    const out = osint.formatPhone({ entity: "+14155551234" });
+    expect(out).toContain("No data returned");
+    expect(out).toContain("API keys");
+  });
+  test("groups fields by scanner, drops null/empty/empty-array values", () => {
+    const out = osint.formatPhone({
+      entity: "+14155551234",
+      findings: [
+        {
+          kind: "phone_info",
+          value: "local",
+          extra: {
+            scanner: "local",
+            valid: true,
+            country: "US",
+            blank: "",
+            nothing: null,
+            empties: [],
+          },
+        },
+        {
+          kind: "phone_info",
+          value: "truecaller",
+          extra: { scanner: "truecaller", carrier: "Verizon" },
+        },
+      ],
+    });
+    expect(out).toContain("## local");
+    expect(out).toContain("valid: true");
+    expect(out).toContain("country: \"US\"");
+    expect(out).not.toContain("blank");
+    expect(out).not.toContain("nothing");
+    expect(out).not.toContain("empties");
+    expect(out).toContain("## truecaller");
+    expect(out).toContain("carrier: \"Verizon\"");
+  });
+});
+
+describe("osint.authHeaders", () => {
+  const orig = process.env.RESEARCH_TOKEN;
+  test("empty when token unset", () => {
+    delete process.env.RESEARCH_TOKEN;
+    expect(osint.authHeaders()).toEqual({});
+  });
+  test("populated when token set, trimmed", () => {
+    process.env.RESEARCH_TOKEN = "  secret123  ";
+    expect(osint.authHeaders()).toEqual({ authorization: "Bearer secret123" });
+    // restore
+    if (orig === undefined) delete process.env.RESEARCH_TOKEN;
+    else process.env.RESEARCH_TOKEN = orig;
   });
 });
 
