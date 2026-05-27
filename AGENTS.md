@@ -29,8 +29,9 @@ exactly:
 - **opencode (legacy TUI)** — the standalone `opencode` TUI app the user
   ran BEFORE migrating to pi. Configs still live in `.config/opencode/`
   in this repo and are partially shared with pi via symlink
-  (`~/.pi/agent/skills` → `~/.config/opencode/skills`). The legacy app is
-  NOT running. Only reach for opencode docs / source when answering a
+  (`~/.config/opencode/skills` → `~/dotfiles/.pi/agent/skills` since the
+  2026-05-27 relocation; pi is canonical, opencode is the back-compat
+  hop). The legacy app is NOT running. Only reach for opencode docs / source when answering a
   question about the upstream project this codebase forked patterns from
   (e.g. the `tool-output-prune` algorithm is a port from
   `~/opencode/packages/opencode/src/session/compaction.ts`).
@@ -101,11 +102,22 @@ tests in /tmp/ that drive the real `execute()` via the SDK preload mock.
 
 ## Skills
 
-- Source: `.config/opencode/skills/<name>/SKILL.md` + supporting files.
-- Live at: `~/.config/opencode/skills/` (stow-managed relative symlink to
-  the dotfiles tree).
-- Pi reads the same tree via `~/.pi/agent/skills` (legacy absolute symlink
-  pointing to `~/.config/opencode/skills`; one indirection but works).
+- Source: `.pi/agent/skills/<name>/SKILL.md` + supporting files.
+  Canonical location since 2026-05-27 — pi is primary, the path mirrors
+  `.pi/agent/extensions/`.
+- Live at: `~/.pi/agent/skills/` (stow-managed relative symlink to the
+  dotfiles tree, 1 hop).
+- Opencode (legacy) reads the same tree via `~/.config/opencode/skills`
+  → `~/dotfiles/.config/opencode/skills` → `../../.pi/agent/skills`. The
+  in-repo `~/dotfiles/.config/opencode/skills` is a committed symlink
+  preserving back-compat without duplicating the source.
+- **Add a new skill:** create `.pi/agent/skills/<name>/SKILL.md` in the
+  repo, then `cd ~ && stow -d ~/dotfiles -t ~ -v .` if you also added
+  supporting files alongside it. Both pi and opencode pick it up
+  immediately (no symlink work needed for new files; they live inside
+  the already-symlinked directory).
+- **Edit a skill:** edit the source file in `~/dotfiles/.pi/agent/skills/<name>/`,
+  never the live `~/.pi/agent/skills/<name>/` symlink target.
 
 ## Prompts (system-prompt fragments)
 
