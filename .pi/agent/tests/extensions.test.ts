@@ -41,6 +41,7 @@ import { extractCdTargets, decideTarget } from "../extensions/cd-agents-reload.t
 import { rewriteClipboardPaths, shrunkSibling } from "../extensions/clipboard-image-shrink.ts";
 import { prune, type AnyMessage } from "../extensions/tool-output-prune.ts";
 import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
+import { shouldAbort as stuckShouldAbort, LAST_ACTIVITY_GRACE_MS } from "../extensions/stuck-state-recovery.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -2267,5 +2268,38 @@ describe("slash-typo-guard.closestCommand", () => {
     expect(closestCommand("ccc", small)).toBeNull();
     // "aab" is dist 1 from "aaa", dist 2 from "bbb" → "aaa"
     expect(closestCommand("aab", small)).toEqual({ name: "aaa", dist: 1 });
+  });
+});
+
+// ── stuck-state-recovery: shouldAbort decision ─────────────────────────
+
+describe("stuck-state-recovery.shouldAbort", () => {
+  test("idle pi → no abort (healthy state)", () => {
+    expect(stuckShouldAbort({ source: "interactive", idle: true, sinceActivityMs: 100 })).toBe(false);
+  });
+  test("idle + long silence → no abort (idle is the real signal)", () => {
+    expect(stuckShouldAbort({ source: "interactive", idle: true, sinceActivityMs: 999_999 })).toBe(false);
+  });
+  test("non-idle + recent activity → no abort (legit streaming, allow steer)", () => {
+    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: 2_000 })).toBe(false);
+  });
+  test("non-idle + just-under-grace → no abort (boundary)", () => {
+    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: LAST_ACTIVITY_GRACE_MS - 1 })).toBe(false);
+  });
+  test("non-idle + just-over-grace → ABORT (wedged stream, force-clean)", () => {
+    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: LAST_ACTIVITY_GRACE_MS + 1 })).toBe(true);
+  });
+  test("non-idle + 60s silence → ABORT (definitively wedged)", () => {
+    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: 60_000 })).toBe(true);
+  });
+  test("extension-source input never aborts (avoid feedback loops)", () => {
+    expect(stuckShouldAbort({ source: "extension", idle: false, sinceActivityMs: 60_000 })).toBe(false);
+  });
+  test("rpc-source input never aborts (caller controls its own state)", () => {
+    expect(stuckShouldAbort({ source: "rpc", idle: false, sinceActivityMs: 60_000 })).toBe(false);
+  });
+  test("custom graceMs override honored", () => {
+    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: 1_000, graceMs: 500 })).toBe(true);
+    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: 1_000, graceMs: 2_000 })).toBe(false);
   });
 });
