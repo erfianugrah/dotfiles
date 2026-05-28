@@ -41,7 +41,9 @@ import { extractCdTargets, decideTarget } from "../extensions/cd-agents-reload.t
 import { rewriteClipboardPaths, shrunkSibling } from "../extensions/clipboard-image-shrink.ts";
 import { prune, type AnyMessage } from "../extensions/tool-output-prune.ts";
 import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
-import { shouldAbort as stuckShouldAbort, LAST_ACTIVITY_GRACE_MS } from "../extensions/stuck-state-recovery.ts";
+import { shouldAbort as stuckShouldAbort, LAST_ACTIVITY_GRACE_MS, ACTIVITY_EVENTS } from "../extensions/stuck-state-recovery.ts";
+import { matchHints, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
+import { findLastUserEntryId } from "../extensions/session-undo.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -2330,5 +2332,219 @@ describe("stuck-state-recovery.shouldAbort", () => {
   test("custom graceMs override honored", () => {
     expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: 1_000, graceMs: 500 })).toBe(true);
     expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: 1_000, graceMs: 2_000 })).toBe(false);
+  });
+});
+
+// ── bash-error-hints: hint dispatch + new session-jsonl trigger ────────────
+
+describe("bash-error-hints.renderHint", () => {
+  test("substitutes $1..$9 from match", () => {
+    const m = "foo bar baz".match(/(\w+) (\w+) (\w+)/)!;
+    expect(renderHint("a=$1 b=$2 c=$3", m)).toBe("a=foo b=bar c=baz");
+  });
+  test("missing capture group → empty string", () => {
+    const m = "x".match(/(x)/)!;
+    expect(renderHint("a=$1 b=$2", m)).toBe("a=x b=");
+  });
+});
+
+describe("bash-error-hints.matchHints — session JSONL trigger", () => {
+  test("ls -la on a session jsonl path triggers the hint", () => {
+    const out = "/home/erfi/.pi/agent/sessions/--home-erfi-foo--/2026-05-28T10-18-22-095Z_019e6e17.jsonl";
+    const hits = matchHints(out);
+    expect(hits.length).toBeGreaterThanOrEqual(1);
+    expect(hits.some((h) => h.includes("session_search"))).toBe(true);
+  });
+
+  test("jq -r on a session jsonl triggers the hint", () => {
+    const out = "$ jq -r '.role' /home/erfi/.pi/agent/sessions/X/Y.jsonl | head -5";
+    expect(matchHints(out).some((h) => h.includes("session_search"))).toBe(true);
+  });
+
+  test("path quoted with single quotes still matches", () => {
+    const out = "head -1 '/home/erfi/.pi/agent/sessions/foo/bar.jsonl'";
+    expect(matchHints(out).some((h) => h.includes("session_search"))).toBe(true);
+  });
+
+  test("plain ~/.pi/agent/sessions/ directory listing (no .jsonl) does NOT trigger", () => {
+    const out = "$ ls ~/.pi/agent/sessions/\n--home-erfi-foo--/\n--home-erfi-bar--/";
+    const hits = matchHints(out);
+    expect(hits.some((h) => h.includes("session_search"))).toBe(false);
+  });
+
+  test("session-fts.db file path does NOT trigger (no .jsonl extension)", () => {
+    const out = "/home/erfi/.pi/agent/session-fts.db";
+    expect(matchHints(out).some((h) => h.includes("session_search"))).toBe(false);
+  });
+
+  test("unrelated path containing the word 'session' does NOT trigger", () => {
+    const out = "/var/log/session-manager.log";
+    expect(matchHints(out).some((h) => h.includes("session_search"))).toBe(false);
+  });
+});
+
+describe("bash-error-hints.matchHints — existing patterns still wired", () => {
+  test("git -c user.email override fires the author-override hint", () => {
+    const cmd = "$ git -c user.email=fake@example.com commit -m x";
+    const hits = matchHints(cmd);
+    expect(hits.some((h) => h.includes("Author/committer override"))).toBe(true);
+  });
+
+  test("dig TSIG leak fires the rotation hint", () => {
+    const out = "; TSIG: hmac-sha256:axfr-out:abcdefXYZ";
+    expect(matchHints(out).some((h) => /rotate/i.test(h))).toBe(true);
+  });
+
+  test("clean output → no hits", () => {
+    expect(matchHints("HEAD is now at abcd123 commit message")).toEqual([]);
+  });
+});
+
+describe("bash-error-hints.HINTS — sanity invariants", () => {
+  test("every hint has a non-empty pattern + hint string", () => {
+    for (const h of HINTS) {
+      expect(h.pattern).toBeInstanceOf(RegExp);
+      expect(typeof h.hint).toBe("string");
+      expect(h.hint.length).toBeGreaterThan(20);
+    }
+  });
+});
+
+// ── stuck-state-recovery: ACTIVITY_EVENTS regression list ──────────────────
+//
+// Bug 2026-05-28: a user got their live streaming response force-aborted mid-
+// analysis because the activity tracker missed `message_update` (the per-
+// token streaming event). Without these events the heuristic falsely flags
+// healthy streams as wedged after 8s of pure text streaming.
+//
+// These tests pin the critical entries so a future "minimize the event list"
+// refactor can't silently re-introduce the bug.
+
+describe("stuck-state-recovery.ACTIVITY_EVENTS", () => {
+  test("includes message_update (per-token streaming bump — critical)", () => {
+    expect(ACTIVITY_EVENTS).toContain("message_update");
+  });
+
+  test("includes tool_execution_start (long-tool-call gap coverage)", () => {
+    expect(ACTIVITY_EVENTS).toContain("tool_execution_start");
+  });
+
+  test("includes tool_execution_update (long-tool partial-result coverage)", () => {
+    expect(ACTIVITY_EVENTS).toContain("tool_execution_update");
+  });
+
+  test("includes tool_call (preflight gate, fires before exec)", () => {
+    expect(ACTIVITY_EVENTS).toContain("tool_call");
+  });
+
+  test("includes agent_start (gap between input and first message_start)", () => {
+    expect(ACTIVITY_EVENTS).toContain("agent_start");
+  });
+
+  test("preserves the original turn/message lifecycle events", () => {
+    for (const ev of [
+      "turn_start",
+      "turn_end",
+      "message_start",
+      "message_end",
+      "tool_execution_end",
+      "after_provider_response",
+      "agent_end",
+    ]) {
+      expect(ACTIVITY_EVENTS).toContain(ev);
+    }
+  });
+
+  test("no duplicates (each event fires bumpActivity once)", () => {
+    expect(new Set(ACTIVITY_EVENTS).size).toBe(ACTIVITY_EVENTS.length);
+  });
+});
+
+// ── session-undo: findLastUserEntryId pure helper ─────────────────────────
+
+describe("session-undo.findLastUserEntryId", () => {
+  test("empty branch → null", () => {
+    expect(findLastUserEntryId([])).toBeNull();
+  });
+
+  test("only assistant messages → null", () => {
+    expect(
+      findLastUserEntryId([
+        { type: "message", id: "a1", message: { role: "assistant" } },
+        { type: "message", id: "a2", message: { role: "assistant" } },
+      ]),
+    ).toBeNull();
+  });
+
+  test("single user message → that id", () => {
+    expect(
+      findLastUserEntryId([{ type: "message", id: "u1", message: { role: "user" } }]),
+    ).toBe("u1");
+  });
+
+  test("user → assistant → user → assistant returns LATEST user id", () => {
+    expect(
+      findLastUserEntryId([
+        { type: "message", id: "u1", message: { role: "user" } },
+        { type: "message", id: "a1", message: { role: "assistant" } },
+        { type: "message", id: "u2", message: { role: "user" } },
+        { type: "message", id: "a2", message: { role: "assistant" } },
+      ]),
+    ).toBe("u2");
+  });
+
+  test("ignores non-message entries (model_change, thinking_level_change, compaction)", () => {
+    expect(
+      findLastUserEntryId([
+        { type: "message", id: "u1", message: { role: "user" } },
+        { type: "model_change", id: "mc1" },
+        { type: "thinking_level_change", id: "tlc1" },
+        { type: "compaction", id: "c1" },
+      ]),
+    ).toBe("u1");
+  });
+
+  test("ignores toolResult role (it's an entry but not a 'user message')", () => {
+    expect(
+      findLastUserEntryId([
+        { type: "message", id: "u1", message: { role: "user" } },
+        { type: "message", id: "a1", message: { role: "assistant" } },
+        { type: "message", id: "tr1", message: { role: "toolResult" } },
+      ]),
+    ).toBe("u1");
+  });
+
+  test("ignores bashExecution and custom roles too", () => {
+    expect(
+      findLastUserEntryId([
+        { type: "message", id: "u1", message: { role: "user" } },
+        { type: "message", id: "be1", message: { role: "bashExecution" } },
+        { type: "message", id: "cu1", message: { role: "custom" } },
+      ]),
+    ).toBe("u1");
+  });
+
+  test("entry without a message field is silently skipped (no crash)", () => {
+    expect(
+      findLastUserEntryId([
+        { type: "message", id: "u1", message: { role: "user" } },
+        { type: "model_change", id: "mc1" }, // no message field at all
+      ]),
+    ).toBe("u1");
+  });
+
+  test("walks BACKWARD — first matching entry from the end wins", () => {
+    // Sanity check that we're not finding the EARLIEST user message
+    // (the first 'u1' should NOT win over 'u3').
+    expect(
+      findLastUserEntryId([
+        { type: "message", id: "u1", message: { role: "user" } },
+        { type: "message", id: "a1", message: { role: "assistant" } },
+        { type: "message", id: "u2", message: { role: "user" } },
+        { type: "message", id: "a2", message: { role: "assistant" } },
+        { type: "message", id: "u3", message: { role: "user" } },
+        { type: "message", id: "a3", message: { role: "assistant" } },
+      ]),
+    ).toBe("u3");
   });
 });

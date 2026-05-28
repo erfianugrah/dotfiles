@@ -58,14 +58,52 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 const DISABLED = process.env.PI_NO_STUCK_STATE_RECOVERY === "1";
 
-// Time in ms since last observable agent activity (turn_end / message_end /
-// tool_result / after_provider_response). If pi claims to be streaming but
-// has been silent longer than this, treat it as wedged.
+// Time in ms since last observable agent activity — see ACTIVITY_EVENTS
+// below for the full list of events that bump the timer. If pi claims to
+// be streaming but no activity event has fired in this long, treat it as
+// wedged.
 //
 // 8s default — long enough that mid-thinking-block input (which is rare but
 // legitimate as steer) doesn't trigger abort, short enough that the
 // post-401 wedge clears within a few seconds of the user typing.
 export const LAST_ACTIVITY_GRACE_MS = 8_000;
+
+/**
+ * Pi events whose firing means "the agent did SOMETHING" — each one bumps
+ * the per-session activity timer.
+ *
+ * Critical inclusions (lesson 2026-05-28):
+ *   - `message_update` fires on every assistant text-delta token. Without it,
+ *     a long streaming response (e.g. a multi-paragraph analysis with no
+ *     tool calls) goes 10–20s without any other event firing, and the next
+ *     user input gets force-aborted as "wedged". This was the bug a user hit
+ *     mid-analysis of an slskd port script.
+ *   - `tool_execution_start` and `tool_execution_update` cover the gap
+ *     between a tool starting and `tool_execution_end` firing — a long bash
+ *     call or read of a big file would otherwise look wedged.
+ *   - `tool_call` is the gate event that fires after `tool_execution_start`
+ *     but before the tool actually runs; included for belt-and-suspenders.
+ *   - `agent_start` covers the gap between user input and the first
+ *     `message_start`.
+ *
+ * Removing any of these events from this list re-exposes a class of
+ * false-positive aborts on healthy streams. The `bash-error-hints`-style
+ * regression test in extensions.test.ts asserts the critical entries.
+ */
+export const ACTIVITY_EVENTS = [
+  "agent_start",
+  "agent_end",
+  "turn_start",
+  "turn_end",
+  "message_start",
+  "message_update",
+  "message_end",
+  "tool_call",
+  "tool_execution_start",
+  "tool_execution_update",
+  "tool_execution_end",
+  "after_provider_response",
+] as const;
 
 /**
  * Pure decision: should the input handler force-abort the current stream?
@@ -110,18 +148,16 @@ export default function (pi: ExtensionAPI) {
   if (DISABLED) return;
 
   // Track every observable progress event so we can compute "time since
-  // last sign of life". Each of these means pi did SOMETHING — if pi
-  // claims to be streaming but none of these have fired in 8s, it's wedged.
-  for (const eventName of [
-    "turn_start",
-    "turn_end",
-    "message_start",
-    "message_end",
-    "tool_execution_end",
-    "after_provider_response",
-    "agent_end",
-  ] as const) {
-    pi.on(eventName, (_event, ctx) => bumpActivity(ctx));
+  // last sign of life". Each event in ACTIVITY_EVENTS means pi did SOMETHING
+  // — if pi claims to be streaming but none of these have fired in 8s, it's
+  // wedged. The pi.on overloads narrow `event`/`ctx` per literal name, but
+  // iterating over the tuple loses that narrowing — we don't need it because
+  // the handler only consults ctx via bumpActivity, which is type-erased.
+  for (const eventName of ACTIVITY_EVENTS) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (pi.on as any)(eventName, (_event: unknown, ctx: ExtensionContext) =>
+      bumpActivity(ctx),
+    );
   }
 
   pi.on("session_shutdown", (_event, ctx) => {

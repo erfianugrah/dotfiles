@@ -23,7 +23,8 @@ The terminal, bash, git, and pi's renderer all preserve real UTF-8. They do NOT 
 Exceptions where the escape form is correct: source code where the language runtime interprets the escape (TypeScript / JavaScript / JSON string literals etc.), and bash ANSI-C quoting in dollar-single-quote form.
 
 <!--
-Tool-routing rules live in ~/.pi/agent/prompts/tool-routing.md and are
-prepended to the system prompt by ~/.pi/agent/extensions/tool-routing.ts.
-Edit the markdown, not this file.
+Tool-routing rules live in ~/.pi/agent/AGENTS.md (everything BEFORE the
+`## Documentation` heading) and are prepended to the system prompt by
+~/.pi/agent/extensions/tool-routing.ts. Canonical edit target via the
+symlink chain is ~/dotfiles/.config/opencode/AGENTS.md.
 -->
