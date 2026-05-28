@@ -1,7 +1,7 @@
 /**
  * continue-after-error — recovery affordance for provider 401/402/429.
  *
- * Two parts:
+ * Three parts:
  *
  *  1. `after_provider_response` hook detects non-OK provider responses
  *     (401 unauthorized, 402 payment required, 429 rate-limited) and
@@ -15,6 +15,17 @@
  *     which case "continue" prompts the agent to read the existing
  *     conversation and act) or mid-flow (where it cleanly resumes
  *     from the last assistant tool result).
+ *
+ *  3. The error state is STICKY — only cleared on the next 2xx from
+ *     after_provider_response, by /continue or /model invocation, or
+ *     on session_shutdown. The previous version cleared on agent_start
+ *     after a 1-second guard, which raced badly: the failed-turn's own
+ *     agent_start was within 1s so it got preserved, but a subsequent
+ *     /continue would fire agent_start AGAIN >1s later and stomp the
+ *     state, then the retry's 401 would fire too late for the slash
+ *     command to see it (visible to the user as the stale "no recent
+ *     provider error recorded" warning even when the screen literally
+ *     shows the 401 body two lines above).
  *
  * Why a slash command and not a keybinding: opencode-zen 401s are a
  * recoverable state — the user typically needs to refresh credits in
@@ -41,6 +52,8 @@ type SessionState = {
   lastErrorStatus: number | null;
   lastErrorAt: number;
   lastErrorMessage: string;
+  /** how many same-status errors we've seen in a row (for "switch model" suggestion) */
+  consecutiveSameStatus: number;
 };
 
 const sessions = new Map<string, SessionState>();
@@ -48,10 +61,24 @@ const sessions = new Map<string, SessionState>();
 function stateFor(key: string): SessionState {
   let s = sessions.get(key);
   if (!s) {
-    s = { lastErrorStatus: null, lastErrorAt: 0, lastErrorMessage: "" };
+    s = {
+      lastErrorStatus: null,
+      lastErrorAt: 0,
+      lastErrorMessage: "",
+      consecutiveSameStatus: 0,
+    };
     sessions.set(key, s);
   }
   return s;
+}
+
+function clearState(key: string, ctx: ExtensionContext) {
+  const s = sessions.get(key);
+  if (!s || s.lastErrorStatus === null) return;
+  s.lastErrorStatus = null;
+  s.lastErrorMessage = "";
+  s.consecutiveSameStatus = 0;
+  if (ctx.hasUI) ctx.ui.setStatus("continue-after-error", "");
 }
 
 function sessionKey(ctx: ExtensionContext): string {
@@ -62,19 +89,49 @@ function sessionKey(ctx: ExtensionContext): string {
   }
 }
 
-function describeStatus(status: number, headers: Record<string, string | undefined>): string {
+function describeStatus(
+  status: number,
+  headers: Record<string, string | undefined>,
+  consecutive: number,
+): { headline: string; suggest: string } {
+  // After 2 consecutive same-status errors, the gateway/provider almost
+  // certainly won't recover by itself — push the user toward /model rather
+  // than another /continue.
+  const switchHint = consecutive >= 2
+    ? " — RETRY ALREADY FAILED, use /model to switch providers (Anthropic / OpenAI / local llama-server) before /continue"
+    : "";
+
   switch (status) {
     case 401:
-      return "Provider returned 401 (unauthorized). Likely an expired/invalid API key OR opencode-zen credits exhausted.";
+      return {
+        headline: "Provider 401 (unauthorized).",
+        suggest:
+          "Likely opencode-zen credits exhausted (CreditsError body) OR an expired/invalid API key. " +
+          "Top up at https://opencode.ai/billing OR rotate the key in ~/.pi/agent/auth.json, then /continue. " +
+          "If credits stay 0 and you need to keep working, /model to swap to a non-opencode-zen provider" +
+          switchHint,
+      };
     case 402:
-      return "Provider returned 402 (payment required). Credits exhausted — top up at the gateway.";
+      return {
+        headline: "Provider 402 (payment required).",
+        suggest:
+          "Credits exhausted. Top up at the gateway OR /model to switch providers" + switchHint,
+      };
     case 429: {
       const retryAfter = headers["retry-after"] ?? headers["x-ratelimit-reset"];
       const hint = retryAfter ? ` Retry-After: ${retryAfter}s.` : "";
-      return `Provider returned 429 (rate-limited).${hint}`;
+      return {
+        headline: `Provider 429 (rate-limited).${hint}`,
+        suggest:
+          "Wait the Retry-After window then /continue, OR /model to switch providers if rate-limit is structural" +
+          switchHint,
+      };
     }
     default:
-      return `Provider returned ${status}.`;
+      return {
+        headline: `Provider ${status}.`,
+        suggest: "Check the provider's billing/auth, then /continue, or /model to switch.",
+      };
   }
 }
 
@@ -86,73 +143,76 @@ export default function (pi: ExtensionAPI) {
   pi.on("after_provider_response", (event, ctx) => {
     const status = (event as { status?: number }).status;
     if (typeof status !== "number") return;
+
+    const key = sessionKey(ctx);
+
+    // Successful response clears any prior error state. THIS is the right
+    // place to clear — the model is healthy again, the badge can go away.
+    if (status >= 200 && status < 300) {
+      clearState(key, ctx);
+      return;
+    }
+
     if (!RECOVERABLE_STATUSES.has(status)) return;
 
     const headers = (event as { headers?: Record<string, string | undefined> }).headers ?? {};
-    const message = describeStatus(status, headers);
-    const key = sessionKey(ctx);
     const state = stateFor(key);
+    const isRepeat = state.lastErrorStatus === status;
+    state.consecutiveSameStatus = isRepeat ? state.consecutiveSameStatus + 1 : 1;
     state.lastErrorStatus = status;
     state.lastErrorAt = Date.now();
-    state.lastErrorMessage = message;
+
+    const { headline, suggest } = describeStatus(status, headers, state.consecutiveSameStatus);
+    state.lastErrorMessage = `${headline} ${suggest}`;
 
     if (ctx.hasUI) {
-      ctx.ui.notify(`${message} Run /continue to resume after fixing.`, "error");
-      ctx.ui.setStatus(
-        "continue-after-error",
-        `provider ${status} — /continue to resume`,
-      );
+      ctx.ui.notify(state.lastErrorMessage, "error");
+      const badge = state.consecutiveSameStatus >= 2
+        ? `provider ${status} ×${state.consecutiveSameStatus} — try /model`
+        : `provider ${status} — /continue or /model`;
+      ctx.ui.setStatus("continue-after-error", badge);
     }
-  });
-
-  // Clear the status on the next agent_start (next user prompt resolves
-  // the error implicitly — typing anything counts as the user moving on).
-  pi.on("agent_start", (_event, ctx) => {
-    const key = sessionKey(ctx);
-    const state = sessions.get(key);
-    if (!state || state.lastErrorStatus === null) return;
-
-    // Only clear if the error is older than 1 second — same-tick agent_start
-    // is the failed turn itself; we want to preserve the status so the user
-    // sees it.
-    if (Date.now() - state.lastErrorAt < 1000) return;
-
-    state.lastErrorStatus = null;
-    state.lastErrorMessage = "";
-    if (ctx.hasUI) ctx.ui.setStatus("continue-after-error", "");
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
     sessions.delete(sessionKey(ctx));
   });
 
+  // /continue — explicit retry on the same provider.
   pi.registerCommand("continue", {
-    description: "Resume the agent after a provider 401/402/429 (sends 'continue' as a user message)",
+    description:
+      "Resume the agent after a provider 401/402/429 (sends 'continue' as a user message). " +
+      "Use /model first if /continue has already failed once on the same status.",
     handler: async (args, ctx) => {
       const key = sessionKey(ctx);
       const state = stateFor(key);
 
-      // Allow the user to provide custom continuation text:
-      //   /continue please retry the last tool call
-      // Default is the bare "continue" which is enough for most cases.
       const text = args.trim() || "continue";
 
-      // If we never saw an error, the command still works — it's just a
-      // generic "wake up" trigger. Warn so the user knows they probably
-      // wanted a different command.
+      // No recent error → user probably wanted a different command, but
+      // /continue still works as a generic "resume" trigger.
       if (state.lastErrorStatus === null && ctx.hasUI) {
         ctx.ui.notify(
-          "No recent provider error recorded — /continue still fires, but you may have wanted a different command.",
+          "No recent provider error recorded — /continue still fires as a generic resume, but you may have wanted a different command (e.g. /model).",
           "warning",
         );
       }
 
-      // Clear state BEFORE sending so the agent_start handler doesn't
-      // immediately stomp the status (and so a second 401 on retry shows
-      // up cleanly).
-      state.lastErrorStatus = null;
-      state.lastErrorMessage = "";
-      if (ctx.hasUI) ctx.ui.setStatus("continue-after-error", "");
+      // Special case: 2+ consecutive same-status errors mean retry on this
+      // provider is almost certainly futile. Warn but don't block — the user
+      // may have manually fixed something between attempts.
+      if (state.consecutiveSameStatus >= 2 && ctx.hasUI) {
+        ctx.ui.notify(
+          `/continue invoked after ${state.consecutiveSameStatus} consecutive ${state.lastErrorStatus}s. ` +
+          `If you haven't fixed the underlying issue (top up credits / rotate key / switch provider), this will fail again. ` +
+          `Consider /model first.`,
+          "warning",
+        );
+      }
+
+      // Clear state BEFORE sending so the next 401's notification reads
+      // cleanly (consecutive count resets too).
+      clearState(key, ctx);
 
       // If pi is mid-stream, sendUserMessage throws without deliverAs. But
       // post-error pi should be idle (the assistant message was finalized
@@ -161,9 +221,6 @@ export default function (pi: ExtensionAPI) {
       // first (it's likely the stuck-after-401 case) and then send.
       const idle = (await ctx.isIdle?.()) ?? true;
       if (!idle) {
-        // Stale stream is the failure mode this command was designed to
-        // recover from. Abort it and proceed cleanly. ctx.abort() resolves
-        // when the abort takes effect.
         try {
           await ctx.abort?.();
         } catch { /* abort may throw if already aborted; ignore */ }
@@ -172,9 +229,6 @@ export default function (pi: ExtensionAPI) {
       try {
         await pi.sendUserMessage(text);
       } catch (err) {
-        // sendUserMessage still throws if pi thinks it's streaming after
-        // our abort. Last-ditch: queue via steer so the message at least
-        // lands on the next idle tick rather than disappearing.
         try {
           await pi.sendUserMessage(text, { deliverAs: "steer" });
         } catch (err2) {
@@ -185,5 +239,12 @@ export default function (pi: ExtensionAPI) {
         }
       }
     },
+  });
+
+  // model_select event clears error state — switching providers is the
+  // recovery, not a fresh provider call. Without this, the badge stays
+  // stuck after a successful /model swap.
+  pi.on("model_select", (_event, ctx) => {
+    clearState(sessionKey(ctx), ctx);
   });
 }
