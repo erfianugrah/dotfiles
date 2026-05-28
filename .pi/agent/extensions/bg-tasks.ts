@@ -213,6 +213,15 @@ function makeSessionName(slug: string): string {
 // CRITICAL: do not use `eval` on the prompt. Prompts contain user content
 // with arbitrary characters. Backticks would trigger command substitution and
 // hang the wrapper waiting for input from an interactive sub-bash.
+//
+// LIVE OUTPUT INVARIANT: the inner command's output MUST land on the tmux
+// pane in real time, not buffered to a file and dumped at exit. bg_wait's
+// whole premise is polling `tmux capture-pane` for a regex match in live
+// output — if the pane stays empty until the wrapper exits, bg_wait can
+// only ever match on already-completed tasks, which defeats the point.
+// We achieve this with `<cmd> 2>&1 | tee "$OUT_FILE"` (writes to both pane
+// and file) plus `stdbuf -oL -eL` on the inner cmd so libc-block-buffered
+// children flush per-line. Exit code via `${PIPESTATUS[0]}` (bash builtin).
 function buildWrapperCommand(state: TaskState, piFlags: string[]): string {
   const promptFile = `${statePath(state.name)}.prompt`;
   // We write the prompt file from inside the wrapper itself (single-quoted
@@ -252,9 +261,15 @@ function buildWrapperCommand(state: TaskState, piFlags: string[]): string {
     OUT_FILE=\$(mktemp)
     # Run pi WITHOUT eval. Array splat keeps flags as separate argv entries;
     # prompt is passed as a single quoted arg with all special chars intact.
-    pi -p "\$PROMPT" "\${PI_FLAGS[@]}" > "\$OUT_FILE" 2>&1
-    RC=\$?
-    cat "\$OUT_FILE"
+    # Live-stream pi's output to the tmux pane via tee while also recording
+    # to OUT_FILE for the byte count + state JSON. stdbuf -oL forces
+    # line-buffered stdout/stderr (matters for libc-buffered children).
+    if command -v stdbuf >/dev/null 2>&1; then
+      stdbuf -oL -eL pi -p "\$PROMPT" "\${PI_FLAGS[@]}" 2>&1 | tee "\$OUT_FILE"
+    else
+      pi -p "\$PROMPT" "\${PI_FLAGS[@]}" 2>&1 | tee "\$OUT_FILE"
+    fi
+    RC=\${PIPESTATUS[0]}
     BYTES=\$(wc -c < "\$OUT_FILE")
     NOW=\$(date +%s%3N)
     if command -v jq >/dev/null; then
@@ -308,9 +323,17 @@ function buildBashWrapper(state: TaskState): string {
     # Run the user's bash command as a fresh subshell sourcing the file.
     # No eval. The command's own quoting / substitutions are evaluated
     # by bash exactly as if you'd typed them yourself.
-    bash "\$CMD_FILE" > "\$OUT_FILE" 2>&1
-    RC=\$?
-    cat "\$OUT_FILE"
+    # Live-stream the user's bash command to the tmux pane via tee while
+    # also recording to OUT_FILE for the byte count + state JSON. stdbuf -oL
+    # propagates via LD_PRELOAD to children, so a python or gh call inside
+    # the user's script gets line-buffered stdout instead of the default
+    # 4 KB block buffering when piped.
+    if command -v stdbuf >/dev/null 2>&1; then
+      stdbuf -oL -eL bash "\$CMD_FILE" 2>&1 | tee "\$OUT_FILE"
+    else
+      bash "\$CMD_FILE" 2>&1 | tee "\$OUT_FILE"
+    fi
+    RC=\${PIPESTATUS[0]}
     BYTES=\$(wc -c < "\$OUT_FILE")
     NOW=\$(date +%s%3N)
     if command -v jq >/dev/null; then
