@@ -190,23 +190,31 @@ bw_serve_status() {
     fi
 }
 
+# Sync the LIVE bw serve daemon via its REST /sync endpoint.
+#
+# Why not `bw sync`? The external CLI updates the on-disk encrypted vault
+# but the running `bw serve` daemon keeps its own decrypted in-memory copy
+# loaded at startup. After an external `bw sync`, the daemon's
+# /list/object/items?search=... still returns stale results — newly-added
+# items look missing. POST /sync triggers the daemon to refresh its own
+# state, which is what we actually want.
 bw_serve_sync() {
-    local session_file="${_BW_SESSION_DIR}/bw-session.env"
-    if [[ ! -f "$session_file" ]]; then
-        echo "[bw-serve] No active session. Run bw_serve_start first." >&2
+    if ! _bw_serve_ok; then
+        echo "[bw-serve] Service not reachable on ${BW_SERVE_ADDR}. Run bw_serve_start." >&2
         return 1
     fi
-    BW_SESSION=$(command grep '^BW_SESSION=' "$session_file" | cut -d= -f2-)
-    if [[ -z "$BW_SESSION" ]]; then
-        echo "[bw-serve] Invalid session file." >&2
-        return 1
-    fi
-    echo "[bw-serve] Syncing vault..."
-    BW_SESSION="$BW_SESSION" bw sync && echo "[bw-serve] Vault synced." || {
-        echo "[bw-serve] Sync failed." >&2
+    echo "[bw-serve] Syncing vault via daemon API..."
+    local response
+    response=$(curl -sf -X POST "${BW_SERVE_ADDR}/sync") || {
+        echo "[bw-serve] Sync request failed." >&2
         return 1
     }
-    # Clear local cache so next _bw_get fetches fresh values
+    if [[ $(print -r -- "$response" | jq -r '.success // false') != "true" ]]; then
+        echo "[bw-serve] Sync API returned failure: $response" >&2
+        return 1
+    fi
+    echo "[bw-serve] Vault synced."
+    # Drop shell-side cache so next _bw_get refetches from the freshly-synced daemon.
     clear_bw_cache
 }
 
@@ -249,14 +257,17 @@ _bw_load_items() {
         bw_serve_start || return 1
     fi
 
-    # Always sync first so newly-added vault items are visible. bw serve
-    # caches the local DB and the `?search=...` endpoint silently returns
-    # 0 results for items added since the last sync, which makes _bw_get
-    # fail with "No value found" even though the item is in the web vault.
-    bw_serve_sync >/dev/null 2>&1 || print -u2 "[bw] sync failed, using stale cache"
-    # Sync clears the in-memory cache; ensure we drop it too so the next
-    # _bw_get re-fetches.
-    clear_bw_cache >/dev/null 2>&1
+    # Always sync first so newly-added vault items are visible. The
+    # daemon caches the decrypted vault in memory; without a sync the
+    # /list/object/items?search=... endpoint silently returns 0 results
+    # for items added since daemon startup, making _bw_get fail with
+    # "No value found" even though the item is in the web vault.
+    # bw_serve_sync hits the daemon's POST /sync and clears the
+    # shell-side cache on success.
+    bw_serve_sync >/dev/null 2>&1 || {
+        print -u2 "[bw] sync failed, using stale cache"
+        clear_bw_cache >/dev/null 2>&1
+    }
 
     for item in "${items[@]}"; do
         bw_name=${item%|*}
