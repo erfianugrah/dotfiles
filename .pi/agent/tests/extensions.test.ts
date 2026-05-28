@@ -33,7 +33,7 @@ import { parseGitleaksJson, parseNoseyparkerJsonl } from "../extensions/secret-s
 import { parseHurlJson } from "../extensions/hurl-test.ts";
 import { parseGoTestJson } from "../extensions/go-test.ts";
 import { parseHyperfineJson } from "../extensions/bench.ts";
-import { fmtDuration, makeSlug, makeSessionName, decideWaitResult } from "../extensions/bg-tasks.ts";
+import { fmtDuration, makeSlug, makeSessionName, decideWaitResult, computeStatusLabel } from "../extensions/bg-tasks.ts";
 import { decideInjection, matchesIntent, looksLikeSpec } from "../extensions/superpowers.ts";
 import { _internals as osint } from "../extensions/osint.ts";
 import { safePath } from "../extensions/docs.ts";
@@ -1547,6 +1547,35 @@ describe("bg-tasks.decideWaitResult", () => {
       untilExit: true,
     });
     expect(r.result).toBe("exited");
+  });
+});
+
+// ── bg-tasks: computeStatusLabel ────────────────────────────────
+
+describe("bg-tasks.computeStatusLabel", () => {
+  test("live + no completion → running", () => {
+    expect(computeStatusLabel({}, true)).toBe("running");
+    expect(computeStatusLabel({ exit_code: undefined }, true)).toBe("running");
+  });
+
+  test("completed + exit_code 0 → done", () => {
+    expect(computeStatusLabel({ completed_at: 1, exit_code: 0 }, false)).toBe("done");
+    // Pane still alive within the 30s grace — status is still "done", not "running"
+    expect(computeStatusLabel({ completed_at: 1, exit_code: 0 }, true)).toBe("done");
+  });
+
+  test("completed + exit_code -1 (bg_kill sentinel) → killed (NOT exit--1)", () => {
+    expect(computeStatusLabel({ completed_at: 1, exit_code: -1 }, false)).toBe("killed");
+  });
+
+  test("completed + non-zero exit_code → exit-N", () => {
+    expect(computeStatusLabel({ completed_at: 1, exit_code: 1 }, false)).toBe("exit-1");
+    expect(computeStatusLabel({ completed_at: 1, exit_code: 137 }, false)).toBe("exit-137");
+  });
+
+  test("no completion + tmux dead → lost (crashed/OOM/reboot before wrapper patched state)", () => {
+    expect(computeStatusLabel({}, false)).toBe("lost");
+    expect(computeStatusLabel({ exit_code: undefined }, false)).toBe("lost");
   });
 });
 
