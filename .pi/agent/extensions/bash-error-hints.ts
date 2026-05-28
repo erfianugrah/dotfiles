@@ -28,7 +28,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const HINT_MARKER = "[bash-error-hints]";
 
-interface Hint {
+export interface Hint {
   /** Regex tested against the combined bash output (stdout + stderr). */
   pattern: RegExp;
   /**
@@ -38,7 +38,7 @@ interface Hint {
   hint: string;
 }
 
-const HINTS: Hint[] = [
+export const HINTS: Hint[] = [
   // ── git tracking footguns ───────────────────────────────────────────────
   {
     // `fatal: not under version control, source=FILE.md, destination=...`
@@ -135,6 +135,20 @@ const HINTS: Hint[] = [
 
   // ── pi / agent internals ────────────────────────────────────────────────
   {
+    // Reading a pi session JSONL via bash (cat/head/tail/jq/grep) — the
+    // agent should be using `session_search` instead. Caught 2026-05-28 in a
+    // prior session AND the meta-session reviewing it (recursive whoops).
+    // Trigger: any path under ~/.pi/agent/sessions/ ending in .jsonl shows
+    // up in bash output (either the command echo or the listing). Gated to
+    // bash tool only (see hook below) so session_search's own output, which
+    // also contains these paths, never self-triggers.
+    pattern: /\/\.pi\/agent\/sessions\/[^\s'"]+\.jsonl/,
+    hint:
+      "Path under ~/.pi/agent/sessions/ is a pi session log — use the `session_search` tool, not jq/cat/grep on the .jsonl. " +
+      "session_search is FTS5-backed (sub-50ms, multi-word OR semantics, role filtering) and returns scored snippets. " +
+      "Bash on the .jsonl is for one-off forensics the index can't answer (raw timestamps, model_change events, tool-call sequencing).",
+  },
+  {
     // Anthropic stream cutoff (already auto-retries in pi 0.74.1+, but
     // when the retry budget is exhausted the model still sees this)
     pattern: /Anthropic stream ended before message_stop/,
@@ -155,8 +169,22 @@ const HINTS: Hint[] = [
  * Mirrors String.prototype.replace's $-handling so authors can use familiar
  * syntax (`$1`) inside hint text without us reaching for a templating lib.
  */
-function renderHint(template: string, match: RegExpMatchArray): string {
+export function renderHint(template: string, match: RegExpMatchArray): string {
   return template.replace(/\$([1-9])/g, (_, idx) => match[Number(idx)] ?? "");
+}
+
+/**
+ * Run all HINT patterns against `text` and return the rendered hint strings
+ * (in HINTS-array order). Pure function exposed for unit testing — the live
+ * `tool_result` hook below uses the same logic inline.
+ */
+export function matchHints(text: string): string[] {
+  const out: string[] = [];
+  for (const { pattern, hint } of HINTS) {
+    const m = text.match(pattern);
+    if (m) out.push(renderHint(hint, m));
+  }
+  return out;
 }
 
 /**
@@ -192,11 +220,7 @@ export default function (pi: ExtensionAPI) {
     // Idempotency — never stack hints if we somehow run twice.
     if (text.includes(HINT_MARKER)) return undefined;
 
-    const hits: string[] = [];
-    for (const { pattern, hint } of HINTS) {
-      const m = text.match(pattern);
-      if (m) hits.push(renderHint(hint, m));
-    }
+    const hits = matchHints(text);
     if (hits.length === 0) return undefined;
 
     const decorated = `${text.trimEnd()}\n\n${HINT_MARKER}\n${hits.map((h) => `• ${h}`).join("\n")}`;

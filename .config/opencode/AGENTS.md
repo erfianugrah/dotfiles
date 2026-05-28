@@ -61,6 +61,7 @@ Don't use `task` for: reading 1-3 known files, simple `grep`, work needing paren
 
 - Save to `memory` when: user states a preference, you discover a project convention, you spot a recurring pattern. `list` first to avoid duplicates; `update` rather than create when overlap.
 - `session_search` BEFORE rebuilding context from scratch when the user references past work ("how did we do X last time?", "remember when...", "like before").
+- `session_search` BEFORE bash+jq when the user message contains a path under `~/.pi/agent/sessions/`, references "previous session" / "where we left off" / "pick up from", or names a session UUID. The .jsonl is the storage format; the FTS5 index is the access path. Pasted bash transcripts referencing a session file are the canonical trigger — don't match the demonstrated tool register, route to the right tool.
 
 ## Bash discipline
 
