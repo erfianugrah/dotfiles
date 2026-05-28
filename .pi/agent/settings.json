@@ -3,9 +3,20 @@
   "defaultProvider": "opencode",
   "defaultModel": "claude-opus-4-7",
   "theme": "opencode-dark",
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "xhigh",
   "compaction": {
     "enabled": true
   },
-  "enabledModels": []
+  "enabledModels": [],
+  "httpIdleTimeoutMs": 60000,
+  "retry": {
+    "enabled": true,
+    "maxRetries": 3,
+    "baseDelayMs": 2000,
+    "provider": {
+      "timeoutMs": 120000,
+      "maxRetries": 2,
+      "maxRetryDelayMs": 60000
+    }
+  }
 }

@@ -56,9 +56,46 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
+
+/**
+ * Run a subprocess asynchronously with a hard timeout. Returns {code, stdout, stderr}
+ * exactly like the synchronous spawnSync-shape return — but the await never
+ * blocks the bun event loop. On timeout, the child is SIGKILL'd and code is set
+ * to a non-zero sentinel (124, matching coreutils' `timeout` convention).
+ *
+ * Why not spawnSync: in pi extensions, the `input` event handler is on the
+ * critical path of every keystroke that hits submit. spawnSync blocks bun's
+ * main thread for up to `timeoutMs` while ImageMagick runs (~200ms-2s on a
+ * typical screenshot), causing visible TUI freezes. Async spawn lets pi keep
+ * painting and accepting input while magick runs.
+ */
+function execAsync(
+  cmd: string,
+  args: string[],
+  opts: { timeoutMs: number; encoding?: "utf8" | null } = { timeoutMs: 15_000 },
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (code: number) => {
+      if (settled) return;
+      settled = true;
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+      resolve({ code, stdout, stderr });
+    };
+    child.stdout.on("data", (d) => { stdout += d.toString("utf8"); });
+    child.stderr.on("data", (d) => { stderr += d.toString("utf8"); });
+    child.on("error", () => finish(-1));
+    child.on("close", (code) => finish(code ?? 0));
+    const timer = setTimeout(() => finish(124), opts.timeoutMs);
+    child.on("close", () => clearTimeout(timer));
+  });
+}
 
 // ── tunables ──────────────────────────────────────────────────────────────
 
@@ -104,26 +141,21 @@ interface Dimensions {
 }
 
 /** Probe a file's pixel dimensions via `magick identify`. Null on failure. */
-export function probeDimensions(file: string, magick: string): Dimensions | null {
-  const r = spawnSync(magick, ["identify", "-format", "%w %h", file], {
-    encoding: "utf8",
-    timeout: 5000,
-  });
-  if (r.status !== 0 || !r.stdout) return null;
+export async function probeDimensions(file: string, magick: string): Promise<Dimensions | null> {
+  const r = await execAsync(magick, ["identify", "-format", "%w %h", file], { timeoutMs: 5000 });
+  if (r.code !== 0 || !r.stdout) return null;
   const m = r.stdout.trim().match(/^(\d+)\s+(\d+)/);
   if (!m) return null;
   return { w: Number.parseInt(m[1], 10), h: Number.parseInt(m[2], 10) };
 }
 
 /** Run `magick <src> -resize TARGETxTARGET> <dst>`. Returns true on success. */
-function runShrink(src: string, dst: string, magick: string): boolean {
+async function runShrink(src: string, dst: string, magick: string): Promise<boolean> {
   // `>` modifier = only shrink if larger than target on either axis. Aspect
   // ratio preserved by default.
   const geom = `${TARGET_EDGE_PX}x${TARGET_EDGE_PX}>`;
-  const r = spawnSync(magick, [src, "-resize", geom, dst], {
-    timeout: 15_000,
-  });
-  return r.status === 0;
+  const r = await execAsync(magick, [src, "-resize", geom, dst], { timeoutMs: 15_000 });
+  return r.code === 0;
 }
 
 // ── decision logic ────────────────────────────────────────────────────────
@@ -153,7 +185,7 @@ export function shrunkSibling(p: string): string {
  * Inspect one clipboard path, shrink if oversized, return what to use.
  * Pure-ish: side effects are only the magick subprocess and disk write.
  */
-export function shrinkOne(srcPath: string, magick: string | null): ShrinkDecision {
+export async function shrinkOne(srcPath: string, magick: string | null): Promise<ShrinkDecision> {
   const noop: ShrinkDecision = {
     outPath: srcPath,
     shrunk: false,
@@ -182,7 +214,7 @@ export function shrinkOne(srcPath: string, magick: string | null): ShrinkDecisio
     return noop;
   }
 
-  const dims = probeDimensions(srcPath, magick);
+  const dims = await probeDimensions(srcPath, magick);
   const oversizeByEdge = dims !== null && (dims.w > MAX_EDGE_PX || dims.h > MAX_EDGE_PX);
 
   if (!oversizeByBytes && !oversizeByEdge) return noop;
@@ -208,7 +240,7 @@ export function shrinkOne(srcPath: string, magick: string | null): ShrinkDecisio
     }
   }
 
-  const ok = runShrink(srcPath, dst, magick);
+  const ok = await runShrink(srcPath, dst, magick);
   if (!ok) {
     return { ...noop, warn: `magick failed on ${path.basename(srcPath)}` };
   }
@@ -242,14 +274,21 @@ export interface RewriteResult {
  * Find every clipboard path in `text`, shrink oversized ones, and produce
  * rewritten text. Deduplicates paths so each unique file runs magick at
  * most once per message.
+ *
+ * Unique paths are shrunk in PARALLEL via Promise.all — a message with 3
+ * pasted images runs 3 magick processes concurrently instead of serially,
+ * cutting total latency from ~3×N to ~1×N. The OS schedules them.
  */
-export function rewriteClipboardPaths(text: string, magick: string | null): RewriteResult {
-  const seen = new Map<string, ShrinkDecision>();
-  // Iterate matches first to collect uniques (so we shrink each once).
+export async function rewriteClipboardPaths(text: string, magick: string | null): Promise<RewriteResult> {
+  // Collect uniques first (so we shrink each once).
+  const uniqueSrcs: string[] = [];
   for (const m of text.matchAll(CLIP_PATH_RE)) {
-    const src = m[0];
-    if (seen.has(src)) continue;
-    seen.set(src, shrinkOne(src, magick));
+    if (!uniqueSrcs.includes(m[0])) uniqueSrcs.push(m[0]);
+  }
+  const results = await Promise.all(uniqueSrcs.map((src) => shrinkOne(src, magick)));
+  const seen = new Map<string, ShrinkDecision>();
+  for (let i = 0; i < uniqueSrcs.length; i++) {
+    seen.set(uniqueSrcs[i], results[i]);
   }
 
   let out = text;
@@ -320,7 +359,7 @@ export default function (pi: ExtensionAPI) {
       );
     }
 
-    const { text, decisions } = rewriteClipboardPaths(event.text, magick);
+    const { text, decisions } = await rewriteClipboardPaths(event.text, magick);
     const summary = summarize(decisions);
     if (summary) ctx.ui.notify(summary.msg, summary.level);
 

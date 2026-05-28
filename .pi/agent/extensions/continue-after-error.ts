@@ -154,11 +154,27 @@ export default function (pi: ExtensionAPI) {
       state.lastErrorMessage = "";
       if (ctx.hasUI) ctx.ui.setStatus("continue-after-error", "");
 
+      // If pi is mid-stream, sendUserMessage throws without deliverAs. But
+      // post-error pi should be idle (the assistant message was finalized
+      // with stopReason). Use ctx.isIdle() to decide — if idle we send a
+      // fresh turn; if streaming (unexpected) we ABORT the dead stream
+      // first (it's likely the stuck-after-401 case) and then send.
+      const idle = (await ctx.isIdle?.()) ?? true;
+      if (!idle) {
+        // Stale stream is the failure mode this command was designed to
+        // recover from. Abort it and proceed cleanly. ctx.abort() resolves
+        // when the abort takes effect.
+        try {
+          await ctx.abort?.();
+        } catch { /* abort may throw if already aborted; ignore */ }
+      }
+
       try {
         await pi.sendUserMessage(text);
       } catch (err) {
-        // sendUserMessage throws if pi is mid-stream without deliverAs.
-        // Try again with deliverAs:"steer" — the user intent is clear.
+        // sendUserMessage still throws if pi thinks it's streaming after
+        // our abort. Last-ditch: queue via steer so the message at least
+        // lands on the next idle tick rather than disappearing.
         try {
           await pi.sendUserMessage(text, { deliverAs: "steer" });
         } catch (err2) {
