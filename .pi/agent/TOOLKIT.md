@@ -200,9 +200,12 @@ Not a binary wrapper — a slash-command extension. Detailed in
 ## Background tasks pattern
 
 Two spawn tools (`bg_task` for pi sessions, `bg_bash` for arbitrary shell
-commands) + two query tools (`bg_list`, `bg_status`). All share the same
-state-file format under `~/.pi/agent/bg-tasks/`. Each task runs in its
-own tmux session named `pi-bg-<slug>-<unix-ts>`.
+commands) + four query/control tools (`bg_list`, `bg_status`, `bg_wait`,
+`bg_kill`). All share the same state-file format under
+`~/.pi/agent/bg-tasks/`. Each task runs in its own tmux session named
+`pi-bg-<slug>-<unix-ts>` and persists output to a sibling `<name>.log`
+file so `bg_status` works post-mortem (after the 30s tmux grace period
+and even after `bg_wait` was cancelled).
 
 This is the amux-style "kick off a long task and check on it later"
 mechanism, minus amux's Claude-Code lock-in.
@@ -248,7 +251,7 @@ bg_bash({
 // → returns immediately; check progress with bg_status when convenient
 ```
 
-### Query: bg_list + bg_status
+### Query: bg_list + bg_status + bg_wait + bg_kill
 
 ```typescript
 // List all running + recently-completed (24h window)
@@ -257,7 +260,21 @@ bg_list({ only_running: true })
 
 // Drill into one task
 bg_status({ name: "pi-bg-flyctl-cert-wait-1748056290", lines: 100 })
-// → full state + last 100 lines of tmux pane output
+// → full state + last 100 lines of output (live tmux pane while alive,
+//   persistent .log file when the pane has gone)
+
+// Block server-side until a regex matches, the task exits, or timeout.
+bg_wait({
+  name: "pi-bg-flyctl-cert-wait-1748056290",
+  pattern: "status = Ready",   // OR until_exit: true
+  timeout: 600,                // default 300, max 600
+})
+// → returns waitResult: "matched" | "exited" | "timeout"
+//   On timeout the result includes a hint pointing at the persistent log.
+
+// Kill a runaway task (terminates tmux session, marks state with
+// exit_code=-1 + completed_at, preserves the .log file).
+bg_kill({ name: "pi-bg-flyctl-cert-wait-1748056290" })
 ```
 
 ### Slash commands (human-friendly)

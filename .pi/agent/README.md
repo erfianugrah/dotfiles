@@ -69,7 +69,7 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `hurl-test.ts` | `hurl --test --json <file>` | Compact pass/fail summary. On failure: per-entry method/URL/status + the assertion that failed. Variable substitution supported. |
 | `go-test.ts` | `go test -json ./...` | Filters to failed tests + last 30 output lines per failure. Supports `run`, `race`, `count`, `short`, `timeout`. |
 | `bench.ts` | `hyperfine --export-json` | Statistical benchmark across N commands. Returns mean/stddev/min/max/winner/speedup. |
-| `bg-tasks.ts` (4 tools) | `tmux new-session -d` + `pi -p` / `bash` | Detached parallel work. `bg_task` spawns a pi subprocess, `bg_bash` runs any shell command (polling loops, long builds, slow downloads — anything past pi's 30s bash timeout), `bg_list` enumerates with kind glyphs (π/$), `bg_status` drills in. Plus `/bg-list` and `/bg-kill` slash commands. Skips amux's Claude-Code lock-in. |
+| `bg-tasks.ts` (6 tools) | `tmux new-session -d` + `pi -p` / `bash` | Detached parallel work. `bg_task` spawns a pi subprocess, `bg_bash` runs any shell command (polling loops, long builds, slow downloads — anything past pi's 30s bash timeout), `bg_list` enumerates with kind glyphs (π/$), `bg_status` drills in (with persistent `.log` fallback after the 30s tmux grace), `bg_wait` blocks server-side on a regex / exit / timeout, `bg_kill` terminates a runaway task. Plus `/bg-list` and `/bg-kill` slash commands. Skips amux's Claude-Code lock-in. |
 
 ### Event / behavior extensions (no LLM-visible tool surface)
 

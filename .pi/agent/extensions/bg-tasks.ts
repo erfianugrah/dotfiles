@@ -98,6 +98,10 @@ function ensureStateDir() {
   if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
 }
 
+function logPath(name: string): string {
+  return `${statePath(name).replace(/\.json$/, "")}.log`;
+}
+
 function statePath(name: string): string {
   return join(STATE_DIR, `${name}.json`);
 }
@@ -131,7 +135,8 @@ function listStates(): TaskState[] {
 }
 
 // GC: remove state files older than RECENT_WINDOW_MS for tasks that have
-// completed. Keeps the dir tidy without losing running tasks.
+// completed. Also removes the sibling .log file (output is persisted
+// there since 2026-05-28). Keeps the dir tidy without losing running tasks.
 function gc() {
   ensureStateDir();
   const now = Date.now();
@@ -140,13 +145,34 @@ function gc() {
     const s = loadState(f.replace(/\.json$/, ""));
     if (!s) continue;
     if (s.completed_at && now - s.completed_at > RECENT_WINDOW_MS) {
-      try {
-        unlinkSync(statePath(s.name));
-      } catch {
-        /* ignore */
+      for (const p of [statePath(s.name), logPath(s.name)]) {
+        try { unlinkSync(p); } catch { /* ignore */ }
       }
     }
   }
+}
+
+/**
+ * Read the last N lines of a bg task's output — try the live tmux pane
+ * first, fall back to the persistent .log file when the pane is dead.
+ * Without the .log fallback, tasks become invisible 30s after exit (the
+ * wrapper's grace period). Caught 2026-05-28: bg_wait gets cancelled, the
+ * underlying bg_bash keeps running, output ends up nowhere the agent
+ * can reach.
+ */
+function captureOrLog(name: string, lines: number): string {
+  if (tmuxHasSession(name)) {
+    const cap = tmuxCapture(name, lines);
+    if (cap) return cap;
+  }
+  const lp = logPath(name);
+  try {
+    const r = spawnSync("tail", ["-n", String(lines), lp], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (r.status === 0) return r.stdout?.toString("utf-8") ?? "";
+  } catch { /* fall through */ }
+  return "";
 }
 
 // ── tmux helpers ──────────────────────────────────────────────────────────
@@ -258,7 +284,11 @@ function buildWrapperCommand(state: TaskState, piFlags: string[]): string {
     # Decode the prompt to a file. base64 is binary-safe for any content.
     printf '%s' "\$PI_BG_PROMPT_B64" | base64 -d > "\$PI_BG_PROMPT_FILE"
     PROMPT="\$(cat "\$PI_BG_PROMPT_FILE")"
-    OUT_FILE=\$(mktemp)
+    # Persistent log file lives next to the state JSON — survives the 30s
+    # tmux grace + gc() 24h window. Truncate any prior content in case of
+    # a name collision (rare, but cheap to defend).
+    OUT_FILE="\${PI_BG_STATE%.json}.log"
+    : > "\$OUT_FILE"
     # Run pi WITHOUT eval. Array splat keeps flags as separate argv entries;
     # prompt is passed as a single quoted arg with all special chars intact.
     # Live-stream pi's output to the tmux pane via tee while also recording
@@ -288,7 +318,9 @@ d['completed_at']=int(\$NOW)
 json.dump(d, open(p,'w'), indent=2)
 "
     fi
-    rm -f "\$OUT_FILE" "\$PI_BG_PROMPT_FILE"
+    # Keep \$OUT_FILE — it's the persistent log. Only wrapper-private
+    # helpers (\$PI_BG_PROMPT_FILE) get cleaned.
+    rm -f "\$PI_BG_PROMPT_FILE"
     # Keep the pane alive for ~30s so a fast bg_status call can still see the
     # final output via tmux capture-pane. After that tmux GCs the session.
     sleep 30
@@ -317,7 +349,11 @@ function buildBashWrapper(state: TaskState): string {
   const body = `
     set -o pipefail
     cd "\$PI_BG_CWD" || exit 1
-    OUT_FILE=\$(mktemp)
+    # Persistent log file (see pi wrapper for rationale). CMD_FILE stays as
+    # mktemp — it's a transient base64-decoded staging file, not
+    # user-visible output.
+    OUT_FILE="\${PI_BG_STATE%.json}.log"
+    : > "\$OUT_FILE"
     CMD_FILE=\$(mktemp)
     printf '%s' "\$PI_BG_CMD_B64" | base64 -d > "\$CMD_FILE"
     # Run the user's bash command as a fresh subshell sourcing the file.
@@ -352,7 +388,7 @@ d['completed_at']=int(\$NOW)
 json.dump(d, open(p,'w'), indent=2)
 "
     fi
-    rm -f "\$OUT_FILE" "\$CMD_FILE"
+    rm -f "\$CMD_FILE"
     sleep 30
   `;
   return `${envPrefix} bash -c ${shellSingleQuote(body)}`;
@@ -716,7 +752,10 @@ const bgStatusTool = defineTool({
     }
     const live = tmuxHasSession(params.name);
     const linesWanted = params.lines ?? MAX_OUTPUT_LINES_DEFAULT;
-    const output = live ? tmuxCapture(params.name, linesWanted) : "";
+    // captureOrLog: tmux pane while alive, persistent .log file after exit.
+    // Pre-2026-05-28 this was tmuxCapture-only and returned "" once the
+    // wrapper's 30s grace period elapsed.
+    const output = captureOrLog(params.name, linesWanted);
 
     const now = Date.now();
     const elapsedMs = (state.completed_at ?? now) - state.started_at;
@@ -804,7 +843,7 @@ const bgWaitTool = defineTool({
   promptGuidelines: [
     "Use when you spawned bg_bash/bg_task and need to wait for a specific event (a log line, task completion). Replaces a chain of bg_status polls + user re-prompts.",
     "Pass `pattern` to wait for a regex in the captured tail; `until_exit=true` to wait for the task to finish; pass both for match-OR-exit.",
-    "Default timeout 60s, max 600s. The tool returns as soon as ANY condition fires.",
+    "Default timeout 300s, max 600s. The tool returns as soon as ANY condition fires. CI/build watch loops typically need the full 300+; quick log-line waits can pass smaller values.",
     "Regex is JS syntax with the `m` flag (multiline). Common: 'ERROR|FATAL', 'listening on \\d+', 'job complete'.",
   ],
   description: [
@@ -830,7 +869,7 @@ const bgWaitTool = defineTool({
     timeout: Type.Optional(
       Type.Number({
         description:
-          "Max seconds to wait. Default 120, min 1, max 600. Bump generously for long log tails / slow builds — the tool returns early as soon as the condition fires, so over-estimating is free.",
+          "Max seconds to wait. Default 300, min 1, max 600. Bump generously for long log tails / slow builds — the tool returns early as soon as the condition fires, so over-estimating is free. CI / build-watch loops typically need the full 300+; quick log-line waits can pass smaller values.",
       }),
     ),
     poll_interval: Type.Optional(
@@ -885,7 +924,7 @@ const bgWaitTool = defineTool({
         };
       }
     }
-    const timeoutMs = Math.min(Math.max(params.timeout ?? 120, 1), 600) * 1000;
+    const timeoutMs = Math.min(Math.max(params.timeout ?? 300, 1), 600) * 1000;
     const intervalMs = Math.max((params.poll_interval ?? 2) * 1000, 500);
     const linesWanted = Math.min(Math.max(params.lines ?? 200, 1), 5000);
     const deadline = Date.now() + timeoutMs;
@@ -908,8 +947,10 @@ const bgWaitTool = defineTool({
       }
       const state = loadState(params.name);
       const live = tmuxHasSession(params.name);
-      // tmuxCapture errors silently on a dead session — keep the previous tail.
-      const cap = live ? tmuxCapture(params.name, linesWanted) : lastOutput;
+      // captureOrLog: tmux while live, persistent .log when not. Without
+      // the log fallback bg_wait would lose visibility of tasks that
+      // finished during the wait (race between exit + grace expiry).
+      const cap = captureOrLog(params.name, linesWanted);
       if (cap) lastOutput = cap;
 
       const verdict = decideWaitResult({
@@ -984,6 +1025,15 @@ const bgWaitTool = defineTool({
       ? ` (matched: ${matchLine.replace(/\n/g, " ").slice(0, 100)})`
       : "";
 
+    // On timeout with no match, surface a hint to drill into the persistent
+    // log via bg_status — the agent's reflex was to give up; better path is
+    // to extend timeout or tail the log.
+    const timeoutHint = waitResult === "timeout"
+      ? `\n\n[hint] timeout fired without ${re ? `matching /${re.source}/` : "task exit"}. ` +
+        `Output above is the live tail. Full log persists at ~/.pi/agent/bg-tasks/${params.name}.log ` +
+        `(also accessible via bg_status). Re-invoke bg_wait with a higher timeout if the task is still running.`
+      : "";
+
     const text = [
       `name:        ${finalState.name}`,
       `waitResult:  ${waitResult}${matchPreview}`,
@@ -993,7 +1043,7 @@ const bgWaitTool = defineTool({
       "",
       `output (last ${linesWanted} lines):`,
       lastOutput.trimEnd() || "(empty)",
-    ].join("\n");
+    ].join("\n") + timeoutHint;
 
     return {
       content: [{ type: "text", text }],
@@ -1006,6 +1056,95 @@ const bgWaitTool = defineTool({
         elapsedMs,
         timedOut: waitResult === "timeout",
       },
+    };
+  },
+});
+
+// ── tool: bg_kill ─────────────────────────────────────────────────────────
+//
+// Forcibly stop a running bg task. Until 2026-05-28 the only way to terminate
+// a runaway bg_bash polling loop or a background pi -p subprocess was to
+// `tmux kill-session` manually from a host shell, which the agent can't do.
+// The tool kills the tmux session AND patches the state JSON so subsequent
+// bg_list / bg_status calls see exit_code=-1 + completed_at=now (otherwise
+// the task would show as "lost" — tmux gone with no completion recorded).
+
+function killAndMarkState(name: string): {
+  killed: boolean;
+  hadSession: boolean;
+  hadState: boolean;
+} {
+  const hadState = loadState(name) !== null;
+  const hadSession = tmuxHasSession(name);
+  if (hadSession) tmuxKillSession(name);
+  const s = loadState(name);
+  if (s && s.completed_at === undefined) {
+    s.completed_at = Date.now();
+    s.exit_code = -1; // sentinel: killed
+    saveState(s);
+  }
+  return { killed: hadSession, hadSession, hadState };
+}
+
+const bgKillTool = defineTool({
+  name: "bg_kill",
+  label: "Background Task Kill",
+  promptSnippet:
+    "bg_kill — terminate a running bg task. Sets exit_code=-1 in state so bg_list shows it as killed (not lost).",
+  promptGuidelines: [
+    "Use to stop runaway polling loops or background pi -p subprocesses you no longer need.",
+    "Idempotent — calling on an already-finished task is a no-op (returns hadSession=false).",
+    "Persistent .log file is preserved so you can still inspect output after the kill.",
+  ],
+  description: [
+    "Kill a bg task: terminates the tmux session immediately and marks the state JSON with exit_code=-1 + completed_at=now.",
+    "",
+    "The persistent .log file is NOT deleted — drill into the final output via bg_status afterwards.",
+    "Use when a polling loop is no longer needed or a bg_task has gone runaway.",
+  ].join("\n"),
+  parameters: Type.Object({
+    name: Type.String({
+      description: "tmux session name returned by bg_task / bg_bash (e.g. pi-bg-foo-1748050000).",
+    }),
+  }),
+  async execute(_id, params) {
+    const r = killAndMarkState(params.name);
+    if (!r.hadState && !r.hadSession) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `No state and no live session for ${params.name}. Either the task never existed or it was GC'd (>24h ago).`,
+          },
+        ],
+        details: { error: "no-state-no-session", name: params.name },
+      };
+    }
+    if (!r.hadSession) {
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `${params.name} already finished — no live tmux session to kill. State preserved.`,
+          },
+        ],
+        details: { name: params.name, killed: false, hadSession: false, hadState: r.hadState },
+      };
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `Killed bg task: ${params.name}\n` +
+            `  state marked: exit_code=-1, completed_at=now\n` +
+            `  log preserved at: ~/.pi/agent/bg-tasks/${params.name}.log\n` +
+            `  inspect via: bg_status name=${params.name}`,
+        },
+      ],
+      details: { name: params.name, killed: true, hadSession: true, hadState: r.hadState },
     };
   },
 });
@@ -1035,6 +1174,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(bgListTool);
   pi.registerTool(bgStatusTool);
   pi.registerTool(bgWaitTool);
+  pi.registerTool(bgKillTool);
 
   // Convenience slash command: `/bg-list` for human use (same as the LLM tool)
   pi.registerCommand("bg-list", {
@@ -1074,10 +1214,16 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(`No live tmux session: ${name}`, "warning");
         return;
       }
-      const ok = await ctx.ui.confirm(`Kill background task ${name}?`, "This terminates the pi -p subprocess immediately.");
+      const ok = await ctx.ui.confirm(
+        `Kill background task ${name}?`,
+        "This terminates the pi -p subprocess immediately. Persistent .log is preserved.",
+      );
       if (!ok) return;
-      tmuxKillSession(name);
-      ctx.ui.notify(`killed ${name}`, "info");
+      const r = killAndMarkState(name);
+      ctx.ui.notify(
+        r.killed ? `killed ${name} (state marked exit_code=-1)` : `${name} already finished`,
+        "info",
+      );
     },
   });
 }

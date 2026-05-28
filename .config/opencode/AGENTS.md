@@ -84,14 +84,21 @@ Pi has wrapper tools that return token-efficient structured output. Prefer them 
 
 ## Background / parallel work
 
-When a task will take >30s OR you want pi to keep working in parallel, use the bg-tasks family instead of blocking pi's `bash` tool.
+When a task will take >30s OR you want pi to keep working in parallel, use the bg-tasks family instead of blocking pi's `bash` tool. **But default to a synchronous `bash` call when the work fits inside the 30s budget** — the user sees output in real time, no two-step bg_status drill-in, no orphaned tmux sessions to garbage-collect.
 
-- **Long bash work** (polling loops, builds >30s, slow downloads, anything that would hit pi's `bash` tool 30s timeout) → `bg_bash command="..."`. Returns the session name within ~100ms. Check progress with `bg_status name=...` later.
+- **Decision rule**: if a single command will plausibly finish in ≤30s AND its output is small (<200 lines), use `bash`. Only graduate to `bg_bash` once it's clear the budget is busted (long build, polling loop, GH Actions watch). Wrong-side-of-the-line is the failure mode — the user sees "Working…", interrupts, then asks the agent to check directly anyway, which proves the bg_task layer added overhead without paying off.
+- **Long bash work** (polling loops, builds >30s, slow downloads, anything that would hit pi's `bash` tool 30s timeout) → `bg_bash command="..."`. Returns the session name within ~100ms. Check progress with `bg_status name=...` later. Output streams live to the tmux pane AND a persistent log at `~/.pi/agent/bg-tasks/<name>.log` since 2026-05-28 — it survives the 30s tmux grace period and bg_wait cancellation.
+- **GH Actions / Fly cert / k8s rollout watch loops** are the canonical `bg_bash` use case. `gh run watch <id>` and `flyctl certs check --watch` already block until completion — wrap them in `bg_bash` so pi's bash doesn't time out, then `bg_wait until_exit=true` for the result.
 - **Delegated pi work** (multi-step task that benefits from another LLM brain, expected >5 min) → `bg_task prompt="..."`. Same lifecycle as bg_bash but spawns `pi -p` instead of bash. Pass `minimal=true` for read-only exploration with no extensions/skills loaded.
 - **Read-only deep dive that must complete before continuing** → existing `task subagent_type="explore"` (blocks parent; cheaper than bg_task).
-- **Check on running / recent tasks** → `bg_list` (one line per task with kind glyph π/$, status, elapsed). `bg_status name=...` for details + last N lines of output.
-- **Wait for an event on a bg task** → `bg_wait name=... pattern="..." timeout=...` (or `until_exit=true`). Blocks server-side until the regex matches output, the task exits, or timeout elapses — replaces the re-prompt loop of `bg_status` → "check again" → `bg_status`. Use this whenever you spawned a bg task and the next step depends on something appearing in its output.
-- **Anti-pattern**: a `bash` call with `sleep N` loops or `for i in $(seq 1 N); do ... done` that runs >30s — use `bg_bash` instead. Likewise, polling `bg_status` in successive turns is the anti-pattern `bg_wait` exists to fix.
+- **Check on running / recent tasks** → `bg_list` (one line per task with kind glyph π/$, status, elapsed). `bg_status name=...` for details + last N lines of output (also reads the persistent .log file post-mortem).
+- **Wait for an event on a bg task** → `bg_wait name=... pattern="..." timeout=...` (or `until_exit=true`). Blocks server-side until the regex matches output, the task exits, or timeout elapses — replaces the re-prompt loop of `bg_status` → "check again" → `bg_status`. Use this whenever you spawned a bg task and the next step depends on something appearing in its output. Default timeout 300s; bump for slow CI / image builds.
+- **Kill a runaway task** → `bg_kill name=...` (sets exit_code=-1 + completed_at=now in state JSON; persistent log preserved). Use when a polling loop is no longer needed or a bg_task has hung.
+- **Anti-patterns**:
+  - A `bash` call with `sleep N` loops or `for i in $(seq 1 N); do ... done` that runs >30s — use `bg_bash` instead.
+  - Polling `bg_status` across successive turns — use `bg_wait` instead.
+  - Wrapping a 5-second `gh run list` or `curl` in `bg_bash` because the agent assumed it'd take longer — just run it sync. The bg layer is overhead.
+  - Spawning a bg task for something the user is actively watching in another terminal — the agent narrates progress they can already see, and the result still has to be hand-fetched via bg_status.
 - **Context-hygiene**: when a single session is interleaving 2+ unrelated problem domains (e.g. git reorganization + storage rebuild + DNS debugging), park one via `bg_task` or a `task` subagent. Thrashing both in shared context degrades attention on each.
 
 ## Implementation discipline
