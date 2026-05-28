@@ -100,6 +100,19 @@ const HINTS: Hint[] = [
       "Probe with `ls -la $1; stat $1; id` to see ownership vs current user. Don't blanket-sudo — fix the perms or run as the owning user.",
   },
 
+  // ── git-author override (caught 2026-05-28: ~/discord-wipe has 7 commits
+  //    with author=erfi@erfi.io because an agent freelanced the override and
+  //    every subsequent agent saw the prior commits as precedent). Detects
+  //    `git -c user.name=` or `git -c user.email=` in successful commands
+  //    too — the hint is preventative, not just for failures. The combined
+  //    bash output starts with the command echo when run through pi's
+  //    bash tool, so the regex matches the command itself.
+  {
+    pattern: /git\s+-c\s+user\.(?:name|email)\s*=/,
+    hint:
+      "Author/committer override detected (`-c user.name=` / `-c user.email=`). DO NOT do this. The user's ~/.gitconfig is authoritative — it has `Erfi Anugrah <erfi.anugrah@gmail.com>` plus a GPG signing key. Past sessions invented `erfi@erfi.io` and the pattern propagated across 7 discord-wipe commits before being caught. Re-run as plain `git commit` (or `git commit -F <file>`) and let the global config apply.",
+  },
+
   // ── secret-leak hazards (output captured into session log) ──────────────
   {
     // dig prints a `; TSIG: <key>` header line when -y is used. With stderr

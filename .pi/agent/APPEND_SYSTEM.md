@@ -8,6 +8,7 @@ Commits and pull requests must read as if written by the human author. The user 
 - Do not mention the assistant, the model, or the tool in commit messages or PR descriptions unless the user explicitly asks for it.
 - This applies to `git commit`, `git commit --amend`, `gh pr create`, `gh pr edit`, `gh issue` commands, and any equivalent invoked through tools, scripts, or HEREDOCs.
 - If the user has previously asked for attribution in this session, that override applies only to that session and only when restated.
+- **NEVER override the user's git author/committer identity via `-c user.name=...` / `-c user.email=...` / `--author="..."` / env-var injection (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`).** The user's `~/.gitconfig` is authoritative — it carries `Erfi Anugrah <erfi.anugrah@gmail.com>` plus a GPG signing key. Past sessions invented `erfi@erfi.io` as the author for new repos (`~/discord-wipe` has 7 such commits) and the pattern propagated because subsequent agents read the prior commits as precedent. Use plain `git commit` (or `git commit -F <file>`) and let the global config do its job. Only override when the user explicitly asks in the current session.
 
 # Safety
 
