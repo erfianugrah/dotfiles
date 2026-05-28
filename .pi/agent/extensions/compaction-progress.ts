@@ -43,8 +43,20 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 
-	const tick = (ctx: ExtensionContext) => {
+	const tick = async (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
+		// Safety: if pi has gone idle without us seeing session_compact (e.g.
+		// compaction was cancelled, errored silently, or the event was missed),
+		// stop painting rather than leave a stuck spinner. The next compaction
+		// run will set startedAt fresh and restart the timer.
+		try {
+			const idle = await ctx.isIdle?.();
+			if (idle === true && Date.now() - startedAt > 5000) {
+				clear(ctx);
+				return;
+			}
+		} catch { /* isIdle absent on older pi — fall through and keep painting */ }
+
 		const theme = ctx.ui.theme;
 		const spinner = theme.fg("accent", SPINNER_FRAMES[frame % SPINNER_FRAMES.length]!);
 		frame++;
@@ -62,9 +74,9 @@ export default function (pi: ExtensionAPI) {
 		startedAt = Date.now();
 		tokensBefore = event.preparation?.tokensBefore;
 		frame = 0;
-		if (ctx.hasUI) tick(ctx);
+		if (ctx.hasUI) await tick(ctx);
 		if (timer) clearInterval(timer);
-		timer = setInterval(() => tick(ctx), 120);
+		timer = setInterval(() => { void tick(ctx); }, 120);
 		// Do not return anything — let pi's default compaction run.
 	});
 
@@ -81,5 +93,13 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		clear(ctx);
+	});
+
+	// Belt-and-braces: clear on agent_end too. If a compaction is cancelled
+	// or errors before session_compact fires (e.g. the user hits ESC during
+	// the LLM summarisation call), the spinner would otherwise paint forever.
+	// agent_end fires reliably at the end of every prompt cycle.
+	pi.on("agent_end", async (_event, ctx) => {
+		if (timer) clear(ctx);
 	});
 }
