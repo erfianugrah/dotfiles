@@ -134,22 +134,60 @@ function listStates(): TaskState[] {
   return out;
 }
 
-// GC: remove state files older than RECENT_WINDOW_MS for tasks that have
-// completed. Also removes the sibling .log file (output is persisted
-// there since 2026-05-28). Keeps the dir tidy without losing running tasks.
+// GC: remove state files older than RECENT_WINDOW_MS. Two paths:
+//
+//   1. Tasks with `completed_at` set: GC `completed_at + 24h` ago. Normal flow.
+//
+//   2. Tasks with `completed_at` NULL but no live tmux session AND
+//      `started_at + 24h` ago: "lost" tasks where tmux died before the
+//      wrapper could patch state JSON (host reboot, OOM kill, etc.).
+//      Without this branch they accumulate forever — caught 2026-05-28
+//      with 13 orphans aged 71h-100h+ on a single host.
+//
+// Sibling .log files are removed alongside the JSON.
 function gc() {
   ensureStateDir();
   const now = Date.now();
+  const liveSessions = new Set(tmuxListSessions());
   for (const f of readdirSync(STATE_DIR)) {
     if (!f.endsWith(".json")) continue;
     const s = loadState(f.replace(/\.json$/, ""));
     if (!s) continue;
-    if (s.completed_at && now - s.completed_at > RECENT_WINDOW_MS) {
+    const isLive = liveSessions.has(s.name);
+    const completedExpired =
+      s.completed_at !== undefined && now - s.completed_at > RECENT_WINDOW_MS;
+    const lostExpired =
+      s.completed_at === undefined && !isLive && now - s.started_at > RECENT_WINDOW_MS;
+    if (completedExpired || lostExpired) {
       for (const p of [statePath(s.name), logPath(s.name)]) {
         try { unlinkSync(p); } catch { /* ignore */ }
       }
     }
   }
+}
+
+/**
+ * Compute the human-readable status label for a task. Single source of
+ * truth so bg_list (tool + slash command) and bg_status agree.
+ *
+ * `exit_code === -1` is the bg_kill sentinel — render as "killed" not the
+ * eyeball-hostile "exit--1". Otherwise:
+ *   running  — live tmux session, no completion recorded
+ *   done     — completed with exit_code 0
+ *   exit-N   — completed with non-zero exit code
+ *   killed   — completed via bg_kill (exit_code -1)
+ *   lost     — tmux gone but no completion recorded (crashed / OOM / reboot)
+ */
+export function computeStatusLabel(
+  state: { exit_code?: number; completed_at?: number },
+  isLive: boolean,
+): string {
+  const isDone = state.completed_at !== undefined;
+  if (isLive && !isDone) return "running";
+  if (isDone && state.exit_code === 0) return "done";
+  if (isDone && state.exit_code === -1) return "killed";
+  if (isDone) return `exit-${state.exit_code}`;
+  return "lost";
 }
 
 /**
@@ -662,11 +700,7 @@ const bgListTool = defineTool({
       .map((s) => {
         const isLive = liveSessions.has(s.name);
         const isDone = s.completed_at !== undefined;
-        let status: string;
-        if (isLive && !isDone) status = "running";
-        else if (isDone && s.exit_code === 0) status = "done";
-        else if (isDone) status = `exit-${s.exit_code}`;
-        else status = "lost"; // tmux session gone but no completion recorded — crashed or killed
+        const status = computeStatusLabel(s, isLive);
         const elapsedMs = (s.completed_at ?? now) - s.started_at;
         const elapsed = fmtDuration(elapsedMs);
         const previewSrc = s.prompt ?? s.command ?? "";
@@ -689,9 +723,11 @@ const bgListTool = defineTool({
           ? "▶ running"
           : r.status === "done"
             ? "✓ done   "
-            : r.status === "lost"
-              ? "? lost   "
-              : `✗ ${r.status}`;
+            : r.status === "killed"
+              ? "☠ killed  "
+              : r.status === "lost"
+                ? "? lost   "
+                : `✗ ${r.status}`;
       const kindGlyph = r.kind === "bash" ? "$" : "π"; // π for pi, $ for bash
       return `${tag} ${kindGlyph} ${r.elapsed.padEnd(7)}  ${r.name}\n             ${r.prompt}${r.prompt.length === 80 ? "…" : ""}`;
     });
@@ -703,6 +739,7 @@ const bgListTool = defineTool({
         running: rows.filter((r) => r.status === "running").length,
         done: rows.filter((r) => r.status === "done").length,
         failed: rows.filter((r) => r.status.startsWith("exit-")).length,
+        killed: rows.filter((r) => r.status === "killed").length,
         lost: rows.filter((r) => r.status === "lost").length,
         tasks: rows.map((r) => ({
           name: r.name,
@@ -759,11 +796,7 @@ const bgStatusTool = defineTool({
 
     const now = Date.now();
     const elapsedMs = (state.completed_at ?? now) - state.started_at;
-    let status: string;
-    if (live && state.completed_at === undefined) status = "running";
-    else if (state.exit_code === 0) status = "done";
-    else if (state.exit_code !== undefined) status = `exit-${state.exit_code}`;
-    else status = "lost";
+    const status = computeStatusLabel(state, live);
 
     const kind = state.kind ?? (state.prompt ? "pi" : state.command ? "bash" : "pi");
     const body = state.prompt ?? state.command ?? "(missing)";
@@ -1190,8 +1223,7 @@ export default function (pi: ExtensionAPI) {
       const now = Date.now();
       const lines = states.map((s) => {
         const live = liveSessions.has(s.name);
-        const done = s.completed_at !== undefined;
-        const status = live && !done ? "running" : done && s.exit_code === 0 ? "done" : done ? `exit-${s.exit_code}` : "lost";
+        const status = computeStatusLabel(s, live);
         const elapsed = fmtDuration((s.completed_at ?? now) - s.started_at);
         const kind = s.kind ?? (s.prompt ? "pi" : "bash");
         const kindGlyph = kind === "bash" ? "$" : "π";
