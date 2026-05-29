@@ -49,27 +49,37 @@ function openReadDb(): Database {
   if (readDb) return readDb;
   mkdirSync(dirname(DB_PATH), { recursive: true });
   const d = new Database(DB_PATH, { create: true });
-  d.exec("PRAGMA journal_mode = WAL");
-  d.exec("PRAGMA synchronous = NORMAL");
-  // Ensure schema exists (worker also does this, but we may search before
-  // the worker has run)
-  d.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS msg_fts USING fts5(
-      content,
-      session_path UNINDEXED,
-      date UNINDEXED,
-      role UNINDEXED,
-      tokenize = 'porter unicode61'
-    );
-  `);
-  d.exec(`
-    CREATE TABLE IF NOT EXISTS indexed_files (
-      path TEXT PRIMARY KEY,
-      mtime INTEGER NOT NULL,
-      size INTEGER NOT NULL,
-      entry_count INTEGER NOT NULL DEFAULT 0
-    );
-  `);
+  // Wait up to 5s for the write lock instead of throwing — when a second
+  // pi process starts while the first's worker is mid-INSERT, the schema
+  // pragmas/CREATEs below would otherwise fail with "database is locked"
+  // and bring down extension load. busy_timeout is connection-local and
+  // doesn't itself need any lock.
+  d.exec("PRAGMA busy_timeout = 5000");
+  // Schema-init is best-effort: the worker (in this or any other pi
+  // process sharing the DB) is the canonical writer and will create the
+  // tables on session_start. If we can't get the write lock here, that's
+  // fine — searchFts() already swallows errors, and indexStats() does too.
+  try {
+    d.exec("PRAGMA journal_mode = WAL");
+    d.exec("PRAGMA synchronous = NORMAL");
+    d.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS msg_fts USING fts5(
+        content,
+        session_path UNINDEXED,
+        date UNINDEXED,
+        role UNINDEXED,
+        tokenize = 'porter unicode61'
+      );
+    `);
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS indexed_files (
+        path TEXT PRIMARY KEY,
+        mtime INTEGER NOT NULL,
+        size INTEGER NOT NULL,
+        entry_count INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+  } catch { /* worker will handle schema; reads tolerate missing tables */ }
   readDb = d;
   return d;
 }
@@ -200,8 +210,12 @@ function countSessionFiles(): number {
 
 export function indexStats(): { totalRows: number; totalFiles: number; pendingFiles: number; workerBusy: boolean; lastCommand: string | null } {
   const d = openReadDb();
-  const totalRows = d.query<{ c: number }, []>("SELECT COUNT(*) as c FROM msg_fts").get()?.c ?? 0;
-  const totalFiles = d.query<{ c: number }, []>("SELECT COUNT(*) as c FROM indexed_files").get()?.c ?? 0;
+  // Tables may not exist yet on first launch if the schema-init above lost
+  // the write-lock race — tolerate that and report zeros.
+  let totalRows = 0;
+  let totalFiles = 0;
+  try { totalRows = d.query<{ c: number }, []>("SELECT COUNT(*) as c FROM msg_fts").get()?.c ?? 0; } catch { /* table missing */ }
+  try { totalFiles = d.query<{ c: number }, []>("SELECT COUNT(*) as c FROM indexed_files").get()?.c ?? 0; } catch { /* table missing */ }
   // Approximate pending count without enumerating every file on every
   // call — cache the FS walk for PENDING_CACHE_TTL_MS.
   const now = Date.now();

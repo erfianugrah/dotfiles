@@ -43,6 +43,11 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 mkdirSync(dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH, { create: true });
+// Wait up to 30s for the write lock instead of failing fast. When a
+// second pi process is doing its own indexing on the same DB, INSERTs
+// here would otherwise raise SQLITE_BUSY on every contended COMMIT.
+// busy_timeout is connection-local and cooperates with WAL.
+db.exec("PRAGMA busy_timeout = 30000");
 db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA synchronous = NORMAL");
 db.exec("PRAGMA temp_store = MEMORY");
