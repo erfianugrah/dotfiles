@@ -27,6 +27,12 @@
  *   4. Skip already-pruned messages (idempotent — important because `context`
  *      fires every turn on the same prefix).
  *   5. Skip protected tool names (PROTECTED_TOOLS) — for skill outputs etc.
+ *   6. Skip image-bearing tool results entirely. A single image read is
+ *      ~290KB base64 — easily blows the 160KB protect window the FIRST
+ *      time a non-newest tool call follows it. Pruning the bytes forces
+ *      the agent to re-read (which gets pruned again) — the original
+ *      `magick`-resize dance the user complained about. Rule 6 exempts
+ *      image content the same way PROTECTED_TOOLS exempts skill/memory.
  *
  * Sizing rationale (matches opencode defaults):
  *   PROTECT_TOKENS = 40_000  (tokens of recent tool output preserved)
@@ -106,8 +112,9 @@ function bytesOfContent(content: unknown): number {
   let total = 0;
   for (const part of content) {
     if (isTextPart(part)) total += Buffer.byteLength(part.text, "utf-8");
-    // Image parts: count just the base64 string size, but we don't currently
-    // prune images (rare and small for tool results).
+    // Image parts: count just the base64 string size. Used for stats only
+    // — image-bearing toolResults are skipped before this is called
+    // (`hasImageContent`).
     else if (
       typeof part === "object" &&
       part !== null &&
@@ -118,6 +125,27 @@ function bytesOfContent(content: unknown): number {
     }
   }
   return total;
+}
+
+/**
+ * Does this toolResult content contain any image part?
+ *
+ * Image-bearing tool results are exempt from pruning. The model genuinely
+ * needs to revisit pasted screenshots / `read foo.png` results across
+ * multiple turns; collapsing them to a marker forces a re-read which
+ * itself gets pruned the next turn, producing the manual `magick -resize`
+ * loop the user originally complained about.
+ */
+export function hasImageContent(content: unknown): boolean {
+  if (!Array.isArray(content)) return false;
+  for (const p of content) {
+    if (
+      typeof p === "object" &&
+      p !== null &&
+      (p as { type?: unknown }).type === "image"
+    ) return true;
+  }
+  return false;
 }
 
 function alreadyPruned(msg: AnyMessage): boolean {
@@ -170,15 +198,22 @@ export interface PruneOptions {
  *   3. Subsequent results that fit (cumulative + size ≤ protect): kept.
  *   4. Otherwise: content replaced with a marker text part.
  *
- * Why rule 2 exists: a single image `read` returns ~200KB (a 148KB PNG
- * gets wrapped as a base64 envelope). Without this exception that read
- * gets pruned on the SAME turn it was issued, because cumulative(0) +
- * size(200KB) already exceeds the 160KB protect window. The agent then
- * can't see what it just asked for, falls back to compressing + re-reading,
- * and the new read gets pruned the same way — the manual `magick` dance
- * the user originally complained about. clipboard-image-shrink papered
- * over this by making most pastes small enough to fit, but the underlying
- * algorithm bug bit any read larger than the protect window.
+ * Why rule 2 existed (historic): a single image `read` returns ~200KB+
+ * (a 148KB PNG gets wrapped as a base64 envelope). Without protection the
+ * read got pruned on the SAME turn it was issued, because cumulative(0) +
+ * size(200KB) already exceeded the 160KB protect window. The agent then
+ * couldn't see what it just asked for, fell back to compressing +
+ * re-reading, and the new read got pruned the same way — the manual
+ * `magick` dance the user originally complained about. But rule 2 only
+ * protects the SINGLE newest toolResult; the next tool call (any text
+ * read / bash) demotes the image off "newest" and it gets pruned on the
+ * very next `context` tick.
+ *
+ * The real fix (2026-05-29) is rule 6 below: image-bearing toolResults
+ * are exempt from the algorithm entirely, like PROTECTED_TOOLS. Rule 2
+ * stays for the symmetric text case (an enormous one-shot `bash find /`
+ * output the agent just requested) but is no longer the load-bearing
+ * defense against image pruning.
  */
 export function prune(
   messages: AnyMessage[],
@@ -196,6 +231,8 @@ export function prune(
     const m = messages[i];
     if (!m || m.role !== "toolResult") continue;
     if (m.toolName && protectedTools.has(m.toolName)) continue;
+    // Rule 6: image-bearing toolResults are exempt. See doc on hasImageContent.
+    if (hasImageContent(m.content)) continue;
     if (alreadyPruned(m)) continue;
 
     const size = bytesOfContent(m.content);
