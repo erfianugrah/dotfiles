@@ -39,7 +39,7 @@ import { _internals as osint } from "../extensions/osint.ts";
 import { safePath } from "../extensions/docs.ts";
 import { extractCdTargets, decideTarget } from "../extensions/cd-agents-reload.ts";
 import { rewriteClipboardPaths, shrunkSibling } from "../extensions/clipboard-image-shrink.ts";
-import { prune, type AnyMessage } from "../extensions/tool-output-prune.ts";
+import { prune, hasImageContent, type AnyMessage } from "../extensions/tool-output-prune.ts";
 import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
 import { shouldAbort as stuckShouldAbort, LAST_ACTIVITY_GRACE_MS, ACTIVITY_EVENTS } from "../extensions/stuck-state-recovery.ts";
 import { matchHints, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
@@ -2228,6 +2228,91 @@ describe("tool-output-prune.prune", () => {
     ];
     const stats = prune(msgs);
     expect(stats.keptNewest).toBe(false);
+  });
+
+  test("image-bearing toolResults are NEVER pruned, even when not newest (the 2026-05-29 fix)", () => {
+    // Reproduces the screenshot bug: user pastes a 217KB PNG, agent reads it
+    // (~290KB base64), then runs a follow-up bash call. On the NEXT context
+    // tick the bash is newest and the image read would (pre-fix) be pruned
+    // because its base64 bytes alone blow the 160KB protect window.
+    const imageRead: AnyMessage = {
+      role: "toolResult",
+      toolName: "read",
+      toolCallId: "image-read",
+      content: [
+        { type: "text", text: "[image] /tmp/pi-clipboard-foo.png" },
+        // 290KB base64 string — a realistic 217KB PNG envelope.
+        { type: "image", data: "A".repeat(290_000), mimeType: "image/png" } as unknown as never,
+      ],
+    };
+    const followUp = toolResult("bash", 50_000, "bash-after-image");
+    const msgs: AnyMessage[] = [imageRead, followUp];
+
+    const origImageBytes = (imageRead.content as Array<{ data?: string }>)[1].data!.length;
+    const stats = prune(msgs, { protectBytes: 160_000 });
+
+    // Image read totally untouched.
+    expect(Array.isArray(imageRead.content)).toBe(true);
+    expect((imageRead.content as unknown[]).length).toBe(2);
+    expect(((imageRead.content as Array<{ data?: string }>)[1].data ?? "").length).toBe(origImageBytes);
+    // The bash follow-up is newest and so kept by rule 2.
+    expect(firstTextPart(followUp)).toBe("x".repeat(50_000));
+    expect(stats.prunedCount).toBe(0);
+    expect(stats.reclaimedBytes).toBe(0);
+    // keptNewest tracks newest *non-exempt* result — the bash here.
+    expect(stats.keptNewest).toBe(true);
+  });
+
+  test("image exemption doesn't burn the newest-protected slot", () => {
+    // If an image-bearing result IS newest, the next non-exempt text
+    // toolResult should still benefit from rule 2 (kept verbatim).
+    const oldBigBash = toolResult("bash", 500_000, "old");      // way over budget
+    const newishRead = toolResult("read", 100_000, "newish");   // would-be newest
+    const newestImage: AnyMessage = {
+      role: "toolResult",
+      toolName: "read",
+      toolCallId: "newest-image",
+      content: [
+        { type: "image", data: "B".repeat(200_000), mimeType: "image/png" } as unknown as never,
+      ],
+    };
+    const msgs: AnyMessage[] = [oldBigBash, newishRead, newestImage];
+    const stats = prune(msgs, { protectBytes: 160_000 });
+
+    // Image untouched.
+    expect((newestImage.content as unknown[]).length).toBe(1);
+    // newishRead consumed the newest-protected slot (since image was skipped)
+    // — so 100KB read stays verbatim.
+    expect(firstTextPart(newishRead)).toBe("x".repeat(100_000));
+    // Old 500KB bash gets pruned (cumulative starts at 0 after newish-protected;
+    // 500KB > 160KB so doesn't fit).
+    expect(firstTextPart(oldBigBash)).toMatch(/\[tool-output-prune\] bash/);
+    expect(stats.prunedCount).toBe(1);
+    expect(stats.reclaimedBytes).toBe(500_000);
+  });
+});
+
+describe("tool-output-prune.hasImageContent", () => {
+  test("detects image part among text parts", () => {
+    expect(
+      hasImageContent([
+        { type: "text", text: "hi" },
+        { type: "image", data: "abc", mimeType: "image/png" },
+      ]),
+    ).toBe(true);
+  });
+  test("returns false for text-only content", () => {
+    expect(hasImageContent([{ type: "text", text: "hi" }])).toBe(false);
+  });
+  test("returns false for non-array (string content)", () => {
+    expect(hasImageContent("some string")).toBe(false);
+  });
+  test("returns false for empty array", () => {
+    expect(hasImageContent([])).toBe(false);
+  });
+  test("returns false for null / undefined", () => {
+    expect(hasImageContent(null)).toBe(false);
+    expect(hasImageContent(undefined)).toBe(false);
   });
 });
 
