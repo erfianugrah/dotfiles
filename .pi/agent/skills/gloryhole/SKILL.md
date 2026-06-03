@@ -1,6 +1,6 @@
 ---
 name: gloryhole
-description: "Work in the user's self-built DNS server `glory-hole` at `~/gloryhole/` — Go binary + embedded Unbound recursor + Astro/React dashboard. Pi-hole-style ad-blocking, expr-based policy engine, local records, conditional forwarding, sharded LRU cache, SQLite query log, REST/WS API, DoT/DoH. Two deployment profiles — home (LAN-fronted, VyOS upstream) and a public DoT/DoH endpoint on Fly.io. Covers the packet-path through `pkg/dns` → policy → blocklist → cache → forwarder, the `pkg/forwarder` round-robin + circuit-breaker + UpstreamHealth model, SERVFAIL pass-through semantics, the bundled-Unbound runtime topology, Fly UDP-binding requirements, OpenTelemetry+Prometheus pattern, and the mock-DNS-server test idiom. Use when adding a forwarder/policy/blocklist feature, debugging a SERVFAIL path, designing telemetry, or touching the Fly deploy. Sibling to `knot-dns` (DNS adjacent, but auth-vs-recursive opposites), `fly` (deploy target)."
+description: "Work in the user's self-built DNS server `glory-hole` at `~/gloryhole/` — Go binary + embedded Unbound recursor + Astro/React dashboard. Pi-hole-style ad-blocking, expr-based policy engine, local records, conditional forwarding, sharded LRU cache, SQLite query log, REST/WS API, DoT/DoH. Three deployment profiles — home (LAN-fronted, VyOS upstream on servarr), a VyOS podman LAN resolver (vyos-sg), and a public DoT/DoH endpoint on Fly.io (sin region). Covers the packet-path through `pkg/dns` → policy → blocklist → cache → forwarder, the `pkg/forwarder` round-robin + circuit-breaker + UpstreamHealth model, SERVFAIL pass-through semantics, the bundled-Unbound runtime topology, Fly UDP-binding requirements, OpenTelemetry+Prometheus pattern, and the mock-DNS-server test idiom. Use when adding a forwarder/policy/blocklist feature, debugging a SERVFAIL path, designing telemetry, or touching the Fly deploy. Sibling to `knot-dns` (DNS adjacent, but auth-vs-recursive opposites), `fly` (deploy target)."
 ---
 
 # gloryhole — self-built DNS server
@@ -24,12 +24,13 @@ Single Go binary that combines:
 - Embedded Astro + React + shadcn dashboard (go:embed)
 - **Bundled Unbound recursor** built from source in the Docker image, supervised as a child process on a loopback port — provides DNSSEC-validated recursion without trusting an upstream
 
-Two live deployments:
+Three live deployments:
 
 | Profile | Where | Upstream | Purpose |
 |---|---|---|---|
 | home | LAN (deployed on `servarr`) | site router | LAN ad-block + local records for internal hostnames |
-| public DoT/DoH | Fly.io | bundled Unbound (loopback) | DoT/DoH for personal devices, ad-block, no LAN context |
+| LAN resolver (SG) | VyOS podman container on `vyos-sg` @ `172.16.0.5` (config `/config/erfi/gloryhole/config.yml`) | bundled Unbound (loopback) | Replaced pihole+unbound+httpbun as the Singapore site resolver (2026-06-03). DHCP name-server (4 subnets), `system name-server`, and `service dns forwarding` all point at it |
+| public DoT/DoH | Fly.io — `sin` region since 2026-06-03 (was `fra`) | bundled Unbound (loopback) | DoT/DoH for personal devices, ad-block, no LAN context |
 
 ## Architecture — packet path
 
@@ -130,7 +131,7 @@ Tiny `Dockerfile.fly` layers `config.fly.yml` + entrypoint onto the pre-built `<
 | `:53/UDP` | **Plain UDP DNS — needs a dedicated v4 (`fly ips allocate-v4`)** and bind to `fly-global-services:53`, not `:53`. Plain UDP cannot see real client IPs (Fly NATs) — rely on `trusted_proxies` + PROXY proto on TCP/DoT for client identification. |
 | `:53/TCP`, `:853/TCP` (DoT) | Both PROXY-proto so real client IPs survive |
 
-Persistent volume mounted at `/var/lib/glory-hole`.
+Persistent volume mounted at `/var/lib/glory-hole`. Primary region is **`sin`** (migrated from `fra` 2026-06-03; the dedicated v4/v6 anycast IPs + the Fly-managed cert are app-level and survived the region move).
 
 Deploy: `make fly-deploy` (= `docker-fly` + push + `fly deploy --build-arg VERSION=… --build-arg BUILD_TIME=…`) or `fly deploy --remote-only`. CI deploys on tag push.
 
@@ -233,6 +234,7 @@ E2E via `docker-compose.e2e.yml` — auth disabled, all features on, high ports 
 10. **Dashboard rebuild is silent** — Astro lives under `pkg/api/ui/dashboard/`; touching `package.json` requires `npm ci && npm run build`. Embedded via `go:embed`, so a stale `dist/` ships into the binary without warning.
 11. **Hot reload coverage** — config-watcher `OnChange` reloads blocklist, policy, local records, whitelist (→ policy), conditional forwarding, rate limit, forwarder. Listen-address changes still require restart.
 12. **Repo dir vs binary name** — `gloryhole/` on disk, `glory-hole` everywhere else. Don't fight it.
+13. **VyOS container deploy (equuleus 1.3, `vyos-sg`)** — the gotchas that cost time: (a) run config sessions via `ssh vyos-sg 'vbash -s' <<EOF … EOF` — `bash -s` silently fails to persist `set`s; (b) `volume`/`port` attributes must be separate per-leaf `set` commands, not a combined one-liner; (c) the **plain** `erfianugrah/glory-hole` image bakes `config.example.yml`, NOT `config.yml`, so the default `-config /etc/glory-hole/config.yml` fails — override with `set container name gloryhole command '-config'` + `arguments '/var/lib/glory-hole/config.yml'` pointing at the mounted config; (d) VyOS `service dns forwarding` **recurses independently** unless given `name-server <glory-hole-ip>` — without it the DHCP-secondary/gateway path bypasses ad-blocking. Web UI reached at `http://172.16.0.5:8080` (host-port `:3021` mapping is flaky — podman port-forward quirk).
 
 ## Cross-references
 
@@ -260,4 +262,24 @@ fly machine restart <id>
 
 # Drive the API (replace token with real one from UI; substitute your hostname)
 curl -H "Authorization: Bearer $TOKEN" https://<your-glory-hole-host>/api/v1/policy/rules | jq
+
+# --- vyos-sg LAN resolver (podman container managed by VyOS config) ---
+# Logs / status
+ssh vyos-sg 'sudo podman logs --tail 50 gloryhole'
+ssh vyos-sg 'sudo podman ps --filter name=gloryhole'
+# Edit container config (vbash, NOT bash)
+ssh vyos-sg 'vbash -s' <<'EOF'
+source /opt/vyatta/etc/functions/script-template
+configure
+set container name gloryhole image 'docker.io/erfianugrah/glory-hole:<new-tag>'
+commit
+save
+exit
+EOF
+# Config lives on the host volume; restart picks up edits
+ssh vyos-sg 'sudo vi /config/erfi/gloryhole/config.yml'   # then:
+ssh vyos-sg 'sudo systemctl restart vyos-container-gloryhole'
+# Verify resolve + block (172.16.0.5 direct, or gateway 10.68.69.1 via dns-forwarding)
+ssh vyos-sg 'dig +short @172.16.0.5 example.com; dig +short @172.16.0.5 doubleclick.net'
+# Web UI: http://172.16.0.5:8080  (login erfi / shared-with-Fly creds)
 ```
