@@ -1,7 +1,7 @@
 {
-  "lastChangelogVersion": "0.76.0",
+  "lastChangelogVersion": "0.78.0",
   "defaultProvider": "opencode",
-  "defaultModel": "claude-opus-4-7",
+  "defaultModel": "claude-opus-4-8",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "xhigh",
   "compaction": {
