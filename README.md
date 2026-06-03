@@ -237,6 +237,26 @@ tmux source ~/.tmux.conf
 # prefix (Ctrl-A) + I to install plugins
 ```
 
+> **macOS yellow status bar:** `tokyo-night-tmux`'s `themes.sh` uses `declare -A`
+> (bash >= 4.2), but macOS ships bash 3.2 at `/bin/bash` and the script bails ->
+> default yellow/orange bar. Fix: `brew install bash` (now in `packages/brew.txt`,
+> so `install_packages` handles it), then `tmux kill-server` and reopen — the
+> running server caches the old PATH, so a restart is required. `.tmux.conf`
+> already prepends Homebrew to the tmux server PATH so `env bash` finds 4.2+.
+
+### pi (coding agent)
+
+Installed automatically by `install_packages` (Phase 3 standalone). Run
+`install_pi` directly to update or to replace an npm/Node pi install.
+
+```sh
+install_pi   # fetches the standalone Bun binary -> ~/.local/opt/pi + ~/.local/bin/pi
+```
+
+> Use the **standalone Bun binary**, not `npm install -g` / `pi.dev/install.sh`
+> (those install the Node build, which lacks `bun:sqlite` and breaks Bun-only
+> extensions like `session-fts` with "bun:sqlite module not found").
+
 ### Neovim
 
 ```sh

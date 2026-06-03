@@ -5,6 +5,10 @@
 #
 # format: name=install_command
 #
+# pi: standalone Bun binary (NOT the npm/Node build — that lacks bun:sqlite).
+# install_pi is defined in functions.d/misc.zsh. Skipped if `pi` already on PATH;
+# to replace an existing npm install, run `install_pi` directly.
+pi=install_pi
 cosign=go install github.com/sigstore/cosign/v2/cmd/cosign@latest
 d2=curl -fsSL https://d2lang.com/install.sh | sh -s --
 sql-formatter=npm install -g sql-formatter

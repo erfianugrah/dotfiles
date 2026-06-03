@@ -8,6 +8,7 @@ asnmap
 atac
 awscli
 bandwhich
+bash
 bat
 bat-extras
 bitwarden-cli
