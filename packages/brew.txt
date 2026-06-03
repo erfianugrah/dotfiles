@@ -14,7 +14,6 @@ bitwarden-cli
 btop
 caddy
 certbot
-cf-terraforming
 cloudflared
 cmatrix
 cosign
