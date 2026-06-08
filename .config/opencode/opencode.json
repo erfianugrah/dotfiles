@@ -108,7 +108,8 @@
       "environment": {
         "SEARXNG_URL": "https://searxng.erfi.io",
         "CRAWLER_URL": "https://crawler.erfi.io",
-        "OSINT_URL":   "https://osint.erfi.io"
+        "OSINT_URL":   "https://osint.erfi.io",
+        "LLM_URL":     "https://llama.erfi.io"
       },
       "timeout": 120000,
       "enabled": true
