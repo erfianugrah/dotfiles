@@ -85,7 +85,12 @@ async function runSubagent(args: {
   description: string;
 }): Promise<{ output: string; sessionId?: string }> {
   const preset = SUBAGENT_PRESETS[args.subagentType] ?? SUBAGENT_PRESETS.general;
-  const flags = ["-p", args.prompt, "--mode", "json", "--no-session"];
+  // -a/--approve: load project-local inputs (AGENTS.md, .pi resources) in the
+  // subagent. It inherits the parent's cwd via spawn (no cwd override), so it
+  // shares the parent's trust boundary — the parent is already operating in
+  // this tree. Restores pre-0.79 behavior; without it pi 0.79+ silently skips
+  // project instructions in any cwd not yet saved in ~/.pi/agent/trust.json.
+  const flags = ["-p", args.prompt, "--mode", "json", "--no-session", "-a"];
   if (preset.tools.length > 0) flags.push("--tools", preset.tools.join(","));
   if (preset.minimal) {
     // Re-include only the extensions the whitelist actually needs (e.g.

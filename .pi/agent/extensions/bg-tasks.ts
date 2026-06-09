@@ -501,7 +501,13 @@ const bgTaskTool = defineTool({
     const sessionName = makeSessionName(slug);
     const cwd = params.cwd ?? ctx.cwd;
 
-    const piFlags: string[] = ["--no-session"]; // no persisted session for bg
+    // --no-session: no persisted session for bg runs.
+    // -a/--approve: load project-local inputs (AGENTS.md, .pi resources). The
+    // bg pi runs in the parent's cwd (or an explicit override the user chose),
+    // so it shares the parent's trust boundary. Restores pre-0.79 behavior;
+    // without it pi 0.79+ skips project instructions unless the cwd is saved
+    // in ~/.pi/agent/trust.json.
+    const piFlags: string[] = ["--no-session", "-a"];
     if (params.model) piFlags.push("--model", params.model);
     if (params.minimal) {
       piFlags.push("--no-extensions", "--no-skills", "--no-prompt-templates");
