@@ -88,6 +88,29 @@ symlink target. Changes propagate instantly through the symlink.
   /tmp/ integration test driven via the SDK preload mock (see
   `.pi/agent/tests/preload.ts` for the stub pattern).
 
+## Project trust (pi 0.79+)
+
+Since pi 0.79.0, pi gates **project-local** inputs behind a trust decision.
+This is mostly transparent here, but know the model:
+
+- **Global config is never gated.** Everything under `~/.pi/agent/`
+  (all extensions, skills, prompts, the global `AGENTS.md`, `tool-routing`)
+  is user/global and loads on every startup. Since the whole repo is
+  stow-symlinked into `~/.pi/agent/`, all our mods are always loaded.
+- **Trust gates `<cwd>/.pi/` + `<cwd>/AGENTS.md` only.** In `~/dotfiles`
+  that's effectively just `~/dotfiles/AGENTS.md` (pi reads project
+  resources from `<cwd>/.pi/`, not `<cwd>/.pi/agent/`, so our source tree
+  is invisible to the project loader — no double-load).
+- **Decisions persist** to `~/.pi/agent/trust.json` (runtime state, NOT
+  tracked). A new repo prompts once on interactive startup; `/trust` saves
+  it (restart to apply). Non-interactive `pi -p` skips project inputs
+  unless the cwd is in `trust.json` or `-a`/`--approve` is passed.
+- **Subagent spawners pass `-a`.** `task.ts` and `bg-tasks.ts` add
+  `-a`/`--approve` to their `pi -p` invocations so subagents load
+  project-local `AGENTS.md` / `.pi` resources in the parent's cwd (they
+  share the parent's trust boundary). This restores the pre-0.79 default.
+  If you add another `pi -p` spawner, pass `-a` too.
+
 ## Tests
 
 ```bash
