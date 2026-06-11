@@ -504,10 +504,14 @@ const bgTaskTool = defineTool({
     // --no-session: no persisted session for bg runs.
     // -a/--approve: load project-local inputs (AGENTS.md, .pi resources). The
     // bg pi runs in the parent's cwd (or an explicit override the user chose),
-    // so it shares the parent's trust boundary. Restores pre-0.79 behavior;
-    // without it pi 0.79+ skips project instructions unless the cwd is saved
-    // in ~/.pi/agent/trust.json.
-    const piFlags: string[] = ["--no-session", "-a"];
+    // so it shares the parent's trust boundary. We pass -a only when the parent
+    // session trusts the cwd (ctx.isProjectTrusted(), pi 0.79.1+) so the bg run
+    // inherits the parent's actual trust decision. Without -a, pi 0.79+ skips
+    // project instructions unless the cwd is saved in ~/.pi/agent/trust.json.
+    // isProjectTrusted may be absent on pi < 0.79.1 — default true there.
+    const approve = ctx.isProjectTrusted?.() ?? true;
+    const piFlags: string[] = ["--no-session"];
+    if (approve) piFlags.push("-a");
     if (params.model) piFlags.push("--model", params.model);
     if (params.minimal) {
       piFlags.push("--no-extensions", "--no-skills", "--no-prompt-templates");
