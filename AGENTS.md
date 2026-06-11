@@ -105,11 +105,20 @@ This is mostly transparent here, but know the model:
   tracked). A new repo prompts once on interactive startup; `/trust` saves
   it (restart to apply). Non-interactive `pi -p` skips project inputs
   unless the cwd is in `trust.json` or `-a`/`--approve` is passed.
-- **Subagent spawners pass `-a`.** `task.ts` and `bg-tasks.ts` add
-  `-a`/`--approve` to their `pi -p` invocations so subagents load
-  project-local `AGENTS.md` / `.pi` resources in the parent's cwd (they
-  share the parent's trust boundary). This restores the pre-0.79 default.
-  If you add another `pi -p` spawner, pass `-a` too.
+- **Subagent spawners pass `-a` when the parent trusts the cwd.** `task.ts`
+  and `bg-tasks.ts` add `-a`/`--approve` to their `pi -p` invocations
+  *conditionally* — gated on `ctx.isProjectTrusted()` (pi 0.79.1+) so the
+  subagent inherits the parent's actual trust decision instead of
+  force-loading project inputs the user may have declined. When the parent
+  trusts the cwd, subagents load project-local `AGENTS.md` / `.pi` resources
+  (pre-0.79 default); when it doesn't, they skip them too. `isProjectTrusted`
+  is treated as `true` if absent (pi < 0.79.1). If you add another `pi -p`
+  spawner, gate `-a` the same way.
+- **Global alternative: `defaultProjectTrust`.** Since 0.79.1 a global
+  settings key `defaultProjectTrust` (`"ask"` default / `"always"` /
+  `"never"`) controls the fallback when no saved/CLI decision applies. We do
+  NOT set it to `"always"` — that would auto-trust *every* cwd, far broader
+  than the scoped per-spawner `-a`. The `-a` gate stays the mechanism.
 
 ## Tests
 

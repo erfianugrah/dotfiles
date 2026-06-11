@@ -83,14 +83,18 @@ async function runSubagent(args: {
   prompt: string;
   subagentType: string;
   description: string;
+  approve: boolean;
 }): Promise<{ output: string; sessionId?: string }> {
   const preset = SUBAGENT_PRESETS[args.subagentType] ?? SUBAGENT_PRESETS.general;
   // -a/--approve: load project-local inputs (AGENTS.md, .pi resources) in the
   // subagent. It inherits the parent's cwd via spawn (no cwd override), so it
-  // shares the parent's trust boundary — the parent is already operating in
-  // this tree. Restores pre-0.79 behavior; without it pi 0.79+ silently skips
-  // project instructions in any cwd not yet saved in ~/.pi/agent/trust.json.
-  const flags = ["-p", args.prompt, "--mode", "json", "--no-session", "-a"];
+  // shares the parent's trust boundary. We pass -a only when the parent
+  // session itself trusts the cwd (ctx.isProjectTrusted(), pi 0.79.1+) — that
+  // way the subagent inherits the parent's actual trust decision instead of
+  // overriding it. Without -a, pi 0.79+ silently skips project instructions in
+  // any cwd not yet saved in ~/.pi/agent/trust.json.
+  const flags = ["-p", args.prompt, "--mode", "json", "--no-session"];
+  if (args.approve) flags.push("-a");
   if (preset.tools.length > 0) flags.push("--tools", preset.tools.join(","));
   if (preset.minimal) {
     // Re-include only the extensions the whitelist actually needs (e.g.
@@ -253,11 +257,16 @@ const taskTool = defineTool({
       { description: "The type of specialized agent to use for this task" },
     ),
   }),
-  async execute(_id, params) {
+  async execute(_id, params, _signal, _onUpdate, ctx) {
+    // Inherit the parent session's trust decision (saved, temporary, or CLI
+    // override). isProjectTrusted may be absent on pi < 0.79.1 — default to
+    // true there to preserve the prior always-approve behavior.
+    const approve = ctx?.isProjectTrusted?.() ?? true;
     const { output, sessionId } = await runSubagent({
       prompt: params.prompt,
       subagentType: params.subagent_type,
       description: params.description,
+      approve,
     });
     const sessionLine = sessionId ? `subagent session: ${sessionId}\n\n` : "";
     return {
