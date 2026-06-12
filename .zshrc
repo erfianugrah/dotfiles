@@ -66,6 +66,27 @@ zinit snippet OMZP::gh
 [[ -f /etc/debian_version ]] && zinit snippet OMZP::debian
 zinit snippet OMZP::rust
 zinit snippet OMZP::colored-man-pages
+zinit snippet OMZ::lib/async_prompt.zsh
+zinit snippet OMZ::lib/bzr.zsh
+zinit snippet OMZ::lib/cli.zsh
+zinit snippet OMZ::lib/clipboard.zsh
+zinit snippet OMZ::lib/compfix.zsh
+zinit snippet OMZ::lib/completion.zsh
+zinit snippet OMZ::lib/correction.zsh
+zinit snippet OMZ::lib/diagnostics.zsh
+zinit snippet OMZ::lib/directories.zsh
+zinit snippet OMZ::lib/functions.zsh
+zinit snippet OMZ::lib/git.zsh
+zinit snippet OMZ::lib/grep.zsh
+zinit snippet OMZ::lib/history.zsh
+zinit snippet OMZ::lib/key-bindings.zsh
+zinit snippet OMZ::lib/misc.zsh
+zinit snippet OMZ::lib/nvm.zsh
+zinit snippet OMZ::lib/prompt_info_functions.zsh
+zinit snippet OMZ::lib/spectrum.zsh
+zinit snippet OMZ::lib/termsupport.zsh
+zinit snippet OMZ::lib/theme-and-appearance.zsh
+zinit snippet OMZ::lib/vcs_info.zsh
 
 autoload -Uz compinit && compinit
 zinit cdreplay -q

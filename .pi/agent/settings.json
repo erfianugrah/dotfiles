@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.79.1",
   "defaultProvider": "anthropic",
-  "defaultModel": "claude-opus-4-8",
+  "defaultModel": "claude-sonnet-4-6",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
   "compaction": {
