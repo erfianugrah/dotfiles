@@ -41,6 +41,7 @@ Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context
 - After 2 `docs_search` calls on the same topic with no read in between, STOP and `docs_read` the top hit.
 - Disputed doc-based answer → `docs_read` (or `docs_grep` for inline context) on the source, not another `docs_search`.
 - `docs_grep` with `path=/docs/<source>/` beats `docs_search` when you already know the source and want a specific phrase or symbol.
+- Always cite the source path in your response to the user when answering from docs (e.g. `Source: /docs/supabase/guides/auth.md`). The path appears in `[source]` headers on `docs_read` output, in `docs_search` result rows, and in `docs_grep` match lines.
 
 ## Code intelligence
 
@@ -158,7 +159,8 @@ authentik-api, aws-api, cloudflare-api, docker-api, flyio-api, gitea-api, keyclo
 
 Tool output uses stable markers the agent should recognise:
 
-- `[file] N lines, M bytes` — prefix on full `docs_read` results. Use this to decide whether to re-read with `offset`/`lines` next time.
+- `[source] /docs/<source>/file.md` — **always** prepended to every `docs_read` result (full and partial). Cite this path in your response.
+- `[file] N lines, M bytes` — follows the `[source]` header on full (no offset/lines) reads. Use this to decide whether to re-read with `offset`/`lines` next time.
 - `**matched text**` — `docs_grep` wraps matched substrings in bold so match positions are visible without re-scanning.
 - `(showing X of Y)` — truncation notice in `docs_search` / `docs_grep`. Narrow the query or raise `maxResults`.
 - `[truncated N chars — use docs_read with offset/lines or docs_summary ...]` — output hit the 51K char cap. Follow the hint.

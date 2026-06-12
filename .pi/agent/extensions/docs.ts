@@ -233,6 +233,7 @@ const docsSearch = defineTool({
   promptSnippet: "docs_search — docs.erfi.io title+summary index. First step of docs lookup.",
   promptGuidelines: [
     "Pass source= when known. Index covers 158 sources.",
+    "Always cite the source path(s) in your response to the user (e.g. `Source: /docs/supabase/guides/auth.md`).",
   ],
   label: "Docs Search",
   description: "Search docs.erfi.io title+summary index.",
@@ -281,6 +282,7 @@ const docsRead = defineTool({
   promptSnippet: "docs_read — read a docs file. Drill-in tool after docs_search.",
   promptGuidelines: [
     "On files >300 lines, docs_summary first, then docs_read with offset/lines.",
+    "Always cite the [source] path from the output header in your response to the user.",
   ],
   parameters: Type.Object({
     path: Type.Optional(Type.String({ description: "File path (e.g. /docs/supabase/guides/auth.md)" })),
@@ -307,7 +309,11 @@ const docsRead = defineTool({
       cmd = `printf '[file] %s lines, %s bytes\\n\\n' "$(wc -l < '${sq(p)}')" "$(wc -c < '${sq(p)}')"; bat --decorations=always --paging=never --color=never --style=numbers '${sq(p)}' 2>/dev/null || cat '${sq(p)}'`;
     }
     const result = await ssh(cmd);
-    return { content: [{ type: "text", text: capOutput(result, argPath) }], details: { path: argPath } };
+    // Prepend [source] path to every read result so the LLM can always cite
+    // where the content came from — full reads already have a [file] header but
+    // no path; partial reads (offset/lines) had no header at all before this.
+    const text = `[source] ${argPath}\n\n` + result;
+    return { content: [{ type: "text", text: capOutput(text, argPath) }], details: { path: argPath } };
   },
 });
 
@@ -342,6 +348,7 @@ const docsGrep = defineTool({
   promptSnippet: "docs_grep — regex search docs. Use when source is known and you want a phrase / symbol.",
   promptGuidelines: [
     "Scope path=/docs/<source>/ to keep output sane.",
+    "Always include source path(s) in your response to the user.",
   ],
   parameters: Type.Object({
     query: Type.String({ description: "Regex pattern to search for" }),
@@ -386,7 +393,9 @@ const docsSummary = defineTool({
   label: "Docs Summary",
   description: "Outline (headings only) of a docs file.",
   promptSnippet: "docs_summary — file outline. Run before docs_read on files >300 lines.",
-  promptGuidelines: [],
+  promptGuidelines: [
+    "Always include the source path in your response to the user.",
+  ],
   parameters: Type.Object({
     path: Type.Optional(Type.String({ description: "File path (e.g. /docs/supabase/guides/auth.md)" })),
     filePath: Type.Optional(Type.String({ description: "Alias for 'path'. Accepted for compatibility with built-in Read tool." })),
