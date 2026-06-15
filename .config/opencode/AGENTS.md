@@ -39,6 +39,7 @@ Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context
 - Workflow is `docs_search` → `docs_summary` → `docs_read` with `offset` / `lines`. Skipping `docs_summary` on files >300 lines wastes tokens — don't.
 - ALWAYS pass `source=` on `docs_search` when the source is known (it usually is).
 - After 2 `docs_search` calls on the same topic with no read in between, STOP and `docs_read` the top hit.
+- **Zero-results path**: if `docs_search` returns `[no results for "..."]`, do NOT call `docs_sources` (that lists sources, it is not a search fallback). Instead: (1) retry once with a shorter/broader query, (2) if still 0 results try `docs_grep path=/docs/<source>/` for the key term. Only escalate to `web_research` after both fail. `docs_sources` is only for verifying a source exists — never as a search workaround.
 - Disputed doc-based answer → `docs_read` (or `docs_grep` for inline context) on the source, not another `docs_search`.
 - `docs_grep` with `path=/docs/<source>/` beats `docs_search` when you already know the source and want a specific phrase or symbol.
 - Always cite the source path in your response to the user when answering from docs (e.g. `Source: /docs/supabase/guides/auth.md`). The path appears in `[source]` headers on `docs_read` output, in `docs_search` result rows, and in `docs_grep` match lines.
@@ -166,7 +167,7 @@ Tool output uses stable markers the agent should recognise:
 - `[truncated N chars — use docs_read with offset/lines or docs_summary ...]` — output hit the 51K char cap. Follow the hint.
 - `[error] command timed out ...` — server killed the command at 60s. Narrow path/regex; don't retry the same query.
 - `[error] SSH connection failed: ...` — network issue. Retry after a short delay.
-- `[no results for "..."]` — search found nothing after index + filename + content fallback. Try a different term or `docs_grep` across `/docs/`.
+- `[no results for "..."]` — search found nothing after index + filename + content fallback. Broaden the query (drop the most specific term) and retry ONCE, then try `docs_grep path=/docs/<source>/` for the key term. Only after both fail should you escalate to `web_research`. Do NOT call `docs_sources` as an intermediate step — it returns source metadata, not content.
 
 ### Token tips
 
