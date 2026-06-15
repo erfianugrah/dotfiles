@@ -205,45 +205,72 @@ wrangler tail
 # Filter: wrangler tail --format=pretty --status=error
 ```
 
-### `wrangler.toml` (modern: `wrangler.jsonc` also supported)
+### `wrangler.jsonc` (recommended since Wrangler v3.91.0)
 
-```toml
-name = "my-worker"
-main = "src/index.ts"
-compatibility_date = "2026-05-01"
-compatibility_flags = ["nodejs_compat"]
+Cloudflare recommends `wrangler.jsonc` for all new projects. Some newer Wrangler features are **only available in JSON config** — don't start new projects with `wrangler.toml`.
 
-# Routes (zone-scoped)
-[[routes]]
-pattern = "api.<host>/*"
-zone_name = "<host>"
+**Pure static assets** (no Worker script — just serve a `dist/` directory):
 
-# Workers KV
-[[kv_namespaces]]
-binding = "CACHE"
-id = "<kv-id>"
-
-# Workers R2
-[[r2_buckets]]
-binding = "ASSETS"
-bucket_name = "<bucket-name>"
-
-# Workers D1 (SQLite at edge)
-[[d1_databases]]
-binding = "DB"
-database_name = "<db-name>"
-database_id = "<d1-id>"
-
-# Queues
-[[queues.producers]]
-binding = "TASKS"
-queue = "task-queue"
-
-[[queues.consumers]]
-queue = "task-queue"
-max_batch_size = 25
-max_batch_timeout = 30
+```jsonc
+{
+  "name": "my-site",
+  // Set this to today's date
+  "compatibility_date": "2026-06-15",
+  "assets": {
+    "directory": "./dist",
+  },
+}
 ```
+
+No `main`, no `binding` — omit `binding` when there is no Worker script (`main`), since binding is only useful for `env.ASSETS.fetch()` inside Worker code.
+
+**Worker + static assets** (API routes + frontend in one Worker):
+
+```jsonc
+{
+  "name": "my-worker",
+  "main": "src/index.ts",
+  // Set this to today's date
+  "compatibility_date": "2026-06-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",           // required only when main is set
+    // "not_found_handling": "single-page-application",  // SPA fallback to index.html
+    // "run_worker_first": ["/api/*", "!/api/docs/*"],  // selective Worker-first routing
+  },
+  // Routes (zone-scoped)
+  "routes": [
+    { "pattern": "api.<host>/*", "zone_name": "<host>" }
+  ],
+  // Workers KV
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "<kv-id>" }
+  ],
+  // Workers R2
+  "r2_buckets": [
+    { "binding": "BUCKET", "bucket_name": "<bucket-name>" }
+  ],
+  // Workers D1 (SQLite at edge)
+  "d1_databases": [
+    { "binding": "DB", "database_name": "<db-name>", "database_id": "<d1-id>" }
+  ],
+  // Queues
+  "queues": {
+    "producers": [{ "binding": "TASKS", "queue": "task-queue" }],
+    "consumers": [{ "queue": "task-queue", "max_batch_size": 25, "max_batch_timeout": 30 }]
+  },
+}
+```
+
+**`assets` key reference**:
+
+| Field | Default | Notes |
+|---|---|---|
+| `directory` | — | Build output folder (`./dist`, `./public`, `./build`) |
+| `binding` | — | Only set when `main` is present; enables `env.ASSETS.fetch()` |
+| `not_found_handling` | `"none"` | `"single-page-application"` → 200+index.html; `"404-page"` → nearest 404.html |
+| `run_worker_first` | `false` | `true` = always invoke Worker; array of glob patterns for selective routing |
 
 ### R2 (S3-compatible object storage)
 
