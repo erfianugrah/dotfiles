@@ -44,6 +44,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // Set to e.g. ["docs_path", "find_name"] to suppress specific rules without
 // removing the extension. See rule IDs below.
+// IDs: docs_first, reformulation_loop, ls_docs, find_docs, cat_docs, grep_r,
+//      find_name, find_path, rg_files, curl_search, npm_when_bun, pnpm_in_bun_project,
+//      npx_when_bunx, sed_inplace_large_file, docker_logs_servarr, head_full_file,
+//      unsigned_git_commit, webfetch_docs, write_too_large, edit_dotenv, edit_lockfile,
+//      edit_git_internals, edit_node_modules.
 const DISABLED: Set<string> = new Set();
 
 // ---- Reformulation-loop guard ----
@@ -101,6 +106,27 @@ function stateFor(sessionKey: string): LoopState {
   }
   return s;
 }
+
+// ---- Docs-first chain guard ----
+//
+// Enforces: check docs.erfi.io BEFORE reaching for websearch / web_research.
+//
+// Chain the guard encodes at runtime:
+//   websearch / web_research called?
+//     → docs_* tool called this session?  (tracked in docsFirstSessions)
+//         yes → allow (model did the check; took the "else" branch if docs had nothing)
+//         no  → block once: "call docs_sources first; if ≥1 file use docs_*;
+//                             if 0 files call websearch again — gate opens"
+//
+// One block per session: enough to enforce the habit, not enough to be
+// annoying when docs genuinely has no coverage for the topic.
+const DOCS_FIRST_TOOLS = new Set([
+  "docs_sources", "docs_search", "docs_grep", "docs_find", "docs_read", "docs_summary",
+]);
+const WEB_SEARCH_TOOLS = new Set(["websearch", "web_research"]);
+// Sessions where docs_* was called OR the one-time redirect already fired.
+// Either event opens the gate for the rest of the session.
+const docsFirstSessions = new Set<string>();
 
 // Hard-block rules: regex on bash command, plus a redirect message.
 type BlockRule = {
@@ -423,6 +449,7 @@ export default function (pi: ExtensionAPI) {
     try {
       const key = ctx.sessionManager.getSessionFile?.() ?? "default";
       loopStates.delete(key);
+      docsFirstSessions.delete(key);
     } catch { /* ignore */ }
   });
 
@@ -435,6 +462,28 @@ export default function (pi: ExtensionAPI) {
     if (!DISABLED.has("reformulation_loop")) {
       const loopMsg = checkReformulationLoop(event.toolName, sessionKey);
       if (loopMsg) return { block: true, reason: `tool-guard[reformulation_loop]: ${loopMsg}` };
+    }
+
+    // Docs-first chain: mark docs check — any docs_* call opens the gate
+    if (DOCS_FIRST_TOOLS.has(event.toolName)) {
+      docsFirstSessions.add(sessionKey);
+      // fall through — never block docs_* tools
+    }
+
+    // Docs-first chain: redirect websearch / web_research if docs not yet consulted
+    if (!DISABLED.has("docs_first") && WEB_SEARCH_TOOLS.has(event.toolName)) {
+      if (!docsFirstSessions.has(sessionKey)) {
+        docsFirstSessions.add(sessionKey); // fire once per session
+        return {
+          block: true,
+          reason:
+            `tool-guard[docs_first]: docs.erfi.io has 158 indexed sources covering most technical topics. ` +
+            `Follow the docs-first chain before reaching for \`${event.toolName}\`: ` +
+            `(1) call \`docs_sources <filter>\` to check coverage; ` +
+            `(2) if ≥1 file → use \`docs_search\` / \`docs_read\` / \`docs_grep\` instead; ` +
+            `(3) if 0 files → call \`${event.toolName}\` again — the gate opens once docs_sources has been consulted.`,
+        };
+      }
     }
 
     // bash anti-patterns
