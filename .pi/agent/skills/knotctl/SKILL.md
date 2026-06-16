@@ -5,6 +5,12 @@ description: Drive the user's `knotctl` CLI for live DNS edits against `knot-fly
 
 # knotctl — TSIG-keyed DNS editor
 
+> **knotea merge (2026-06-16)** — source moves with knot-fly into the knotea
+> monorepo: `~/knot-fly/cmd/knotctl/` → **`~/knotea/authority/cmd/knotctl/`**
+> (original path canonical until cutover). After the deployment cutover the
+> RFC 2136 target IP changes from `169.155.56.21` to knotea's new anycast IP
+> (plan §5.3 / §8). Plan: `~/knotea/docs/plans/2026-06-16-knotea-merge.md`.
+
 Lives at `~/knot-fly/cmd/knotctl/`. Static Go binary, ~9.5MB, `CGO_ENABLED=0`,
 talks miekg/dns RFC 2136 directly to `knotd` on `169.155.56.21:53`. No shim,
 no Cloudflare API token, no `nsupdate -y` (which leaks secrets to argv) —

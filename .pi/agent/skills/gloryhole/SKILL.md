@@ -5,7 +5,18 @@ description: "Work in the user's self-built DNS server `glory-hole` at `~/gloryh
 
 # gloryhole — self-built DNS server
 
-Repo: `~/gloryhole/`. Module path `glory-hole` (single Go module). On disk: `gloryhole/`. Binary / image / Fly app: `glory-hole`. Don't conflate the two.
+> **knotea merge (2026-06-16)** — glory-hole is being merged with `knot-fly`
+> (authoritative DNS) into a single supervised binary, `knotea`. The monorepo
+> lives at `~/knotea/` with glory-hole under **`~/knotea/resolver/`** and
+> knot-fly under `~/knotea/authority/`. The original `~/gloryhole/` repo + the
+> live `glory-hole` Fly app (sin) remain canonical until the deployment cutover.
+> Plan + phased architecture: `~/knotea/docs/plans/2026-06-16-knotea-merge.md`.
+> The end-state binary supervises both Unbound (recursive, `127.0.0.1:5353`)
+> and knotd (authoritative, `127.0.0.1:5354`) — co-location fixes the Fly UDP
+> hairpin SERVFAIL on `*.erfi.io` (knot-dns gotcha #24). Sibling skills:
+> `knot-dns`, `knotctl`.
+
+Repo: `~/gloryhole/` (canonical) — also at `~/knotea/resolver/` post-merge. Module path `glory-hole` (single Go module). On disk: `gloryhole/`. Binary / image / Fly app: `glory-hole`. Don't conflate the two.
 
 **Project-truth: `~/gloryhole/AGENTS.md` + `~/gloryhole/CHANGELOG.md`** — read first for current version, config schema, and per-feature decisions. This skill is the pattern layer.
 

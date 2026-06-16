@@ -5,6 +5,18 @@ description: Deploy self-hosted authoritative DNS — Knot DNS 3.5 on Fly.io any
 
 # knot-dns — authoritative DNS on Fly
 
+> **knotea merge (2026-06-16)** — knot-fly is being merged with `glory-hole`
+> (recursive resolver) into a single supervised binary, `knotea`. The monorepo
+> lives at `~/knotea/` with knot-fly under **`~/knotea/authority/`** and
+> glory-hole under `~/knotea/resolver/`. The original `~/knot-fly/` repo + the
+> live `knot-fly-mvp` Fly app (fra) remain canonical until the deployment
+> cutover. Plan: `~/knotea/docs/plans/2026-06-16-knotea-merge.md`. Post-merge,
+> knotd no longer binds public `:53` — it runs loopback-only on `127.0.0.1:5354`
+> and knotea owns the public sockets, proxying RFC 2136 UPDATE + AXFR inward.
+> This resolves the PROXY-on-TCP limitation (gotcha #2) and the UDP hairpin
+> SERVFAIL (gotcha #24) by co-location. The Namecheap glue re-registration to
+> knotea's new anycast IP is the one irreversible-until-TTL cutover step (plan §5).
+
 The reference deployment is `~/knot-fly/deploy/knot-only/`. It runs as the `<your-knot-app>` Fly app in your primary region (single region; secondary-region deferred to Phase 2), serves `<your-zone>` + `lab.<your-zone>`, and issues real Let's Encrypt certs for 36 Caddy sites via `dns rfc2136`. Every snippet below is from that working tree. Read `~/knot-fly/AGENTS.md` for the canonical gotcha list this skill condenses.
 
 ## Why self-host
