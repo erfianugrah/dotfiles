@@ -409,7 +409,7 @@ const docsSummary = defineTool({
       ssh(`wc -l < '${sq(p)}'`),
       ssh(`wc -c < '${sq(p)}'`),
     ]);
-    const text = `${lineCount.trim()} lines, ${byteCount.trim()} bytes\n\n${headings}`;
+    const text = `[source] ${argPath}\n\n${lineCount.trim()} lines, ${byteCount.trim()} bytes\n\n${headings}`;
     return { content: [{ type: "text", text }], details: { path: argPath } };
   },
 });
