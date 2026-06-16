@@ -12,6 +12,7 @@ import { describe, expect, test } from "bun:test";
 import {
   splitSegments,
   extractPatchPaths,
+  checkReformulationLoop,
 } from "../extensions/tool-guard.ts";
 import { parsePatch } from "../extensions/apply-patch.ts";
 import {
@@ -134,6 +135,61 @@ describe("tool-guard.extractPatchPaths", () => {
   test("catches .git/config write attempt", () => {
     const patch = "*** Add File: .git/config\n+[remote \"evil\"]\n";
     expect(extractPatchPaths(patch)).toEqual([".git/config"]);
+  });
+});
+
+// ── tool-guard: reformulation-loop guard ──────────────────────────────────
+
+describe("tool-guard.checkReformulationLoop", () => {
+  let n = 0;
+  const freshKey = () => `sess-${Date.now()}-${n++}`;
+
+  test("docs_search reworded 4× fires the loop", () => {
+    const k = freshKey();
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+    expect(checkReformulationLoop("docs_search", k)).toMatch(/Reformulation loop/);
+  });
+
+  test("docs_grep is a drill-in: does NOT count and resets the counter", () => {
+    const k = freshKey();
+    // Three fruitless docs_search then the prescribed zero-results escalation.
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+    // docs_grep must be allowed (it is the escalation, not a reword) and
+    // must reset the loop counter like any other drill-in.
+    expect(checkReformulationLoop("docs_grep", k)).toBeNull();
+    // After the drill-in the counter is clear, so a follow-up search is fine.
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+  });
+
+  test("a drill-in clears the counter so the next search is not the 4th", () => {
+    const k = freshKey();
+    // Without the drill-in the 4th call would fire (see test above).
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+    // docs_read is a drill-in: it resets lastDrillInTs.
+    expect(checkReformulationLoop("docs_read", k)).toBeNull();
+    // The post-drill-in search starts a fresh window instead of being the 4th.
+    expect(checkReformulationLoop("docs_search", k)).toBeNull();
+  });
+
+  test("loop message points at docs_grep as the zero-results escalation", () => {
+    const k = freshKey();
+    checkReformulationLoop("docs_search", k);
+    checkReformulationLoop("docs_search", k);
+    checkReformulationLoop("docs_search", k);
+    const msg = checkReformulationLoop("docs_search", k);
+    expect(msg).toContain("docs_grep");
+  });
+
+  test("non-search tools are ignored entirely", () => {
+    const k = freshKey();
+    expect(checkReformulationLoop("bash", k)).toBeNull();
+    expect(checkReformulationLoop("edit", k)).toBeNull();
   });
 });
 

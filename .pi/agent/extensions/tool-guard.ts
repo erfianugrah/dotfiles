@@ -70,16 +70,22 @@ const SEARCH_TOOLS = new Set([
   "websearch",
   "codesearch",
   "docs_search",
-  "docs_grep",
   "docs_find",
   "session_search",
   "context7_resolve_library_id",
 ]);
 // Drill-in tools (call resets the loop counter for that family):
+// NOTE: docs_grep is a drill-in, NOT a search. It returns matched file
+// content with context lines (like docs_read scoped to a regex), and the
+// AGENTS.md zero-results path prescribes it as THE escalation after
+// docs_search returns nothing ("broaden query then docs_grep
+// path=/docs/<source>/ before web fallback"). Counting it as a reformulation
+// blocked exactly that prescribed escalation — see the LINZ Supabase session.
 const DRILL_IN_TOOLS = new Set([
   "webfetch",
   "web_research",
   "docs_read",
+  "docs_grep",
   "docs_summary",
   "context7_query_docs",
   "read",
@@ -396,7 +402,7 @@ export function splitSegments(command: string): string[] {
   return command.split(/&&|\|\||;|\|/);
 }
 
-function checkReformulationLoop(toolName: string, sessionKey: string): string | null {
+export function checkReformulationLoop(toolName: string, sessionKey: string): string | null {
   const now = Date.now();
   const state = stateFor(sessionKey);
 
@@ -420,7 +426,7 @@ function checkReformulationLoop(toolName: string, sessionKey: string): string | 
     }
     const total = state.recentSearches.length;
     const breakdown = [...counts.entries()].map(([t, n]) => `${t}×${n}`).join(", ");
-    return `Reformulation loop detected: ${total} search calls (${breakdown}) since the last drill-in. STOP rewording. Open the most likely result with the appropriate drill-in tool: docs_search → docs_read, websearch → webfetch or web_research, codesearch → read on the linked file, context7_resolve → context7_query_docs. If results genuinely don't fit your need, ask the user to clarify rather than searching again.`;
+    return `Reformulation loop detected: ${total} search calls (${breakdown}) since the last drill-in. STOP rewording. Open the most likely result with the appropriate drill-in tool: docs_search → docs_read (or docs_grep path=/docs/<source>/ to escalate after a zero-results docs_search), websearch → webfetch or web_research, codesearch → read on the linked file, context7_resolve → context7_query_docs. If results genuinely don't fit your need, ask the user to clarify rather than searching again.`;
   }
 
   return null;
