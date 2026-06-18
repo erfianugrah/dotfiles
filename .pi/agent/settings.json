@@ -1,7 +1,7 @@
 {
-  "lastChangelogVersion": "0.79.1",
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-sonnet-4-6",
+  "lastChangelogVersion": "0.79.7",
+  "defaultProvider": "opencode",
+  "defaultModel": "claude-opus-4-8",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
   "compaction": {
@@ -19,5 +19,8 @@
       "maxRetryDelayMs": 60000
     }
   },
-  "hideThinkingBlock": true
+  "hideThinkingBlock": true,
+  "packages": [
+    "git:github.com/erfianugrah/pi-mcp-bridge"
+  ]
 }
