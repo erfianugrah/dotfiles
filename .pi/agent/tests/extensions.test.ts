@@ -29,6 +29,14 @@ import {
   tokenise,
 } from "../extensions/session-search.ts";
 import { toFtsQuery } from "../extensions/session-fts/index.ts";
+import {
+	isDegenerateSummary,
+	ftsQuery as ledgerFtsQuery,
+	buildInjectionBlock,
+	isReadOnlySql,
+	serializeEntriesForSummary,
+	extractCompletionText,
+} from "../extensions/session-ledger/index.ts";
 import { parseOsvJson } from "../extensions/osv-scan.ts";
 import { parseGitleaksJson, parseNoseyparkerJsonl } from "../extensions/secret-scan.ts";
 import { parseHurlJson } from "../extensions/hurl-test.ts";
@@ -2687,5 +2695,142 @@ describe("session-undo.findLastUserEntryId", () => {
         { type: "message", id: "a3", message: { role: "assistant" } },
       ]),
     ).toBe("u3");
+  });
+});
+
+// ── session-ledger: pure helpers ──────────────────────────────────────────
+
+describe("session-ledger.isDegenerateSummary", () => {
+  const realDegenerate = `## Goal
+(No conversation content was provided to summarize.)
+
+## Constraints & Preferences
+- (none)
+
+## Progress
+### Done
+- (none)
+
+### Blocked
+- No conversation messages were included between the \`<conversation>\` tags to summarize.
+
+## Key Decisions
+- (none)
+
+## Next Steps
+1. Provide the actual conversation content to be summarized.`;
+
+  const realGood = `## Goal
+Build the session-ledger extension.
+
+## Key Decisions
+- **Capture raw on shutdown, summarise lazily**: avoids hanging quit on a network call.
+
+## Next Steps
+1. Wire FTS5 search tool.`;
+
+  test("flags the real degenerate compaction summary", () => {
+    expect(isDegenerateSummary(realDegenerate)).toBe(true);
+  });
+  test("flags empty / null / whitespace", () => {
+    expect(isDegenerateSummary("")).toBe(true);
+    expect(isDegenerateSummary(null)).toBe(true);
+    expect(isDegenerateSummary("   \n  ")).toBe(true);
+  });
+  test("flags an all-(none) skeleton", () => {
+    expect(isDegenerateSummary("## Goal\n- (none)\n## Next Steps\n- (none)")).toBe(true);
+  });
+  test("keeps a real summary", () => {
+    expect(isDegenerateSummary(realGood)).toBe(false);
+  });
+  test("keeps the SKIP sentinel out by treating short content as degenerate", () => {
+    expect(isDegenerateSummary("SKIP")).toBe(true);
+  });
+});
+
+describe("session-ledger.ftsQuery", () => {
+  test("tokenises and OR-joins, dropping punctuation + 1-char tokens", () => {
+    expect(ledgerFtsQuery("DNS migration!")).toBe('"dns" OR "migration"');
+    expect(ledgerFtsQuery("a knot")).toBe('"knot"');
+  });
+  test("empty for punctuation-only", () => {
+    expect(ledgerFtsQuery("!!! ?")).toBe("");
+  });
+});
+
+describe("session-ledger.buildInjectionBlock", () => {
+  const rows = [
+    { id: 2, created_at: Date.UTC(2026, 5, 18, 9, 0), kind: "compaction", git_branch: "main", summary: "## Goal\nB second" },
+    { id: 1, created_at: Date.UTC(2026, 5, 17, 9, 0), kind: "shutdown", git_branch: null, summary: "## Goal\nA first" },
+  ];
+  test("empty for no rows", () => {
+    expect(buildInjectionBlock([])).toBe("");
+  });
+  test("includes header, staleness warning, and both sections", () => {
+    const out = buildInjectionBlock(rows);
+    expect(out).toContain("# Recent work in this project");
+    expect(out).toContain("re-read named files");
+    expect(out).toContain("B second");
+    expect(out).toContain("A first");
+    expect(out).toContain("· main");
+  });
+  test("byte budget caps sections (header-only => empty string)", () => {
+    expect(buildInjectionBlock(rows, 10)).toBe("");
+  });
+  test("skips rows with null summary", () => {
+    const out = buildInjectionBlock([{ id: 3, created_at: Date.now(), kind: "shutdown", git_branch: null, summary: null }]);
+    expect(out).toBe("");
+  });
+});
+
+describe("session-ledger.isReadOnlySql", () => {
+  test("allows SELECT and WITH", () => {
+    expect(isReadOnlySql("SELECT * FROM ledger").ok).toBe(true);
+    expect(isReadOnlySql("with x as (select 1) select * from x").ok).toBe(true);
+    expect(isReadOnlySql("  SELECT id FROM ledger;  ").ok).toBe(true);
+  });
+  test("rejects writes / DDL", () => {
+    expect(isReadOnlySql("DELETE FROM ledger").ok).toBe(false);
+    expect(isReadOnlySql("UPDATE ledger SET x=1").ok).toBe(false);
+    expect(isReadOnlySql("DROP TABLE ledger").ok).toBe(false);
+    expect(isReadOnlySql("PRAGMA table_info(ledger)").ok).toBe(false);
+    expect(isReadOnlySql("ATTACH DATABASE 'x' AS y").ok).toBe(false);
+  });
+  test("rejects multiple statements", () => {
+    expect(isReadOnlySql("SELECT 1; DROP TABLE ledger").ok).toBe(false);
+  });
+  test("rejects empty + non-select", () => {
+    expect(isReadOnlySql("").ok).toBe(false);
+    expect(isReadOnlySql("EXPLAIN SELECT 1").ok).toBe(false);
+  });
+});
+
+describe("session-ledger.serializeEntriesForSummary", () => {
+  test("role-tags and skips empty entries", () => {
+    const out = serializeEntriesForSummary([
+      { role: "user", content: "hello" },
+      { type: "model_change", content: "" },
+      { role: "assistant", content: [{ type: "text", text: "hi there" }] },
+    ]);
+    expect(out).toBe("[user] hello\n[assistant] hi there");
+  });
+  test("caps total to the most recent content (tail kept)", () => {
+    const big = "x".repeat(5000);
+    const out = serializeEntriesForSummary([{ role: "user", content: big }], { maxPerEntry: 10000, maxTotal: 100 });
+    expect(out.length).toBe(100);
+    expect(out.endsWith("x")).toBe(true);
+  });
+});
+
+describe("session-ledger.extractCompletionText", () => {
+  test("string content", () => {
+    expect(extractCompletionText({ content: "done" })).toBe("done");
+  });
+  test("array of text parts", () => {
+    expect(extractCompletionText({ content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] })).toBe("ab");
+  });
+  test("defensive on junk", () => {
+    expect(extractCompletionText(null)).toBe("");
+    expect(extractCompletionText({ content: 42 })).toBe("");
   });
 });
