@@ -14,7 +14,7 @@ import {
   extractPatchPaths,
   checkReformulationLoop,
 } from "../extensions/tool-guard.ts";
-import { parsePatch } from "../extensions/apply-patch.ts";
+import { parsePatch, renderApplyDiffs } from "../extensions/apply-patch.ts";
 import {
   HARD_CAP_BYTES,
   SOFT_WARN_BYTES,
@@ -270,6 +270,55 @@ describe("apply-patch.parsePatch", () => {
   test("handles CRLF line endings (Windows clipboards)", () => {
     const patch = "*** Begin Patch\r\n*** Delete File: x\r\n*** End Patch\r\n";
     expect(parsePatch(patch)).toEqual([{ type: "delete", path: "x" }]);
+  });
+});
+
+// ── apply-patch: renderApplyDiffs ─────────────────────────────────────────
+
+describe("apply-patch.renderApplyDiffs", () => {
+  // Recognizable stub standing in for pi's bundled generateDiffString. Lets us
+  // assert the wiring (which files get diffed, with what content) without
+  // depending on pi's exact diff format.
+  const stubDiff = (oldC: string, newC: string) => `DIFF(${oldC.length}->${newC.length})`;
+
+  test("renders a diff block for update ops", () => {
+    const out = renderApplyDiffs(
+      [{ relPath: "src/foo.ts", oldContent: "old", newContent: "newer", isNew: false }],
+      stubDiff,
+    );
+    expect(out).toBe("### src/foo.ts\nDIFF(3->5)");
+  });
+
+  test("skips add ops (isNew) — model already knows new file content", () => {
+    const out = renderApplyDiffs(
+      [{ relPath: "new.ts", oldContent: "", newContent: "brand new", isNew: true }],
+      stubDiff,
+    );
+    expect(out).toBe("");
+  });
+
+  test("skips empty/whitespace-only diffs", () => {
+    const out = renderApplyDiffs(
+      [{ relPath: "x.ts", oldContent: "a", newContent: "a", isNew: false }],
+      () => "   \n  ",
+    );
+    expect(out).toBe("");
+  });
+
+  test("joins multiple update blocks with a blank line, drops adds", () => {
+    const out = renderApplyDiffs(
+      [
+        { relPath: "a.ts", oldContent: "1", newContent: "22", isNew: false },
+        { relPath: "b.ts", oldContent: "", newContent: "x", isNew: true },
+        { relPath: "c.ts", oldContent: "333", newContent: "4444", isNew: false },
+      ],
+      stubDiff,
+    );
+    expect(out).toBe("### a.ts\nDIFF(1->2)\n\n### c.ts\nDIFF(3->4)");
+  });
+
+  test("returns empty string when no files", () => {
+    expect(renderApplyDiffs([], stubDiff)).toBe("");
   });
 });
 

@@ -42,7 +42,7 @@
  */
 
 import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, generateDiffString, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve as pathResolve, relative as pathRelative } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -160,7 +160,10 @@ export function parsePatch(text: string): FileOp[] {
   return ops;
 }
 
-async function applyUpdate(filePath: string, hunks: Hunk[]): Promise<string> {
+async function applyUpdate(
+  filePath: string,
+  hunks: Hunk[],
+): Promise<{ before: string; after: string }> {
   let content: string;
   try {
     content = await readFile(filePath, "utf8");
@@ -208,7 +211,32 @@ async function applyUpdate(filePath: string, hunks: Hunk[]): Promise<string> {
     result = result.slice(0, firstIdx) + newBlock + result.slice(firstIdx + oldBlock.length);
   }
 
-  return result;
+  return { before: content, after: result };
+}
+
+/**
+ * Build an edit-style diff block for the applied changes, matching pi's native
+ * edit tool output (line-numbered `+`/`-`/` ` gutters — pi colorizes by prefix
+ * at render time). Pure + dependency-injected so it's unit-testable without
+ * pi's bundled `generateDiffString`.
+ *
+ * `add` ops are skipped: the model authored the new file content, so a diff
+ * from empty adds nothing but tokens. `delete` ops never reach here. Only
+ * `update` ops (where the on-disk result may differ from what the model
+ * pictured) get a diff.
+ */
+export function renderApplyDiffs(
+  files: Array<{ relPath: string; oldContent: string; newContent: string; isNew: boolean }>,
+  diffFn: (oldContent: string, newContent: string) => string,
+): string {
+  const blocks: string[] = [];
+  for (const f of files) {
+    if (f.isNew) continue;
+    const diff = diffFn(f.oldContent, f.newContent);
+    if (diff.trim().length === 0) continue;
+    blocks.push(`### ${f.relPath}\n${diff}`);
+  }
+  return blocks.join("\n\n");
 }
 
 const applyPatchTool = defineTool({
@@ -256,6 +284,14 @@ const applyPatchTool = defineTool({
       | { type: "delete"; path: string };
 
     const staged: Staged[] = [];
+    // Parallel record of write ops for post-promote diff rendering. Index-free
+    // (matched by path) — only consumed on the all-success path.
+    const diffInputs: Array<{
+      relPath: string;
+      oldContent: string;
+      newContent: string;
+      isNew: boolean;
+    }> = [];
     for (const op of ops) {
       const abs = isAbsolute(op.path) ? op.path : pathResolve(ctx.cwd, op.path);
 
@@ -272,6 +308,12 @@ const applyPatchTool = defineTool({
           // good — doesn't exist
         }
         staged.push({ type: "write", path: abs, content: op.content, isNew: true });
+        diffInputs.push({
+          relPath: pathRelative(ctx.cwd, abs),
+          oldContent: "",
+          newContent: op.content,
+          isNew: true,
+        });
         continue;
       }
 
@@ -290,9 +332,9 @@ const applyPatchTool = defineTool({
       }
 
       // update
-      let newContent: string;
+      let updated: { before: string; after: string };
       try {
-        newContent = await applyUpdate(abs, op.hunks);
+        updated = await applyUpdate(abs, op.hunks);
       } catch (err) {
         return {
           isError: true,
@@ -300,7 +342,13 @@ const applyPatchTool = defineTool({
           details: { failedAt: op.path },
         };
       }
-      staged.push({ type: "write", path: abs, content: newContent, isNew: false });
+      staged.push({ type: "write", path: abs, content: updated.after, isNew: false });
+      diffInputs.push({
+        relPath: pathRelative(ctx.cwd, abs),
+        oldContent: updated.before,
+        newContent: updated.after,
+        isNew: false,
+      });
     }
 
     // Two-phase commit so a mid-batch failure rolls every change back:
@@ -382,8 +430,13 @@ const applyPatchTool = defineTool({
       };
     }
 
+    let text = `Applied ${staged.length} file ops:\n  - ${summary.join("\n  - ")}`;
+    const diffs = renderApplyDiffs(diffInputs, generateDiffString);
+    if (diffs.length > 0) {
+      text += `\n\nDiffs:\n\n${diffs}`;
+    }
     return {
-      content: [{ type: "text", text: `Applied ${staged.length} file ops:\n  - ${summary.join("\n  - ")}` }],
+      content: [{ type: "text", text }],
       details: { ops: staged.length },
     };
   },

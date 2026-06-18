@@ -17,6 +17,10 @@ import { mock } from "bun:test";
 mock.module("@earendil-works/pi-coding-agent", () => ({
   defineTool: (x: unknown) => x,
   getAgentDir: () => "/tmp/pi-test-agent-dir",
+  // Stub: apply-patch.ts imports this at module load. Tests that exercise diff
+  // rendering inject their own diffFn into renderApplyDiffs, so this is never
+  // actually called — it only needs to exist so the import resolves.
+  generateDiffString: (_old: string, _new: string) => "",
 }));
 
 mock.module("@earendil-works/pi-ai", () => {
