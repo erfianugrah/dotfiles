@@ -1,6 +1,6 @@
 ---
 name: cloudflare
-description: Drive Cloudflare via the API (REST), `wrangler` CLI (Workers / Pages / R2 / D1 / KV / Tunnels), and bulk Python automation. Covers token auth (account vs zone scoping), the resource model (zones / DNS / rulesets / Workers / R2 / Pages / Zero Trust), rate-limit handling, and the import-existing-state-into-Terraform workflow via `cf-terraforming`. Pairs with the `terraform` skill for IaC and with `infrastructure-stack` (Caddy in front of compose stacks behind Cloudflare). Use when working against the Cloudflare API directly, writing wrangler-deployed Workers/Pages, debugging DNS/cache/WAF behaviour, or scripting bulk operations across multiple zones.
+description: Drive Cloudflare via the API (REST), `wrangler` CLI (Workers / Pages / R2 / D1 / KV / Queues / Hyperdrive / Durable Objects / Tunnels / Email), and bulk Python automation. Covers token auth (account vs zone scoping), the resource model (zones / DNS / rulesets / Workers / R2 / Pages / Zero Trust), Durable Object patterns (sharding, alarms, hibernation, SQLite storage), Queues producer/consumer, Hyperdrive Postgres pooling, Email Routing + Workers, Zero Trust (Access / Gateway / WARP / Tunnels), rate-limit handling, and the import-existing-state-into-Terraform workflow via `cf-terraforming`. Pairs with the `terraform` skill for IaC and with `infrastructure-stack` (Caddy in front of compose stacks behind Cloudflare). Use when working against the Cloudflare API directly, writing wrangler-deployed Workers/Pages, building stateful Durable Objects, debugging DNS/cache/WAF behaviour, or scripting bulk operations across multiple zones.
 ---
 
 # Cloudflare
@@ -12,6 +12,7 @@ description: Drive Cloudflare via the API (REST), `wrangler` CLI (Workers / Page
 3. **Rate limits are real.** Default 1,200 req / 5 min per token. `wrangler`, the Python SDK, and the Terraform provider all retry with backoff — your custom scripts must too.
 4. **Cache headers matter.** When debugging unexpected responses, check `cf-cache-status`, `cf-ray`, and `cf-bgj` headers. Cloudflare's cache is aggressive; bypass with `Cache-Control: no-cache` from the origin or purge via API.
 5. **Match the resource taxonomy in code.** A "page rule" is legacy. The current model is: rulesets → rules → expressions. Don't write code against deprecated endpoints unless you're maintaining old TF state.
+6. **Prefer retrieval over baked-in knowledge for limits/pricing/signatures.** Cloudflare ships changes weekly. Before quoting a numeric limit, pricing tier, type signature, or new binding shape, check the live docs (`docs_search source="cloudflare"` — 6121 files — or `source="cloudflare-api"` for the OpenAPI spec). When this skill and the docs disagree, trust the docs.
 
 ## Authentication
 
@@ -169,17 +170,82 @@ curl -sS -X PATCH \
   -d '{"deployment_configs":{"production":{"env_vars":{"KEY":{"value":"...","type":"secret_text"}}}}}'
 ```
 
-### Zero Trust (Access apps + Tunnels)
+### Zero Trust / Cloudflare One (Access + Gateway + Tunnels + WARP)
+
+Zero Trust resources are **all account-scoped** under `/accounts/{id}/`. Token needs `Access: Apps and Policies:Edit`, `Zero Trust:Edit`, `Cloudflare Tunnel:Edit` as appropriate.
 
 ```sh
+# --- Access (identity-aware app gating) ---
 # List Access applications
 curl -sS "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/access/apps" \
   -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq '.result[] | {id, name, domain, type}'
 
-# Cloudflared tunnel list
+# Access policies for an app (allow/deny/bypass decisions + rules)
+curl -sS "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/access/apps/$APP_ID/policies" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq '.result[] | {id, name, decision}'
+
+# Service tokens (for machine-to-machine Access — CI, scripts)
+curl -sS "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/access/service_tokens" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq '.result[] | {id, name, client_id}'
+
+# --- Gateway (DNS / HTTP / network filtering for WARP-enrolled devices) ---
+# Gateway DNS-filtering rules
+curl -sS "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/gateway/rules" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq '.result[] | {id, name, action, enabled}'
+
+# Gateway locations (which networks map to which DoH endpoint)
+curl -sS "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/gateway/locations" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq '.result[] | {id, name, doh_subdomain}'
+
+# --- Tunnels (cloudflared) ---
 curl -sS "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel?is_deleted=false" \
   -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq '.result[] | {id, name, status, connections: (.connections | length)}'
+
+# Tunnel ingress config (which hostname → which local service)
+curl -sS "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq '.result.config.ingress'
 ```
+
+**Tunnel vs your homelab Caddy**: Tunnels expose a local service without opening ports / public IP (origin connects *outbound* to the edge). They're an alternative to the `caddy` + public-DNS pattern when you can't take inbound. **Locally-managed** tunnels (config in `~/.cloudflared/config.yml` + `cloudflared tunnel run`) and **remotely-managed** tunnels (ingress JSON above, set in dashboard/API) are mutually exclusive per tunnel — don't mix.
+
+**Access ↔ Authelia**: Access is Cloudflare's equivalent of the `(forward_auth)` Authelia snippet in your Caddy stack. Use Access when the app sits *behind a Tunnel*; use Authelia forward-auth when it sits behind host-mode Caddy. Don't double-gate.
+
+### Email Routing + Email Workers
+
+Email Routing forwards `*@<zone>` to real inboxes (or to a Worker) with zero mail-server hosting. Zone-scoped; token needs `Email Routing Addresses:Edit` + `Zone:Edit`.
+
+```sh
+# Enable + check status
+curl -sS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/email/routing" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq '.result | {enabled, status, name}'
+
+# Destination addresses must be verified before routing to them
+curl -sS -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/email/routing/addresses" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"email":"me@real-inbox.com"}'   # → triggers a verification email
+
+# Routing rule: forward hi@<zone> → verified destination
+curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/email/routing/rules" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"hi","enabled":true,"matchers":[{"type":"literal","field":"to","value":"hi@<zone>"}],"actions":[{"type":"forward","value":["me@real-inbox.com"]}]}'
+```
+
+**Email Workers** — process inbound mail in a Worker (the `email()` handler) instead of forwarding. Bind in `wrangler.jsonc` and set the routing rule action to `worker`:
+
+```ts
+export default {
+  async email(message, env, ctx) {
+    // message.from, message.to, message.headers, message.raw (ReadableStream)
+    const subject = message.headers.get("subject") ?? "";
+    if (subject.includes("spam")) { message.setReject("No thanks"); return; }
+    // Re-forward (destination must still be a verified address)
+    await message.forward("me@real-inbox.com");
+    // Or send a new message via a send_email binding (env.SEB.send(...))
+  },
+};
+```
+
+**Gotchas**: Email Routing adds its own MX + SPF records — they conflict with self-hosted mail on the same zone. `message.forward()` targets must be pre-verified destinations. Outbound *send* needs a `send_email` binding with an allowed `destination_address`, not arbitrary recipients.
 
 ## `wrangler` CLI workflow
 
@@ -310,6 +376,131 @@ wrangler kv key list --namespace-id=<id> --prefix="session:"
 wrangler kv bulk put --namespace-id=<id> ./batch.json   # [{"key":"k","value":"v"}, ...]
 ```
 
+## Durable Objects (stateful coordination)
+
+Workers are stateless; Durable Objects (DOs) are **single-threaded, globally-unique, strongly-consistent** compute+storage. Reach for a DO when you need coordination (chat rooms, multiplayer), strong consistency (booking, inventory), per-entity storage (per-user/tenant DB), persistent WebSockets, or per-entity scheduled work. For stateless request handling, stay in a plain Worker.
+
+```jsonc
+// wrangler.jsonc — SQLite-backed DO (recommended for all new DOs)
+{
+  "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "ChatRoom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ChatRoom"] }]
+}
+```
+
+```ts
+import { DurableObject } from "cloudflare:workers";
+
+export class ChatRoom extends DurableObject<Env> {
+  // Constructor runs on EVERY wake (incl. after hibernation). Keep it light.
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Schema setup only — blockConcurrencyWhile gates requests until done.
+    ctx.blockConcurrencyWhile(async () => {
+      this.ctx.storage.sql.exec(
+        "CREATE TABLE IF NOT EXISTS msgs (id INTEGER PRIMARY KEY, body TEXT)");
+    });
+  }
+  // RPC method — call directly from the Worker (no fetch()), compat date >= 2024-04-03.
+  async post(body: string) {
+    this.ctx.storage.sql.exec("INSERT INTO msgs (body) VALUES (?)", body);
+  }
+}
+
+// Worker routes to a DO instance by NAME (stable identity = persisted state).
+export default {
+  async fetch(req: Request, env: Env) {
+    const id = env.ROOM.idFromName("general");   // same name → same instance + state
+    const stub = env.ROOM.get(id);
+    await stub.post("hello");
+    return new Response("ok");
+  },
+};
+```
+
+**Critical rules** (these are the silent-bug generators):
+
+1. **`idFromName(x)` for persistent identity** — same input always maps to the same instance with its memory + storage. `newUniqueId()` makes a fresh, isolated DO every call (use for sharding high-throughput workloads). Forgetting `idFromName` and using `newUniqueId` is the #1 "my state never persists" bug.
+2. **SQLite storage, not legacy KV** — configure `new_sqlite_classes` in migrations. `ctx.storage.sql.exec(...)` for queries; sync KV API (`ctx.storage.kv`) also available on SQLite DOs. 10GB/DO.
+3. **Persist first, cache second** — always write storage before updating in-memory fields. Hibernation / eviction clears memory; storage survives.
+4. **`blockConcurrencyWhile()` is for init only** — never wrap it around `fetch()` or external I/O on every request; it serialises and kills throughput.
+5. **One alarm per DO** — `setAlarm()` replaces any existing alarm. For multiple future events use a queue-in-storage pattern and re-arm the single alarm.
+6. **WebSocket Hibernation** — use `ctx.acceptWebSocket(ws)` + the `webSocketMessage`/`webSocketClose` handlers (not in-memory `addEventListener`) so idle connections cost nothing and survive eviction.
+7. **~1K req/s ceiling per DO** — it's a single thread. Shard with `newUniqueId()` or a hash if you need more.
+
+**Testing**: `@cloudflare/vitest-pool-workers` runs DOs in the real workerd runtime (alarms, storage, isolation all real). Prefer it over mocking.
+
+## Queues (async message processing)
+
+At-least-once delivery, batched consumers, automatic retries + DLQ. Producer and consumer are both Workers.
+
+```jsonc
+// wrangler.jsonc
+{
+  "queues": {
+    "producers": [{ "binding": "TASKS", "queue": "task-queue" }],
+    "consumers": [{
+      "queue": "task-queue",
+      "max_batch_size": 25,        // up to 100
+      "max_batch_timeout": 30,     // seconds to wait to fill a batch
+      "max_retries": 3,
+      "dead_letter_queue": "task-dlq"   // failed msgs land here after max_retries
+    }]
+  }
+}
+```
+
+```ts
+export default {
+  // Producer
+  async fetch(req: Request, env: Env) {
+    await env.TASKS.send({ url: "https://..." });          // single
+    await env.TASKS.sendBatch([{ body: {...} }, { body: {...} }]); // batch
+    return new Response("queued");
+  },
+  // Consumer
+  async queue(batch: MessageBatch, env: Env) {
+    for (const msg of batch.messages) {
+      try { await handle(msg.body); msg.ack(); }   // explicit ack
+      catch { msg.retry({ delaySeconds: 60 }); }   // re-deliver later
+    }
+    // Or batch.ackAll() / batch.retryAll()
+  },
+};
+```
+
+**Gotchas**: at-least-once → handlers must be **idempotent**. Without explicit `ack()`, a thrown error retries the whole batch. `delaySeconds` on send or retry defers delivery. DLQ is itself a queue — give it its own consumer to inspect failures.
+
+## Hyperdrive (pooled access to existing Postgres/MySQL)
+
+Makes a regional database feel local to Workers: connection pooling + query caching at the edge, so each Worker invocation doesn't pay a fresh TCP+TLS handshake to your origin DB. **Directly relevant to fronting a Supabase / self-hosted Postgres with Workers.**
+
+```sh
+# Create a Hyperdrive config pointing at your existing DB
+wrangler hyperdrive create my-db \
+  --connection-string="postgres://user:pass@host:5432/dbname"
+wrangler hyperdrive list
+```
+
+```jsonc
+// wrangler.jsonc
+{ "hyperdrive": [{ "binding": "DB", "id": "<hyperdrive-config-id>" }] }
+```
+
+```ts
+import { Pool } from "pg";   // or postgres / mysql2; needs nodejs_compat
+export default {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext) {
+    const pool = new Pool({ connectionString: env.DB.connectionString });
+    const { rows } = await pool.query("SELECT 1");
+    ctx.waitUntil(pool.end());   // don't leak connections
+    return Response.json(rows);
+  },
+};
+```
+
+**Gotchas**: requires `compatibility_flags: ["nodejs_compat"]` + a TCP-socket-capable driver (`pg`, `postgres`, `mysql2`). Caching defaults to on for read queries — disable per-query or via config for write-after-read consistency. The connection string lives in the Hyperdrive config (server-side), not in your Worker secrets. **For Supabase, point Hyperdrive at the Direct connection string — NOT the Supavisor pooled connection strings.** Hyperdrive does its own pooling; stacking it on top of another pooler is the anti-pattern. Connect with `node-postgres`/`Postgres.js` directly, not the `@supabase/supabase-js` client. (Source: `/docs/cloudflare/supabase.md`.)
+
 ## Python automation (bulk operations across many zones)
 
 For operations that touch 10+ zones or need async (e.g. bulk DNS export, custom-hostname audit), use the official Python SDK with concurrency. Pattern:
@@ -438,10 +629,15 @@ curl -sI "https://<host>/path" | rg -i 'cf-|server-timing'
 
 ## Docs
 
-- **OpenAPI spec** mirrored at docs.erfi.io: `docs_search(source="cloudflare-api", query="<endpoint>")`.
+- **OpenAPI spec** mirrored at docs.erfi.io: `docs_search(source="cloudflare-api", query="<endpoint>")` (510 files).
+- **Full developer docs** mirrored at docs.erfi.io: `docs_search(source="cloudflare", query="...")` (6121 files) — limits, pricing, runtime APIs, product guides.
 - **Wrangler reference**: `wrangler help <subcommand>` — comprehensive.
 - **Workers runtime**: `developers.cloudflare.com/workers/runtime-apis/`.
 - **Terraform provider docs**: `registry.terraform.io/providers/cloudflare/cloudflare/latest/docs`.
+
+## Topics this skill does NOT cover (and where to go)
+
+This skill is the **operator / API / IaC** angle plus the bindings you're most likely to use (DO, Queues, Hyperdrive, Email, Zero Trust). For deep **dev-platform build** topics it deliberately doesn't vendor, Cloudflare publishes an official Pi-compatible skill bundle at **`github.com/cloudflare/skills`** (install: `npx skills add https://github.com/cloudflare/skills`, or clone into `~/.pi/agent/skills/` — rename their `cloudflare` skill to avoid colliding with this one). It carries dedicated references for: **Agents SDK** (stateful AI agents, MCP servers, streaming chat), **Workflows** (durable step execution), **Workers AI / Vectorize / AI Gateway / AI Search** (RAG + inference), **Browser Rendering**, **Containers**, **Sandbox SDK**, **Bot Management / API Shield / DDoS / Turnstile**, **Pipelines / R2 SQL / R2 Data Catalog**, **Observability / Analytics Engine / GraphQL Analytics API**, **Pulumi**, and ~50 more product references. Reach for it when building *on* the Workers platform beyond what's here.
 
 ## Related skills
 
