@@ -39,6 +39,14 @@
  * The only window where partial state is possible is mid-promote (rename
  * over target) — which on a healthy filesystem essentially can't fail
  * once the tmp is on disk.
+ *
+ * Success output:
+ *   After a clean apply, the result text lists the file ops and then appends
+ *   an edit-style diff (line-numbered +/-/space gutters via pi's exported
+ *   `generateDiffString`, matching the native edit tool — pi colorizes by
+ *   prefix at render). Only Update ops are diffed; Add ops are skipped (the
+ *   model authored the new content, so a from-empty diff is pure token bloat)
+ *   and Delete ops carry no diff. See `renderApplyDiffs`.
  */
 
 import { Type } from "@earendil-works/pi-ai";

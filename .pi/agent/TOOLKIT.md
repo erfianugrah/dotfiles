@@ -580,7 +580,7 @@ bg_task({
 | AST-precise rewrite (avoid strings/comments) | `ast-grep --pattern 'foo($X)' --rewrite 'bar($X)' --update-all -l ts` |
 | Structural (find function bodies, class members, etc) | `comby 'function $name($params) { $body }' 'arrow $params: $body'` |
 | Newer Rust alternative to ast-grep | `srgn --typed-language ts <find> <replace>` |
-| Multi-file atomic add/update/delete | pi `apply_patch` (two-phase commit; auto-protected from .env / lockfile / .git via tool-guard) |
+| Multi-file atomic add/update/delete | pi `apply_patch` (two-phase commit; edit-style diffs in success output; auto-protected from .env / lockfile / .git via tool-guard) |
 | Append to file | `cat <<'EOF' >> file` |
 | Insert/delete by line range | `sed -i` with line addressing |
 | Whole-file regen | pi `write` |

@@ -37,7 +37,7 @@ the loader without deleting it.
 
 | Extension | Purpose |
 |---|---|
-| `apply-patch.ts` | Multi-file atomic patch envelope (Add/Update/Delete File). Two-phase commit via `*.applypatch-<rand>` tmps + rename so partial failures roll back cleanly. |
+| `apply-patch.ts` | Multi-file atomic patch envelope (Add/Update/Delete File). Two-phase commit via `*.applypatch-<rand>` tmps + rename so partial failures roll back cleanly. Success output appends edit-style diffs for Update ops via pi's `generateDiffString`. |
 | `build-favicon-set.ts` | SVG/PNG → full PWA favicon artifact set + HTML head snippet. |
 | `context7.ts` | `context7_resolve_library_id` + `context7_query_docs` via REST (anon tier; `CONTEXT7_API_KEY` for higher tier). |
 | `docs.ts` | `docs_search` / `docs_read` / `docs_grep` / `docs_find` / `docs_summary` / `docs_sources` against docs.erfi.io via SSH. |
@@ -204,7 +204,7 @@ Edit the source-of-truth files in `~/dotfiles/.pi/agent/`. Pi hot-reloads:
 Unit tests for the pure parsers in each extension:
 
 - tool-guard segment splitter + apply_patch path extraction
-- apply-patch envelope parser
+- apply-patch envelope parser + `renderApplyDiffs` success-diff renderer
 - oci-tags image parser + version compare
 - session-search tokenizer
 - session-fts query tokenizer
