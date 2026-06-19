@@ -183,7 +183,14 @@ bun run test:live <org>   # real throwaway Supabase pair, full pipeline + sequen
 
 **Scale harness** (`test/scale.harness.ts`): annoying schema (STORED gen-column,
 IDENTITY + composite + no-PK tables, inter-table FKs, GUC-sensitive types,
-unicode/NULLs). Override `ROWS` (validated to 10M / 8.6 GB) and `PAYLOAD_CHARS`.
+unicode/NULLs). Size with `ROWS` (validated to 10M / 8.6 GB). Three modes via env
+flag, each exits non-zero if its gate does NOT fire (so they're CI assertions too):
+`WRITE_LOAD=1` (concurrent INSERT/UPDATE/DELETE on documents + no-PK FULL-identity
+churn on audit through the copy/stream; reconcile after cutover at lag=0 + ledger
+inflight-loss check), `WATCHDOG_FIRE=1` (negative: freeze apply + bloat WAL →
+`watch` must abort on the watchdog), `WRITE_THROUGH_CUTOVER=1` (negative: write
+through cutover → `cutover` must fail "lag did not drain"). The two negatives are
+the at-scale complement to the `rehearse chaos` faults. See RUNBOOK §3.
 
 **Live harness** (`test/live.harness.ts <org-id> [rows]`): needs
 `SUPABASE_ACCESS_TOKEN` (sbp_…); creates cross-region src+tgt projects
