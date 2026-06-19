@@ -50,7 +50,6 @@ import { extractCdTargets, decideTarget } from "../extensions/cd-agents-reload.t
 import { rewriteClipboardPaths, shrunkSibling } from "../extensions/clipboard-image-shrink.ts";
 import { prune, hasImageContent, type AnyMessage } from "../extensions/tool-output-prune.ts";
 import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
-import { shouldAbort as stuckShouldAbort, LAST_ACTIVITY_GRACE_MS, ACTIVITY_EVENTS } from "../extensions/stuck-state-recovery.ts";
 import { matchHints, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
 import { findLastUserEntryId } from "../extensions/session-undo.ts";
 
@@ -2500,39 +2499,6 @@ describe("slash-typo-guard.closestCommand", () => {
   });
 });
 
-// ── stuck-state-recovery: shouldAbort decision ─────────────────────────
-
-describe("stuck-state-recovery.shouldAbort", () => {
-  test("idle pi → no abort (healthy state)", () => {
-    expect(stuckShouldAbort({ source: "interactive", idle: true, sinceActivityMs: 100 })).toBe(false);
-  });
-  test("idle + long silence → no abort (idle is the real signal)", () => {
-    expect(stuckShouldAbort({ source: "interactive", idle: true, sinceActivityMs: 999_999 })).toBe(false);
-  });
-  test("non-idle + recent activity → no abort (legit streaming, allow steer)", () => {
-    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: 2_000 })).toBe(false);
-  });
-  test("non-idle + just-under-grace → no abort (boundary)", () => {
-    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: LAST_ACTIVITY_GRACE_MS - 1 })).toBe(false);
-  });
-  test("non-idle + just-over-grace → ABORT (wedged stream, force-clean)", () => {
-    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: LAST_ACTIVITY_GRACE_MS + 1 })).toBe(true);
-  });
-  test("non-idle + 60s silence → ABORT (definitively wedged)", () => {
-    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: 60_000 })).toBe(true);
-  });
-  test("extension-source input never aborts (avoid feedback loops)", () => {
-    expect(stuckShouldAbort({ source: "extension", idle: false, sinceActivityMs: 60_000 })).toBe(false);
-  });
-  test("rpc-source input never aborts (caller controls its own state)", () => {
-    expect(stuckShouldAbort({ source: "rpc", idle: false, sinceActivityMs: 60_000 })).toBe(false);
-  });
-  test("custom graceMs override honored", () => {
-    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: 1_000, graceMs: 500 })).toBe(true);
-    expect(stuckShouldAbort({ source: "interactive", idle: false, sinceActivityMs: 1_000, graceMs: 2_000 })).toBe(false);
-  });
-});
-
 // ── bash-error-hints: hint dispatch + new session-jsonl trigger ────────────
 
 describe("bash-error-hints.renderHint", () => {
@@ -2605,56 +2571,6 @@ describe("bash-error-hints.HINTS — sanity invariants", () => {
       expect(typeof h.hint).toBe("string");
       expect(h.hint.length).toBeGreaterThan(20);
     }
-  });
-});
-
-// ── stuck-state-recovery: ACTIVITY_EVENTS regression list ──────────────────
-//
-// Bug 2026-05-28: a user got their live streaming response force-aborted mid-
-// analysis because the activity tracker missed `message_update` (the per-
-// token streaming event). Without these events the heuristic falsely flags
-// healthy streams as wedged after 8s of pure text streaming.
-//
-// These tests pin the critical entries so a future "minimize the event list"
-// refactor can't silently re-introduce the bug.
-
-describe("stuck-state-recovery.ACTIVITY_EVENTS", () => {
-  test("includes message_update (per-token streaming bump — critical)", () => {
-    expect(ACTIVITY_EVENTS).toContain("message_update");
-  });
-
-  test("includes tool_execution_start (long-tool-call gap coverage)", () => {
-    expect(ACTIVITY_EVENTS).toContain("tool_execution_start");
-  });
-
-  test("includes tool_execution_update (long-tool partial-result coverage)", () => {
-    expect(ACTIVITY_EVENTS).toContain("tool_execution_update");
-  });
-
-  test("includes tool_call (preflight gate, fires before exec)", () => {
-    expect(ACTIVITY_EVENTS).toContain("tool_call");
-  });
-
-  test("includes agent_start (gap between input and first message_start)", () => {
-    expect(ACTIVITY_EVENTS).toContain("agent_start");
-  });
-
-  test("preserves the original turn/message lifecycle events", () => {
-    for (const ev of [
-      "turn_start",
-      "turn_end",
-      "message_start",
-      "message_end",
-      "tool_execution_end",
-      "after_provider_response",
-      "agent_end",
-    ]) {
-      expect(ACTIVITY_EVENTS).toContain(ev);
-    }
-  });
-
-  test("no duplicates (each event fires bumpActivity once)", () => {
-    expect(new Set(ACTIVITY_EVENTS).size).toBe(ACTIVITY_EVENTS.length);
   });
 });
 
