@@ -154,6 +154,8 @@ Engine is plain Postgres (the integration tier runs against vanilla `postgres:16
 - Use `pg_dump`/`pg_dumpall` for the roles/schema/extension pre-steps instead of the `supabase db dump` snippets.
 - `doctor`'s Supabase heuristics degrade to no-ops; the wal_level / replica-identity / version / grant / schema / extension checks still run.
 
+**Azure Database for PostgreSQL (Flexible Server)** is plain PG11–17 → works as source/target with no code change. Azure gotchas (`doctor`/`preflight` warn where checkable): subscriber `max_worker_processes >= 16` (low Azure default → `out of background worker slots`), `wal_level=logical` via portal server-param + restart, replication role needs `ALTER ROLE x WITH REPLICATION` + `GRANT azure_pg_admin TO x`, Azure auto-drops idle slots at >=95% storage (flips read-only), and pre-PG17 HA failover doesn't preserve logical slots. **Not** Azure SQL Database/Managed Instance — that's SQL Server (T-SQL), a heterogeneous migration, out of scope.
+
 ## Config + secrets
 
 - `migrate.config.yaml` — non-secret, commit-safe: source/target refs, `replication.{tables,slot,publication,subscription}` (generic names, set per env), `reconcile.tables`, `watchdog.{maxRetainedWalMb,pollIntervalSec,syncTimeoutMin}`. Example: `migrate.config.example.yaml`.
