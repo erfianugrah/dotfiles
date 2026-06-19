@@ -3,7 +3,7 @@ name: abuse-operations
 description: Use when designing, building, or operating any anti-abuse / fraud-detection system — defending a free tier, signup flow, public form, upload endpoint, API, or "run-someone's-code" platform against spam, phishing, cryptomining, multi-account farming, fake reviews, credential harvesting, DDoS staging, or other monetization-of-free abuse. Fires when reasoning about risk scoring, indicator/signal design, blacklists, account bans, false-positive handling, actor tracking, campaign/pivot detection, or "is this activity abusive and what do we do about it". Pairs with `software-architecture` (system shape) and the fraud-detection project's scoring engine. Not for traditional vuln/exploit security (that's appsec) except the post-exploitation handoff.
 ---
 
-# Abuse Operations — hunting wolves in sheep's clothing
+# Abuse Operations
 
 Anti-abuse is the *twilight zone* of infosec: not red team, not blue team, not anti-fraud, not SRE — it overlaps all of them. This skill encodes a working framework for detecting and stopping **abuse**, defined as:
 
@@ -11,7 +11,7 @@ Anti-abuse is the *twilight zone* of infosec: not red team, not blue team, not a
 
 If you offer a free service, free trial, or any surface with an angle to extract value, someone is already trying to make money off it. The line between "a business getting off the ground" and "an abuser taking advantage" is thin and only resolvable *after the fact* by establishing **intent**.
 
-Sources: Heroku abuse-ops (Cureton & Stojanovic, Black Hat) + the "Facets of Abuse / First Principles" doctrine. The fraud-detection project (`~/fraud-detection/forminator`) is the canonical local instantiation — its `src/lib/scoring.ts` is the per-submission scorer; this skill is the operating model around it.
+The fraud-detection project (`~/fraud-detection/forminator`) is the canonical local instantiation — its `src/lib/scoring.ts` is the per-submission scorer; this skill is the operating model around it.
 
 ## When to use
 

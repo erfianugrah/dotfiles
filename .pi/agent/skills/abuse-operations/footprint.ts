@@ -3,7 +3,7 @@
  *
  * Zero dependencies, pure functions. Framework-agnostic — drop into any
  * runtime (Cloudflare Worker, Node, Deno, browser). This is the operational
- * layer the Heroku abuse-ops talk describes, distinct from per-item risk
+ * layer the abuse-operations model describes, distinct from per-item risk
  * scoring:
  *
  *   - A WEIGHTED SCORER answers "how bad is this one submission?" (0-100).
