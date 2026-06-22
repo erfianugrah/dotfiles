@@ -1,6 +1,6 @@
 ---
 name: gloryhole
-description: "Work in the user's self-built DNS server `glory-hole` at `~/gloryhole/` — Go binary + embedded Unbound recursor + Astro/React dashboard. Pi-hole-style ad-blocking, expr-based policy engine, local records, conditional forwarding, sharded LRU cache, SQLite query log, REST/WS API, DoT/DoH. Three deployment profiles — home (LAN-fronted, VyOS upstream on servarr), a VyOS podman LAN resolver (vyos-sg), and a public DoT/DoH endpoint on Fly.io (sin region). Covers the packet-path through `pkg/dns` → policy → blocklist → cache → forwarder, the `pkg/forwarder` round-robin + circuit-breaker + UpstreamHealth model, SERVFAIL pass-through semantics, the bundled-Unbound runtime topology, Fly UDP-binding requirements, OpenTelemetry+Prometheus pattern, and the mock-DNS-server test idiom. Use when adding a forwarder/policy/blocklist feature, debugging a SERVFAIL path, designing telemetry, or touching the Fly deploy. Sibling to `knot-dns` (DNS adjacent, but auth-vs-recursive opposites), `fly` (deploy target)."
+description: "Work in the user's self-built DNS resolver `glory-hole`, now at `~/knotea/resolver/` (legacy `~/gloryhole/` until P6 cutover) — Go binary + embedded Unbound recursor + Astro/React dashboard. Pi-hole-style ad-blocking, expr-based policy engine, local records, conditional forwarding, sharded LRU cache, SQLite query log, REST/WS API, DoT/DoH. Three deployment profiles — home (LAN-fronted, VyOS upstream on servarr), a VyOS podman LAN resolver (vyos-sg), and a public DoT/DoH endpoint on Fly.io (sin region). Covers the packet-path through `pkg/dns` → policy → blocklist → cache → forwarder, the `pkg/forwarder` round-robin + circuit-breaker + UpstreamHealth model, SERVFAIL pass-through semantics, bundled-Unbound topology, Fly UDP-binding requirements, OpenTelemetry+Prometheus pattern, and the mock-DNS-server test idiom. Use when adding a forwarder/policy/blocklist feature, debugging a SERVFAIL path, designing telemetry, or touching the Fly deploy. Sibling to `knot-dns`, `knotctl`, and `fly` (deploy target)."
 ---
 
 # gloryhole — self-built DNS server
@@ -8,17 +8,18 @@ description: "Work in the user's self-built DNS server `glory-hole` at `~/gloryh
 > **knotea merge (2026-06-16)** — glory-hole is being merged with `knot-fly`
 > (authoritative DNS) into a single supervised binary, `knotea`. The monorepo
 > lives at `~/knotea/` with glory-hole under **`~/knotea/resolver/`** and
-> knot-fly under `~/knotea/authority/`. The original `~/gloryhole/` repo + the
-> live `glory-hole` Fly app (sin) remain canonical until the deployment cutover.
+> knot-fly under `~/knotea/authority/`. The monorepo is the canonical source
+> tree; the legacy `~/gloryhole/` checkout and live `glory-hole` Fly app (sin)
+> remain in service until the P6 deployment cutover.
 > Plan + phased architecture: `~/knotea/docs/plans/2026-06-16-knotea-merge.md`.
 > The end-state binary supervises both Unbound (recursive, `127.0.0.1:5353`)
 > and knotd (authoritative, `127.0.0.1:5354`) — co-location fixes the Fly UDP
 > hairpin SERVFAIL on `*.erfi.io` (knot-dns gotcha #24). Sibling skills:
 > `knot-dns`, `knotctl`.
 
-Repo: `~/gloryhole/` (canonical) — also at `~/knotea/resolver/` post-merge. Module path `glory-hole` (single Go module). On disk: `gloryhole/`. Binary / image / Fly app: `glory-hole`. Don't conflate the two.
+Repo: `~/knotea/resolver/` (canonical source). Legacy `~/gloryhole/` still backs the live `glory-hole` app until P6. Module path `glory-hole` (single Go module). Binary / image / Fly app: `glory-hole`. Don't conflate the two.
 
-**Project-truth: `~/gloryhole/AGENTS.md` + `~/gloryhole/CHANGELOG.md`** — read first for current version, config schema, and per-feature decisions. This skill is the pattern layer.
+**Project-truth: `~/knotea/resolver/AGENTS.md` + `~/knotea/resolver/CHANGELOG.md`** — read first for current version, config schema, and per-feature decisions. Root merge guardrails live in `~/knotea/AGENTS.md` + `~/knotea/docs/plans/2026-06-16-knotea-merge.md`. This skill is the pattern layer.
 
 ## What it is — one self-contained binary
 
