@@ -1,7 +1,7 @@
 {
-  "lastChangelogVersion": "0.79.7",
+  "lastChangelogVersion": "0.79.9",
   "defaultProvider": "opencode",
-  "defaultModel": "claude-opus-4-8",
+  "defaultModel": "gpt-5.3-codex",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
   "compaction": {
@@ -20,7 +20,5 @@
     }
   },
   "hideThinkingBlock": true,
-  "packages": [
-    "git:github.com/erfianugrah/pi-mcp-bridge"
-  ]
+  "packages": []
 }

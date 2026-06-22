@@ -1,6 +1,6 @@
 ---
 name: pgshift
-description: Drive the user's `pgshift` CLI — a typed Bun/TypeScript orchestrator for near-zero-downtime Postgres→Postgres migration via native logical replication (publication+slot+subscription → watch → reconcile → cutover → teardown). Use for cross-region Supabase moves, Supabase↔self-hosted, self-hosted↔self-hosted, same-region tier changes, or project splits — any PG15+→PG15+ pair where a dump/restore downtime window is unacceptable. Covers the IPv6 direct-vs-pooler trap (pooler `SOURCE_DB_URL` + direct `SOURCE_REPLICATION_URL`), what logical replication silently does NOT carry (DDL, roles, extensions, sequences, Supabase `auth`/`storage`) plus the dump/restore pre-step, the `auth.users` FK trap, sequence-resync guard, WAL/slot watchdog aborts, the cutover quiesce gate, checksum reconciliation, and the autonomous `run`/`status` CI entries. Sibling to `supabase`, `fly`, `infrastructure-stack`. Repo `~/pgshift`; runbook `docs/RUNBOOK.md`. Validated at 10M rows / 8.6 GB and cross-region Supabase.
+description: Drive the user's `pgshift` CLI — a typed Bun/TypeScript orchestrator for near-zero-downtime Postgres→Postgres migration via native logical replication. Use for cross-region Supabase moves, Supabase↔self-hosted, self-hosted↔self-hosted, same-region tier changes, project splits, or Azure Database for PostgreSQL Flexible Server moves — any low-downtime PG migration where dump/restore downtime is unacceptable. Covers direct-vs-pooler IPv6 setup (`SOURCE_DB_URL` pooler + `SOURCE_REPLICATION_URL` direct), logical-replication gaps (DDL, roles, extensions, sequences, Supabase `auth`/`storage`) and the dump/restore pre-step, `auth.users` FK trap, sequence resync, WAL/slot/stuck-worker watchdogs, cutover write-stop gate, checksum reconcile, `run`/`status` CI, sandbox/live/scale validation. Sibling to `supabase`, `fly`, `infrastructure-stack`. Repo `~/pgshift`; runbook `docs/RUNBOOK.md`.
 ---
 
 # pgshift — Postgres→Postgres logical-replication migrator
@@ -18,6 +18,7 @@ machine + reconciliation + WAL watchdog**.
 - **Full runbook:** `~/pgshift/docs/RUNBOOK.md` (per-phase, with abort/rollback §12).
 - **Design + every gotcha:** `~/pgshift/README.md`.
 - **Run from the repo:** `cd ~/pgshift && bun start <subcommand>`.
+- **Secrets:** loaded from `.env` (or `--env-file <path>`), AUTHORITATIVE over inherited shell vars — pgshift warns when it overrides a conflicting one, so a stale exported `SOURCE_DB_URL` can't silently point a run at the wrong DB. `--no-env-file` uses the shell env as-is.
 
 Read the README and RUNBOOK before a real migration — this skill is the router,
 not the full procedure.
@@ -33,6 +34,7 @@ not the full procedure.
 | Prove source == target byte-for-byte | `reconcile` (chunked checksum) |
 | Flip over with sequence resync + lag drain | `cutover` (write-stop gate) |
 | Run the whole thing non-interactively in CI/Lambda | `run --through <phase> --json` |
+| Rehearse the whole pipeline hands-on against a throwaway Supabase pair | `sandbox up --org <id>` → drive → `sandbox down` |
 | One-shot health snapshot for a scheduled watcher | `status --json` / `--require-synced` |
 | Copy Auth/Realtime/etc. project config (Supabase) | `config-sync --dry-run` then apply |
 | Manage the managed platform itself (projects, keys, RLS) | `supabase` skill |
@@ -43,7 +45,8 @@ not the full procedure.
 ```
 doctor      readiness checklist (pooler-vs-direct, IPv6, wal_level, replica
             identity, subscribe grant, schema loaded, extension diff, auth.users
-            FK trap). --source-only when target not created yet. Fail-closed.
+            FK trap, custom pg_db_role_setting GUC overrides config-sync can't
+            carry). --source-only when target not created yet. Fail-closed.
   ↓
 [ pre-step, NOT automated — do this FIRST, see below ]
   ↓
@@ -139,8 +142,35 @@ rolling back loses every write the target took. RUNBOOK §12 has the per-phase t
 
 **Supabase identity churn.** A new project = new JWT secret + API keys → existing
 user sessions invalidate and the app's `SUPABASE_URL` + anon/service keys change.
-`config-sync` copies settings but **never secrets** — re-enter SMTP/OAuth/JWT by
-hand. Always `config-sync --dry-run` first.
+`config-sync` copies settings; secrets are stripped by default. Auth integration
+creds (SMTP/OAuth/SMS/hooks) + Edge-Function secrets are opt-in (`configSync.secrets`
+/ `configSync.projectSecrets`); the JWT signing secret + API keys are **never** copied
+(not on any synced endpoint). Optional opt-in sections: `sslEnforcement`,
+`networkRestrictions`, `thirdPartyAuth` (Firebase/Auth0/Cognito JWT integrations) and
+`ssoProviders` (SAML — additive, needs SAML 2.0 on the target plan); the last two are the
+auth sub-resources the `/config/auth` blob does NOT carry. Org settings + members/roles are
+read-only in the API → not migratable (re-invite by hand). Always `config-sync --dry-run` first.
+
+**"Invisible" custom Postgres config.** config-sync's `dbPostgres` only carries the GUCs
+Supabase exposes on `/config/database/postgres`. `ALTER ROLE/DATABASE ... SET` overrides
+(statement_timeout, auto_explain.*, pg_stat_statements.*, pgaudit.*, …) live in
+`pg_db_role_setting` and config-sync can't see them. `doctor` reads it on both ends and warns
+about source overrides missing/differing on target; compute-tuned ones (shared_buffers,
+work_mem, max_connections) are flagged `[compute-tuned]` — review, don't blindly copy. Re-apply
+by hand (or via `supabase postgres-config` for CLI-only system params).
+
+**Sibling Management-API commands:** `verify` (post-migration advisor health gate;
+`--fail-on error|warn|info`; fails closed if advisors unreachable), `provision [--confirm]`
+(copy billable infra: compute size / PITR / IPv4 / disk / backup schedule; preview-by-default,
+opt-in per `provision.*` flag, adds/upgrades to match source but never strips), and `claim
+<org-slug> <token> [--confirm]` (move a project into another org via claim token; preview-gates
+by default, warns on plan downgrade).
+
+**Can't be migrated (no write path / by design):** JWT signing secret + API keys (new project =
+new keys), org settings + members/roles + entitlements (read-only API), custom domain / vanity
+subdomain (DNS-coupled), pgsodium root key (decrypt-everything footgun), read replicas (no
+enumerate API — recreate post-cutover), CLI-only system GUCs (`shared_buffers` via `supabase
+postgres-config`).
 
 **Wrong-tool condition:** a **paused** source (especially > 90 days, no longer
 restorable via Studio) can't stream WAL — use Supabase's offline backup-download +
@@ -178,9 +208,10 @@ human logs to stderr. The runner must reach the **direct** hosts (IPv6 / IPv4 ad
 bun test                  # unit — pure logic, no DB, always on in CI (zod, SQL-injection guards, bucket-diff, conn-string, config-sync stripping)
 bun run typecheck         # tsc --noEmit
 bun run check             # biome format + lint
-bun run test:integration  # docker PG pair on ONE compose network; real replication + fault injection
+bun run test:integration  # == `bun start rehearse integration`; docker PG pair on ONE compose network; real replication + fault injection
 bun run test:scale        # docker, ROWS=N (default 1M); annoying 4-table schema, per-phase timing
 bun run test:live <org>   # real throwaway Supabase pair, full pipeline + sequence-collision check, auto-deletes projects (costs money)
+bun start sandbox up --org <id>   # hands-on: throwaway Supabase pair you drive yourself (sandbox status / sandbox down)
 ```
 
 **Scale harness** (`test/scale.harness.ts`): annoying schema (STORED gen-column,
@@ -214,9 +245,9 @@ src/cli.ts            commander entry, one subcommand per step
 src/config.ts         zod schema (YAML) + env secrets schema
 src/db.ts             source/target pg clients; qi() identifier quoting; conn-string builder
 src/mgmt.ts           Supabase Management API client
-src/steps/            doctor preflight replicate watch reconcile cutover teardown status run config-sync cli-wrappers checks
-src/rehearsal/        seed.ts (size-targeted seeding) + writer.ts (continuous write load + id ledger)
-test/                 *.test.ts (unit) + integration.test.ts + scale/live harnesses + annoying-schema.ts
+src/steps/            doctor preflight replicate watch reconcile cutover teardown status run config-sync claim provision verify sandbox cli-wrappers checks
+src/rehearsal/        schema.sql (sandbox/rehearse-run fixture) + seed.ts (size-targeted seeding) + writer.ts (write load + id ledger) + integration.ts (docker tier)
+test/                 *.test.ts (unit) + integration.test.ts (inline itest) + scale/live harnesses + annoying-schema.ts (their separate bigint-IDENTITY fixture)
 docs/RUNBOOK.md       the step-by-step runbook; §9 cutover, §12 rollback
 ```
 
