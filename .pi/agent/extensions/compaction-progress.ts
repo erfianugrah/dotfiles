@@ -26,11 +26,23 @@ function humanTokens(n: number | undefined): string {
 	return String(n);
 }
 
+// pi 0.79.10+ adds `reason` / `willRetry` to the compaction events. Map the
+// raw reason to a short UI label; tolerate older pi where the field is absent.
+function reasonLabel(reason: string | undefined): string {
+	switch (reason) {
+		case "manual": return "manual";
+		case "threshold": return "auto";
+		case "overflow": return "overflow";
+		default: return "";
+	}
+}
+
 export default function (pi: ExtensionAPI) {
 	let timer: NodeJS.Timeout | undefined;
 	let frame = 0;
 	let startedAt = 0;
 	let tokensBefore: number | undefined;
+	let label = "";
 
 	const clear = (ctx: ExtensionContext) => {
 		if (timer) {
@@ -62,9 +74,10 @@ export default function (pi: ExtensionAPI) {
 		frame++;
 		const elapsed = Math.floor((Date.now() - startedAt) / 1000);
 		const from = humanTokens(tokensBefore);
-		ctx.ui.setStatus(STATUS_SLOT, `${spinner} ${theme.fg("dim", `compacting ${from} • ${elapsed}s`)}`);
+		const tag = label ? ` (${label})` : "";
+		ctx.ui.setStatus(STATUS_SLOT, `${spinner} ${theme.fg("dim", `compacting${tag} ${from} • ${elapsed}s`)}`);
 		ctx.ui.setWidget(WIDGET_SLOT, [
-			`${spinner} Compacting session`,
+			`${spinner} Compacting session${tag}`,
 			theme.fg("dim", `  from ${from} tokens • elapsed ${elapsed}s`),
 			theme.fg("dim", "  summarizing older turns, recent turns kept verbatim"),
 		]);
@@ -73,6 +86,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_before_compact", async (event, ctx) => {
 		startedAt = Date.now();
 		tokensBefore = event.preparation?.tokensBefore;
+		label = reasonLabel((event as { reason?: string }).reason);
 		frame = 0;
 		if (ctx.hasUI) await tick(ctx);
 		if (timer) clearInterval(timer);
@@ -85,9 +99,10 @@ export default function (pi: ExtensionAPI) {
 		const before = humanTokens(event.compactionEntry?.tokensBefore ?? tokensBefore);
 		const summaryLen = event.compactionEntry?.summary?.length ?? 0;
 		const after = summaryLen > 0 ? `~${humanTokens(Math.round(summaryLen / 4))}` : "?";
+		const tag = label ? ` (${label})` : "";
 		clear(ctx);
 		if (ctx.hasUI) {
-			ctx.ui.notify(`Compacted ${before} → ${after} in ${elapsed}s`, "info");
+			ctx.ui.notify(`Compacted${tag} ${before} → ${after} in ${elapsed}s`, "info");
 		}
 	});
 
