@@ -22,7 +22,7 @@
  * To disable: rename file to .ts.disabled or comment out the registration.
  */
 
-import { complete, getModel } from "@earendil-works/pi-ai";
+import { complete, getModel } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
