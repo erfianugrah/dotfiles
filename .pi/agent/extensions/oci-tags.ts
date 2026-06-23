@@ -6,6 +6,22 @@
  * versions — registry API is authoritative, no stale results, minimal tokens.
  *
  * Works with Docker Hub, ghcr.io, quay.io, and any OCI-compliant registry.
+ *
+ * Known limits (tag-scheme realities the registry tags/list API can't resolve
+ * without per-manifest timestamps — documented so they aren't re-discovered):
+ *
+ *   1. Date-versioned images (e.g. thrnz/docker-wireguard-pia
+ *      `20260622_master_835e5bc`) are dropped entirely by `semver:true` —
+ *      they don't match `\d+\.\d+`. Query these WITHOUT `semver`.
+ *   2. Commit-hash-suffixed tags (e.g. slskd `0.25.1.65534-fc722e4a`) share
+ *      a version prefix and differ only by hash; the sort orders the hash
+ *      lexically, so "latest" is meaningless. Ignore the ordering for these.
+ *   3. Separator-less prereleases (`1.0.0rc1`) slip past the stable filter.
+ *      Rare; tightening the boundary risks false-positives on legit tags, so
+ *      left as-is.
+ *   4. `0.x -> 0.x` minor bumps are grouped as "same-major" (compatible) even
+ *      though semver treats 0.x minors as breaking. Matches operator intent
+ *      (numeric-major grouping); not treated as a major jump.
  */
 
 import { Type } from "@earendil-works/pi-ai";
@@ -71,18 +87,50 @@ async function tags(registry: string, repo: string, auth: string | undefined): P
   return result;
 }
 
-// ── version-aware sort ────────────────────────────────────────────────────
+// ── stable-semver filter ──────────────────────────────────────────────────
+
+// Pre-release / dev / nightly markers that should be excluded when semver:true.
+// Matched as whole tokens (bounded by start, '.', or '-') so legit build
+// suffixes like linuxserver's `-ls307` or binhex's `-1-01` are kept.
+// Exported for unit tests.
+export const PRERELEASE =
+  /(?:^|[.\-])(?:develop(?:ment)?|nightly|unstable|preview|canary|testing|edge|snapshot|version|beta|alpha|rc)(?:[.\-]|\d|$)/i;
 
 // Exported for unit tests.
+export function isStableSemver(tag: string): boolean {
+  if (!/^v?\d+\.\d+/.test(tag)) return false;
+  if (PRERELEASE.test(tag)) return false;
+  return true;
+}
+
+// First numeric component (the "major"), ignoring a leading `v`. NaN if none.
+// Exported for unit tests.
+export function majorOf(tag: string): number {
+  const m = tag.replace(/^v/, "").match(/^(\d+)/);
+  return m ? parseInt(m[1], 10) : NaN;
+}
+
+// ── version-aware sort ────────────────────────────────────────────────────
+
+// Natural-order comparison: split each string into alternating digit / non-digit
+// chunks and compare digit-runs numerically. This fixes the lexical-width bug
+// where `ls10` sorted before `ls9` (the dominant linuxserver `-lsNNN` scheme).
+// Exported for unit tests.
 export function versionCompare(a: string, b: string): number {
-  const pa = a.replace(/^v/, "").split(/[.\-]/);
-  const pb = b.replace(/^v/, "").split(/[.\-]/);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = parseInt(pa[i] ?? "0", 10);
-    const nb = parseInt(pb[i] ?? "0", 10);
-    if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
-    const cmp = (pa[i] ?? "").localeCompare(pb[i] ?? "");
-    if (cmp !== 0) return cmp;
+  const ax = (a.replace(/^v/, "").match(/\d+|\D+/g) ?? []) as string[];
+  const bx = (b.replace(/^v/, "").match(/\d+|\D+/g) ?? []) as string[];
+  for (let i = 0; i < Math.max(ax.length, bx.length); i++) {
+    const as = ax[i] ?? "";
+    const bs = bx[i] ?? "";
+    const aNum = /^\d+$/.test(as);
+    const bNum = /^\d+$/.test(bs);
+    if (aNum && bNum) {
+      const d = parseInt(as, 10) - parseInt(bs, 10);
+      if (d !== 0) return d;
+    } else if (as !== bs) {
+      // Shorter string sorts first (e.g. `6.2.1` before `6.2.1.10461-ls305`).
+      return as < bs ? -1 : 1;
+    }
   }
   return 0;
 }
@@ -93,7 +141,8 @@ const ociTagsTool = defineTool({
   name: "oci_tags",
   promptSnippet: "oci_tags — OCI registry tag query. Use for container versions.",
   promptGuidelines: [
-    "Pass semver:true for release tags only.",
+    "Pass semver:true for release tags only (excludes nightly/develop/rc/beta/preview/-version- dev tags).",
+    "Pass current:<tag> to anchor on the running version — output splits into same-major updates vs different-major (breaking) jumps so a major bump is never silently recommended as routine.",
   ],
   label: "OCI Tags",
   description:
@@ -105,7 +154,13 @@ const ociTagsTool = defineTool({
     }),
     semver: Type.Optional(
       Type.Boolean({
-        description: "Filter to semver-like tags only (default: false)",
+        description: "Filter to stable release tags only — excludes nightly/develop/rc/beta/preview/-version- dev tags (default: false)",
+      }),
+    ),
+    current: Type.Optional(
+      Type.String({
+        description:
+          "Currently-deployed tag (e.g. '4.0.17'). When set, output is partitioned into same-major updates vs different-major (breaking) jumps, so a major version change is never recommended as a routine bump.",
       }),
     ),
     limit: Type.Optional(
@@ -122,19 +177,53 @@ const ociTagsTool = defineTool({
     const all = await tags(normalized, repo, auth);
 
     let filtered = all;
-    if (params.semver) filtered = filtered.filter((t) => /^v?\d+\.\d+/.test(t));
+    if (params.semver) filtered = filtered.filter(isStableSemver);
     filtered.sort(versionCompare);
 
     const limit = Math.min(params.limit ?? 10, 100);
-    const result = filtered.slice(-limit);
 
-    if (result.length === 0) {
+    if (filtered.length === 0) {
       return {
         content: [{ type: "text", text: `No tags found for ${params.image}` }],
         details: { count: 0, registry: normalized, image: params.image },
       };
     }
 
+    // ── current-anchored mode: partition into same-major vs different-major ──
+    if (params.current) {
+      const cur = params.current;
+      const curMajor = majorOf(cur);
+      const newer = filtered.filter((t) => versionCompare(t, cur) > 0);
+      const sameMajor = newer.filter((t) => majorOf(t) === curMajor).slice(-limit);
+      const higherMajor = newer.filter((t) => majorOf(t) > curMajor).slice(-limit);
+
+      const lines: string[] = [`current: ${cur}`];
+      lines.push("");
+      lines.push(
+        sameMajor.length
+          ? `same-major updates (${curMajor}.x):\n  ${sameMajor.join("\n  ")}`
+          : `same-major updates (${curMajor}.x): none — you are on the latest ${curMajor}.x`,
+      );
+      if (higherMajor.length) {
+        lines.push("");
+        lines.push(`⚠ different major versions (review before upgrading — likely breaking):\n  ${higherMajor.join("\n  ")}`);
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: {
+          registry: normalized,
+          image: params.image,
+          current: cur,
+          sameMajor,
+          higherMajor,
+          sameMajorCount: sameMajor.length,
+          higherMajorCount: higherMajor.length,
+        },
+      };
+    }
+
+    const result = filtered.slice(-limit);
     return {
       content: [{ type: "text", text: result.join("\n") }],
       details: { count: result.length, registry: normalized, image: params.image },
