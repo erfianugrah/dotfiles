@@ -45,7 +45,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { mkdirSync } from "node:fs";
 
-import { complete } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 

@@ -23,7 +23,7 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
   generateDiffString: (_old: string, _new: string) => "",
 }));
 
-mock.module("@earendil-works/pi-ai", () => {
+const piAiStub = () => {
   const identity = (x: unknown) => x;
   return {
     Type: {
@@ -39,7 +39,12 @@ mock.module("@earendil-works/pi-ai", () => {
     complete: async () => ({ content: [] }),
     getModel: () => undefined,
   };
-});
+};
+mock.module("@earendil-works/pi-ai", piAiStub);
+// 0.80.0 moved the old global API (complete/getModel/...) to the /compat
+// subpath. Some extensions import from there now; Bun can't resolve the real
+// bundled module, so mirror the stub onto the subpath specifier.
+mock.module("@earendil-works/pi-ai/compat", piAiStub);
 
 mock.module("@earendil-works/pi-tui", () => ({
   truncateToWidth: (s: string) => s,

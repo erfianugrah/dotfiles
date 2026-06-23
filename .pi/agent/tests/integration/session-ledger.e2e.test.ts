@@ -23,7 +23,7 @@ let completeReturn = {
 		},
 	],
 };
-mock.module("@earendil-works/pi-ai", () => ({
+const piAiStub = () => ({
 	Type: {
 		Object: (x: unknown) => x,
 		String: (x: unknown) => x,
@@ -31,7 +31,10 @@ mock.module("@earendil-works/pi-ai", () => ({
 		Optional: (x: unknown) => x,
 	},
 	complete: async () => completeReturn,
-}));
+});
+mock.module("@earendil-works/pi-ai", piAiStub);
+// session-ledger imports `complete` from the /compat subpath since pi 0.80.0.
+mock.module("@earendil-works/pi-ai/compat", piAiStub);
 mock.module("@earendil-works/pi-coding-agent", () => ({
 	defineTool: (x: unknown) => x,
 	getAgentDir: () => AGENT_DIR,
