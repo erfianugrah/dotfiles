@@ -1,6 +1,6 @@
 ---
 name: knotctl
-description: Drive the user's `knotctl` CLI for live DNS edits against `knot-fly-mvp` (`erfi.io` + `lab.erfi.io`). TSIG-keyed RFC 2136 over TCP — no nsupdate heredocs, /tmp keyfiles, or Cloudflare API token. Covers add/rm/set/ls/export/keys/apply (declarative YAML reconcile; additive by default, `--prune` for full reconciliation), atomic multi-value `set`, sub-zone routing via `known_zones`, canonical MX/CNAME/NS/SRV rdata, key roles/ACLs (`knotctl`, `axfr-out`, `caddy-acme`, `caddy-ddns`; ddns is A/AAAA-only, acme is `_acme-challenge` TXT-only), script exit codes, auto-verify-after-write, `--json`, and `make smoke` live integration test. Sibling to `knot-dns`, `caddy`, and `cloudflare`. Source `~/knotea/authority/cmd/knotctl/` (monorepo; legacy `~/knot-fly/cmd/knotctl/` retained until P6 cutover), binary `~/bin/knotctl`.
+description: Drive the user's `knotctl` CLI for live DNS edits against the merged knotea authority on `glory-hole` Fly (`137.66.1.170`, `erfi.io` + `lab.erfi.io`; ex-`knot-fly-mvp`). TSIG-keyed RFC 2136 over TCP — no nsupdate heredocs, /tmp keyfiles, or Cloudflare API token. Covers add/rm/set/ls/export/keys/apply (declarative YAML reconcile; additive by default, `--prune` for full reconciliation), atomic multi-value `set`, sub-zone routing via `known_zones`, canonical MX/CNAME/NS/SRV rdata, key roles/ACLs (`knotctl`, `axfr-out`, `caddy-acme`, `caddy-ddns`; ddns is A/AAAA-only, acme is `_acme-challenge` TXT-only), script exit codes, auto-verify-after-write, `--json`, and `make smoke` live integration test. Sibling to `knot-dns`, `caddy`, and `cloudflare`. Source `~/knotea/authority/cmd/knotctl/` (monorepo; default server now `137.66.1.170:53` post-cutover), binary `~/bin/knotctl`.
 ---
 
 # knotctl — TSIG-keyed DNS editor
@@ -9,12 +9,14 @@ description: Drive the user's `knotctl` CLI for live DNS edits against `knot-fly
 > monorepo at **`~/knotea/authority/cmd/knotctl/`** (built via
 > `cd ~/knotea/authority && make install-knotctl`). The legacy
 > `~/knot-fly/cmd/knotctl/` checkout is retained until the P6 Fly cutover but is
-> no longer the build source. After the deployment cutover the RFC 2136 target
-> IP changes from `169.155.56.21` to knotea's new anycast IP (plan §5.3 / §8).
-> Plan: `~/knotea/docs/plans/2026-06-16-knotea-merge.md`.
+> no longer the build source. **Cutover done (2026-06-25):** the live RFC 2136
+> target is now knotea's anycast v4 **`137.66.1.170`** (the `glory-hole` Fly app's
+> embedded knotd); `knot-fly-mvp`/`169.155.56.21` is frozen and pending retirement
+> after the soak. Plans: `~/knotea/docs/plans/2026-06-16-knotea-merge.md` +
+> `~/knotea/docs/plans/2026-06-25-knotea-cutover-runbook.md`.
 
 Lives at `~/knotea/authority/cmd/knotctl/`. Static Go binary, ~9.5MB, `CGO_ENABLED=0`,
-talks miekg/dns RFC 2136 directly to `knotd` on `169.155.56.21:53`. No shim,
+talks miekg/dns RFC 2136 directly to `knotd` on `137.66.1.170:53`. No shim,
 no Cloudflare API token, no `nsupdate -y` (which leaks secrets to argv) —
 just keyfiles + TSIG + auto-verify polling. See the M0.5 plan at
 `~/knotea/authority/docs/plans/2026-05-25-knotctl-foundation.md` for the full design.
@@ -270,12 +272,12 @@ Flag > env > YAML > defaults. Resolution at `pkg/config/loadConfig`.
 knotctl --server [fdaa:5:8fc8:a7b:...]:53 --keydir /tmp/keys ls foo
 
 # Or via env (good for shell aliases)
-export KNOTCTL_SERVER=169.155.56.21:53
+export KNOTCTL_SERVER=137.66.1.170:53
 export KNOTCTL_ZONE=erfi.io
 
 # Lowest precedence (other than defaults) — YAML at ~/.config/knotctl/config.yml
 cat > ~/.config/knotctl/config.yml <<'YAML'
-server: 169.155.56.21:53
+server: 137.66.1.170:53
 default_zone: erfi.io
 default_key: knotctl
 keydir: /home/erfi/.config/knotctl/keys
@@ -389,7 +391,7 @@ Almost always "wrong key role for the record type." Check:
 
 ### `error: update: network error: ... i/o timeout` (exit 4)
 
-The default server `169.155.56.21:53` is the public anycast IP. If you're
+The default server `137.66.1.170:53` is the public anycast IP. If you're
 running `knotctl` from inside a Fly machine in `fra`, the UDP hairpin
 block applies and queries timeout — but TCP works fine. `knotctl` uses
 TCP throughout, so this usually means a real outage, not the hairpin
