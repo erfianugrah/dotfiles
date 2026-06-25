@@ -1,6 +1,6 @@
 ---
 name: gloryhole
-description: "Work in the user's self-built DNS resolver `glory-hole`, now at `~/knotea/resolver/` (legacy `~/gloryhole/` until P6 cutover) — Go binary + embedded Unbound recursor + Astro/React dashboard. Pi-hole-style ad-blocking, expr-based policy engine, local records, conditional forwarding, sharded LRU cache, SQLite query log, REST/WS API, DoT/DoH. Three deployment profiles — home (LAN-fronted, VyOS upstream on servarr), a VyOS podman LAN resolver (vyos-sg), and a public DoT/DoH endpoint on Fly.io (sin region). Covers the packet-path through `pkg/dns` → policy → blocklist → cache → forwarder, the `pkg/forwarder` round-robin + circuit-breaker + UpstreamHealth model, SERVFAIL pass-through semantics, bundled-Unbound topology, Fly UDP-binding requirements, OpenTelemetry+Prometheus pattern, and the mock-DNS-server test idiom. Use when adding a forwarder/policy/blocklist feature, debugging a SERVFAIL path, designing telemetry, or touching the Fly deploy. Sibling to `knot-dns`, `knotctl`, and `fly` (deploy target)."
+description: "Work in the user's self-built DNS resolver `glory-hole`, now at `~/knotea/resolver/` (the merged knotea binary; since the 2026-06-25 cutover the live `glory-hole` Fly app is ALSO the authoritative NS for `erfi.io`+`lab.erfi.io` at `137.66.1.170`) — Go binary + embedded Unbound recursor + loopback knotd + Astro/React dashboard. Pi-hole-style ad-blocking, expr-based policy engine, local records, conditional forwarding, sharded LRU cache, SQLite query log, REST/WS API, DoT/DoH. Three deployment profiles — home (LAN-fronted, VyOS upstream on servarr), a VyOS podman LAN resolver (vyos-sg), and a public DoT/DoH endpoint on Fly.io (sin region). Covers the packet-path through `pkg/dns` → policy → blocklist → cache → forwarder, the `pkg/forwarder` round-robin + circuit-breaker + UpstreamHealth model, SERVFAIL pass-through semantics, bundled-Unbound topology, Fly UDP-binding requirements, OpenTelemetry+Prometheus pattern, and the mock-DNS-server test idiom. Use when adding a forwarder/policy/blocklist feature, debugging a SERVFAIL path, designing telemetry, or touching the Fly deploy. Sibling to `knot-dns`, `knotctl`, and `fly` (deploy target)."
 ---
 
 # gloryhole — self-built DNS server
@@ -9,15 +9,18 @@ description: "Work in the user's self-built DNS resolver `glory-hole`, now at `~
 > (authoritative DNS) into a single supervised binary, `knotea`. The monorepo
 > lives at `~/knotea/` with glory-hole under **`~/knotea/resolver/`** and
 > knot-fly under `~/knotea/authority/`. The monorepo is the canonical source
-> tree; the legacy `~/gloryhole/` checkout and live `glory-hole` Fly app (sin)
-> remain in service until the P6 deployment cutover.
-> Plan + phased architecture: `~/knotea/docs/plans/2026-06-16-knotea-merge.md`.
-> The end-state binary supervises both Unbound (recursive, `127.0.0.1:5353`)
+> tree. **P6 cutover DONE (2026-06-25):** the live `glory-hole` Fly app (sin,
+> anycast v4 `137.66.1.170`) now runs the merged knotea binary and is the
+> **authoritative** nameserver for `erfi.io` + `lab.erfi.io` — the Namecheap glue
+> was swapped off `knot-fly-mvp` (`169.155.56.21`, frozen, pending retirement
+> after soak). The binary supervises both Unbound (recursive, `127.0.0.1:5353`)
 > and knotd (authoritative, `127.0.0.1:5354`) — co-location fixes the Fly UDP
-> hairpin SERVFAIL on `*.erfi.io` (knot-dns gotcha #24). Sibling skills:
+> hairpin SERVFAIL on `*.erfi.io` (knot-dns gotcha #24). Plans:
+> `~/knotea/docs/plans/2026-06-16-knotea-merge.md` +
+> `~/knotea/docs/plans/2026-06-25-knotea-cutover-runbook.md`. Sibling skills:
 > `knot-dns`, `knotctl`.
 
-Repo: `~/knotea/resolver/` (canonical source). Legacy `~/gloryhole/` still backs the live `glory-hole` app until P6. Module path `glory-hole` (single Go module). Binary / image / Fly app: `glory-hole`. Don't conflate the two.
+Repo: `~/knotea/resolver/` (canonical source; the live `glory-hole` app builds from the monorepo root Dockerfile as of the cutover). Module path `glory-hole` (single Go module). Binary / image / Fly app: `glory-hole` (cosmetic name — Fly can't rename in place; the binary is knotea). Don't conflate the two.
 
 **Project-truth: `~/knotea/resolver/AGENTS.md` + `~/knotea/resolver/CHANGELOG.md`** — read first for current version, config schema, and per-feature decisions. Root merge guardrails live in `~/knotea/AGENTS.md` + `~/knotea/docs/plans/2026-06-16-knotea-merge.md`. This skill is the pattern layer.
 
@@ -42,7 +45,7 @@ Three live deployments:
 |---|---|---|---|
 | home | LAN (deployed on `servarr`) | site router | LAN ad-block + local records for internal hostnames |
 | LAN resolver (SG) | VyOS podman container on `vyos-sg` @ `172.16.0.5` (config `/config/erfi/gloryhole/config.yml`) | bundled Unbound (loopback) | Replaced pihole+unbound+httpbun as the Singapore site resolver (2026-06-03). DHCP name-server (4 subnets), `system name-server`, and `service dns forwarding` all point at it |
-| public DoT/DoH | Fly.io — `sin` region since 2026-06-03 (was `fra`) | bundled Unbound (loopback) | DoT/DoH for personal devices, ad-block, no LAN context |
+| public DoT/DoH **+ authoritative** | Fly.io — `sin`, anycast v4 `137.66.1.170` | bundled Unbound (loopback) + embedded knotd (`127.0.0.1:5354`) | DoT/DoH for personal devices, ad-block — **and** since the 2026-06-25 cutover the authoritative NS for `erfi.io` + `lab.erfi.io` (glue points here). Auth-zone queries bypass the recursive client ACL + blocklist/cache and route to loopback knotd |
 
 ## Architecture — packet path
 

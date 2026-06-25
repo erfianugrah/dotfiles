@@ -1,6 +1,6 @@
 ---
 name: knot-dns
-description: Deploy self-hosted authoritative DNS — Knot DNS 3.5 on Fly.io anycast, with TSIG-keyed RFC 2136 ACME (Caddy), AXFR/IXFR primary↔secondary, and the Cloudflare → Knot migration path. Covers nameserver choice (Knot vs NSD vs PowerDNS vs CoreDNS), Fly machine sizing and the PROXY-on-TCP-is-broken trap, knotc confdb operations, ACME ACL pattern (the `sub-or-equal` vs `pattern` mismatch for `_acme-challenge`), Namecheap glue + in-bailiwick NS, the CF outgoing-AXFR migration (NOTIFY source IPs documented-wrong vs the real anycast list, Fly edge NAT rewriting source to 172.16.x), TTL pre-lowering, registry NS swap timing per TLD, and the post-migration Caddy `dns cloudflare` → `dns rfc2136` cutover. Sibling to `fly`, `cloudflare`, `infrastructure-stack`, `gloryhole`, and `knotctl`. Reference deployment source lives at `~/knotea/authority/deploy/knot-only/` (legacy `~/knot-fly/deploy/knot-only/` feeds live `knot-fly-mvp` until P6).
+description: Deploy self-hosted authoritative DNS — Knot DNS 3.5 on Fly.io anycast, with TSIG-keyed RFC 2136 ACME (Caddy), AXFR/IXFR primary↔secondary, and the Cloudflare → Knot migration path. Covers nameserver choice (Knot vs NSD vs PowerDNS vs CoreDNS), Fly machine sizing and the PROXY-on-TCP-is-broken trap, knotc confdb operations, ACME ACL pattern (the `sub-or-equal` vs `pattern` mismatch for `_acme-challenge`), Namecheap glue + in-bailiwick NS, the CF outgoing-AXFR migration (NOTIFY source IPs documented-wrong vs the real anycast list, Fly edge NAT rewriting source to 172.16.x), TTL pre-lowering, registry NS swap timing per TLD, and the post-migration Caddy `dns cloudflare` → `dns rfc2136` cutover. Sibling to `fly`, `cloudflare`, `infrastructure-stack`, `gloryhole`, and `knotctl`. Reference deployment source lives at `~/knotea/authority/deploy/knot-only/` (standalone-knotd pattern, now historical — post-2026-06-25 cutover the live authority is the merged knotea binary on the `glory-hole` Fly app at `137.66.1.170`; `knot-fly-mvp` retired).
 ---
 
 # knot-dns — authoritative DNS on Fly
@@ -9,16 +9,18 @@ description: Deploy self-hosted authoritative DNS — Knot DNS 3.5 on Fly.io any
 > (recursive resolver) into a single supervised binary, `knotea`. The monorepo
 > lives at `~/knotea/` with knot-fly under **`~/knotea/authority/`** and
 > glory-hole under `~/knotea/resolver/`. The monorepo is the canonical source
-> tree; the legacy `~/knot-fly/` checkout and live `knot-fly-mvp` Fly app (fra)
-> remain in service until the P6 deployment cutover. Plan:
-> `~/knotea/docs/plans/2026-06-16-knotea-merge.md`. Post-merge,
+> tree. **P6 cutover DONE (2026-06-25):** the live authority for `erfi.io` +
+> `lab.erfi.io` is now the merged knotea binary on the `glory-hole` Fly app (sin,
+> anycast v4 `137.66.1.170`); the Namecheap glue was swapped off `knot-fly-mvp`
+> (`169.155.56.21`, fra) which is now frozen and pending `apps destroy` after the
+> 24–48h soak. Plans: `~/knotea/docs/plans/2026-06-16-knotea-merge.md` +
+> `~/knotea/docs/plans/2026-06-25-knotea-cutover-runbook.md`. Post-merge,
 > knotd no longer binds public `:53` — it runs loopback-only on `127.0.0.1:5354`
 > and knotea owns the public sockets, proxying RFC 2136 UPDATE + AXFR inward.
 > This resolves the PROXY-on-TCP limitation (gotcha #2) and the UDP hairpin
-> SERVFAIL (gotcha #24) by co-location. The Namecheap glue re-registration to
-> knotea's new anycast IP is the one irreversible-until-TTL cutover step (plan §5).
+> SERVFAIL (gotcha #24) by co-location.
 
-The reference deployment source is `~/knotea/authority/deploy/knot-only/` — the former `~/knot-fly/deploy/knot-only/` tree. The live `knot-fly-mvp` app in `fra` keeps serving from the legacy checkout until P6. It runs as the `<your-knot-app>` Fly app in your primary region (single region; secondary-region deferred to Phase 2), serves `<your-zone>` + `lab.<your-zone>`, and issues real Let's Encrypt certs for 36 Caddy sites via `dns rfc2136`. Every snippet below mirrors that working tree. Read `~/knotea/authority/AGENTS.md` for the canonical gotcha list this skill condenses.
+The reference deployment source is `~/knotea/authority/deploy/knot-only/` — the former `~/knot-fly/deploy/knot-only/` tree — now **historical**: it documents the standalone-knotd pattern, but the live authority is the merged knotea binary (see the `gloryhole` skill), not a bare knotd app. The retired `knot-fly-mvp` app (fra) served `<your-zone>` + `lab.<your-zone>` and issued real Let's Encrypt certs for ~45 Caddy sites via `dns rfc2136`; that same TSIG/ACME machinery now runs through knotea's loopback knotd. Every snippet below still mirrors that working tree. Read `~/knotea/authority/AGENTS.md` for the canonical gotcha list this skill condenses.
 
 ## Why self-host
 
