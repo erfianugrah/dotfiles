@@ -1,21 +1,23 @@
 ---
 name: knotctl
-description: Drive the user's `knotctl` CLI for live DNS edits against `knot-fly-mvp` (`erfi.io` + `lab.erfi.io`). TSIG-keyed RFC 2136 over TCP — no nsupdate heredocs, /tmp keyfiles, or Cloudflare API token. Covers add/rm/set/ls/export/keys/apply (declarative YAML reconcile; additive by default, `--prune` for full reconciliation), atomic multi-value `set`, sub-zone routing via `known_zones`, canonical MX/CNAME/NS/SRV rdata, key roles/ACLs (`knotctl`, `axfr-out`, `caddy-acme`, `caddy-ddns`; ddns is A/AAAA-only, acme is `_acme-challenge` TXT-only), script exit codes, auto-verify-after-write, `--json`, and `make smoke` live integration test. Sibling to `knot-dns`, `caddy`, and `cloudflare`. Source `~/knot-fly/cmd/knotctl/` (moving to `~/knotea/authority/cmd/knotctl/`), binary `~/bin/knotctl`.
+description: Drive the user's `knotctl` CLI for live DNS edits against `knot-fly-mvp` (`erfi.io` + `lab.erfi.io`). TSIG-keyed RFC 2136 over TCP — no nsupdate heredocs, /tmp keyfiles, or Cloudflare API token. Covers add/rm/set/ls/export/keys/apply (declarative YAML reconcile; additive by default, `--prune` for full reconciliation), atomic multi-value `set`, sub-zone routing via `known_zones`, canonical MX/CNAME/NS/SRV rdata, key roles/ACLs (`knotctl`, `axfr-out`, `caddy-acme`, `caddy-ddns`; ddns is A/AAAA-only, acme is `_acme-challenge` TXT-only), script exit codes, auto-verify-after-write, `--json`, and `make smoke` live integration test. Sibling to `knot-dns`, `caddy`, and `cloudflare`. Source `~/knotea/authority/cmd/knotctl/` (monorepo; legacy `~/knot-fly/cmd/knotctl/` retained until P6 cutover), binary `~/bin/knotctl`.
 ---
 
 # knotctl — TSIG-keyed DNS editor
 
-> **knotea merge (2026-06-16)** — source moves with knot-fly into the knotea
-> monorepo: `~/knot-fly/cmd/knotctl/` → **`~/knotea/authority/cmd/knotctl/`**
-> (original path canonical until cutover). After the deployment cutover the
-> RFC 2136 target IP changes from `169.155.56.21` to knotea's new anycast IP
-> (plan §5.3 / §8). Plan: `~/knotea/docs/plans/2026-06-16-knotea-merge.md`.
+> **knotea merge (2026-06-16)** — knotctl source now lives in the knotea
+> monorepo at **`~/knotea/authority/cmd/knotctl/`** (built via
+> `cd ~/knotea/authority && make install-knotctl`). The legacy
+> `~/knot-fly/cmd/knotctl/` checkout is retained until the P6 Fly cutover but is
+> no longer the build source. After the deployment cutover the RFC 2136 target
+> IP changes from `169.155.56.21` to knotea's new anycast IP (plan §5.3 / §8).
+> Plan: `~/knotea/docs/plans/2026-06-16-knotea-merge.md`.
 
-Lives at `~/knot-fly/cmd/knotctl/`. Static Go binary, ~9.5MB, `CGO_ENABLED=0`,
+Lives at `~/knotea/authority/cmd/knotctl/`. Static Go binary, ~9.5MB, `CGO_ENABLED=0`,
 talks miekg/dns RFC 2136 directly to `knotd` on `169.155.56.21:53`. No shim,
 no Cloudflare API token, no `nsupdate -y` (which leaks secrets to argv) —
 just keyfiles + TSIG + auto-verify polling. See the M0.5 plan at
-`~/knot-fly/docs/plans/2026-05-25-knotctl-foundation.md` for the full design.
+`~/knotea/authority/docs/plans/2026-05-25-knotctl-foundation.md` for the full design.
 
 ## When to reach for it
 
@@ -229,7 +231,7 @@ knotctl keys import-env [PATH]            # default: ~/.knot-fly-mvp.env
 ```
 
 `keys show` deliberately does NOT echo the secret (defense against the
-gotcha #25 leak class — see `~/knot-fly/AGENTS.md`). Read the file
+gotcha #25 leak class — see `~/knotea/authority/AGENTS.md`). Read the file
 directly if you genuinely need the value.
 
 ## Exit code contract — `$?` after any knotctl call
@@ -383,7 +385,7 @@ Almost always "wrong key role for the record type." Check:
    write a TXT? Pass `--key knotctl` explicitly to force the
    general-purpose key, or fix the `Keys` map in config.yml.
 3. Is the secret in your `.key` file actually the current one?
-   See gotcha #25 in `~/knot-fly/AGENTS.md` for the rotation procedure.
+   See gotcha #25 in `~/knotea/authority/AGENTS.md` for the rotation procedure.
 
 ### `error: update: network error: ... i/o timeout` (exit 4)
 
@@ -391,7 +393,7 @@ The default server `169.155.56.21:53` is the public anycast IP. If you're
 running `knotctl` from inside a Fly machine in `fra`, the UDP hairpin
 block applies and queries timeout — but TCP works fine. `knotctl` uses
 TCP throughout, so this usually means a real outage, not the hairpin
-issue. See gotcha #24 in `~/knot-fly/AGENTS.md` for the full UDP/TCP
+issue. See gotcha #24 in `~/knotea/authority/AGENTS.md` for the full UDP/TCP
 matrix per source.
 
 ### Verify timed out (exit 1) — write succeeded but record not yet queryable
@@ -429,7 +431,7 @@ Rare with Knot (primary serves authoritative immediately). Possibilities:
 
 ## Updating knotctl
 
-`knotctl` lives in `~/knot-fly/cmd/knotctl/`. Update via:
+`knotctl` lives in `~/knotea/authority/cmd/knotctl/`. Update via:
 
 ```bash
 cd ~/knot-fly
@@ -437,7 +439,7 @@ git pull
 make install-knotctl    # rebuilds with current commit SHA in --version
 ```
 
-If you're modifying knotctl itself, see `~/knot-fly/AGENTS.md` and the
+If you're modifying knotctl itself, see `~/knotea/authority/AGENTS.md` and the
 M0.5 plan. The test surface is comprehensive (~96 race-clean unit tests
 across 4 packages, plus the live smoke). Add tests when changing
 handlers; the `pkg/tsigtest` in-process server is the canonical helper.
