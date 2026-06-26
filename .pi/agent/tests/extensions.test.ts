@@ -52,6 +52,7 @@ import { prune, hasImageContent, type AnyMessage } from "../extensions/tool-outp
 import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
 import { matchHints, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
 import { findLastUserEntryId } from "../extensions/session-undo.ts";
+import { scanForBlocked } from "../extensions/confidential-write-guard.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -2797,5 +2798,67 @@ describe("session-ledger.extractCompletionText", () => {
   test("defensive on junk", () => {
     expect(extractCompletionText(null)).toBe("");
     expect(extractCompletionText({ content: 42 })).toBe("");
+  });
+});
+
+// ── confidential-write-guard: scanForBlocked (the security-critical masker) ──
+
+describe("confidential-write-guard.scanForBlocked", () => {
+  test("matches a blocked term case-insensitively", () => {
+    expect(scanForBlocked("the AcmeCo deal", ["acmeco"])).not.toBeNull();
+    expect(scanForBlocked("the acmeco deal", ["AcmeCo"])).not.toBeNull();
+  });
+
+  test("respects non-alphanumeric boundaries (no substring false positives)", () => {
+    // term appears as a whole token bounded by punctuation/space → match
+    expect(scanForBlocked("path is Acme/Foo", ["Acme"])).not.toBeNull();
+    expect(scanForBlocked("(Acme)", ["Acme"])).not.toBeNull();
+    // term embedded inside a larger alphanumeric token → NO match
+    expect(scanForBlocked("the Acmebot service", ["Acme"])).toBeNull();
+    expect(scanForBlocked("preAcme", ["Acme"])).toBeNull();
+  });
+
+  test("NEVER echoes the blocked term in its output (the core guarantee)", () => {
+    const term = "Zephyrus";
+    const hit = scanForBlocked("internal codename Zephyrus ships Q3", [term]);
+    expect(hit).not.toBeNull();
+    expect(hit!.masked).toContain("[REDACTED]");
+    expect(hit!.masked.toLowerCase()).not.toContain(term.toLowerCase());
+  });
+
+  test("masks only the term, keeping surrounding context", () => {
+    const hit = scanForBlocked("before Widget after", ["Widget"]);
+    expect(hit!.masked).toBe("before [REDACTED] after");
+  });
+
+  test("adds ellipsis when context is truncated on both sides", () => {
+    const long = "x".repeat(40) + " SECRET " + "y".repeat(40);
+    const hit = scanForBlocked(long, ["SECRET"]);
+    expect(hit!.masked.startsWith("…")).toBe(true);
+    expect(hit!.masked.endsWith("…")).toBe(true);
+    expect(hit!.masked).toContain("[REDACTED]");
+  });
+
+  test("returns null when no blocked term is present", () => {
+    expect(scanForBlocked("nothing sensitive here", ["Acme", "Zephyrus"])).toBeNull();
+  });
+
+  test("returns null on empty text or empty blocklist", () => {
+    expect(scanForBlocked("", ["Acme"])).toBeNull();
+    expect(scanForBlocked("Acme", [])).toBeNull();
+  });
+
+  test("masks the first blocked term it finds (block list order)", () => {
+    // iterates the block list in order → "Beta" is checked first and redacted
+    const hit = scanForBlocked("Alpha then Beta", ["Beta", "Alpha"]);
+    expect(hit).not.toBeNull();
+    expect(hit!.masked).toContain("[REDACTED]");
+    expect(hit!.masked).not.toContain("Beta"); // the matched term never leaks
+  });
+
+  test("escapes regex metacharacters in terms (treated literally)", () => {
+    expect(scanForBlocked("project a.b.c here", ["a.b.c"])).not.toBeNull();
+    // the dots are literal, so a different separator must NOT match
+    expect(scanForBlocked("project axbxc here", ["a.b.c"])).toBeNull();
   });
 });
