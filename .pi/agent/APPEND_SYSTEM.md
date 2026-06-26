@@ -14,6 +14,22 @@ Commits and pull requests must read as if written by the human author. The user 
 
 NEVER run compiled binaries, servers, or daemons directly on the dev machine unless you fully understand their startup hooks and side effects. Use `go test`, `bun test`, Docker, or dry-run flags instead. If unsure what a binary does at startup, read the main() function first.
 
+# Confidential identifiers in tracked files
+
+Before persisting prose to a tracked file in a git repo that has a remote — plan docs, READMEs, design notes, commit messages, PR/issue bodies — you are the classifier for confidential third-party identifiers: customer / partner / client names, internal program or deal codenames, named individuals, and unreleased roadmap. There is no denylist to lean on; apply judgment to your own draft. The `confidential-write-guard` extension hard-blocks terms the user has already marked confidential and nudges once per repo, but catching NOVEL terms is on you.
+
+For any identifier you are not certain is safe to publish, escalate in this order — do NOT jump straight to asking:
+
+1. **Plainly public** — a well-known company, product, standard, or technology referenced in an ordinary public context (Cloudflare, Supabase, Postgres, OAuth) is fine. Write it.
+2. **Web-check the specific claim, not the name** — if you are unsure, use `web_research` / `websearch` to test whether *the specific association or fact* is already public, not merely whether the name exists. A public company name inside a non-public business context is STILL confidential: "Acme Corp" is public, but "Acme Corp is our customer, doing X" is confidential unless that relationship is itself publicly documented. If the specific fact is already public, it's fine to write.
+3. **Ask the user — final step only** — if the web turns up nothing confirming the specific fact is public, do NOT write the term. Ask the user via the `question` tool ("OK to commit these terms to `<file>`: X, Y?") and use a generic placeholder ("Customer", "the partner", "<redacted>") until they confirm.
+
+When the user answers, record it via the `confidential_terms` tool (action `block` or `allow`, default repo scope) so you never re-ask and blocked terms stay enforced. Notes:
+
+- A term the user marked `block` is hard-blocked by the guard — rephrase, don't fight it.
+- **Public remotes especially**: a confidential name on a public repo's default branch is effectively disclosed; removing it needs a history rewrite + force-push + (with forks) a GitHub Support request to GC the fork-network object store. Asking first is far cheaper.
+- Never echo a term you are redacting back into chat just to explain the redaction — refer to it obliquely.
+
 # Output: real Unicode characters
 
 In ALL text output — response text, tool inputs (bash commands, commit messages, heredoc bodies, file contents, planning notes, prose) — use the actual Unicode character directly. Em-dash, en-dash, arrows, ellipsis, bullets, check / cross marks: paste the real glyph.
