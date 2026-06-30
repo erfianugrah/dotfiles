@@ -288,12 +288,20 @@ export default function (pi: ExtensionAPI) {
 
     // write / edit / write_stream — enforce blocked terms + nudge on prose
     if (tool === "write" || tool === "edit" || tool === "write_stream") {
-      const input = event.input as { path?: string; file_path?: string; content?: string; newText?: string };
+      const input = event.input as {
+        path?: string;
+        file_path?: string;
+        content?: string;
+        // edit: current schema is edits[]; top-level newText is legacy (old sessions).
+        newText?: string;
+        edits?: Array<{ oldText?: string; newText?: string }>;
+      };
       const target = input.path ?? input.file_path;
       if (typeof target !== "string" || isStoreFile(target)) return undefined;
 
       const blocked = blockedTermsFor(target);
-      for (const blob of [target, input.content ?? "", input.newText ?? ""]) {
+      const editTexts = Array.isArray(input.edits) ? input.edits.map((e) => e?.newText ?? "") : [];
+      for (const blob of [target, input.content ?? "", input.newText ?? "", ...editTexts]) {
         const hit = scanForBlocked(blob, blocked);
         if (hit) return { block: true, reason: blockMsg(hit.masked, `${tool} → ${target}`) };
       }

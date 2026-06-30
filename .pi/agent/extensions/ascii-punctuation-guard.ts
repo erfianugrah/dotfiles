@@ -103,11 +103,22 @@ export default function (pi: ExtensionAPI) {
     const tool = event.toolName;
 
     if (tool === "write" || tool === "edit" || tool === "write_stream") {
-      const input = event.input as { path?: string; file_path?: string; content?: string; newText?: string };
+      const input = event.input as {
+        path?: string;
+        file_path?: string;
+        content?: string;
+        // edit: current schema is edits[]; newText/oldText at top level is legacy
+        // (old sessions only — see pi docs/extensions.md prepareArguments note).
+        newText?: string;
+        edits?: Array<{ oldText?: string; newText?: string }>;
+      };
       const target = input.path ?? input.file_path;
       if (typeof target !== "string") return undefined;
       if (proseOnly && !isProsePath(target)) return undefined;
-      const found = scan(input.content ?? input.newText ?? "");
+      const editText = Array.isArray(input.edits)
+        ? input.edits.map((e) => e?.newText ?? "").join("\n")
+        : "";
+      const found = scan(`${input.content ?? ""}\n${input.newText ?? ""}\n${editText}`);
       if (found.length) return { block: true, reason: reason(found, `${tool} → ${target}`) };
       return undefined;
     }
