@@ -36,6 +36,7 @@ Single Go binary that combines:
 - Sharded LRU cache with TTL + blocked-TTL override
 - SQLite query log (modernc.org/sqlite — CGO=0; WAL; async-buffered writes)
 - REST + Server-Sent-Events + WebSocket API with API key / Basic / session+CSRF auth
+- **CF-shape authoritative REST API** (`authority/pkg/api`, mounted in-process via `cmd/glory-hole/cfapi.go`) - a Cloudflare-API-compatible DNS surface (16 endpoints, bearer-token + argon2id side-store) over the loopback knotd. Live on Fly at `https://knotea.erfi.io:2096/client/v4`; off by default (`knot_api.enabled`). Point terraform-provider-cloudflare / cloudflare-go / dnscontrol here. Full schema: `~/knotea/authority/docs/api.md`
 - Embedded Astro + React + shadcn dashboard (go:embed)
 - **Bundled Unbound recursor** built from source in the Docker image, supervised as a child process on a loopback port — provides DNSSEC-validated recursion without trusting an upstream
 
