@@ -36,8 +36,13 @@ just keyfiles + TSIG + auto-verify polling. See the M0.5 plan at
 | Add a new TSIG key or ACL | `knot-dns` skill (`knotc conf-set` directly) |
 | Run a Caddy ACME challenge | Caddy already does this via `dns rfc2136`; see `caddy` skill |
 
-`knotctl` is the operator-facing CLI. It is NOT the HTTP API — that's M2+
-work, not shipped yet.
+`knotctl` is the operator-facing CLI (TSIG-keyed RFC 2136). It is NOT the
+CF-shape HTTP API - that ships separately and is now **live** on the merged
+`glory-hole` Fly app at `https://knotea.erfi.io:2096/client/v4` (bearer-token,
+in-process over the same loopback knotd). Full schema:
+`~/knotea/authority/docs/api.md`. Use `knotctl` for wire-level operator edits;
+use the HTTP API for CF-compatible tooling (terraform-provider-cloudflare,
+cloudflare-go, dnscontrol, octodns).
 
 ## Install + first-run
 
@@ -113,8 +118,9 @@ knotctl rm staging.erfi.io                # everything at staging.erfi.io
 ```
 
 `add` and `set` validate inputs against `wire.Record.Validate()` before
-sending — uneditable types (SOA, DNSSEC) exit 5 client-side without
-touching the wire. Empty content, missing name, TTL below 30s also exit 5.
+sending - uneditable types (SOA; DNSKEY/RRSIG/NSEC*/CDS/CDNSKEY) exit 5
+client-side without touching the wire. `DS` is editable (delegation glue,
+since 2026-06-30). Empty content, missing name, TTL below 30s also exit 5.
 **`--wait` is also validated client-side before the wire op** — a bad
 `--wait` value never leaves a record behind. (This was a real bug fixed
 2026-05-27 in d8fe958 — the smoke's `bad --wait → ExitUsageError`
@@ -157,9 +163,14 @@ Properties to internalise:
 - **Safe by construction.** `--prune` will NEVER remove:
   - Apex `NS` (would orphan the zone)
   - `SOA` (server-managed)
-  - `DNSKEY` / `DS` / `RRSIG` / `NSEC*` (DNSSEC, server-managed)
-  - Anything outside `IsEditable()` (8 types only: A, AAAA, CNAME, MX,
-    NS, TXT, SRV, CAA, PTR)
+  - `DNSKEY` / `RRSIG` / `NSEC*` / `CDS` / `CDNSKEY` (DNSSEC, server-managed)
+  - `DS` - editable INTERACTIVELY (add/rm/set/ls) but excluded from
+    apply/export: a delegation DS may be daemon-managed by ds-push, and
+    a zone's own DS is published via the read-only CDS. apply rejects a
+    DS in YAML with a pointer back to `knotctl add`.
+  - Anything outside `IsReconcilable()`. Interactive `IsEditable()` is 10
+    types (A, AAAA, CNAME, MX, NS, TXT, SRV, CAA, PTR, DS); apply's
+    reconcilable set is those 9 minus DS.
 - **Multi-value-aware.** `content: [a, b, c]` becomes one rrset of three
   records, replaced atomically via SetMany.
 - **Apex via `@`.** Resolves to the zone name.
@@ -414,14 +425,24 @@ Rare with Knot (primary serves authoritative immediately). Possibilities:
 
 - **Not a Cloudflare-API client.** `erfi.dev` + `erfianugrah.com` are still
   on CF; use the `cloudflare` skill / wrangler / dnscontrol for those.
-- **Not the future HTTP API.** M2 (knot-api shim) will expose a CF-shape
-  REST API on `:8080`. `knotctl` is the wire-level CLI today; the JSON
-  shape matches what M2 will return, so scripts port over.
-- **Not for DNSSEC ops.** Knot's KASP manages keys + signing automatically.
-  DNSKEY/RRSIG/NSEC3 records can't be edited via `knotctl` (uneditable-type
-  validation rejects them client-side, exit 5). Same applies to `apply
-  --prune` — DNSSEC RRs in the AXFR response are filtered out before
-  the diff, so they're never candidates for removal.
+- **Not the HTTP API.** The CF-shape REST API is now **live** in-process on
+  the `glory-hole` Fly app at `https://knotea.erfi.io:2096/client/v4`
+  (bearer-token, argon2id side-store, 16 endpoints over the same loopback
+  knotd). `knotctl` is the wire-level CLI; the JSON shape matches, so scripts
+  port over. Full schema + scopes + codegen pipeline:
+  `~/knotea/authority/docs/api.md`.
+- **Mostly not for DNSSEC ops.** Knot's KASP manages keys + signing
+  automatically. DNSKEY/RRSIG/NSEC3/CDS/CDNSKEY can't be edited via
+  `knotctl` (uneditable-type validation rejects them client-side, exit
+  5), and `apply --prune` filters them out of the AXFR diff. The ONE
+  exception is `DS`: a child's delegation DS (e.g. `lab.erfi.io` DS
+  inside `erfi.io`) IS interactively editable - `knotctl add/rm/set/ls
+  <child> DS "<keytag> <alg> <digesttype> <digest>" --zone=<parent>`.
+  It is still excluded from `apply`/`export` (interactive-only). Since
+  2026-06-30 lab.erfi.io's DS into erfi.io is also auto-reconciled on
+  KSK rollover via same-server ds-push (confdb `remote[parent_loopback]`
+  + `zone[lab.erfi.io].ds-push`) - see gotcha #28 in
+  `~/knotea/authority/AGENTS.md`.
 - **Not for zone-level config** (NS, SOA at apex, TSIG keys, ACLs). Use
   `knotc conf-set` from the server side via the `knot-dns` skill. `apply
   --prune` will NOT remove apex NS or SOA even if they appear in the
