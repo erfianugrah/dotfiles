@@ -46,6 +46,11 @@ import { fmtDuration, makeSlug, makeSessionName, decideWaitResult, computeStatus
 import { decideInjection, matchesIntent, looksLikeSpec } from "../extensions/superpowers.ts";
 import { _internals as osint } from "../extensions/osint.ts";
 import { safePath } from "../extensions/docs.ts";
+import {
+  scan as scanAsciiPunct,
+  isProsePath as isAsciiProsePath,
+  WRITE_BASH as ASCII_WRITE_BASH,
+} from "../extensions/ascii-punctuation-guard.ts";
 import { extractCdTargets, decideTarget } from "../extensions/cd-agents-reload.ts";
 import { rewriteClipboardPaths, shrunkSibling } from "../extensions/clipboard-image-shrink.ts";
 import { prune, hasImageContent, type AnyMessage } from "../extensions/tool-output-prune.ts";
@@ -2860,5 +2865,92 @@ describe("confidential-write-guard.scanForBlocked", () => {
     expect(scanForBlocked("project a.b.c here", ["a.b.c"])).not.toBeNull();
     // the dots are literal, so a different separator must NOT match
     expect(scanForBlocked("project axbxc here", ["a.b.c"])).toBeNull();
+  });
+});
+
+describe("ascii-punctuation-guard / scan", () => {
+  test("detects em dash and maps to ASCII hyphen", () => {
+    const found = scanAsciiPunct("foo \u2014 bar");
+    expect(found.length).toBe(1);
+    expect(found[0].name).toContain("em dash");
+    expect(found[0].ascii).toBe("-");
+    expect(found[0].count).toBe(1);
+  });
+
+  test("counts multiple occurrences of the same char", () => {
+    const found = scanAsciiPunct("a \u2014 b \u2014 c \u2014 d");
+    expect(found.length).toBe(1);
+    expect(found[0].count).toBe(3);
+  });
+
+  test("detects en dash, smart quotes, and ellipsis together", () => {
+    const found = scanAsciiPunct("range 1\u20135, \u201Cquoted\u201D and \u2018single\u2019\u2026");
+    const names = found.map((f) => f.name).join(" ");
+    expect(names).toContain("en dash");
+    expect(names).toContain("smart double quote");
+    expect(names).toContain("smart single quote");
+    expect(names).toContain("ellipsis");
+  });
+
+  test("maps smart quotes and ellipsis to correct ASCII", () => {
+    const found = scanAsciiPunct("\u201Cx\u201D \u2018y\u2019 z\u2026");
+    const byName = Object.fromEntries(found.map((f) => [f.name.split(" (")[0], f.ascii]));
+    expect(byName["smart double quote"]).toBe('"');
+    expect(byName["smart single quote"]).toBe("'");
+    expect(byName["ellipsis"]).toBe("...");
+  });
+
+  test("detects non-breaking space", () => {
+    const found = scanAsciiPunct("a\u00A0b");
+    expect(found.length).toBe(1);
+    expect(found[0].ascii).toBe(" ");
+  });
+
+  test("returns empty for clean ASCII text", () => {
+    expect(scanAsciiPunct("plain ascii - no smart punctuation here...")).toEqual([]);
+  });
+
+  test("returns empty for empty string", () => {
+    expect(scanAsciiPunct("")).toEqual([]);
+  });
+
+  test("includes a masked context snippet for the first hit", () => {
+    const found = scanAsciiPunct("the quick brown fox \u2014 jumps over");
+    expect(found[0].sample.length).toBeGreaterThan(0);
+  });
+});
+
+describe("ascii-punctuation-guard / isProsePath", () => {
+  test("flags markdown and text extensions as prose", () => {
+    expect(isAsciiProsePath("README.md")).toBe(true);
+    expect(isAsciiProsePath("notes.txt")).toBe(true);
+    expect(isAsciiProsePath("doc.mdx")).toBe(true);
+  });
+
+  test("flags paths under a docs/ directory", () => {
+    expect(isAsciiProsePath("src/docs/guide.html")).toBe(true);
+    expect(isAsciiProsePath("doc/page.html")).toBe(true);
+  });
+
+  test("does not flag code files", () => {
+    expect(isAsciiProsePath("src/index.ts")).toBe(false);
+    expect(isAsciiProsePath("main.go")).toBe(false);
+  });
+});
+
+describe("ascii-punctuation-guard / WRITE_BASH", () => {
+  test("matches commands that persist text", () => {
+    expect(ASCII_WRITE_BASH.test('git commit -m "msg"')).toBe(true);
+    expect(ASCII_WRITE_BASH.test("echo hi >> file")).toBe(true);
+    expect(ASCII_WRITE_BASH.test("echo hi > file")).toBe(true);
+    expect(ASCII_WRITE_BASH.test("foo | tee file")).toBe(true);
+    expect(ASCII_WRITE_BASH.test("sed -i 's/a/b/' file")).toBe(true);
+    expect(ASCII_WRITE_BASH.test("git tag -a v1 -m x")).toBe(true);
+  });
+
+  test("ignores read-only / printing commands", () => {
+    expect(ASCII_WRITE_BASH.test("echo hello")).toBe(false);
+    expect(ASCII_WRITE_BASH.test("rg pattern src/")).toBe(false);
+    expect(ASCII_WRITE_BASH.test("git log --oneline")).toBe(false);
   });
 });
