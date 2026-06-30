@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.79.10",
+  "lastChangelogVersion": "0.80.2",
   "defaultProvider": "opencode",
   "defaultModel": "claude-opus-4-8",
   "theme": "opencode-dark",
@@ -19,6 +19,6 @@
       "maxRetryDelayMs": 60000
     }
   },
-  "hideThinkingBlock": true,
+  "hideThinkingBlock": false,
   "packages": []
 }
