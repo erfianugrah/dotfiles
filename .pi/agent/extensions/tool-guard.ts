@@ -140,7 +140,20 @@ type BlockRule = {
   pattern: RegExp;
   reason: string;
   segment?: boolean; // if true, test against each `&&|;|||` segment, not the whole command
+  // Optional predicate that overrides `pattern` for the match decision. Used
+  // when a bare regex can't express the exemption (e.g. ANSI-C `$'...'` spans).
+  // Receives the segment (or whole command when segment is falsy).
+  test?: (seg: string) => boolean;
 };
+
+// Strip bash ANSI-C quoting spans (`$'...'`) from a command. Inside `$'...'`
+// bash DOES interpret `\uXXXX`, so any escape there is correct usage and must
+// not trip the unicode_escape_in_bash guard. A span runs from `$'` to the next
+// unescaped `'`. Everything else (double-quoted / unquoted text where the
+// escape stays literal) is preserved for the guard to inspect.
+export function stripAnsiCSpans(s: string): string {
+  return s.replace(/\$'(?:[^'\\]|\\.)*'/g, "");
+}
 
 const BASH_RULES: BlockRule[] = [
   {
@@ -324,7 +337,11 @@ const BASH_RULES: BlockRule[] = [
     // (ANSI-C quoting). Most often appears in `git commit -m "... \u2014 ..."` and
     // ends up in the actual commit message verbatim. We guard the COMMON case
     // (\uXXXX not preceded by $') and let the rare correct usage through.
-    pattern: /(?<!\$')\\u[0-9a-fA-F]{4}/,
+    pattern: /\\u[0-9a-fA-F]{4}/,
+    // Exempt escapes inside `$'...'` ANSI-C spans (bash interprets those
+    // correctly, including multiple escapes in one span like `$'\u2014\u2026'`).
+    // The old `(?<!\$')` lookbehind only spared the FIRST escape after `$'`.
+    test: (seg) => /\\u[0-9a-fA-F]{4}/.test(stripAnsiCSpans(seg)),
     reason:
       "Bash doesn't interpret `\\uXXXX` JS-style unicode escapes inside regular quotes — they end up as literal 6-char sequences in your output (most painfully in `git commit -m`). Two correct options: (1) paste the actual character into the string (em-dash —, en-dash –, arrow →, etc.); (2) use bash ANSI-C quoting: `$'\\u2014'`. Recommended: just use the real character.",
     segment: false,
@@ -501,7 +518,8 @@ export default function (pi: ExtensionAPI) {
         if (DISABLED.has(rule.id)) continue;
         const probe = rule.segment ? splitSegments(command) : [command];
         for (const seg of probe) {
-          if (rule.pattern.test(seg)) {
+          const matched = rule.test ? rule.test(seg) : rule.pattern.test(seg);
+          if (matched) {
             return {
               block: true,
               reason: `tool-guard[${rule.id}]: ${rule.reason}`,

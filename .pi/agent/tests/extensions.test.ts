@@ -13,6 +13,7 @@ import {
   splitSegments,
   extractPatchPaths,
   checkReformulationLoop,
+  stripAnsiCSpans,
 } from "../extensions/tool-guard.ts";
 import { parsePatch, renderApplyDiffs } from "../extensions/apply-patch.ts";
 import {
@@ -93,7 +94,50 @@ describe("tool-guard.splitSegments", () => {
   });
 });
 
-// ── tool-guard: apply_patch path extraction ───────────────────────────────
+// ── tool-guard: ANSI-C span stripping (unicode_escape_in_bash exemption) ───
+describe("tool-guard.stripAnsiCSpans", () => {
+  // The unicode_escape_in_bash rule blocks \uXXXX outside $'...' but must
+  // exempt escapes INSIDE $'...' (bash interprets those). The predicate is
+  // /\\u[0-9a-fA-F]{4}/.test(stripAnsiCSpans(seg)) -- mirror it here.
+  const blocks = (seg: string) => /\\u[0-9a-fA-F]{4}/.test(stripAnsiCSpans(seg));
+  const BS = "\\u2014"; // literal backslash + u2014
+  const BS2 = "\\u2026";
+
+  test("strips a single ANSI-C span", () => {
+    expect(stripAnsiCSpans(`printf $'${BS}'`)).toBe("printf ");
+  });
+
+  test("strips multiple escapes within one span", () => {
+    expect(stripAnsiCSpans(`echo $'${BS}|${BS2}'`)).toBe("echo ");
+  });
+
+  test("leaves double-quoted text intact", () => {
+    const s = `echo "${BS}"`;
+    expect(stripAnsiCSpans(s)).toBe(s);
+  });
+
+  test("FOOTGUN: double-quoted escape in commit msg still blocks", () => {
+    expect(blocks(`git commit -m "fix ${BS} thing"`)).toBe(true);
+  });
+
+  test("ANSI-C multi-escape no longer false-positives", () => {
+    expect(blocks(`grep -nP $'${BS}|${BS2}' f.md`)).toBe(false);
+  });
+
+  test("ANSI-C single escape exempt", () => {
+    expect(blocks(`printf $'${BS}'`)).toBe(false);
+  });
+
+  test("mixed: ANSI-C ok but double-quoted escape present -> blocks", () => {
+    expect(blocks(`echo $'a${BS}b' && echo "${BS}"`)).toBe(true);
+  });
+
+  test("no backslash before u is not a match", () => {
+    expect(blocks(`rg -c 'u2014' file`)).toBe(false);
+  });
+});
+
+// ── tool-guard: apply_patch path extraction ────────────────────────
 
 describe("tool-guard.extractPatchPaths", () => {
   test("extracts Add/Update/Delete paths from envelope", () => {
