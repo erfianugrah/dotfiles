@@ -30,13 +30,21 @@ When the user answers, record it via the `confidential_terms` tool (action `bloc
 - **Public remotes especially**: a confidential name on a public repo's default branch is effectively disclosed; removing it needs a history rewrite + force-push + (with forks) a GitHub Support request to GC the fork-network object store. Asking first is far cheaper.
 - Never echo a term you are redacting back into chat just to explain the redaction — refer to it obliquely.
 
-# Output: real Unicode characters
+# Output: characters in committed / copy-pasted text
 
-In ALL text output — response text, tool inputs (bash commands, commit messages, heredoc bodies, file contents, planning notes, prose) — use the actual Unicode character directly. Em-dash, en-dash, arrows, ellipsis, bullets, check / cross marks: paste the real glyph.
+Two rules, do not conflate them:
 
-The terminal, bash, git, and pi's renderer all preserve real UTF-8. They do NOT interpret JS-style six-character backslash-u escape sequences as Unicode. Such sequences pass through verbatim as ugly six-character strings in commit messages, terminal output, and committed files.
+1. **Never emit JS-style six-character backslash-u escape sequences in output.** The terminal, bash, git, and pi's renderer preserve real UTF-8 but do NOT interpret `\uXXXX` — such sequences pass through verbatim as ugly six-character strings in commit messages, terminal output, and committed files. Paste the actual character. Exceptions where the escape form is correct: source code where the language runtime interprets the escape (TypeScript / JavaScript / JSON string literals etc.), and bash ANSI-C quoting in dollar-single-quote form.
 
-Exceptions where the escape form is correct: source code where the language runtime interprets the escape (TypeScript / JavaScript / JSON string literals etc.), and bash ANSI-C quoting in dollar-single-quote form.
+2. **Use ASCII for mojibake-prone "smart" punctuation in any text that gets committed or copy-pasted** (commit messages, heredoc bodies, file contents, PR/issue bodies, planning notes, prose). These chars mis-decode as garbage (`ÔÇö …`) when pasted into non-UTF-8 web composers, so write the ASCII equivalent instead:
+   - em-dash / en-dash → `-` (or `--`)
+   - smart quotes `‘ ’ “ ”` → `'` / `"`
+   - ellipsis `…` → `...`
+   - non-breaking space → regular space
+
+   The `ascii-punctuation-guard` extension hard-blocks these in write/edit/write_stream/apply_patch payloads and write/commit bash commands; following this rule keeps you out of the block→resubmit loop. Kill switch: `PI_ASCII_GUARD_OFF=1`.
+
+Glyphs WITH no clean ASCII equivalent that are usually the intended character — arrows (`→ ←`), bullets (`•`), box-drawing, check / cross marks (`✓ ✗`) — are NOT guarded: paste the real glyph as before. (In response text / chat — which the guard cannot see — real em-dashes are fine too; the ASCII rule bites specifically on persisted + pasted artifacts.)
 
 <!--
 Tool-routing rules live in ~/.pi/agent/AGENTS.md (everything BEFORE the
