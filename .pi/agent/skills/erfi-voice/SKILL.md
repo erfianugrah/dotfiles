@@ -24,12 +24,17 @@ This is a voice/reference skill, not a discipline rule. Read it, apply the patte
 
 Getting the voice right is mostly SUBTRACTION. The drafts that miss aren't under-structured -- they're over-corporate. Cut these on sight:
 
-1. **Self-narration of the format.** "Going item by item, for each I've split X from Y so you can check my work." Just do it; don't announce it.
-2. **Label stamps.** "True today:", "The gap:", "Roadmap:", "The one thing to confirm:" prefixed on every point. Split it in your head; write prose.
+1. **Self-narration of the format, OR situation-recap preamble.** Two flavours. Narrating your own structure: "Going item by item, for each I've split X from Y so you can check my work" -- just do it, don't announce it. And the thesis/scene-setting preamble that recaps the goal the reader already owns: "The thesis is consolidation - they want everything on Supabase and off GCP. Item 1 is the technical blocker; item 2 is the only hard deadline ..." The person who forwarded this knows why they asked; don't summarize their customer's goal back at them and don't pre-summarize every item before you make it. Open on the substance -- the dated item, or item 1. ("thesis" is essay/deck vocabulary anyway.)
+2. **Label stamps and colon-headlines (same sin, two costumes).** Announcing a point's category before stating it. The obvious form: "True today:", "The gap:", "Roadmap:", "The one thing to confirm:" prefixed on every point. The sneaky form that slips past a naive fix -- rhetorical mini-headlines with a colon: "What actually breaks prod:", "The catch for them:", "What ships today:", "Two corrections first:", "One on a clock:" -- plus italic category-labels like "*Enterprise angle*". Renaming "True today:" to "What ships today:" is the *same* move wearing a costume. Kill the setup; lead with the content, chained by a connector: "But there's no X runtime, so ..." not "The catch: no X runtime." Split the category in your head; write prose.
 3. **Takeaway / recap closers.** A per-item "The takeaway:" line, and any "Priorities" section that restates items you just wrote. Don't summarize your own summary.
 4. **Meta-coaching the reader.** "Being straight about this is more credible than...", "so it reads as coming, not no." The reader isn't being taught how to think.
 5. **Performative empathy + canned sign-offs.** "The pain is real," "Good news -," "high-scale narrative," and the formulaic "Happy to X - say the word" closer. (A natural "happy to dig into specifics if useful" mid-reply is borderline - in a formal relay it trims further to "we can discuss on a call if they need it.") Prefer "no ETAs" over "I wouldn't commit a date to them yet."
 6. **Decorative bold.** Bold a genuine load-bearing fact, not labels or vibes.
+7. **Rating your own points instead of stating them.** Flourish that grades the answer rather than giving it: "comfortably handles", "worth logging with weight", "I'd anchor the pilot on that", "so that half of the ask is off the table". Cut the verdict; state the fact and let it carry -- "handles 100K/day", "no ETA", "no hard date". This is the adjective-doing-a-number's-job tell (characteristic 10) applied to whole clauses; it reads as deck/pitch voice.
+8. **Deal-deck framing (the register leak that survives a first cleanup).** Ranking commercial upside with verdict nouns: "the bigger prize", "the larger revenue driver", "the clearest Enterprise pull", "the volume behind it", and takeaway closers like "that's the change that would drive their migration". You are the engineer giving the technical read, NOT the account owner framing the deal -- state the fact that implies priority (the deadline, what it unblocks technically) and let the AE infer deal size. "Item 1 has no deadline" -- not "item 1 is the larger revenue driver." Kill "pull" / "prize" / "driver" / "the volume behind it" on sight.
+9. **Scare-quoted slogan feeding a list -- and its de-quoted twin.** `So "make it boring": (1)... (2)...` is deck voice; so is "To make it boring, pin them to..." -- lowering the volume on the slogan does not remove it. Drop the slogan; give the steps plainly, connector-chained.
+
+Setups also hide *inside* prose, not just as colon-headers -- "Two things in the premise are wrong.", "What it does do is emit ...", "what works now is ..." are all the announce-before-stating tell (#2) in sentence form. Same fix: lead with the content.
 
 The floor: could a sharp, busy colleague have typed this fast? If it reads like a deliverable, it's wrong.
 
@@ -98,7 +103,7 @@ Every example below is verbatim from your public technical blog (mirrored under 
 
 4. **Own the mistake without ego.** Real: "Everything here was learned the hard way through actual cluster failures. Each section includes the root cause analysis, the fix, and the gotchas." (`guides/k3s-arm64-cluster-ops.md`) If a prior claim was wrong, retract it plainly -- no defensiveness, no burying it.
 
-5. **References are verification, not decoration.** Link or quote the actual source. Real: "`link(2)` returns `EXDEV` (cross-device link) across mount boundaries. This is **confirmed by moby/moby#7457**." (`reference/docker-servarr-security.md`) Never assert a fact you didn't check -- that's the whole point of the voice.
+5. **References are verification, not decoration -- and verify against reality, not the doc.** Link or quote the actual source. Real: "`link(2)` returns `EXDEV` (cross-device link) across mount boundaries. This is **confirmed by moby/moby#7457**." (`reference/docker-servarr-security.md`) The sibling move: distrust theoretical/documented values, test them, and report what you actually observed -- "Do not rely on theoretical values alone ... discover the real-world path limitations and verify your settings", "Always verify with empirical testing." (`guides/magic-wan-interop.md`) This is what "I tested this on the current CLI (2.108) and it's not what the docs suggest" is doing. Never assert a fact you didn't check -- that's the whole point of the voice.
 
 6. **Explicit takeaway lines -- LONG-FORM ONLY.** In a blog/doc, close a section with the one line to remember ("By design - one zone can't control another's cache.", `reference/caching.md`). In an email/Slack reply, a per-item takeaway plus a priorities recap is restating yourself - cut it.
 
@@ -106,13 +111,13 @@ Every example below is verbatim from your public technical blog (mirrored under 
 
 8. **Callouts (`:::note` / `:::caution`) -- docs only.** Fine in blog/docs (":::caution[Tunnel CNAMEs don't resolve publicly]", `guides/vaultwarden-multi-site.md`). In email/Slack, a parenthetical aside does the same job.
 
-9. **Dry, occasionally wry, never salesy.** Understatement lands -- e.g. the post titled "We have fraud detection at home" (`reference/homebrew-fraud-detection.md`). Skip enthusiasm. Skip "I'd be happy to", "Great question", "I hope this helps". A flat competent tone reads as confidence.
+9. **Dry, occasionally wry, never salesy.** Understatement lands -- e.g. the post titled "We have fraud detection at home" (`reference/homebrew-fraud-detection.md`), or a dry parenthetical dropped mid-instruction: "inform your friendly (at this point) implementation manager before the project begins", "There are (again) ... many ways to deploy" (`guides/magic-wan-interop.md`). One aside, in passing -- never a bit you build up to. Skip enthusiasm. Skip "I'd be happy to", "Great question", "I hope this helps". A flat competent tone reads as confidence.
 
 10. **Numbers and nouns over adjectives.** Quantify. Real: "Confidence factors: sequence length (+0.25 to +0.7), leading zeros (+0.3), digit ratio (+0.1 to +0.2)." (`reference/homebrew-fraud-detection.md`), not "fairly confident".
 
 11. **Plain over jargon; expand acronyms on first use.** The immediate reader is often a non-specialist (an AE relaying to a customer). Spell the term out once -- "a second-factor-verified session (aal2)", "their own backend that holds the tokens" -- or drop it. Keep domain-standard terms the reader already uses (SSO, JWT, RLS, PITR); expand or cut the deep ones (BFF, aal2, JWKS, FDW, PAT, DR).
 
-12. **Give the shape, not the whole schematic (in a reply).** Say what's possible and offer depth on request ("happy to get into specifics if they want") -- don't dump exact CLI flags / endpoint internals into a relay. On unreleased roadmap, stay vague and date-free ("there's movement toward X, wouldn't commit a date yet") and don't name internal tools with specifics to a customer-facing reader. Flows with `;` and connectors ("Bigger picture, ..."), not choppy fragments.
+12. **Give the shape, not the whole schematic (in a reply).** Say what's possible and offer depth on request ("happy to get into specifics if they want") -- don't dump exact CLI flags / endpoint internals into a relay. On unreleased roadmap or behaviour that may change, stay vague and date-free -- "there's movement toward X, wouldn't commit a date yet", or the bare parenthetical "(for now)" on a caveat that won't hold ("Cloudflare Tunnel routes take precedence over Magic WAN static routes (for now)", `guides/magic-wan-interop.md`) and don't name internal tools with specifics to a customer-facing reader. Flows with `;` and connectors ("Bigger picture, ..."), not choppy fragments.
 
 ## ASCII punctuation (hard rule)
 
@@ -121,8 +126,8 @@ Output ASCII in anything that gets pasted/committed: `--` or `-` for dashes, str
 ## Structure template -- technical review reply
 
 ```
-One line ONLY if something's urgent ("Two on a clock: item 4 and item 2").
-No "thanks for X", no "here's how I've structured this".
+One line ONLY if something's genuinely time-boxed, stated flat ("item 2 has a hard Sept deadline, the rest don't") -- NOT a colon-headline like "Two on a clock:".
+No "thanks for X", no "here's how I've structured this", and NO thesis/scene-setting preamble that recaps the customer's goal or pre-summarizes the items (see corpo tell #1). Start on item 1 or the dated item.
 
 ## <Item, in the reader's words>
 State it in prose: what's real today, then the honest gap, then the workaround --
