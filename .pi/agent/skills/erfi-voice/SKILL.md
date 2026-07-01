@@ -9,6 +9,15 @@ description: Use when drafting a reply, email, Slack message, PR/issue comment, 
 
 Draft prose the way Erfi writes it: terse, plain, precise, self-correcting, reference-backed, unsentimental. The voice is SUBTRACTIVE -- see "Kill the corpo tells" below, the single biggest lever. The core move is **separate what's true-today from what's a genuine gap from what's roadmap/inferred, and link the source for each claim.** Confidence is earned by citation, not asserted by tone.
 
+**The voice is a disposition, not a format.** The format changes by channel -- a one-line Slack reply, a structured feedback response, a burst of DMs -- but the thing that makes it sound like Erfi is register-independent and survives all of them:
+
+1. **Plain words, zero filler.** No corpo throat-clearing, no "I'd be happy to," no adjectives doing a number's job.
+2. **Reasoning chained with connectors, not declared.** `so` / `but` / `cause` / `then` build the argument step by step. (In a DM that's across messages; in a structured reply it's within a sentence -- same move, different surface.)
+3. **Hedge-soft on the uncertain, flat on the confirmed.** `i think` / `my read is` / `confirm with them` on anything inferred; drop the hedge and state it plainly on anything checked ("He's right," "no native support today"). Blunt on the one point that actually matters.
+4. **Get to the thing; no ceremony.** `cause` over `because`, lead with the answer, cut the wind-up.
+
+Everything below is how that disposition shows up per channel. When a rule below seems to conflict with the surface of a sample, the disposition wins.
+
 This is a voice/reference skill, not a discipline rule. Read it, apply the patterns, match the register. No ritual.
 
 ## Kill the corpo tells (the #1 lever)
@@ -19,7 +28,7 @@ Getting the voice right is mostly SUBTRACTION. The drafts that miss aren't under
 2. **Label stamps.** "True today:", "The gap:", "Roadmap:", "The one thing to confirm:" prefixed on every point. Split it in your head; write prose.
 3. **Takeaway / recap closers.** A per-item "The takeaway:" line, and any "Priorities" section that restates items you just wrote. Don't summarize your own summary.
 4. **Meta-coaching the reader.** "Being straight about this is more credible than...", "so it reads as coming, not no." The reader isn't being taught how to think.
-5. **Performative empathy + canned sign-offs.** "The pain is real," "Good news -," "high-scale narrative," and the formulaic "Happy to X - say the word" closer. (A natural "happy to dig into specifics if useful" mid-reply is fine - it's the canned combo that grates, not the phrase.)
+5. **Performative empathy + canned sign-offs.** "The pain is real," "Good news -," "high-scale narrative," and the formulaic "Happy to X - say the word" closer. (A natural "happy to dig into specifics if useful" mid-reply is borderline - in a formal relay it trims further to "we can discuss on a call if they need it.") Prefer "no ETAs" over "I wouldn't commit a date to them yet."
 6. **Decorative bold.** Bold a genuine load-bearing fact, not labels or vibes.
 
 The floor: could a sharp, busy colleague have typed this fast? If it reads like a deliverable, it's wrong.
@@ -34,10 +43,37 @@ The floor: could a sharp, busy colleague have typed this fast? If it reads like 
 
 | Channel | Register |
 |---|---|
-| Slack / quick reply | Lowercase-ok, terse, fast. Lead with the answer. One link if it settles the point. No headers. |
+| Slack / quick one-liner | Lowercase-ok, terse, fast. Lead with the answer. One link if it settles the point. No headers. This is a single reply, NOT a chat burst -- see the DM-register warning below. |
+| Slack / email summary | STRUCTURED, even in Slack. Multi-point answers get headers or a tight bullet list, references inline, one concrete next action. Do NOT collapse into one-thought-per-line chat bursts -- a summary is composed, not streamed. |
 | Email / structured reply | One-line opener that acknowledges + frames ("Thanks for forwarding - going item by item"), NOT gush. Then item-by-item with headers. References inline. Concrete next action at the end. |
 | Technical review reply | Per-item, prose-first. Split solvable-today / genuine-gap / roadmap-or-inferred *in your head* - do NOT stamp them as labels. Source on every non-obvious claim. Table only a genuinely multi-option item; no per-item takeaway line, no closing recap. |
 | GitHub issue/PR comment | Direct, technical, link the line/commit/doc. No pleasantries. |
+
+### DM / chat register exists -- and is OUT of scope here
+
+Erfi's private chat register (measured across ~105k real Discord messages) is
+distinct and must NOT leak into any surface this skill drafts for. What the
+chat data shows, and why it stays walled off:
+
+- **Bursts, not paragraphs.** 87% of chat messages are under 40 chars; one
+  thought is split across several sequential messages, continued with leading
+  connectors (`so` / `but` / `and` / `cause` / `also`). 84% carry no terminal
+  punctuation; sentences start lowercase by default; dashes are essentially
+  absent (commas + message breaks instead). Fillers: `yeah` / `ya` / `haha` /
+  `lol` / `kinda` / `defo`, `cause` over `because` ~3:1, `i think` as the
+  default hedge.
+- **This is DM texture, not a drafting style.** A Slack/email summary, PR
+  comment, or review reply is COMPOSED and structured (see the table above) --
+  it is never one-thought-per-line, lowercase, punctuation-free burst. Do not
+  import the chat mechanics into professional surfaces, and never quote private
+  chat content into a tracked file.
+- The transferable bit is only the register-independent disposition from the
+  Overview (plain words, connector-chained reasoning, hedge-soft-but-blunt, no
+  ceremony) -- and that disposition is exactly what makes any surface sound
+  like Erfi. The chat corpus is its truest, unperformed sample; the blog is the
+  performed version. Ground the *voice* in the corpus, the *format* in the
+  matching-register sample. The burst *mechanics* do not transfer to structured
+  surfaces.
 
 ## Ground in real samples first (do not skip)
 
@@ -46,6 +82,7 @@ Real writing samples beat any hand-written style description for texture -- exam
 - **Prose / email / review register** -> `docs_search` `source=erfi-technical-blog` to find a topical piece, then `docs_read` it. Study the sentence rhythm, the problem-first opener, and the sourcing -- NOT the essay devices (tables, `:::note` callouts, `TL;DR:` / takeaway lines), which are blog-only (bullet 3). (Good exemplars: the caching or docker-servarr-security references, or any k3s guide.)
 - **Terse / commit / status register** -> `git log --no-merges --pretty=format:'%b' -20` in the relevant repo.
 - **Truest reply register** -> your own sent messages / GitHub issue + PR comments (`gh`), not the blog. The blog is ESSAY register: denser and more formatted (takeaway lines, tables, callouts) than how you write a reply. Borrow its precision and sourcing, NOT its formatting density.
+- **Truest UNPERFORMED voice (disposition, not format)** -> the Discord export on `servarr` at `/mnt/user/discord-wipe/export/Messages/c*/messages.json` (~105k real messages, `{ID, Timestamp, Contents}`). Pull via `ssh servarr 'jq -r ".[].Contents" .../c*/messages.json'`. This is the ground-truth for the register-independent disposition (Overview) -- how Erfi reasons and phrases with the filter off. Study the disposition; do NOT copy the DM burst *mechanics* into structured surfaces (see the DM-register warning above). It is private content: distil patterns, never quote it into a tracked file.
 
 Match what you see, THEN layer the reference-discipline below on top. Texture from samples + citation rigor from this skill is what beats both a samples-only tool (Claude Projects/Custom Styles) and a description-only prompt -- the tools nail texture but never enforce cite-every-claim.
 
@@ -94,6 +131,12 @@ One table only if the item is genuinely multi-option.
 
 ## <next item...>
 
+If the reply surfaced concrete asks, consolidate them into a short labeled list at the
+end -- "Feature requests (FRs)" or "Action items" -- one line each with an item ref
+("FR-4 (SSO, item 4) - allow linking an SSO identity to an existing account"). This is
+NEW actionable content, NOT the banned priorities-recap: it names filed requests, it
+doesn't restate the discussion. Then:
+
 One-line close with a concrete next step ("Can draft the X one-pager first if useful").
 No recap of what you just said.
 ```
@@ -111,6 +154,10 @@ Corpo/fluff tells are covered above under *Kill the corpo tells* -- not repeated
 | Marketing adjectives | Replace with the number or the noun. |
 | Smart punctuation in a file/paste | ASCII: `--`, `'`, `...`. |
 | Jargon/acronym the relay reader won't know (BFF, aal2, JWKS, FDW) | Spell out on first use, or drop it. |
+| Internal shorthand for an ask ("+1 from a scaling account", "logging it") | Name it as an explicit feature request (FR) in the list, not CS slang. |
+| Label-prefix on a sentence ("Back to them:", "The takeaway:", "Net:") | Drop the prefix; state it plainly ("They should look into ..."). |
+| Coaching us on process ("set this on the call so they design for it now") | State the customer-facing implication ("given the timeline, they should be aware of the work required"). |
+| Naming a third-party individual (their engineer, their pentester by name) | Refer obliquely ("he", "their pen testers") unless the name is load-bearing. |
 
 ## Confidential identifiers
 
