@@ -1,6 +1,6 @@
 ---
 name: sbperf
-description: Drive the user's `sbperf` CLI - a PAT-only Supabase performance analyzer (Bun/TypeScript) that fetches advisors, read-only SQL diagnostics, config, and infra metrics for a project and renders a self-contained HTML + PDF report, with optional 30-day trends accumulated to SQLite. Use when auditing/optimizing a Supabase project's performance without a DB password, generating a perf report for a project (or every project in an org), reproducing `supabase inspect` findings via the Management API instead of a `--db-url`, wiring 30-day infra trends without standing up Prometheus/Grafana, or debugging the tool's zod-at-the-boundary / API-drift-check / metrics-allowlist internals. Sibling to `supabase`, `supabase-postgres-best-practices`, `pgshift`, `fly`. Repo `~/sbperf`; runs on Bun, no build step.
+description: Drive the user's `sbperf` CLI - a PAT-only Supabase performance analyzer (Bun/TypeScript) that fetches advisors, read-only SQL diagnostics, config, and infra metrics for a project and renders a self-contained HTML + PDF report, with optional 30-day trends accumulated to SQLite. Use when auditing/optimizing a Supabase project's performance without a DB password, generating a perf report for a project (or every project in an org), reproducing `supabase inspect` findings via the Management API instead of a `--db-url`, wiring 30-day infra trends without standing up Prometheus/Grafana, or debugging the tool's zod-at-the-boundary / API-drift-check / metrics-allowlist internals. Sibling to `supabase`, `supabase-postgres-best-practices`, `sbshift`, `fly`. Repo `~/sbperf`; runs on Bun, no build step.
 ---
 
 # sbperf - PAT-only Supabase performance analyzer
@@ -223,5 +223,5 @@ with some Supabase extras - it makes the project's internal Grafana unnecessary.
 - `~/sbperf/AGENTS.md` - authoritative conventions + verified-facts log.
 - `supabase` skill - API/CLI/auth reference for the platform itself.
 - `supabase-postgres-best-practices` skill - source of the perf queries.
-- `pgshift` skill - the migration sibling; also a PAT + Management API tool.
+- `sbshift` skill - the migration sibling; also a PAT + Management API tool.
 - `design-utilitarian` skill - the report's visual ethos.

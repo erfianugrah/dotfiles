@@ -1,9 +1,9 @@
 ---
-name: pgshift
-description: Drive the user's `pgshift` CLI — a typed Bun/TypeScript orchestrator for near-zero-downtime Postgres→Postgres migration via native logical replication. Use for cross-region Supabase moves, Supabase↔self-hosted, self-hosted↔self-hosted, same-region tier changes, project splits, or Azure Database for PostgreSQL Flexible Server moves — any low-downtime PG migration where dump/restore downtime is unacceptable. Covers direct-vs-pooler IPv6 setup (`SOURCE_DB_URL` pooler + `SOURCE_REPLICATION_URL` direct), logical-replication gaps (DDL, roles, extensions, sequences, Supabase `auth`/`storage`) and the dump/restore pre-step, `auth.users` FK trap, sequence resync, WAL/slot/stuck-worker watchdogs, cutover write-stop gate, checksum reconcile, `run`/`status` CI, sandbox/live/scale validation. Sibling to `supabase`, `fly`, `infrastructure-stack`. Repo `~/pgshift`; runbook `docs/RUNBOOK.md`.
+name: sbshift
+description: Drive the user's `sbshift` CLI — a typed Bun/TypeScript orchestrator for near-zero-downtime Postgres→Postgres migration via native logical replication. Use for cross-region Supabase moves, Supabase↔self-hosted, self-hosted↔self-hosted, same-region tier changes, project splits, or Azure Database for PostgreSQL Flexible Server moves — any low-downtime PG migration where dump/restore downtime is unacceptable. Covers direct-vs-pooler IPv6 setup (`SOURCE_DB_URL` pooler + `SOURCE_REPLICATION_URL` direct), logical-replication gaps (DDL, roles, extensions, sequences, Supabase `auth`/`storage`) and the dump/restore pre-step, `auth.users` FK trap, sequence resync, WAL/slot/stuck-worker watchdogs, cutover write-stop gate, checksum reconcile, `run`/`status` CI, sandbox/live/scale validation. Sibling to `supabase`, `fly`, `infrastructure-stack`. Repo `~/sbshift`; runbook `docs/RUNBOOK.md`.
 ---
 
-# pgshift — Postgres→Postgres logical-replication migrator
+# sbshift — Postgres→Postgres logical-replication migrator
 
 Typed CLI orchestrator for **near-zero-downtime PG→PG migration** built for the
 large-database case where a plain dump/restore window is unacceptable. The engine
@@ -14,11 +14,11 @@ for the non-replicated pieces (schema, storage, functions, project config).
 It owns the one piece nothing else automates: the **data-replication state
 machine + reconciliation + WAL watchdog**.
 
-- **Repo:** `~/pgshift` — Bun runs `src/cli.ts` directly, no build step (`bun start <cmd>`).
-- **Full runbook:** `~/pgshift/docs/RUNBOOK.md` (per-phase, with abort/rollback §12).
-- **Design + every gotcha:** `~/pgshift/README.md`.
-- **Run from the repo:** `cd ~/pgshift && bun start <subcommand>`.
-- **Secrets:** loaded from `.env` (or `--env-file <path>`), AUTHORITATIVE over inherited shell vars — pgshift warns when it overrides a conflicting one, so a stale exported `SOURCE_DB_URL` can't silently point a run at the wrong DB. `--no-env-file` uses the shell env as-is.
+- **Repo:** `~/sbshift` — Bun runs `src/cli.ts` directly, no build step (`bun start <cmd>`).
+- **Full runbook:** `~/sbshift/docs/RUNBOOK.md` (per-phase, with abort/rollback §12).
+- **Design + every gotcha:** `~/sbshift/README.md`.
+- **Run from the repo:** `cd ~/sbshift && bun start <subcommand>`.
+- **Secrets:** loaded from `.env` (or `--env-file <path>`), AUTHORITATIVE over inherited shell vars — sbshift warns when it overrides a conflicting one, so a stale exported `SOURCE_DB_URL` can't silently point a run at the wrong DB. `--no-env-file` uses the shell env as-is.
 
 Read the README and RUNBOOK before a real migration — this skill is the router,
 not the full procedure.
@@ -85,7 +85,7 @@ Supabase-only commands layered on top: `config-sync` (Management-API config copy
 **IPv6 / direct-vs-pooler — the #1 topology trap.**
 Logical replication needs a **direct** connection (`db.<ref>.supabase.co:5432`);
 the **pooler cannot stream WAL**. Supabase direct hosts are **IPv6-only** (unless
-the IPv4 add-on is enabled). If pgshift runs from a non-IPv6 box: point
+the IPv4 add-on is enabled). If sbshift runs from a non-IPv6 box: point
 `SOURCE_DB_URL`/`TARGET_DB_URL` at the **IPv4 session pooler** (port 5432) for
 admin/seed/reconcile, and set **`SOURCE_REPLICATION_URL`** to the source *direct*
 host — the subscription's CONNECTION is dialed by the **target's walreceiver over
@@ -253,7 +253,7 @@ docs/RUNBOOK.md       the step-by-step runbook; §9 cutover, §12 rollback
 
 ## Siblings
 
-- **`supabase`** — the managed platform pgshift wraps (auth, storage, config, RLS, the Management API).
+- **`supabase`** — the managed platform sbshift wraps (auth, storage, config, RLS, the Management API).
 - **`fly`** — spin up an IPv6-capable VM in the target region to run replication from when your box has no IPv6.
 - **`infrastructure-stack`** — broader self-hosted compose/topology context.
-- **`software-architecture`** — pgshift follows the user's typed-step + fail-closed-gate Go/TS service pattern.
+- **`software-architecture`** — sbshift follows the user's typed-step + fail-closed-gate Go/TS service pattern.
