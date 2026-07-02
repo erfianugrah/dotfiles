@@ -18,10 +18,14 @@ Chromium PDF + a non-technical C-suite summary.
 - **Design + every gotcha:** `~/sbperf/AGENTS.md` and `~/sbperf/README.md`.
 - **Perf query source of truth:** the `supabase-postgres-best-practices` skill.
 
-The one thing it deliberately refuses: a DB password. Everything is the
-Management API + the read-only SQL runner, so it can audit a project you only
-have PAT access to. That trades a small upstream-tracking burden (covered by the
-CI API-drift check) for password-free operation.
+Two SQL tiers behind one interface (`sqlrunner.ts`): the **PAT read-only runner**
+(`supabase_read_only_user`, default - audits a customer project with no password,
+just a PAT) and an opt-in **superuser tier** via `--db-url`/`SBPERF_DB_URL`
+(`DirectSqlRunner` over `Bun.SQL`) for your own projects or any Postgres - full
+access, all schemas, multiple/non-Supabase DBs, and `pg_stat_statements_reset()`
+windowing. `--db-url` augments the PAT (API planes + metrics still use the PAT);
+the connstring is a secret and is never written to `analysis.json` (only
+`meta.sqlSource`). PAT-only stays the default so password-free audit still works.
 
 ## When to reach for it
 
@@ -37,7 +41,8 @@ CI API-drift check) for password-free operation.
 | Trends from an existing Prometheus instead | `--prometheus <url>` (alternate source) |
 | Stand up the (optional) scraper stack | `scrape-init --ref <ref>` |
 | Pick a timeframe for analytics (API/function stats) | `--interval <15min..7day>` (max ~7d; nothing else is windowed) |
-| Reproduce `supabase inspect` without a password | any of the above - sbperf is PAT-only |
+| Reproduce `supabase inspect` without a password | any of the above - PAT read-only runner (default) |
+| Full-access SQL on your own project / any PG | `--db-url <connstr>` or `SBPERF_DB_URL` (superuser tier) |
 | Postgres tuning guidance behind the findings | `supabase-postgres-best-practices` skill |
 | Manage the platform itself (projects, keys, RLS) | `supabase` skill |
 
