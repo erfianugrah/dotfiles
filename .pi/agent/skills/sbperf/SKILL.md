@@ -76,7 +76,8 @@ metrics.ts     Prometheus text parser + DISPLAY-only allowlist (curate())
 collect.ts     orchestrate all planes -> validated Analysis; captures the
                COMPLETE metrics corpus (all ~321 families, no curation)
 store.ts       SQLite history store (bun:sqlite) for the snapshot/trends path
-trends.ts      pure computeTrends: gauges + counter-derived rates
+trends.ts      pure computeTrends: gauges + counter-derived rates, with
+               read-time downsampling to ~300 points/panel (Grafana-style)
 report/render  Analysis -> self-contained HTML (utilitarian, print CSS)
 report/pdf     HTML -> PDF via headless Chromium (--print-to-pdf)
 scraper.ts     generate the alternate Prometheus+Grafana stack
