@@ -39,6 +39,7 @@ the connstring is a secret and is never written to `analysis.json` (only
 | Audit every project in the account/org | `full --all [--org <slug>]` -> `index.html` |
 | Accumulate 30-day infra trends, no Prom/Grafana | `snapshot --ref <ref>` on a schedule (see below) |
 | Trends from an existing Prometheus instead | `--prometheus <url>` (alternate source) |
+| Feed the corpus to Grafana retroactively | `export-prometheus <dir>` -> OpenMetrics -> promtool backfill |
 | Stand up the (optional) scraper stack | `scrape-init --ref <ref>` |
 | Pick a timeframe for analytics (API/function stats) | `--interval <15min..7day>` (max ~7d; nothing else is windowed) |
 | Reproduce `supabase inspect` without a password | any of the above - PAT read-only runner (default) |
@@ -84,6 +85,8 @@ collect.ts     orchestrate all planes -> validated Analysis; captures the
 store.ts       SQLite history store (bun:sqlite) for the snapshot/trends path
 trends.ts      pure computeTrends: gauges + counter-derived rates, with
                read-time downsampling to ~300 points/panel (Grafana-style)
+promexport.ts  store -> OpenMetrics (timestamped) for `export-prometheus`;
+               promtool backfills a Prometheus TSDB (retroactive Grafana)
 report/render  Analysis -> self-contained HTML (utilitarian, print CSS)
 report/pdf     HTML -> PDF via headless Chromium (--print-to-pdf)
 scraper.ts     generate the alternate Prometheus+Grafana stack
@@ -119,6 +122,13 @@ sbperf report <dir>
   them is trendable even if the current report doesn't chart it yet.
 - **`--prometheus <url>` takes precedence** over the store when both exist
   (report only fills trends from the store if no scraper trends are baked in).
+- **Retroactive Grafana**: `export-prometheus <dir> [--ref <ref>]` renders the
+  store as OpenMetrics with timestamps (all families TYPE=unknown to dodge OM
+  suffix strictness). It prints the verified backfill runbook: `promtool tsdb
+  create-blocks-from openmetrics` (two tokens) via the prom/prometheus image
+  (`--entrypoint promtool`, `--user 65534` to write the volume) imports into the
+  scrape-init stack; restart and Grafana queries history retroactively. Verified
+  vs prom/prometheus:v3.1.0. SVG trends remain the zero-infra fallback.
 
 ### Trend gotcha
 
