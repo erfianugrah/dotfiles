@@ -166,6 +166,14 @@ with some Supabase extras - it makes the project's internal Grafana unnecessary.
 - Advisors REST `/v1/projects/:ref/advisors/{performance,security}` returns
   `{ lints: [...] }` (richer than the CLI - includes INFO lints). The zod schema
   accepts `lints` **or** `results` but fails loud if neither is present.
+- KNOWN BUG (2026-07): the hosted `advisors/performance` endpoint 400s with
+  `42601 ... 'storage.buckets'` - splinter's multi-statement storage-buckets
+  lint on the prepared-statement path (supabase/cli#4965; fixed in CLI, not the
+  hosted endpoint). `advisors/security` still works. FALLBACK: with `--db-url`,
+  sbperf runs the vendored `splinter.sql` itself over the simple-query protocol
+  (`splinter.ts` + `DirectSqlRunner.runMulti`) and fills `advisors.performance`
+  from it - so perf lints survive the hosted bug. Verified live: recovered 7
+  unindexed-FK + 3 unused-index lints on a project the API returned 0 for.
 - Read-only SQL: `POST /v1/projects/:ref/database/query/read-only` runs as
   `supabase_read_only_user`; reaches `extensions.pg_stat_statements`, `pg_statio`,
   catalogs. No DB password needed.
