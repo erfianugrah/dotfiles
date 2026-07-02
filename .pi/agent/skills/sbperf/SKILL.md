@@ -36,6 +36,7 @@ CI API-drift check) for password-free operation.
 | Accumulate 30-day infra trends, no Prom/Grafana | `snapshot --ref <ref>` on a schedule (see below) |
 | Trends from an existing Prometheus instead | `--prometheus <url>` (alternate source) |
 | Stand up the (optional) scraper stack | `scrape-init --ref <ref>` |
+| Pick a timeframe for analytics (API/function stats) | `--interval <15min..7day>` (max ~7d; nothing else is windowed) |
 | Reproduce `supabase inspect` without a password | any of the above - sbperf is PAT-only |
 | Postgres tuning guidance behind the findings | `supabase-postgres-best-practices` skill |
 | Manage the platform itself (projects, keys, RLS) | `supabase` skill |
@@ -146,8 +147,13 @@ with some Supabase extras - it makes the project's internal Grafana unnecessary.
 - Metrics endpoint is a point-in-time scrape target, not a TSDB - see the trends
   section for why 30-day history must be accumulated.
 - Per-function stats: `GET .../analytics/endpoints/functions.combined-stats?
-  interval=<15min|1hr|3hr|1day>&function_id=<id>` - needs the function `id`
-  (not the slug); collect.ts aggregates the per-time-bucket rows per function.
+  interval=<window>&function_id=<id>` - needs the function `id` (not the slug);
+  collect.ts aggregates the per-time-bucket rows per function.
+- Timeframe is selectable ONLY for the analytics endpoints (API counts +
+  function stats) via `--interval` - enum `15min|30min|1hr|3hr|1day|3day|7day`,
+  max reach ~7 days (iso ranges are clamped by the API). Metrics are
+  point-in-time; pg_stat_statements is cumulative-since-reset. Longer horizons
+  need the snapshot history store.
 - `supabase inspect report` requires a `--db-url`/`--linked` (a password) and
   emits raw CSV, no findings. sbperf is PAT-only + ranked findings and adds
   advisors, metrics, RLS audit, txid wraparound, and edge-function stats the CLI
