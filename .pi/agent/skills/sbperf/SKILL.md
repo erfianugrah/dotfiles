@@ -27,6 +27,15 @@ windowing. `--db-url` augments the PAT (API planes + metrics still use the PAT);
 the connstring is a secret and is never written to `analysis.json` (only
 `meta.sqlSource`). PAT-only stays the default so password-free audit still works.
 
+**Multiple DBs** (`dbtargets.ts`): `--db-url` is repeatable and there's a
+gitignored `--db-config <file>` (JSON `[{name?,ref?,dbUrl}]`). The Supabase ref
+is auto-derived from each connstring (pooler `role.ref` username or
+`db.<ref>.supabase.co` host), so a bare list needs no `--ref`. `full` sweeps
+targets into per-DB report dirs + an `index.html`; `snapshot` records each into
+the store. Env `SBPERF_DB_URL` is the single-DB fallback (ignored when --db-url/
+--db-config are given). Per-DB failures degrade gracefully (SQL notes) rather
+than aborting the sweep.
+
 ## When to reach for it
 
 | Want to ... | Reach for |
@@ -44,6 +53,7 @@ the connstring is a secret and is never written to `analysis.json` (only
 | Pick a timeframe for analytics (API/function stats) | `--interval <15min..7day>` (max ~7d; nothing else is windowed) |
 | Reproduce `supabase inspect` without a password | any of the above - PAT read-only runner (default) |
 | Full-access SQL on your own project / any PG | `--db-url <connstr>` or `SBPERF_DB_URL` (superuser tier) |
+| Audit multiple superuser DBs in one run | repeatable `--db-url` or `--db-config <file>`; `full` -> per-DB reports + index |
 | Postgres tuning guidance behind the findings | `supabase-postgres-best-practices` skill |
 | Manage the platform itself (projects, keys, RLS) | `supabase` skill |
 
