@@ -117,6 +117,8 @@ Docs server at `docs.erfi.io` — 158 sources (docs + API specs), searchable mar
 
 **Always use custom `docs_search`, `docs_read`, `docs_grep`, `docs_find`, `docs_summary`, `docs_sources` tools.** No raw `ssh` or `Bash` for docs access.
 
+docs.erfi.io also exposes these same six tools over a remote MCP endpoint at `https://docs.erfi.io/mcp` (Streamable HTTP, stateless, read-only) for chat LLMs that can't SSH (Claude.ai / ChatGPT connectors). Pi itself keeps using the `docs_*` tools above - the MCP endpoint is for non-pi clients, so don't route docs lookups through it here.
+
 ### Sources
 
 Full list of 158 docs.erfi.io sources is at `~/.pi/agent/prompts/docs-reference.md`.
