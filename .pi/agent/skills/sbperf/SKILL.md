@@ -9,8 +9,9 @@ Generates a ranked performance-and-security report for a Supabase project using
 **only a Personal Access Token** - no superuser `--db-url`, no manual Grafana
 screenshots. It collects a **superset of the entire `supabase inspect` command
 set** (advisors, read-only SQL diagnostics, config, infra metrics, RLS audit,
-txid wraparound, edge-function stats) and renders a self-contained HTML report +
-Chromium PDF + a non-technical C-suite summary.
+txid wraparound, edge-function stats) and renders one self-contained HTML report
++ Chromium PDF (a technical + business audit pyramid). An optional standalone
+plain-language one-pager is available via the `summary` command.
 
 - **Repo:** `~/sbperf` - Bun runs `src/index.ts` directly, no build step.
 - **Run from the repo:** `cd ~/sbperf && bun run src/index.ts <cmd>`, or the
@@ -40,11 +41,13 @@ than aborting the sweep.
 
 | Want to ... | Reach for |
 |---|---|
-| Full perf/security report for one project | `full --ref <ref>` (analyze + report + summary + pdf) |
+| Full perf/security report for one project | `full --ref <ref>` (analyze + report + pdf) |
 | Just the data, no render | `analyze --ref <ref>` -> `analysis.json` |
 | Re-render HTML from existing `analysis.json` | `report <dir>` |
-| Non-technical summary for leadership | `summary <dir>` (or it's produced by `full`) |
+| Optional plain-language one-pager | `summary <dir>` (standalone; NOT emitted by `full`/`report`/`pdf`) |
+| Merge external CSV/JSON trend series | `import-trends <dir> <file...>` |
 | PDF of an existing report | `pdf <dir>` (needs Chromium on PATH) |
+| Audit a subset of projects (PAT-only) | `full --ref a,b,c` / `full --ref-file refs.txt\|.csv` -> combined org/project `index.html` (repeatable + comma/space lists + file; deduped) |
 | Audit every project in the account/org | `full --all [--org <slug>]` -> `index.html` |
 | Accumulate 30-day infra trends, no Prom/Grafana | `snapshot --ref <ref>` on a schedule (see below) |
 | Trends from an existing Prometheus instead | `--prometheus <url>` (alternate source) |
@@ -61,17 +64,43 @@ than aborting the sweep.
 
 ```
 sbperf analyze  --ref <ref> [--out <dir>]   fetch all planes -> analysis.json
-sbperf report   <dir> [--store <db>]        analysis.json -> report.html + summary.html
-sbperf summary  <dir>                        -> summary.html (non-technical)
-sbperf pdf      <dir>                        -> report.pdf + summary.pdf (needs Chromium)
-sbperf full     --ref <ref>                  analyze + report + summary + pdf
+sbperf report   <dir> [--store <db>]        analysis.json -> report.html (one combined doc)
+sbperf summary  <dir>                        -> summary.html (optional plain-language one-pager)
+sbperf pdf      <dir>                        -> report.pdf (needs Chromium)
+sbperf narrate  <dir>                        executive summary via LLM (SBPERF_LLM_*)
+sbperf narrate  <dir> --print-prompt         -> prompt.md to paste into any chat LLM
+sbperf narrate  <dir> --import <file>|-      embed a pasted LLM reply back (no endpoint)
+sbperf full     --ref <ref>                  analyze + report + pdf
+sbperf full     --ref <r1>,<r2> ...          audit a subset -> combined index (repeatable;
+                                             comma/space lists; snapshot loops, analyze rejects)
+sbperf full     --ref-file <refs.txt|.csv>   subset refs from a file (ref-shaped tokens only)
 sbperf full     --all [--org <slug>]         audit every project + index.html
 sbperf snapshot --ref <ref> [--store <db>]   collect + append to the history store
+sbperf import-trends <dir> <file...>         merge external CSV/JSON series into analysis.trends
+sbperf export-prometheus <dir> [--ref <ref>] history store -> OpenMetrics for promtool backfill
 sbperf scrape-init --ref <ref>               write the (alternate) Prometheus+Grafana stack
 ```
 
 Repo scripts: `bun run check` (biome write), `bun run typecheck`, `bun test`,
-`bun run check:api` (endpoints-still-exist drift check), `bun run build`.
+`bun run check:api` (endpoints drift), `bun run check:inspect` (CLI inspect SQL
+drift), `bun run check:lints` (splinter lints vs the src/lints.ts fix catalog),
+`bun run build`.
+
+**Report shape** (technical + business audit pyramid, one combined `report.html`
+/ `report.pdf`): verdict + Executive summary (deterministic hedged synthesis,
+or the LLM narrative when run) -> Resource snapshot (30-day sparklines from the
+store) -> What's looking good -> Findings worth addressing, each as *What's
+happening / Why it matters / What to do (+ copy-pasteable SQL) / How to verify*
+with a doc link + Advisor deep-link -> Evidence drill-down. Findings are
+deterministic (`heuristics.ts` catalog + `lints.ts` per-splinter-lint fixes);
+the LLM only writes the summary prose and is forbidden from inventing.
+
+**LLM routes** (all optional): auto (`SBPERF_LLM_BASE_URL` + `_MODEL`),
+copy-paste (`narrate --print-prompt` -> paste into pi.dev/ChatGPT/Claude ->
+`narrate --import`), or skip (deterministic summary). A pi tool wrapper lives at
+`extensions/sbperf.pi.ts` (symlink into `~/.pi/agent/extensions/`) - its
+`narrate_prompt`/`narrate_import` actions make pi itself the LLM for the
+round-trip.
 
 ## Auth
 
