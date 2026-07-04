@@ -1,17 +1,23 @@
 ---
 name: sbperf
-description: Drive the user's `sbperf` CLI - a PAT-only Supabase performance analyzer (Bun/TypeScript) that fetches advisors, read-only SQL diagnostics, config, and infra metrics for a project and renders a self-contained HTML + PDF report, with optional 30-day trends accumulated to SQLite. Use when auditing/optimizing a Supabase project's performance without a DB password, generating a perf report for a project (or every project in an org), reproducing `supabase inspect` findings via the Management API instead of a `--db-url`, wiring 30-day infra trends without standing up Prometheus/Grafana, or debugging the tool's zod-at-the-boundary / API-drift-check / metrics-allowlist internals. Sibling to `supabase`, `supabase-postgres-best-practices`, `sbshift`, `fly`. Repo `~/sbperf`; runs on Bun, no build step.
+description: Drive the user's `sbperf` CLI - a Supabase performance analyzer (Bun/TypeScript) that fetches advisors, SQL diagnostics, config, and infra metrics for a project and renders a self-contained HTML + PDF report, with optional configurable-window trends accumulated to SQLite or pulled from Grafana. PAT-first (audit a project with only a Personal Access Token, no DB password) but ALSO has a no-PAT customer-audit mode (superuser --db-url + self-hosted splinter advisors + Grafana trends, driven by a single --profile JSON). Use when auditing/optimizing a Supabase project's performance, generating a perf report for a project (or every project in an org, or a fleet of customer databases), reproducing `supabase inspect` findings via the Management API OR a superuser connstring, wiring infra trends without standing up Prometheus/Grafana, white-labeling (--brand) or review-annotating (--overlay) a report, or debugging the tool's zod-at-the-boundary / API-drift-check / metrics-allowlist internals. Sibling to `supabase`, `supabase-postgres-best-practices`, `sbshift`, `fly`. Repo `~/sbperf`; runs on Bun, no build step.
 ---
 
-# sbperf - PAT-only Supabase performance analyzer
+# sbperf - Supabase performance analyzer (PAT-first, no-PAT capable)
 
-Generates a ranked performance-and-security report for a Supabase project using
-**only a Personal Access Token** - no superuser `--db-url`, no manual Grafana
-screenshots. It collects a **superset of the entire `supabase inspect` command
-set** (advisors, read-only SQL diagnostics, config, infra metrics, RLS audit,
-txid wraparound, edge-function stats) and renders one self-contained HTML report
-+ Chromium PDF (a technical + business audit pyramid). An optional standalone
-plain-language one-pager is available via the `summary` command.
+Generates a ranked performance-and-security report for a Supabase project. The
+**default path needs only a Personal Access Token** - no DB password, no manual
+Grafana screenshots. It collects a **superset of the entire `supabase inspect`
+command set** (advisors, read-only SQL diagnostics, config, infra metrics, RLS
+audit, txid wraparound, edge-function stats) and renders one self-contained HTML
+report + Chromium PDF (a technical + business audit pyramid). An optional
+standalone plain-language one-pager is available via the `summary` command.
+
+There is also a **no-PAT customer-audit mode** (see below): given a superuser
+`--db-url` (and no resolvable PAT), sbperf runs transport-free - SQL diagnostics
+direct over the connstring, advisors from the self-hosted splinter lints, trends
+from Grafana - so you can audit a customer project you only have a connstring
+for. A single `--profile <file>.json` bundles that whole config.
 
 - **Repo:** `~/sbperf` - Bun runs `src/index.ts` directly, no build step.
 - **Run from the repo:** `cd ~/sbperf && bun run src/index.ts <cmd>`, or the
@@ -37,6 +43,36 @@ the store. Env `SBPERF_DB_URL` is the single-DB fallback (ignored when --db-url/
 --db-config are given). Per-DB failures degrade gracefully (SQL notes) rather
 than aborting the sweep.
 
+**No-PAT mode** (`collect(ref, null, ...)`): with NO PAT resolvable but a
+superuser `--db-url` (or `SBPERF_DB_URL` / `sbperf.databases.json`), sbperf runs
+transport-free - every Management-API plane is skipped (returns its fallback +
+one summary note, not per-plane 401 spam), advisors come from the vendored
+splinter lints (BOTH performance and security), SQL from the `--db-url`, trends
+from Grafana if configured. `meta.managementApi=false` drives a report banner
+stating what was NOT collected (provisioning/backups/pooler/metrics/analytics).
+This is the **customer-audit path**: a connstring + optional Grafana cookie, no
+PAT. Force it with `--no-pat` / `SBPERF_NO_PAT=1` even when a token exists.
+`--all` still needs a PAT (it enumerates projects via the API).
+
+**Profile** (`--profile <file>.json`, `profile.ts`): the whole customer-audit
+config in ONE gitignored JSON - `{ noPat, trendDays, grafana: { hostTemplate,
+datasourceUid, matcher, regions: { <region>: { cookie, uid?, host? } } },
+databases: [...] }`. `full --profile <f>` forces no-PAT, makes `databases[]` the
+sweep targets, and resolves trends **per project**: the region is derived from
+each connstring, mapped to that region's Grafana host/uid/cookie (each regional
+Grafana is a separate ALB, so a per-region session cookie). A region absent from
+the map -> that project's trends are skipped (SQL/advisors still run). Nothing
+internal is baked into the repo - hosts, UIDs, cookies, connstrings all live in
+the gitignored profile (`sbperf.profile.json`; keep `.example`).
+
+**Branding + overlay** (presentation-only, both gitignored, keep `.example`):
+`--brand <file>` white-labels the report (logo, favicon, accent/link colours;
+precedence `--brand` > `SBPERF_BRAND` > `./sbperf.brand.json` > Supabase
+default). `--overlay <file>` is a ref-keyed **review overlay** - hide drill
+sections + append markdown notes at render time via the `drill()` choke-point,
+never touching `analysis.json` (precedence `--overlay` > `SBPERF_OVERLAY` >
+`./sbperf.overlays/<ref>.json` > `~/.sbperf/overlays/<ref>.json`).
+
 ## When to reach for it
 
 | Want to ... | Reach for |
@@ -49,8 +85,13 @@ than aborting the sweep.
 | PDF of an existing report | `pdf <dir>` (needs Chromium on PATH) |
 | Audit a subset of projects (PAT-only) | `full --ref a,b,c` / `full --ref-file refs.txt\|.csv` -> combined org/project `index.html` (repeatable + comma/space lists + file; deduped) |
 | Audit every project in the account/org | `full --all [--org <slug>]` -> `index.html` |
-| Accumulate 30-day infra trends, no Prom/Grafana | `snapshot --ref <ref>` on a schedule (see below) |
-| Trends from an existing Prometheus instead | `--prometheus <url>` (alternate source) |
+| Audit a customer project you have NO PAT for | `--db-url <connstr>` with `--no-pat` (SQL + splinter advisors + Grafana) |
+| Audit a fleet of customer DBs (work) | `full --profile <file>.json` -> per-DB reports + index, per-region Grafana |
+| Accumulate infra trends, no Prom/Grafana | `snapshot --ref <ref>` on a schedule (see below) |
+| Trends from an existing Prometheus/Grafana | `--prometheus <url>` (+ `--prometheus-token`/`-cookie`/`-matcher` for auth'd datasources) |
+| Pick the trend query window | `--trend-days <n>` (default 30; `profile.trendDays` wins) |
+| White-label the report | `--brand <file>` (logo/favicon/colours) |
+| Add review notes / hide sections per project | `--overlay <file>` (ref-keyed, presentation-only) |
 | Feed the corpus to Grafana retroactively | `export-prometheus <dir>` -> OpenMetrics -> promtool backfill |
 | Stand up the (optional) scraper stack | `scrape-init --ref <ref>` |
 | Pick a timeframe for analytics (API/function stats) | `--interval <15min..7day>` (max ~7d; nothing else is windowed) |
@@ -75,6 +116,8 @@ sbperf full     --ref <r1>,<r2> ...          audit a subset -> combined index (r
                                              comma/space lists; snapshot loops, analyze rejects)
 sbperf full     --ref-file <refs.txt|.csv>   subset refs from a file (ref-shaped tokens only)
 sbperf full     --all [--org <slug>]         audit every project + index.html
+sbperf full     --profile <file>.json        no-PAT work sweep (per-region Grafana + customer DBs)
+sbperf full     --db-url <connstr> [--no-pat] superuser SQL tier (augments PAT, or sole source no-PAT)
 sbperf snapshot --ref <ref> [--store <db>]   collect + append to the history store
 sbperf import-trends <dir> <file...>         merge external CSV/JSON series into analysis.trends
 sbperf export-prometheus <dir> [--ref <ref>] history store -> OpenMetrics for promtool backfill
@@ -110,34 +153,59 @@ order: env var first, then CLI token; prints a one-line notice when the CLI
 token is used). The per-project `service_role` key for the metrics endpoint is
 auto-fetched via the Management API per run and never written to disk.
 
+**No PAT at all?** Provide a superuser `--db-url` (or `SBPERF_DB_URL` /
+`sbperf.databases.json` / a `--profile`) and sbperf runs transport-free - see
+no-PAT mode above. `--no-pat` / `SBPERF_NO_PAT=1` forces it even when a token is
+resolvable. `--all` is the one path that still requires a PAT.
+
 ## Architecture (bounded contexts)
 
 ```
 config.ts      zod env -> Config (access token, source)
-transport.ts   Transport interface + DirectTransport (auth + retry); the
-               interface exists mainly so tests inject a fake
+transport.ts   Transport interface + DirectTransport (auth + retry); null in
+               no-PAT mode (every Management plane then skipped)
 management.ts  typed, zod-parsed Management API wrapper
+sqlrunner.ts   SQL tiers behind one interface: ManagementSqlRunner (PAT read-only,
+               default) + DirectSqlRunner (superuser --db-url via Bun.SQL)
+splinter.ts    self-hosted advisor: runs the vendored splinter.sql over --db-url
+               (fallback in PAT mode for the 42601 bug; PRIMARY in no-PAT mode)
+dbtargets.ts   multi-DB target parsing + ref/region-from-connstring derivation
+profile.ts     --profile: force-no-PAT + region-mapped Grafana + customer DBs
 sql.ts         the perf query set (superset of `supabase inspect db`)
+rls.ts         isUnwrappedAuth: flags un-wrapped auth.* calls in RLS policies
 metrics.ts     Prometheus text parser + DISPLAY-only allowlist (curate())
 collect.ts     orchestrate all planes -> validated Analysis; captures the
                COMPLETE metrics corpus (all ~321 families, no curation)
+heuristics.ts  evergreen THRESHOLDS + per-finding metadata (why/how/verify/sql)
+lints.ts       per-splinter-lint fix catalog (concrete fix, not "go to Advisor")
+findings.ts    deriveFindings/derivePositives: the deterministic ranking pass
+               (incl. trend-driven capacity suggestions, data-aware)
+trendstats.ts  trend primitives (slope/sustained/peak/projection) behind
+               sufficient() gating so short series never over-claim
 store.ts       SQLite history store (bun:sqlite) for the snapshot/trends path
-trends.ts      pure computeTrends: gauges + counter-derived rates, with
-               read-time downsampling to ~300 points/panel (Grafana-style)
+trends.ts      pure computeTrends: gauges + counter-derived rates, read-time
+               downsampling to ~300 pts/panel; --trend-days window, auto-scoped
+prometheus.ts  optional trends from an auth'd Prometheus/Grafana datasource
 promexport.ts  store -> OpenMetrics (timestamped) for `export-prometheus`;
                promtool backfills a Prometheus TSDB (retroactive Grafana)
+narrate.ts     grounded LLM pass over corpus + findings -> narrative.md
+brand.ts       report white-labeling (--brand); overlay.ts ref-keyed review overlay
 report/render  Analysis -> self-contained HTML (utilitarian, print CSS)
 report/pdf     HTML -> PDF via headless Chromium (--print-to-pdf)
 scraper.ts     generate the alternate Prometheus+Grafana stack
+sync.ts        on-by-default upstream sync check -> report footer
 index.ts       CLI
 ```
 
-## 30-day trends: sbperf is its own collector
+## Infra trends: sbperf is its own collector
 
-**No Supabase API returns 30 days of infra history** (verified 2026-07): the
+**No Supabase API returns multi-day infra history** (verified 2026-07): the
 metrics endpoint takes no time param (point-in-time scrape), and the analytics
-endpoints cap ~24h (`interval=1day` -> 24 hourly buckets). Time series **must**
+endpoints cap ~7d (`interval=1day` -> 24 hourly buckets). Time series **must**
 be accumulated going forward. sbperf does this itself - no Prometheus/Grafana.
+The trend query window is `--trend-days <n>` (default 30; `profile.trendDays`
+wins for a profile run) and **auto-scopes** to a project's real data span, so a
+young project charts its actual history instead of a mostly-empty 30 days.
 
 ```bash
 # schedule this (hourly cron / systemd timer):
@@ -217,9 +285,11 @@ with some Supabase extras - it makes the project's internal Grafana unnecessary.
   point-in-time; pg_stat_statements is cumulative-since-reset. Longer horizons
   need the snapshot history store.
 - `supabase inspect report` requires a `--db-url`/`--linked` (a password) and
-  emits raw CSV, no findings. sbperf is PAT-only + ranked findings and adds
-  advisors, metrics, RLS audit, txid wraparound, and edge-function stats the CLI
-  lacks. Parity was checked against the CLI's **actual query source**
+  emits raw CSV, no findings. sbperf runs password-free by default (PAT only)
+  AND, given a `--db-url` in no-PAT mode, does everything inspect does plus
+  ranked findings, splinter advisors, metrics, RLS audit, txid wraparound, and
+  edge-function stats the CLI lacks. Parity was checked against the CLI's
+  **actual query source**
   (`github.com/supabase/cli apps/cli-go/internal/inspect/*/*.sql`), not its help.
 
 ## Conventions & gotchas
