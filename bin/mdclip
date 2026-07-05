@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# mdclip - render Markdown to HTML and put it on the Windows clipboard as
+# rich text (CF_HTML), so pasting into Gmail / Google Docs / Slack / any
+# WYSIWYG composer preserves formatting (bold, bullets, headings, links,
+# tables, monospace code) instead of showing raw markdown.
+#
+# WSL-only (uses powershell.exe + .NET Clipboard). Renderer is the pandoc
+# bundled with the Quarto CLI (no separate pandoc install needed).
+#
+# Usage:
+#   mdclip reply.md            # render a file
+#   mdclip < reply.md          # or from stdin
+#   pbpaste-equivalent | mdclip
+#
+# Then switch to Gmail and Ctrl+V. The composer receives text/html.
+#
+# Notes:
+#   - Input is treated as GitHub-Flavoured Markdown (gfm).
+#   - Code blocks arrive as monospace; Gmail will not syntax-highlight them.
+#     For highlighted/long code, link a gist or paste a screenshot instead.
+#   - Keep the SOURCE unwrapped (one line per paragraph/bullet) so hard
+#     line-breaks do not leak into the rendered output. See the
+#     paste-formatting skill.
+set -euo pipefail
+
+if ! command -v quarto >/dev/null 2>&1; then
+  echo "mdclip: quarto not found (needed for its bundled pandoc)" >&2
+  exit 1
+fi
+if ! command -v powershell.exe >/dev/null 2>&1; then
+  echo "mdclip: powershell.exe not found (this tool is WSL-only)" >&2
+  exit 1
+fi
+
+# Read markdown from a file arg or stdin.
+if [ "$#" -ge 1 ] && [ "$1" != "-" ]; then
+  [ -f "$1" ] || { echo "mdclip: no such file: $1" >&2; exit 1; }
+  src="$(cat -- "$1")"
+else
+  src="$(cat)"
+fi
+
+# Render GFM -> HTML fragment via Quarto's bundled pandoc.
+html="$(printf '%s' "$src" | quarto pandoc -f gfm -t html)"
+
+# Give code blocks a light monospace box so they read as code in Gmail
+# (pandoc's highlight classes carry no inline styles once out of a stylesheet).
+html="${html//<pre /<pre style=\"background:#f6f8fa;padding:10px;border-radius:6px;overflow:auto;font-family:Consolas,Menlo,monospace;font-size:90%\" }"
+html="${html//<pre>/<pre style=\"background:#f6f8fa;padding:10px;border-radius:6px;overflow:auto;font-family:Consolas,Menlo,monospace;font-size:90%\">}"
+
+# Hand HTML + a plain-text fallback to Windows via temp files (avoids
+# arg-quoting hell), then a temp .ps1 builds a proper CF_HTML payload and sets
+# BOTH the HTML and UnicodeText clipboard slots via a single DataObject.
+# SetDataObject(..., $true) forces an OLE flush so the data survives the
+# powershell.exe process exiting (a plain SetText from a short-lived WSL-spawned
+# process can otherwise fail to reach the real Windows clipboard). Windows
+# PowerShell (-STA) is required for the clipboard APIs.
+tmphtml="$(mktemp --suffix=.html)"
+tmptxt="$(mktemp --suffix=.txt)"
+tmpps="$(mktemp --suffix=.ps1)"
+trap 'rm -f "$tmphtml" "$tmptxt" "$tmpps"' EXIT
+printf '%s' "$html" > "$tmphtml"
+printf '%s' "$src"  > "$tmptxt"
+
+cat > "$tmpps" <<'PSEOF'
+param([string]$HtmlPath, [string]$TextPath)
+Add-Type -AssemblyName System.Windows.Forms
+$enc  = New-Object System.Text.UTF8Encoding($false)
+$frag = [System.IO.File]::ReadAllText($HtmlPath, $enc)
+$text = [System.IO.File]::ReadAllText($TextPath, $enc)
+$pre  = "<html><body><!--StartFragment-->"
+$post = "<!--EndFragment--></body></html>"
+# Fixed 10-digit fields => header byte length is constant regardless of values.
+$hfmt = "Version:0.9`r`nStartHTML:{0:0000000000}`r`nEndHTML:{1:0000000000}`r`nStartFragment:{2:0000000000}`r`nEndFragment:{3:0000000000}`r`n"
+$hlen = $enc.GetByteCount(($hfmt -f 0,0,0,0))
+$sh   = $hlen
+$sf   = $sh + $enc.GetByteCount($pre)
+$ef   = $sf + $enc.GetByteCount($frag)
+$eh   = $ef + $enc.GetByteCount($post)
+$cf   = ($hfmt -f $sh,$eh,$sf,$ef) + $pre + $frag + $post
+$do = New-Object System.Windows.Forms.DataObject
+$do.SetData([System.Windows.Forms.DataFormats]::Html, $false, $cf)
+$do.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $false, $text)
+[System.Windows.Forms.Clipboard]::SetDataObject($do, $true)
+PSEOF
+
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$(wslpath -w "$tmpps")" "$(wslpath -w "$tmphtml")" "$(wslpath -w "$tmptxt")" >/dev/null
+
+echo "Rendered HTML + plain-text fallback are on the clipboard. Paste into Gmail with Ctrl+V." >&2

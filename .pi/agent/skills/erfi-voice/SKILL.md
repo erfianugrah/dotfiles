@@ -123,6 +123,12 @@ Every example below is verbatim from your public technical blog (mirrored under 
 
 Output ASCII in anything that gets pasted/committed: `--` or `-` for dashes, straight quotes, `...` for ellipsis. A guard hard-blocks smart punctuation in written files; matching it here avoids the block-resubmit loop. (Real em-dashes are fine in throwaway chat, but default to ASCII for anything destined for Slack/email/a file.)
 
+## Line wrapping (hard rule for paste-destined text)
+
+When a draft is going to be COPY-PASTED (email, Slack, a WYSIWYG box), author it UNWRAPPED - one line per paragraph and one line per bullet, no hard wrap at 80 columns. Hard wraps become literal newlines in the clipboard and land as mid-sentence line breaks in the composer. Let the editor soft-wrap for display; never bake newlines into a paragraph. If the draft lives inside an otherwise hard-wrapped internal doc, wrap only the surrounding prose and keep the copy-out block on single lines (note why, so a later edit does not re-wrap it).
+
+Getting formatted Markdown INTO a rich-text target (Gmail bold/bullets/code, not raw asterisks) is a separate mechanical problem - see **`paste-formatting`** (the `mdclip` tool: Markdown -> HTML -> clipboard).
+
 ## Structure template -- technical review reply
 
 ```
