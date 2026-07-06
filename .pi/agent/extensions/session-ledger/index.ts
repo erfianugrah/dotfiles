@@ -45,8 +45,11 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { mkdirSync } from "node:fs";
 
-import { complete } from "@earendil-works/pi-ai/compat";
-import { Type } from "@earendil-works/pi-ai";
+// Import from the pi-ai ROOT, not the /compat subpath. Since 0.80.0 the
+// loader aliases root -> compat (a strict superset), so `complete` resolves
+// here on both Linux and the Homebrew Mac build. The explicit /compat subpath
+// is NOT resolvable in the Homebrew packaging and crashes pi at launch.
+import { complete, Type } from "@earendil-works/pi-ai";
 import { defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 // ─────────────────────────────────────────────────────────────────────────

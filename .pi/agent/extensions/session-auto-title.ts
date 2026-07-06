@@ -22,7 +22,10 @@
  * To disable: rename file to .ts.disabled or comment out the registration.
  */
 
-import { complete, getModel } from "@earendil-works/pi-ai/compat";
+// Root import, not /compat: the loader aliases root -> compat since 0.80.0,
+// and the explicit /compat subpath fails to resolve in the Homebrew Mac
+// build (crashes pi at launch). Root resolves on both platforms.
+import { complete, getModel } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
