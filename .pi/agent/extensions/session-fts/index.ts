@@ -79,6 +79,13 @@ function openReadDb(): Database {
         entry_count INTEGER NOT NULL DEFAULT 0
       );
     `);
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS session_names (
+        path TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `);
   } catch { /* worker will handle schema; reads tolerate missing tables */ }
   readDb = d;
   return d;
@@ -147,6 +154,45 @@ export interface FtsHit {
   role: string;
   snippet: string;
   rank: number;
+  /** Human-readable session name, if one has been set. */
+  name?: string;
+}
+
+// session names
+// Upsert the display name for a session file. Best-effort: the worker holds
+// the write lock during big INSERT batches, so busy_timeout (5s) may still
+// time out - swallow errors, name indexing is a nicety, not load-bearing.
+export function recordSessionName(path: string, name: string): void {
+  if (!path) return;
+  try {
+    const d = openReadDb();
+    d.query(
+      `INSERT INTO session_names (path, name, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(path) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`,
+    ).run(path, name, Date.now());
+  } catch { /* best-effort */ }
+}
+
+// Clear the name for a session (fired when the name is unset / cleared).
+export function clearSessionName(path: string): void {
+  if (!path) return;
+  try {
+    const d = openReadDb();
+    d.query(`DELETE FROM session_names WHERE path = ?`).run(path);
+  } catch { /* best-effort */ }
+}
+
+// Direct getter - exported for tests and callers that want just the name.
+export function lookupSessionName(path: string): string | undefined {
+  try {
+    const d = openReadDb();
+    const row = d.query<{ name: string }, [string]>(
+      `SELECT name FROM session_names WHERE path = ?`,
+    ).get(path);
+    return row?.name;
+  } catch {
+    return undefined;
+  }
 }
 
 export function searchFts(query: string, role: string | undefined, limit: number): FtsHit[] {
@@ -156,11 +202,13 @@ export function searchFts(query: string, role: string | undefined, limit: number
   let sql = `
     SELECT
       snippet(msg_fts, 0, '«', '»', '…', 32) as snippet,
-      session_path,
+      msg_fts.session_path,
       date,
       role,
-      rank
+      rank,
+      session_names.name as name
     FROM msg_fts
+    LEFT JOIN session_names ON session_names.path = msg_fts.session_path
     WHERE msg_fts MATCH ?
   `;
   if (role) {
@@ -171,7 +219,7 @@ export function searchFts(query: string, role: string | undefined, limit: number
   args.push(limit);
   try {
     const rows = d.query<
-      { snippet: string; session_path: string; date: string; role: string; rank: number },
+      { snippet: string; session_path: string; date: string; role: string; rank: number; name: string | null },
       typeof args
     >(sql).all(...args);
     return rows.map((r) => ({
@@ -180,6 +228,7 @@ export function searchFts(query: string, role: string | undefined, limit: number
       role: r.role,
       snippet: r.snippet,
       rank: r.rank,
+      name: r.name ?? undefined,
     }));
   } catch {
     return [];
@@ -264,6 +313,18 @@ export default function (pi: ExtensionAPI) {
         // batch will finish and the next session_start will pick up.
       }
     }, STARTUP_DELAY_MS);
+  });
+
+  // Keep the session_names table in sync with display-name changes
+  // (/session-name, RPC, or the auto-title extension). pi 0.80.3+ (#6175).
+  pi.on("session_info_changed", async (event: { name?: string }, ctx: ExtensionContext) => {
+    try {
+      const sessionFile = ctx.sessionManager.getSessionFile?.();
+      if (!sessionFile) return;
+      const name = event.name?.trim();
+      if (name) recordSessionName(sessionFile, name);
+      else clearSessionName(sessionFile);
+    } catch { /* best-effort */ }
   });
 
   // Re-index the current session file at each turn_end so live messages

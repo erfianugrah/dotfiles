@@ -1,9 +1,11 @@
 {
-  "lastChangelogVersion": "0.80.2",
+  "lastChangelogVersion": "0.80.3",
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-4-8",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
+  "externalEditor": "nvim",
+  "outputPad": 0,
   "compaction": {
     "enabled": true
   },

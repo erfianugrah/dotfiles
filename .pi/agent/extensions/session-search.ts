@@ -28,7 +28,17 @@ type Hit = {
 	date: string;
 	role: string;
 	snippet: string;
+	name?: string;
 };
+
+// Format a single search hit for the tool output. Exported for unit tests.
+// Shows the human session name (from session_info_changed) when present, so
+// a hit reads `[2026-07-06] user "docs.erfi.io review"` instead of a bare
+// UUID path alone.
+export function formatHit(h: Hit, i: number): string {
+	const nameTag = h.name ? ` "${h.name}"` : "";
+	return `${i + 1}. [${h.date}] ${h.role}${nameTag}\n   ${h.sessionPath}\n   ${h.snippet}`;
+}
 
 // Exported for unit tests.
 // Filename pattern: 2026-05-20T22-19-40-639Z_<uuid>.jsonl
@@ -268,6 +278,7 @@ const sessionSearchTool = defineTool({
 				sessionPath: h.sessionPath,
 				date: h.date,
 				role: h.role,
+				name: h.name,
 				// FTS5 snippet uses «» markers — keep as-is, the markdown
 				// renderer treats them as ordinary glyphs.
 				snippet: h.snippet.replace(/\s+/g, " ").trim(),
@@ -315,9 +326,7 @@ const sessionSearchTool = defineTool({
 			};
 		}
 
-		const out = hits
-			.map((h, i) => `${i + 1}. [${h.date}] ${h.role}\n   ${h.sessionPath}\n   ${h.snippet}`)
-			.join("\n\n");
+		const out = hits.map((h, i) => formatHit(h, i)).join("\n\n");
 
 		const tokenSummary = tokens.length > 1 ? ` for ${tokens.length} tokens` : "";
 		return {
