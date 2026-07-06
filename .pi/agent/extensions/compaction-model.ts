@@ -33,7 +33,10 @@
  * compatible.
  */
 
-import { complete } from "@earendil-works/pi-ai/compat";
+// Root import, not /compat: the loader aliases root -> compat since 0.80.0,
+// and the explicit /compat subpath fails to resolve in the Homebrew Mac
+// build (crashes pi at launch). Root resolves on both platforms.
+import { complete } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   convertToLlm,
