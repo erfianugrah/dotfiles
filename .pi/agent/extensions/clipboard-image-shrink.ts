@@ -113,8 +113,10 @@ const SUFFIX = "-small";         // sibling filename suffix
 
 // Regex: `/tmp/pi-clipboard-<UUID>.<ext>`. UUID = 8-4-4-4-12 hex with dashes.
 // Extension list mirrors what pi can paste (see pi binary: extensionForImageMimeType).
+// bmp added for pi 0.80.3+ (#6047): read/@file now detect + convert disk BMPs,
+// so a pasted/attached .bmp can reach us and should be shrunk like the rest.
 const CLIP_PATH_RE =
-  /\/tmp\/pi-clipboard-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp|gif)/gi;
+  /\/tmp\/pi-clipboard-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp|gif|bmp)/gi;
 
 // ── magick wrappers ───────────────────────────────────────────────────────
 

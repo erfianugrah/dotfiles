@@ -27,9 +27,15 @@ import { parseImage, versionCompare } from "../extensions/oci-tags.ts";
 import {
   dateFromName,
   extractText,
+  formatHit,
   tokenise,
 } from "../extensions/session-search.ts";
-import { toFtsQuery } from "../extensions/session-fts/index.ts";
+import {
+  toFtsQuery,
+  recordSessionName,
+  clearSessionName,
+  lookupSessionName,
+} from "../extensions/session-fts/index.ts";
 import {
 	isDegenerateSummary,
 	ftsQuery as ledgerFtsQuery,
@@ -446,6 +452,46 @@ describe("oci-tags.versionCompare", () => {
 });
 
 // ── session-search: pure helpers ──────────────────────────────────────────
+
+describe("session-search.formatHit", () => {
+  const base = { sessionPath: "/s/2026-07-06_x.jsonl", date: "2026-07-06", role: "user", snippet: "hi" };
+
+  test("omits name tag when no name set", () => {
+    const out = formatHit(base, 0);
+    expect(out).toBe(`1. [2026-07-06] user\n   /s/2026-07-06_x.jsonl\n   hi`);
+    expect(out).not.toContain('"');
+  });
+
+  test("includes quoted name when present", () => {
+    const out = formatHit({ ...base, name: "docs review" }, 2);
+    expect(out).toBe(`3. [2026-07-06] user "docs review"\n   /s/2026-07-06_x.jsonl\n   hi`);
+  });
+});
+
+describe("session-fts.session_names round-trip", () => {
+  // getAgentDir is stubbed to /tmp/pi-test-agent-dir by preload.ts, so these
+  // hit a real bun:sqlite DB there. Unique paths keep the assertions isolated.
+  const p = `/tmp/sess-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`;
+
+  test("record then lookup returns the name", () => {
+    recordSessionName(p, "my session");
+    expect(lookupSessionName(p)).toBe("my session");
+  });
+
+  test("record again upserts (latest name wins)", () => {
+    recordSessionName(p, "renamed");
+    expect(lookupSessionName(p)).toBe("renamed");
+  });
+
+  test("clear removes the name", () => {
+    clearSessionName(p);
+    expect(lookupSessionName(p)).toBeUndefined();
+  });
+
+  test("lookup of unknown path is undefined", () => {
+    expect(lookupSessionName("/tmp/never-set.jsonl")).toBeUndefined();
+  });
+});
 
 describe("session-search.dateFromName", () => {
   test("extracts ISO date prefix", () => {

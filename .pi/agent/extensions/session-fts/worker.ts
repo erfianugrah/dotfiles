@@ -68,6 +68,16 @@ db.exec(`
     entry_count INTEGER NOT NULL DEFAULT 0
   );
 `);
+// Human-readable session names (set via /session-name, RPC, or auto-title).
+// Written on session_info_changed by the main thread; joined into search
+// results so a hit shows "docs.erfi.io review" instead of a bare UUID path.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS session_names (
+    path TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+`);
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
