@@ -1,6 +1,6 @@
 ---
 name: paste-formatting
-description: Use when text drafted in Markdown has to land in a rich-text destination that does not render Markdown - Gmail / Outlook compose, Google Docs, Slack, Notion, a CMS/WYSIWYG box, an issue tracker. Fires on "paste into email", "the formatting got stripped", "bullets/bold/code came out as raw asterisks or plain text", "code snippet looks janky in the email", or any copy-paste-loses-formatting gripe. Covers the mdclip tool (WSL, Markdown -> HTML -> Windows clipboard), the unwrapped-source hard rule, code-snippet handling, and what survives which composer. Pairs with erfi-voice (which drafts the prose) - this skill gets that prose into the target intact.
+description: Use when text drafted in Markdown has to land in a rich-text destination that does not render Markdown - Gmail / Outlook compose, Google Docs, Slack, Notion, a CMS/WYSIWYG box, an issue tracker. Fires on "paste into email", "the formatting got stripped", "bullets/bold/code came out as raw asterisks or plain text", "code snippet looks janky in the email", or any copy-paste-loses-formatting gripe. Covers the mdclip tool (cross-OS Markdown -> HTML -> clipboard: WSL/macOS/Linux), the unwrapped-source hard rule, code-snippet handling, and what survives which composer. Pairs with erfi-voice (which drafts the prose) - this skill gets that prose into the target intact.
 ---
 
 # Paste formatting
@@ -14,16 +14,26 @@ Gmail, Google Docs, Slack, and every WYSIWYG box are HTML rich-text fields. They
 
 So the job is never "reformat the markdown". It is "render the markdown to HTML and get that HTML onto the clipboard's text/html slot", then paste.
 
-## Primary path: `mdclip` (WSL)
+## Primary path: `mdclip` (cross-OS)
 
-`mdclip` (at `~/dotfiles/bin/mdclip`, symlinked into `~/.local/bin`) does the whole pipeline: Markdown -> HTML (via the pandoc bundled with the Quarto CLI) -> Windows clipboard as CF_HTML (via `.NET Clipboard.SetText(..., Html)`). Then paste into Gmail with Ctrl+V and the formatting is intact.
+`mdclip` (at `~/dotfiles/bin/mdclip`, symlinked into `~/.local/bin`) does the whole pipeline: Markdown -> HTML (via the pandoc bundled with the Quarto CLI) -> the OS clipboard as rich text. Then paste into Gmail (Ctrl+V, or Cmd+V on macOS) and the formatting is intact.
+
+The render step is portable; only the clipboard-set step is platform-specific, auto-detected at runtime (WSL is checked before Wayland/X11 because WSLg sets `WAYLAND_DISPLAY`/`DISPLAY` but the real clipboard is Windows'):
+
+| Platform | Rich backend | Plain backend (`--slack`) |
+|----------|--------------|---------------------------|
+| WSL      | `powershell.exe` .NET CF_HTML DataObject (sets HTML **and** plain fallback) | same, UnicodeText only |
+| macOS    | `textutil` HTML->RTF \| `pbcopy` | `pbcopy` |
+| Wayland  | `wl-copy --type text/html` | `wl-copy` |
+| X11      | `xclip -selection clipboard -t text/html` | `xclip -selection clipboard` |
 
 ```bash
-mdclip reply.md          # render a file
+mdclip reply.md          # render a file (rich text for Gmail/Docs)
 mdclip < reply.md        # or from stdin
+mdclip --slack reply.md  # Slack mrkdwn as plain text (see Slack row below)
 ```
 
-Verified 2026-07: bold, `code` (monospace), bullets, links, and tables all survive the paste into Gmail. Windows PowerShell runs STA by default, which the clipboard API requires; `.NET` auto-prepends the CF_HTML descriptor header, so no offset math is needed.
+Verified 2026-07: bold, `code` (monospace), bullets, links, and tables all survive the paste into Gmail on WSL. Only WSL sets both a rich flavour and a plain-text fallback in one shot; macOS/Wayland/X11 single-flavour tools set the rich flavour only (every rich editor reads it; terminal paste won't). macOS RTF via `textutil` preserves bold/bullets/headings/links/tables; a true `public.html` flavour would need an `osascript` helper and isn't necessary. On macOS/Linux install the backend tool if missing (`pbcopy`/`textutil` are built in; `wl-clipboard` or `xclip` via package manager); mdclip prints a clear per-platform hint when one is absent.
 
 ## Fallback (no tool, any OS): browser copy
 
@@ -51,7 +61,7 @@ Internal reference docs that are read in an editor can stay hard-wrapped; only t
 |---|---|---|---|
 | Gmail / Outlook web | HTML (mdclip / browser) | bold, italic, lists, headings, links, tables, monospace | no code syntax highlight; use a link/image for real code |
 | Google Docs | HTML (mdclip / browser) | same as Gmail, cleaner | best rich-text fidelity of the lot |
-| Slack | plain text, then Slack's own syntax | Slack markup only | Slack ignores pasted HTML; type `*bold*` (single asterisk), `` `code` ``, triple-backtick block. Do NOT run it through mdclip |
+| Slack | `mdclip --slack` (plain text mrkdwn) | Slack markup | Slack ignores pasted HTML and reads the plain-text slot. `mdclip --slack` converts a normal Markdown draft to mrkdwn: `**bold**`->`*bold*`, `*italic*`/`_italic_`->`_italic_`, `[t](u)`->`<u\|t>`, `# H`->`*H*`, `-`/`*`/`+` bullets->`•`; `` `code` `` and ``` fences pass through. In `--slack` a single `*word*` is markdown italic, so use `**word**` for Slack bold. (Hand-typing `*bold*` / `` `code` `` / a triple-backtick block still works if you prefer.) Do NOT use the default HTML mode for Slack. |
 | Notion / most WYSIWYG | often accepts Markdown on paste | varies | many convert `**`/`-`/`#` on paste; try plain first, fall back to HTML |
 | Terminal, code review, a `.md` file, GitHub comment | the raw Markdown | n/a | these ARE markdown-aware or want the source; do not render |
 

@@ -1,68 +1,77 @@
 #!/usr/bin/env bash
-# mdclip - render Markdown to HTML and put it on the Windows clipboard as
-# rich text (CF_HTML), so pasting into Gmail / Google Docs / Slack / any
-# WYSIWYG composer preserves formatting (bold, bullets, headings, links,
-# tables, monospace code) instead of showing raw markdown.
+# mdclip - put a Markdown draft on the OS clipboard in the format a given paste
+# target actually accepts, so pasting preserves formatting instead of showing
+# raw markdown.
 #
-# WSL-only (uses powershell.exe + .NET Clipboard). Renderer is the pandoc
-# bundled with the Quarto CLI (no separate pandoc install needed).
+# Two modes:
+#   (default)   Markdown -> HTML, clipboard as rich text. For Gmail / Outlook /
+#               Google Docs / any WYSIWYG box: bold, bullets, headings, links,
+#               tables, monospace all survive paste.
+#   --slack     Markdown -> Slack mrkdwn, clipboard as plain text ONLY. Slack
+#               ignores pasted rich text and reads the plain-text slot, so this
+#               converts **bold** -> *bold*, *italic*/_italic_ -> _italic_,
+#               [text](url) -> <url|text>, # Heading -> *Heading*, and
+#               -/*/+ bullets -> "* ". Code spans and ``` fences pass through.
+#
+# Cross-OS. The Markdown -> HTML render is portable (Quarto's bundled pandoc);
+# only the clipboard-set step is platform-specific:
+#   WSL      powershell.exe + .NET CF_HTML DataObject (HTML + plain fallback)
+#   macOS    textutil (HTML -> RTF) | pbcopy  (rich) / pbcopy (plain)
+#   Wayland  wl-copy --type text/html          (rich) / wl-copy (plain)
+#   X11      xclip -t text/html                (rich) / xclip (plain)
 #
 # Usage:
-#   mdclip reply.md            # render a file
-#   mdclip < reply.md          # or from stdin
-#   pbpaste-equivalent | mdclip
-#
-# Then switch to Gmail and Ctrl+V. The composer receives text/html.
+#   mdclip reply.md              # rich text (Gmail/Docs)
+#   mdclip < reply.md            # from stdin
+#   mdclip --slack reply.md      # Slack mrkdwn, plain text
+#   mdclip -s < reply.md
 #
 # Notes:
-#   - Input is treated as GitHub-Flavoured Markdown (gfm).
-#   - Code blocks arrive as monospace; Gmail will not syntax-highlight them.
-#     For highlighted/long code, link a gist or paste a screenshot instead.
+#   - Input is treated as GitHub-Flavoured Markdown (gfm). In --slack mode a
+#     single *word* is markdown ITALIC and becomes _word_; use **word** for
+#     Slack bold. (Don't feed already-Slack-formatted text through --slack.)
+#   - Rich mode: code blocks arrive as monospace; Gmail will not syntax-
+#     highlight them. For highlighted/long code, link a gist or paste a shot.
+#   - Only WSL sets BOTH a rich flavour and a plain-text fallback in one shot.
+#     On macOS/Wayland/X11 the single-flavour clipboard tools set the rich
+#     flavour only; every rich editor reads it, terminal paste won't.
 #   - Keep the SOURCE unwrapped (one line per paragraph/bullet) so hard
-#     line-breaks do not leak into the rendered output. See the
-#     paste-formatting skill.
+#     line-breaks do not leak into the output. See the paste-formatting skill.
 set -euo pipefail
 
-if ! command -v quarto >/dev/null 2>&1; then
-  echo "mdclip: quarto not found (needed for its bundled pandoc)" >&2
-  exit 1
-fi
-if ! command -v powershell.exe >/dev/null 2>&1; then
-  echo "mdclip: powershell.exe not found (this tool is WSL-only)" >&2
-  exit 1
-fi
+# ---------------------------------------------------------------------------
+# Platform detection. WSL MUST be checked before Wayland/X11: WSLg sets
+# WAYLAND_DISPLAY and DISPLAY, but the real clipboard is the Windows one.
+# ---------------------------------------------------------------------------
+detect_platform() {
+  case "$(uname -s)" in
+    Darwin) echo macos; return ;;
+    Linux)
+      if grep -qi microsoft /proc/version 2>/dev/null; then echo wsl; return; fi
+      if [ -n "${WAYLAND_DISPLAY:-}" ]; then echo wayland; return; fi
+      if [ -n "${DISPLAY:-}" ]; then echo x11; return; fi
+      echo headless; return ;;
+    *) echo unknown; return ;;
+  esac
+}
+platform="$(detect_platform)"
 
-# Read markdown from a file arg or stdin.
-if [ "$#" -ge 1 ] && [ "$1" != "-" ]; then
-  [ -f "$1" ] || { echo "mdclip: no such file: $1" >&2; exit 1; }
-  src="$(cat -- "$1")"
-else
-  src="$(cat)"
-fi
+need() { command -v "$1" >/dev/null 2>&1 || { echo "mdclip: $1 not found ($2)" >&2; exit 1; }; }
 
-# Render GFM -> HTML fragment via Quarto's bundled pandoc.
-html="$(printf '%s' "$src" | quarto pandoc -f gfm -t html)"
-
-# Give code blocks a light monospace box so they read as code in Gmail
-# (pandoc's highlight classes carry no inline styles once out of a stylesheet).
-html="${html//<pre /<pre style=\"background:#f6f8fa;padding:10px;border-radius:6px;overflow:auto;font-family:Consolas,Menlo,monospace;font-size:90%\" }"
-html="${html//<pre>/<pre style=\"background:#f6f8fa;padding:10px;border-radius:6px;overflow:auto;font-family:Consolas,Menlo,monospace;font-size:90%\">}"
-
-# Hand HTML + a plain-text fallback to Windows via temp files (avoids
-# arg-quoting hell), then a temp .ps1 builds a proper CF_HTML payload and sets
-# BOTH the HTML and UnicodeText clipboard slots via a single DataObject.
-# SetDataObject(..., $true) forces an OLE flush so the data survives the
-# powershell.exe process exiting (a plain SetText from a short-lived WSL-spawned
-# process can otherwise fail to reach the real Windows clipboard). Windows
-# PowerShell (-STA) is required for the clipboard APIs.
-tmphtml="$(mktemp --suffix=.html)"
-tmptxt="$(mktemp --suffix=.txt)"
-tmpps="$(mktemp --suffix=.ps1)"
-trap 'rm -f "$tmphtml" "$tmptxt" "$tmpps"' EXIT
-printf '%s' "$html" > "$tmphtml"
-printf '%s' "$src"  > "$tmptxt"
-
-cat > "$tmpps" <<'PSEOF'
+# ---------------------------------------------------------------------------
+# Clipboard backends. Each takes file paths so no shell-quoting hell.
+#   set_clip_rich  <html-file> <text-file>
+#   set_clip_plain <text-file>
+# ---------------------------------------------------------------------------
+set_clip_rich() {
+  local htmlfile="$1" textfile="$2"
+  case "$platform" in
+    wsl)
+      need powershell.exe "this tool needs powershell.exe on WSL"
+      local tmpps; tmpps="$(mktemp --suffix=.ps1)"
+      # shellcheck disable=SC2064
+      trap "rm -f '$tmpps'" RETURN
+      cat > "$tmpps" <<'PSEOF'
 param([string]$HtmlPath, [string]$TextPath)
 Add-Type -AssemblyName System.Windows.Forms
 $enc  = New-Object System.Text.UTF8Encoding($false)
@@ -83,7 +92,149 @@ $do.SetData([System.Windows.Forms.DataFormats]::Html, $false, $cf)
 $do.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $false, $text)
 [System.Windows.Forms.Clipboard]::SetDataObject($do, $true)
 PSEOF
+      powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$(wslpath -w "$tmpps")" "$(wslpath -w "$htmlfile")" "$(wslpath -w "$textfile")" >/dev/null
+      ;;
+    macos)
+      need textutil "macOS rich clipboard needs textutil (built in)"
+      need pbcopy   "macOS clipboard needs pbcopy (built in)"
+      textutil -stdin -stdout -format html -convert rtf < "$htmlfile" | pbcopy
+      ;;
+    wayland)
+      need wl-copy "Wayland clipboard needs wl-clipboard (wl-copy)"
+      wl-copy --type text/html < "$htmlfile"
+      ;;
+    x11)
+      need xclip "X11 clipboard needs xclip"
+      xclip -selection clipboard -t text/html < "$htmlfile"
+      ;;
+    *)
+      echo "mdclip: no clipboard backend for platform '$platform'" >&2; exit 1 ;;
+  esac
+}
 
-powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$(wslpath -w "$tmpps")" "$(wslpath -w "$tmphtml")" "$(wslpath -w "$tmptxt")" >/dev/null
+set_clip_plain() {
+  local textfile="$1"
+  case "$platform" in
+    wsl)
+      need powershell.exe "this tool needs powershell.exe on WSL"
+      local tmpps; tmpps="$(mktemp --suffix=.ps1)"
+      # shellcheck disable=SC2064
+      trap "rm -f '$tmpps'" RETURN
+      cat > "$tmpps" <<'PSEOF'
+param([string]$TextPath)
+Add-Type -AssemblyName System.Windows.Forms
+$enc  = New-Object System.Text.UTF8Encoding($false)
+$text = [System.IO.File]::ReadAllText($TextPath, $enc)
+$do = New-Object System.Windows.Forms.DataObject
+$do.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $false, $text)
+[System.Windows.Forms.Clipboard]::SetDataObject($do, $true)
+PSEOF
+      powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$(wslpath -w "$tmpps")" "$(wslpath -w "$textfile")" >/dev/null
+      ;;
+    macos)
+      need pbcopy "macOS clipboard needs pbcopy (built in)"
+      pbcopy < "$textfile" ;;
+    wayland)
+      need wl-copy "Wayland clipboard needs wl-clipboard (wl-copy)"
+      wl-copy < "$textfile" ;;
+    x11)
+      need xclip "X11 clipboard needs xclip"
+      xclip -selection clipboard < "$textfile" ;;
+    *)
+      echo "mdclip: no clipboard backend for platform '$platform'" >&2; exit 1 ;;
+  esac
+}
 
-echo "Rendered HTML + plain-text fallback are on the clipboard. Paste into Gmail with Ctrl+V." >&2
+paste_hint() {
+  case "$platform" in
+    macos) echo "Cmd+V" ;;
+    *)     echo "Ctrl+V" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Arg parse.
+# ---------------------------------------------------------------------------
+slack=0
+args=()
+for a in "$@"; do
+  case "$a" in
+    -s|--slack) slack=1 ;;
+    *) args+=("$a") ;;
+  esac
+done
+set -- "${args[@]:-}"
+
+if [ "$slack" -eq 0 ]; then
+  need quarto "needed for its bundled pandoc"
+fi
+if [ "$slack" -eq 1 ]; then
+  need perl "needed for --slack conversion"
+fi
+
+# Read markdown from a file arg or stdin.
+if [ "$#" -ge 1 ] && [ -n "${1:-}" ] && [ "$1" != "-" ]; then
+  [ -f "$1" ] || { echo "mdclip: no such file: $1" >&2; exit 1; }
+  src="$(cat -- "$1")"
+else
+  src="$(cat)"
+fi
+
+# ---------------------------------------------------------------------------
+# Slack mode: convert Markdown -> Slack mrkdwn, set plain text only.
+# ---------------------------------------------------------------------------
+if [ "$slack" -eq 1 ]; then
+  slacktext="$(printf '%s' "$src" | perl -CSD -Mstrict -Mwarnings -e '
+    my $in_code = 0;
+    while (my $line = <STDIN>) {
+      chomp $line;
+      if ($line =~ /^\s*```/) { $in_code = !$in_code; print "$line\n"; next; }
+      if ($in_code)           { print "$line\n"; next; }
+      # protect inline code spans from the transforms below
+      my @spans;
+      $line =~ s/(`[^`]*`)/push @spans, $1; "\x00" . $#spans . "\x00"/ge;
+      # ATX headings -> bold line (sentinel so the italic pass below leaves it)
+      $line =~ s/^\s{0,3}\#{1,6}\s+(.*?)\s*\#*\s*$/\x01$1\x01/;
+      # -,*,+ bullets -> Slack bullet (before bold/italic touch the *)
+      $line =~ s/^(\s*)[-*+]\s+/$1\x{2022} /;
+      # [text](url) -> <url|text>
+      $line =~ s/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/<$2|$1>/g;
+      # **bold** / __bold__ -> sentinel (so italic pass ignores them)
+      $line =~ s/\*\*(.+?)\*\*/\x01$1\x01/g;
+      $line =~ s/__(.+?)__/\x01$1\x01/g;
+      # remaining *italic* -> _italic_ ( _italic_ is already correct )
+      $line =~ s/\*(\S(?:.*?\S)?)\*/_$1_/g;
+      # bold sentinel -> single *
+      $line =~ s/\x01/*/g;
+      # restore code spans
+      $line =~ s/\x00(\d+)\x00/$spans[$1]/g;
+      print "$line\n";
+    }
+  ')"
+
+  tmptxt="$(mktemp --suffix=.txt)"
+  trap 'rm -f "$tmptxt"' EXIT
+  printf '%s' "$slacktext" > "$tmptxt"
+  set_clip_plain "$tmptxt"
+  echo "Slack mrkdwn is on the clipboard (plain text). Paste into Slack with $(paste_hint)." >&2
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Default mode: render GFM -> HTML fragment, set rich clipboard + plain fallback.
+# ---------------------------------------------------------------------------
+html="$(printf '%s' "$src" | quarto pandoc -f gfm -t html)"
+
+# Give code blocks a light monospace box so they read as code in Gmail
+# (pandoc's highlight classes carry no inline styles once out of a stylesheet).
+html="${html//<pre /<pre style=\"background:#f6f8fa;padding:10px;border-radius:6px;overflow:auto;font-family:Consolas,Menlo,monospace;font-size:90%\" }"
+html="${html//<pre>/<pre style=\"background:#f6f8fa;padding:10px;border-radius:6px;overflow:auto;font-family:Consolas,Menlo,monospace;font-size:90%\">}"
+
+tmphtml="$(mktemp --suffix=.html)"
+tmptxt="$(mktemp --suffix=.txt)"
+trap 'rm -f "$tmphtml" "$tmptxt"' EXIT
+printf '%s' "$html" > "$tmphtml"
+printf '%s' "$src"  > "$tmptxt"
+
+set_clip_rich "$tmphtml" "$tmptxt"
+echo "Rendered rich text + fallback are on the clipboard. Paste into Gmail with $(paste_hint)." >&2
