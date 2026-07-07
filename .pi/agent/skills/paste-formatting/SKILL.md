@@ -1,6 +1,6 @@
 ---
 name: paste-formatting
-description: Use when text drafted in Markdown has to land in a rich-text destination that does not render Markdown - Gmail / Outlook compose, Google Docs, Slack, Notion, a CMS/WYSIWYG box, an issue tracker. Fires on "paste into email", "the formatting got stripped", "bullets/bold/code came out as raw asterisks or plain text", "code snippet looks janky in the email", or any copy-paste-loses-formatting gripe. Covers the mdclip tool (cross-OS Markdown -> HTML -> clipboard: WSL/macOS/Linux), the unwrapped-source hard rule, code-snippet handling, and what survives which composer. Pairs with erfi-voice (which drafts the prose) - this skill gets that prose into the target intact.
+description: Use when text drafted in Markdown has to land in a rich-text destination that does not render Markdown - Gmail / Outlook compose, Google Docs, Slack, Notion, a CMS/WYSIWYG box, an issue tracker. Fires on "paste into email", "the formatting got stripped", "bullets/bold/code came out as raw asterisks or plain text", "code snippet looks janky in the email", or any copy-paste-loses-formatting gripe. Covers the mdclip tool (cross-OS Markdown -> HTML -> clipboard on WSL/macOS/Linux), the unwrapped-source hard rule, code-snippet handling, and what survives which composer. Pairs with erfi-voice (which drafts the prose) - this skill gets that prose into the target intact.
 ---
 
 # Paste formatting
