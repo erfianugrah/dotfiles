@@ -80,6 +80,8 @@ never touching `analysis.json` (precedence `--overlay` > `SBPERF_OVERLAY` >
 | Full perf/security report for one project | `full --ref <ref>` (analyze + report + pdf) |
 | Just the data, no render | `analyze --ref <ref>` -> `analysis.json` |
 | Re-render HTML from existing `analysis.json` | `report <dir>` |
+| Did a migration/index/tuning change help? | `diff <oldDir> <newDir>` or `diff --ref <ref>` (last 2 store snapshots) |
+| Gate CI on findings | `check <dir> --fail-on high\|med\|low` (+ `--category`, `--new-since <baselineDir>`); exits 1 on breach |
 | Optional plain-language one-pager | `summary <dir>` (standalone; NOT emitted by `full`/`report`/`pdf`) |
 | Merge external CSV/JSON trend series | `import-trends <dir> <file...>` |
 | PDF of an existing report | `pdf <dir>` (needs Chromium on PATH) |
@@ -119,6 +121,9 @@ sbperf full     --all [--org <slug>]         audit every project + index.html
 sbperf full     --profile <file>.json        no-PAT work sweep (per-region Grafana + customer DBs)
 sbperf full     --db-url <connstr> [--no-pat] superuser SQL tier (augments PAT, or sole source no-PAT)
 sbperf snapshot --ref <ref> [--store <db>]   collect + append to the history store
+sbperf diff     <oldDir> <newDir>            findings delta + per-query (queryid) regressions
+sbperf diff     --ref <ref> [--store <db>]   same, over the last 2 history-store snapshots
+sbperf check    <dir> --fail-on high|med|low CI gate; exit 1 on breach (+ --category, --new-since <dir>)
 sbperf import-trends <dir> <file...>         merge external CSV/JSON series into analysis.trends
 sbperf export-prometheus <dir> [--ref <ref>] history store -> OpenMetrics for promtool backfill
 sbperf scrape-init --ref <ref>               write the (alternate) Prometheus+Grafana stack
@@ -164,7 +169,8 @@ resolvable. `--all` is the one path that still requires a PAT.
 config.ts      zod env -> Config (access token, source)
 transport.ts   Transport interface + DirectTransport (auth + retry); null in
                no-PAT mode (every Management plane then skipped)
-management.ts  typed, zod-parsed Management API wrapper
+management.ts  typed, zod-parsed Management API wrapper (incl. the security-config
+               planes: config/auth, network-restrictions, ssl-enforcement)
 sqlrunner.ts   SQL tiers behind one interface: ManagementSqlRunner (PAT read-only,
                default) + DirectSqlRunner (superuser --db-url via Bun.SQL)
 splinter.ts    self-hosted advisor: runs the vendored splinter.sql over --db-url
@@ -179,7 +185,16 @@ collect.ts     orchestrate all planes -> validated Analysis; captures the
 heuristics.ts  evergreen THRESHOLDS + per-finding metadata (why/how/verify/sql)
 lints.ts       per-splinter-lint fix catalog (concrete fix, not "go to Advisor")
 findings.ts    deriveFindings/derivePositives: the deterministic ranking pass
-               (incl. trend-driven capacity suggestions, data-aware)
+               (incl. trend-driven capacity suggestions, data-aware). Also
+               securityConfigFindings() = sbperf-ORIGINAL Security findings from
+               the auth/network/SSL planes (not advisor passthrough), and the
+               extension-health findings (outdated ext, unindexed pgvector,
+               pg_cron nudge)
+diff.ts        computeDiff(baseline, current): findings appeared/resolved/severity-
+               changed + per-query regressions matched by pg_stat_statements
+               queryid (>=1.5x mean-exec = regression) + scalar deltas
+check.ts       evaluateGate: findings -> pass/fail by --fail-on severity (+
+               --category, --new-since baseline). CLI exits 1 on breach - CI gate
 trendstats.ts  trend primitives (slope/sustained/peak/projection) behind
                sufficient() gating so short series never over-claim
 store.ts       SQLite history store (bun:sqlite) for the snapshot/trends path
