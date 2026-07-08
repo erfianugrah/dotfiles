@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# deck-shot - screenshot a reveal.js / Quarto revealjs deck to a PNG.
+#
+# Two modes, picked by whether you name a slide:
+#
+#   deck-shot pitch.qmd 14        single slide 14 -> PNG (fast, raw chromium)
+#   deck-shot pitch.qmd           whole deck -> contact sheet PNG (decktape,
+#                                 faithful: waits for mermaid + web fonts)
+#
+# <deck> may be a .qmd (rendered via quarto first), a .html file, or a
+# file://.../http(s):// URL. A slide arg is a 0-based reveal.js horizontal
+# index (#/N) or a slide id (#/some-id).
+#
+# Why two engines: raw headless chromium is fast for one slide but can
+# substitute the web font late, so mermaid node text may look clipped. decktape
+# drives reveal.js's own fragment/step machinery and waits for render, so the
+# contact sheet is faithful. Use --faithful to force decktape for one slide too.
+#
+# Deps (all already on this box): quarto, chromium/google-chrome-stable,
+# decktape (via bunx), pdftoppm (poppler), montage (imagemagick).
+
+set -euo pipefail
+
+CHROME=""
+for c in /usr/sbin/chromium /usr/bin/chromium /usr/sbin/google-chrome-stable \
+         /usr/bin/google-chrome-stable; do
+  [ -x "$c" ] && { CHROME="$c"; break; }
+done
+
+usage() {
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+out=""
+size="1280x720"
+budget="8000"
+dpi="52"
+tile="5x6"
+keep_pdf=""
+faithful=""
+
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -s) size="$2"; shift 2 ;;
+    -t) budget="$2"; shift 2 ;;
+    -r) dpi="$2"; shift 2 ;;
+    --tile) tile="$2"; shift 2 ;;
+    --pdf) keep_pdf="$2"; shift 2 ;;
+    --faithful) faithful=1; shift ;;
+    -h|--help) usage 0 ;;
+    -*) echo "deck-shot: unknown option $1" >&2; usage 1 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+
+[ "${#args[@]}" -ge 1 ] || usage 1
+deck="${args[0]}"
+slide="${args[1]:-}"
+
+[ -n "$CHROME" ] || { echo "deck-shot: no chromium/chrome found" >&2; exit 1; }
+
+# --- resolve the deck to a file:// (or http) URL --------------------------
+url=""
+case "$deck" in
+  http://*|https://*|file://*) url="$deck" ;;
+  *.qmd)
+    [ -f "$deck" ] || { echo "deck-shot: no such file: $deck" >&2; exit 1; }
+    echo "deck-shot: rendering $deck (quarto -> revealjs)..." >&2
+    quarto render "$deck" --to revealjs >&2
+    html="${deck%.qmd}.html"
+    [ -f "$html" ] || { echo "deck-shot: expected $html after render" >&2; exit 1; }
+    url="file://$(readlink -f "$html")"
+    ;;
+  *.html|*.htm)
+    [ -f "$deck" ] || { echo "deck-shot: no such file: $deck" >&2; exit 1; }
+    url="file://$(readlink -f "$deck")"
+    ;;
+  *)
+    echo "deck-shot: don't know how to open '$deck' (want .qmd/.html/URL)" >&2
+    exit 1
+    ;;
+esac
+
+# --- single slide: fast raw chromium (or --faithful decktape) -------------
+if [ -n "$slide" ]; then
+  out="${out:-/tmp/deck-shot.png}"
+  IFS=x read -r w h <<<"$size"
+
+  if [ -n "$faithful" ]; then
+    # decktape 1-based slide index; strip any leading #/ from the arg.
+    n="${slide#\#/}"
+    pdf="$(mktemp --suffix=.pdf)"
+    echo "deck-shot: decktape slide $n (faithful)..." >&2
+    bunx decktape reveal --chrome-path "$CHROME" --size "$size" \
+      --slides "$n" "$url" "$pdf" >&2
+    pdftoppm -png -scale-to-x "$w" -scale-to-y "$h" "$pdf" "${out%.png}" >&2
+    # pdftoppm appends -1/-01 etc; normalise to the requested name.
+    first="$(ls "${out%.png}"-*.png 2>/dev/null | head -1 || true)"
+    [ -n "$first" ] && mv "$first" "$out"
+    [ -n "$keep_pdf" ] && cp "$pdf" "$keep_pdf"
+    rm -f "$pdf"
+  else
+    frag="$url"
+    case "$slide" in
+      \#*) frag="$url$slide" ;;
+      /*)  frag="$url#$slide" ;;
+      *)   frag="$url#/$slide" ;;
+    esac
+    echo "deck-shot: chromium screenshot $frag..." >&2
+    "$CHROME" --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
+      --force-device-scale-factor=1 --window-size="$w,$h" \
+      --virtual-time-budget="$budget" --screenshot="$out" "$frag" >&2 2>&1
+  fi
+
+  echo "$out"
+  exit 0
+fi
+
+# --- whole deck: decktape -> PDF -> contact sheet -------------------------
+out="${out:-/tmp/deck-contact.png}"
+pdf="${keep_pdf:-$(mktemp --suffix=.pdf)}"
+tmpprefix="$(mktemp -u)"
+
+echo "deck-shot: decktape whole deck -> PDF..." >&2
+bunx decktape reveal --chrome-path "$CHROME" --size "$size" "$url" "$pdf" >&2
+echo "deck-shot: pdftoppm @ ${dpi}dpi -> montage ${tile}..." >&2
+pdftoppm -png -r "$dpi" "$pdf" "$tmpprefix" >&2
+geom="$(printf '%s' "$size" | awk -Fx '{printf "%dx%d+3+3", int($1/5), int($2/5)}')"
+montage "$tmpprefix"-*.png -tile "$tile" -geometry "$geom" -label '%f' "$out" >&2
+
+rm -f "$tmpprefix"-*.png
+[ -n "$keep_pdf" ] || rm -f "$pdf"
+
+echo "$out"
