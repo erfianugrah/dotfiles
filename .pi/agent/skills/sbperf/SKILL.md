@@ -87,6 +87,8 @@ never touching `analysis.json` (precedence `--overlay` > `SBPERF_OVERLAY` >
 | PDF of an existing report | `pdf <dir>` (needs Chromium on PATH) |
 | Audit a subset of projects (PAT-only) | `full --ref a,b,c` / `full --ref-file refs.txt\|.csv` -> combined org/project `index.html` (repeatable + comma/space lists + file; deduped) |
 | Audit every project in the account/org | `full --all [--org <slug>]` -> `index.html` |
+| Maximal-coverage fleet audit (PAT + superuser) | `full --all --db-config <json>` - PAT enumerates + serves API/metrics; any project whose ref matches a connstring is auto-upgraded to the superuser SQL tier (deep SQL). Add `--amcheck` for integrity checks on matched projects |
+| Data-integrity check (corruption) | `--amcheck` (bt_index_check, light) or `--amcheck heap` (+ verify_heapam, heavy) - superuser + amcheck-installed only; never CREATEs it |
 | Audit a customer project you have NO PAT for | `--db-url <connstr>` with `--no-pat` (SQL + splinter advisors + Grafana) |
 | Audit a fleet of customer DBs (work) | `full --profile <file>.json` -> per-DB reports + index, per-region Grafana |
 | Accumulate infra trends, no Prom/Grafana | `snapshot --ref <ref>` on a schedule (see below) |
@@ -118,8 +120,10 @@ sbperf full     --ref <r1>,<r2> ...          audit a subset -> combined index (r
                                              comma/space lists; snapshot loops, analyze rejects)
 sbperf full     --ref-file <refs.txt|.csv>   subset refs from a file (ref-shaped tokens only)
 sbperf full     --all [--org <slug>]         audit every project + index.html
+sbperf full     --all --db-config <json>     ...+ upgrade matched projects to superuser SQL (PAT+connstrings = max coverage)
 sbperf full     --profile <file>.json        no-PAT work sweep (per-region Grafana + customer DBs)
 sbperf full     --db-url <connstr> [--no-pat] superuser SQL tier (augments PAT, or sole source no-PAT)
+sbperf analyze  --ref <ref> --db-url <c> --amcheck[ heap]  opt-in integrity: bt_index_check (+ verify_heapam); superuser + ext only
 sbperf snapshot --ref <ref> [--store <db>]   collect + append to the history store
 sbperf diff     <oldDir> <newDir>            findings delta + per-query (queryid) regressions
 sbperf diff     --ref <ref> [--store <db>]   same, over the last 2 history-store snapshots
