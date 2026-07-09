@@ -91,6 +91,53 @@ Real writing samples beat any hand-written style description for texture -- exam
 
 Match what you see, THEN layer the reference-discipline below on top. Texture from samples + citation rigor from this skill is what beats both a samples-only tool (Claude Projects/Custom Styles) and a description-only prompt -- the tools nail texture but never enforce cite-every-claim.
 
+## Draft-then-refine with the fine-tune (erfi-q4km)
+
+A QLoRA fine-tune of Erfi's chat + blog corpus is served on-demand at
+`localhost:11434` (model id `erfi-q4km`; load with `llmc switch erfi`, swap back
+with `llmc switch <other>`). It supplies TEXTURE prompting can't fake -- the
+doc-verified failure mode is that prompting alone defaults to "an average,
+generic tone, readily detectable as AI." This skill supplies the DISCIPLINE the
+model lacks (citations, true-today/gap/roadmap split, corpo-tell removal,
+surface structure). They compose as a pipeline, NOT a replacement:
+
+```
+erfi-q4km  ->  raw first draft in authentic voice
+   |
+this skill ->  add citations, verify facts, kill corpo tells, match structure
+   |
+final      ->  sounds like Erfi AND is reference-backed
+```
+
+**Concrete seed step** (do this, don't hand-roll curl): from the erfi-bot repo,
+`bin/erfi-bot draft --persona <bot|writer_technical|writer_personal|writer_corpo> "<prompt>"`.
+It auto-loads the model (`llmc switch erfi` if needed), strips scaffolding, and
+prints the raw draft to stdout. Take that as the texture layer, then apply
+everything below. Stdin also works: `echo "<prompt>" | bin/erfi-bot draft`.
+
+**The model's role is register-dependent** -- it was trained on ~6800 chat pairs
+and ~400 technical-blog pairs, almost nothing composed-professional:
+
+| Surface | Model's role |
+|---|---|
+| Casual chat / DM (out of scope for this skill's *drafting*, but its native register) | Near-final; model leads, light cleanup |
+| Written technical (blog / doc) | Strong first draft (`writer_technical` persona) + this skill's citations on top |
+| Professional relay (customer email, review reply) | Texture-check only; **this skill leads**, model contributes little |
+
+**Hard rules when seeding from the model:**
+- On professional / customer-facing surfaces the skill LEADS and every claim
+  still gets cited or marked inferred. Never ship raw model output as a final
+  professional deliverable -- it has no citation discipline, hallucinates
+  outside its training topics, and has no sense of past vs present.
+- The raw `localhost:11434` API emits Qwen3 `<think>` / `<tool_call>`
+  scaffolding before the reply, and can leak `<PERSON_hash>` scrub placeholders.
+  The bots' `client.py` strips scaffolding automatically; if you hit the raw
+  endpoint, strip `</?(?:think|tool_call)>` blocks and any `<PERSON_...>` token
+  before using the text.
+- Use it as a DRAFT/texture source, then apply everything below. Real samples
+  (blog, git, gh, Discord export) still beat a model generation for grounding
+  when you have them; the model's edge is on-demand, register-matched texture.
+
 ## Voice characteristics (grounded in your published writing)
 
 Every example below is verbatim from your public technical blog (mirrored under `/docs/erfi-technical-blog/`), cited so it can be re-read.
