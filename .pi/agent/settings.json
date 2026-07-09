@@ -21,6 +21,6 @@
       "maxRetryDelayMs": 60000
     }
   },
-  "hideThinkingBlock": false,
+  "hideThinkingBlock": true,
   "packages": []
 }
