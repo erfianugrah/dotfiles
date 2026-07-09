@@ -64,7 +64,7 @@ import { prune, hasImageContent, type AnyMessage } from "../extensions/tool-outp
 import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
 import { matchHints, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
 import { findLastUserEntryId } from "../extensions/session-undo.ts";
-import { scanForBlocked } from "../extensions/confidential-write-guard.ts";
+import { isCommitPersist, scanForBlocked } from "../extensions/confidential-write-guard.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -2955,6 +2955,39 @@ describe("confidential-write-guard.scanForBlocked", () => {
     expect(scanForBlocked("project a.b.c here", ["a.b.c"])).not.toBeNull();
     // the dots are literal, so a different separator must NOT match
     expect(scanForBlocked("project axbxc here", ["a.b.c"])).toBeNull();
+  });
+});
+
+// ── confidential-write-guard: isCommitPersist (commit/PR vet-nudge trigger) ──
+
+describe("confidential-write-guard.isCommitPersist", () => {
+  test("matches git commit in all its forms", () => {
+    expect(isCommitPersist("git commit -m 'x'")).toBe(true);
+    expect(isCommitPersist("git commit -F -")).toBe(true);
+    expect(isCommitPersist("cd ~/repo && git commit --amend --no-edit")).toBe(true);
+    expect(isCommitPersist("git commit -F - <<'EOF'\nfeat: x\nEOF")).toBe(true);
+  });
+
+  test("matches git tag and git notes (message-bearing)", () => {
+    expect(isCommitPersist("git tag -a v1 -m 'release'")).toBe(true);
+    expect(isCommitPersist("git notes add -m 'note'")).toBe(true);
+  });
+
+  test("matches gh pr/issue/release create|edit|comment (remote prose bodies)", () => {
+    expect(isCommitPersist("gh pr create --title x --body y")).toBe(true);
+    expect(isCommitPersist("gh pr edit 3 --body z")).toBe(true);
+    expect(isCommitPersist("gh issue create -t x -b y")).toBe(true);
+    expect(isCommitPersist("gh issue comment 5 -b 'thanks'")).toBe(true);
+    expect(isCommitPersist("gh release create v2 --notes '...'")).toBe(true);
+  });
+
+  test("does NOT match read-only or non-persisting commands", () => {
+    expect(isCommitPersist("git status")).toBe(false);
+    expect(isCommitPersist("git log --oneline -5")).toBe(false);
+    expect(isCommitPersist("git diff --cached")).toBe(false);
+    expect(isCommitPersist("gh pr view 3")).toBe(false);
+    expect(isCommitPersist("gh pr list")).toBe(false);
+    expect(isCommitPersist("echo committing now")).toBe(false);
   });
 });
 

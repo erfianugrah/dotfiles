@@ -22,7 +22,12 @@
  *
  *   3. This guard then DETERMINISTICALLY blocks any write/commit containing a
  *      user-blocked term (so the agent can't forget and re-leak it), and
- *      nudges once per remote-backed repo so the ask-loop actually runs.
+ *      nudges the agent to run the ask-loop at two moments: (a) the first
+ *      prose-file write into a repo, and (b) the first commit / PR / issue
+ *      write into a repo (git commit, gh pr|issue|release). A commit message +
+ *      staged diff is the highest-risk persist-to-remote moment for a NOVEL
+ *      identifier, so it gets its own vet reminder even if (a) already fired.
+ *      (Each nudge fires once per repo per process - separate trackers.)
  *
  * The block reason never echoes the term (that re-propagates it into the
  * session log — the exact mistake that motivated this); it masks the term as
@@ -155,7 +160,10 @@ export function scanForBlocked(text: string, blocked: string[]): Hit | null {
 
 // ── nudge tracking (once per remote-backed repo, per process) ───────────────
 
+// prose-file writes and commit/PR persists nudge independently: a commit is the
+// last gate before push, so it earns its own reminder even after a prose nudge.
 const nudgedRepos = new Set<string>();
+const commitNudgedRepos = new Set<string>();
 
 const PROSE_EXT = new Set([".md", ".mdx", ".txt", ".rst", ".adoc", ".org", ".markdown"]);
 
@@ -170,6 +178,18 @@ function repoHasRemote(repoRoot: string): boolean {
     return true; // can't tell → assume yes (fail safe toward nudging)
   }
 }
+
+const COMMIT_NUDGE = (repoRoot: string, remote: boolean): string =>
+  `tool-guard[confidential-write]: first commit / PR / issue write into ${repoRoot}` +
+  `${remote ? " (has a remote - may be public/shared)" : ""}.\n` +
+  `A commit message + staged diff are about to be persisted. Before this lands, vet BOTH the ` +
+  `message and the staged changes for confidential third-party identifiers - not just named ` +
+  `customers/partners/individuals and internal codenames, but internal-vs-public framing itself ` +
+  `("internal <X>", "the public counterpart to our internal ...", internal label/naming schemes, ` +
+  `unreleased roadmap). You are the classifier - there is no denylist. For ANY term or phrasing you ` +
+  `are not certain is safe to publish, rephrase or use a placeholder, and record confirmed-confidential ` +
+  `terms with the \`confidential_terms\` tool so they're enforced. If you have already vetted this ` +
+  `content, retry - this fires once per repo. Kill switch: PI_CONFIDENTIAL_GUARD_OFF=1.`;
 
 const NUDGE = (repoRoot: string, remote: boolean): string =>
   `tool-guard[confidential-write]: first prose/commit write into ${repoRoot}` +
@@ -258,7 +278,19 @@ const confidentialTermsTool = defineTool({
 });
 
 // ── bash commands that WRITE (so a term in them is about to be persisted) ───
-const WRITE_BASH = /(\bgit\s+commit\b|\btee\b|>>?|\bsd\b|\bsed\s+-i\b|\bperl\s+-i\b|\bdd\b|\bgit\s+(?:tag|notes)\b)/;
+const WRITE_BASH =
+  /(\bgit\s+commit\b|\btee\b|>>?|\bsd\b|\bsed\s+-i\b|\bperl\s+-i\b|\bdd\b|\bgit\s+(?:tag|notes)\b|\bgh\s+(?:pr|issue|release)\s+(?:create|edit|comment)\b)/;
+
+// bash commands that PERSIST PROSE TO A (possibly shared/public) REMOTE - commit
+// messages, tags, PR/issue/release bodies. The highest-risk moment for a novel
+// confidential identifier to land, so they get a dedicated vet nudge.
+const COMMIT_PERSIST =
+  /\bgit\s+commit\b|\bgit\s+(?:tag|notes)\b|\bgh\s+(?:pr|issue|release)\s+(?:create|edit|comment)\b/;
+
+/** True when a bash command persists a commit message / PR / issue body. */
+export function isCommitPersist(cmd: string): boolean {
+  return COMMIT_PERSIST.test(cmd);
+}
 
 function extractPatchPaths(patchText: string): string[] {
   const out: string[] = [];
@@ -324,12 +356,21 @@ export default function (pi: ExtensionAPI) {
       return undefined;
     }
 
-    // bash — only when the command writes/commits
+    // bash - only when the command writes/commits
     if (tool === "bash") {
       const cmd = (event.input as { command?: string }).command;
       if (typeof cmd !== "string" || !WRITE_BASH.test(cmd)) return undefined;
       const hit = scanForBlocked(cmd, blockedTermsFor(process.cwd()));
       if (hit) return { block: true, reason: blockMsg(hit.masked, "bash (writes/commits)") };
+
+      // once-per-repo commit/PR/issue vet nudge (independent of the prose nudge)
+      if (isCommitPersist(cmd)) {
+        const root = findRepoRoot(process.cwd());
+        if (root && !commitNudgedRepos.has(root)) {
+          commitNudgedRepos.add(root);
+          return { block: true, reason: COMMIT_NUDGE(root, repoHasRemote(root)) };
+        }
+      }
       return undefined;
     }
 
