@@ -88,7 +88,7 @@ never touching `analysis.json` (precedence `--overlay` > `SBPERF_OVERLAY` >
 | Audit a subset of projects (PAT-only) | `full --ref a,b,c` / `full --ref-file refs.txt\|.csv` -> combined org/project `index.html` (repeatable + comma/space lists + file; deduped) |
 | Audit every project in the account/org | `full --all [--org <slug>]` -> `index.html` |
 | Maximal-coverage fleet audit (PAT + superuser) | `full --all --db-config <json>` - PAT enumerates + serves API/metrics; any project whose ref matches a connstring is auto-upgraded to the superuser SQL tier (deep SQL). Add `--amcheck` for integrity checks on matched projects |
-| Data-integrity check (corruption) | `--amcheck` (bt_index_check, light) or `--amcheck heap` (+ verify_heapam, heavy) - superuser + amcheck-installed only; never CREATEs it |
+| Data-integrity check (corruption) | `--amcheck` (bt_index_check, light) or `--amcheck heap` (+ verify_heapam, heavy) - superuser + amcheck-installed only; never CREATEs it. On Supabase amcheck is bundled but supautils-gated as "unsafe", so only the `supabase_admin` superuser can `CREATE EXTENSION amcheck` (the `postgres` role cannot); a clean collection note fires if absent |
 | Audit a customer project you have NO PAT for | `--db-url <connstr>` with `--no-pat` (SQL + splinter advisors + Grafana) |
 | Audit a fleet of customer DBs (work) | `full --profile <file>.json` -> per-DB reports + index, per-region Grafana |
 | Accumulate infra trends, no Prom/Grafana | `snapshot --ref <ref>` on a schedule (see below) |
