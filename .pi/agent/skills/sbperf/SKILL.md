@@ -57,11 +57,16 @@ PAT. Force it with `--no-pat` / `SBPERF_NO_PAT=1` even when a token exists.
 **Profile** (`--profile <file>.json`, `profile.ts`): the whole customer-audit
 config in ONE gitignored JSON - `{ noPat, trendDays, grafana: { hostTemplate,
 datasourceUid, matcher, regions: { <region>: { cookie, uid?, host? } } },
-databases: [...] }`. `full --profile <f>` forces no-PAT, makes `databases[]` the
-sweep targets, and resolves trends **per project**: the region is derived from
+databases: [...] }`. `full --profile <f>` defaults to no-PAT (`noPat: true`),
+makes `databases[]` the sweep targets, and resolves trends **per project**: the
+region is derived from
 each connstring, mapped to that region's Grafana host/uid/cookie (each regional
 Grafana is a separate ALB, so a per-region session cookie). A region absent from
-the map -> that project's trends are skipped (SQL/advisors still run). Nothing
+the map -> that project's trends are skipped (SQL/advisors still run). Set
+`"noPat": false` in the profile to KEEP the PAT (Management-API planes + metrics)
+alongside the profile's Grafana graphs + superuser SQL - the fullest report;
+`--amcheck` is honoured on the profile sweep too (`full --profile <f> --amcheck`).
+Nothing
 internal is baked into the repo - hosts, UIDs, cookies, connstrings all live in
 the gitignored profile (`sbperf.profile.json`; keep `.example`).
 
