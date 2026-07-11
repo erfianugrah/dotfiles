@@ -122,6 +122,8 @@ ssh servarr "curl -sf -X PUT \
 
 GETs work fine through the public WAF. Only PUT/POST/DELETE with credential-like bodies trip it. There's a separate, looser WAF rule that adding `User-Agent: Mozilla/5.0` + `Origin: https://composer.erfi.io` headers bypasses — use that first; only fall through to the internal-network workaround when the credential-detection rule fires.
 
+**Incoming webhook deliveries hit the WAF too.** GitHub push/ping deliveries to `POST /api/v1/hooks/{id}` are subject to the same Caddy WAF (ddos-mitigator rate rule). Under a burst (e.g. registering + test-pinging many hooks at once) some return `403` and **never reach composerd** - the tell is `GET /webhooks/{id}/deliveries` showing `deliveries: []` while GitHub's `last_response.code` is `403`. It is NOT per-repo config and NOT payload content (the same payload flips 403->200 on retry). Real single pushes usually land (GitHub retries with backoff), but the durable fix is a Caddy path exemption for `/api/v1/hooks/*` (see caddy skill's `@public path /api/* /webhooks/*` pattern). GitHub can't send the `Mozilla`+`Origin` bypass headers, so path-exemption is the only option for inbound hooks.
+
 ## Roles
 
 - **Admin** — everything. Required for: user/key/system mgmt, `shell_command` + `docker_exec` pipeline steps, `POST /docker/exec`.
@@ -161,6 +163,23 @@ Live run output: SSE at `GET /sse/pipelines/{id}/runs/{runId}`.
 ## GitOps
 
 Stack-side endpoints: `POST /stacks/{name}/sync` (pull + clear dirty flag), `GET /stacks/{name}/git/{log,status,diff}`, `POST /stacks/{name}/rollback` (checkout SHA).
+
+### Repointing a stack to a DIFFERENT repo URL: convert does NOT clone
+
+`convert/local` then `convert/git` looks like the way to change a stack's repo, but **`ConvertToGit` never clones** - it only writes the git config and falsely marks `sync_status: synced`. The on-disk dir keeps the OLD working-tree files and has no `.git`, so the next `sync` fails `500 "pulling: opening repo: repository does not exist"`. Cloning happens ONLY in the `POST /stacks/git` create path. And you can't hand-clone via `docker exec` either: composer's SSH keys are **AES-encrypted at rest**, usable only in-process by go-git.
+
+The only working repoint is **delete + recreate** (brief downtime; fine for periodic jobs). Preserve the encrypted `.env` across it - `GET /stacks/{name}` returns `env_content` in PLAINTEXT, so capture it first, then restore via the internal-network PUT (token body trips the WAF - see WAF section):
+
+```bash
+ENV=$(curl -sf -H "X-API-Key: $KEY" "$BASE/stacks/<name>" | jq -r .env_content)   # real values
+curl -sf -X DELETE -H "X-API-Key: $KEY" "$BASE/stacks/<name>"                      # downs + rm dir + DB row
+curl -sf -X POST -H "X-API-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"<name>","repo_url":"git@github.com:o/NEW.git","branch":"main","compose_path":"compose.yaml","env_path":".env","auth_method":"none"}' \
+  "$BASE/stacks/git"                                                               # clones fresh
+# restore env via internal net (WAF), then POST /stacks/<name>/up?async=true
+```
+
+Delete also drops the stack's webhook - recreate it after (composer `POST /webhooks` + the matching GitHub repo hook).
 
 ### Stack location on disk — host vs container view
 
