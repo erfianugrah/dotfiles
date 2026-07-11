@@ -45,6 +45,7 @@ import {
 	extractCompletionText,
 } from "../extensions/session-ledger/index.ts";
 import { parseOsvJson } from "../extensions/osv-scan.ts";
+import { parsePdffonts, assessText, chooseStrategy, sortPageFiles } from "../extensions/pdf.ts";
 import { parseGitleaksJson, parseNoseyparkerJsonl } from "../extensions/secret-scan.ts";
 import { parseHurlJson } from "../extensions/hurl-test.ts";
 import { parseGoTestJson } from "../extensions/go-test.ts";
@@ -680,6 +681,83 @@ describe("osv-scan.parseOsvJson", () => {
       ],
     });
     expect(parseOsvJson(raw)[0].severity).toBe("9.8");
+  });
+});
+
+// ── pdf: parsePdffonts / assessText / chooseStrategy / sortPageFiles ──
+
+describe("pdf.parsePdffonts", () => {
+  const BORN = [
+    "name                                 type              encoding         emb sub uni object ID",
+    "------------------------------------ ----------------- ---------------- --- --- --- ---------",
+    "BUGWMD+Times-Roman                   Type 1C           WinAnsi          yes yes yes      7  0",
+  ].join("\n");
+  const SCANNED = [
+    "name                                 type              encoding         emb sub uni object ID",
+    "------------------------------------ ----------------- ---------------- --- --- --- ---------",
+  ].join("\n");
+
+  test("born-digital PDF has a text layer", () => {
+    const r = parsePdffonts(BORN);
+    expect(r.hasTextLayer).toBe(true);
+    expect(r.fonts).toEqual(["BUGWMD+Times-Roman"]);
+  });
+
+  test("scanned PDF (header only) has no text layer", () => {
+    const r = parsePdffonts(SCANNED);
+    expect(r.hasTextLayer).toBe(false);
+    expect(r.fonts).toEqual([]);
+  });
+
+  test("empty output has no text layer", () => {
+    expect(parsePdffonts("").hasTextLayer).toBe(false);
+  });
+
+  test("multiple fonts are all captured", () => {
+    const raw = `${BORN}\nABCDEF+Helvetica                     TrueType          Custom           yes yes yes      9  0`;
+    const r = parsePdffonts(raw);
+    expect(r.fonts).toEqual(["BUGWMD+Times-Roman", "ABCDEF+Helvetica"]);
+    expect(r.hasTextLayer).toBe(true);
+  });
+});
+
+describe("pdf.assessText", () => {
+  test("counts words and flags non-empty", () => {
+    expect(assessText("  hello  world  ")).toEqual({ chars: 12, words: 2, nonEmpty: true });
+  });
+  test("empty / whitespace-only is empty", () => {
+    expect(assessText("   \n  ")).toEqual({ chars: 0, words: 0, nonEmpty: false });
+    expect(assessText("")).toEqual({ chars: 0, words: 0, nonEmpty: false });
+  });
+});
+
+describe("pdf.chooseStrategy", () => {
+  test("auto: text layer -> text", () => {
+    expect(chooseStrategy({ hasTextLayer: true })).toBe("text");
+  });
+  test("auto: no text layer -> ocr", () => {
+    expect(chooseStrategy({ hasTextLayer: false })).toBe("ocr");
+  });
+  test("explicit mode always wins over the diagnostic", () => {
+    expect(chooseStrategy({ mode: "ocr", hasTextLayer: true })).toBe("ocr");
+    expect(chooseStrategy({ mode: "text", hasTextLayer: false })).toBe("text");
+    expect(chooseStrategy({ mode: "visual", hasTextLayer: true })).toBe("visual");
+    expect(chooseStrategy({ mode: "tables", hasTextLayer: false })).toBe("tables");
+  });
+  test("unknown mode falls back to the diagnostic", () => {
+    expect(chooseStrategy({ mode: "bogus", hasTextLayer: false })).toBe("ocr");
+  });
+});
+
+describe("pdf.sortPageFiles", () => {
+  test("sorts numerically, not lexically (10 after 2)", () => {
+    const input = ["page-10.png", "page-2.png", "page-1.png", "page-11.png"];
+    expect(sortPageFiles(input)).toEqual(["page-1.png", "page-2.png", "page-10.png", "page-11.png"]);
+  });
+  test("does not mutate the input array", () => {
+    const input = ["page-2.png", "page-1.png"];
+    sortPageFiles(input);
+    expect(input).toEqual(["page-2.png", "page-1.png"]);
   });
 });
 

@@ -84,6 +84,7 @@ Pi has wrapper tools that return token-efficient structured output. Prefer them 
 - **Go tests** → `go_test` (returns failed-only with last 30 output lines per test), NOT `bash go test ./...` (full pass/skip/fail stream). Pass `run=` regex to narrow, `race=true` for race detector.
 - **Benchmarks** → `bench` (statistical compare via hyperfine, returns winner + speedup), NOT `bash time` or `bash hyperfine` directly (table-formatted human prose).
 - **OCI image tags** → `oci_tags`, NEVER `websearch` for container versions (the registry API is authoritative; web search returns stale blog posts).
+- **PDF / scanned document** → `pdf` tool, NEVER `read` (pi's `read` handles text + images only, it cannot open a PDF) and NEVER `bash pdftotext`/model-vision-first. It diagnoses text-layer vs scanned (`pdffonts`) and auto-routes: born-digital → `pdftotext`, scanned → `tesseract` OCR. Use `mode:"visual"` to rasterize pages to PNG and `read` those only when layout/figures/tables need the model's eye.
 
 ## Background / parallel work
 
