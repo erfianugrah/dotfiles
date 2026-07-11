@@ -223,12 +223,29 @@ fi
 # ---------------------------------------------------------------------------
 # Default mode: render GFM -> HTML fragment, set rich clipboard + plain fallback.
 # ---------------------------------------------------------------------------
-html="$(printf '%s' "$src" | quarto pandoc -f gfm -t html)"
+html="$(printf '%s' "$src" | quarto pandoc -f gfm -t html --wrap=none)"
 
 # Give code blocks a light monospace box so they read as code in Gmail
 # (pandoc's highlight classes carry no inline styles once out of a stylesheet).
 html="${html//<pre /<pre style=\"background:#f6f8fa;padding:10px;border-radius:6px;overflow:auto;font-family:Consolas,Menlo,monospace;font-size:90%\" }"
 html="${html//<pre>/<pre style=\"background:#f6f8fa;padding:10px;border-radius:6px;overflow:auto;font-family:Consolas,Menlo,monospace;font-size:90%\">}"
+
+# Tighten paragraph spacing. Two things stack into an oversized gap in Gmail:
+#   1. bare <p> carries ~1em top AND bottom margin -> collapse to bottom-only.
+#   2. pandoc emits each block on its own line, and this clipboard path renders
+#      a bare newline BETWEEN blocks as an extra <br> (same root cause as the
+#      --wrap=none fix) -> strip inter-block newlines so only the margin spaces.
+html="${html//<p>/<p style=\"margin:0 0 10px 0\">}"
+if [[ "$html" != *"<pre"* ]]; then
+  # No preformatted code: newlines are pure formatting, safe to drop wholesale.
+  html="${html//$'\n'/}"
+else
+  # Preserve newlines inside <pre> (significant); only collapse after closing
+  # block tags, which never appear inside a code block.
+  for _ct in '</p>' '</li>' '</ul>' '</ol>' '</h1>' '</h2>' '</h3>' '</h4>' '</h5>' '</h6>' '</blockquote>' '</tr>' '</table>'; do
+    html="${html//$_ct$'\n'/$_ct}"
+  done
+fi
 
 tmphtml="$(mktemp --suffix=.html)"
 tmptxt="$(mktemp --suffix=.txt)"

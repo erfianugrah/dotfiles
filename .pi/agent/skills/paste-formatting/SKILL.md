@@ -18,6 +18,8 @@ So the job is never "reformat the markdown". It is "render the markdown to HTML 
 
 `mdclip` (at `~/dotfiles/bin/mdclip`, symlinked into `~/.local/bin`) does the whole pipeline: Markdown -> HTML (via the pandoc bundled with the Quarto CLI) -> the OS clipboard as rich text. Then paste into Gmail (Ctrl+V, or Cmd+V on macOS) and the formatting is intact.
 
+The render is `quarto pandoc -f gfm -t html --wrap=none`. The `--wrap=none` is load-bearing: pandoc's default `--wrap=auto` re-wraps every paragraph at 72 columns, and Gmail turns those baked-in newlines into hard line-breaks mid-sentence on paste (text wraps at ~65 chars with a wide empty right margin). Keeping the source unwrapped is not enough on its own - the renderer must not re-wrap either. Do not remove that flag.
+
 The render step is portable; only the clipboard-set step is platform-specific, auto-detected at runtime (WSL is checked before Wayland/X11 because WSLg sets `WAYLAND_DISPLAY`/`DISPLAY` but the real clipboard is Windows'):
 
 | Platform | Rich backend | Plain backend (`--slack`) |
@@ -33,7 +35,7 @@ mdclip < reply.md        # or from stdin
 mdclip --slack reply.md  # Slack mrkdwn as plain text (see Slack row below)
 ```
 
-Verified 2026-07: bold, `code` (monospace), bullets, links, and tables all survive the paste into Gmail on WSL. Only WSL sets both a rich flavour and a plain-text fallback in one shot; macOS/Wayland/X11 single-flavour tools set the rich flavour only (every rich editor reads it; terminal paste won't). macOS RTF via `textutil` preserves bold/bullets/headings/links/tables; a true `public.html` flavour would need an `osascript` helper and isn't necessary. On macOS/Linux install the backend tool if missing (`pbcopy`/`textutil` are built in; `wl-clipboard` or `xclip` via package manager); mdclip prints a clear per-platform hint when one is absent.
+Verified 2026-07: bold, `code` (monospace), bullets, links, and tables all survive the paste into Gmail on WSL, with no mid-paragraph line-breaks (see the `--wrap=none` note above). Only WSL sets both a rich flavour and a plain-text fallback in one shot; macOS/Wayland/X11 single-flavour tools set the rich flavour only (every rich editor reads it; terminal paste won't). macOS RTF via `textutil` preserves bold/bullets/headings/links/tables; a true `public.html` flavour would need an `osascript` helper and isn't necessary. On macOS/Linux install the backend tool if missing (`pbcopy`/`textutil` are built in; `wl-clipboard` or `xclip` via package manager); mdclip prints a clear per-platform hint when one is absent.
 
 ## Fallback (no tool, any OS): browser copy
 
@@ -48,6 +50,10 @@ quarto pandoc -f gfm -t html -s reply.md -o /tmp/reply.html && wslview /tmp/repl
 Author paste-destined text with **one line per paragraph and one line per bullet** - no hard wrapping at 80 columns. Hard wraps become literal newlines in the clipboard, so a plain-text paste (and even some HTML paths) injects line breaks mid-sentence. Let the editor soft-wrap for display; never bake newlines into a paragraph. This is the mechanical companion to erfi-voice's ASCII-punctuation rule - see **`erfi-voice`**.
 
 Internal reference docs that are read in an editor can stay hard-wrapped; only the block you intend to copy out must be unwrapped. Mark it so a later edit does not re-wrap it.
+
+## Hard rule: author bullet lists TIGHT (no blank line between items)
+
+A blank line between list items makes pandoc emit a **loose list** - each `<li>` is wrapped in `<p>`, and Gmail renders those with large top/bottom margins, so the bullets end up spaced far apart with a big gap before the first one. Write list items on consecutive lines with no blank line between them; pandoc then emits `<li>...</li>` (a tight list) and the bullets render compact. Blank lines are only for separating a list from surrounding paragraphs, never between items.
 
 ## Code snippets: be honest about the medium
 
