@@ -153,6 +153,27 @@ gh repo archive old-thing                             # archive (read-only)
 gh api repos/<org>/<repo>/rules/branches/main --jq '.[].type'
 ```
 
+## Repo webhooks (push -> external receiver, e.g. composer auto-deploy)
+
+No first-class `gh` command - drive the REST API. **`config` is a nested object**: `-f config.url=...` does NOT nest (sends literal key `config.url`) and fails `422 "url cannot be blank"`. Build JSON and pipe via `--input -`.
+
+```bash
+# create (secret is the shared HMAC secret from the receiver, e.g. composer POST /webhooks)
+jq -nc --arg u "$URL" --arg s "$SECRET" \
+  '{name:"web",active:true,events:["push"],config:{url:$u,content_type:"json",secret:$s}}' \
+  | gh api -X POST repos/<org>/<repo>/hooks --input - --jq '.id'
+
+gh api repos/<org>/<repo>/hooks --jq '.[]|{id,url:.config.url,active,last:.last_response.code}'
+gh api -X PATCH repos/<org>/<repo>/hooks/<id> --input -   # repoint/rotate (reuse a dangling hook)
+gh api -X POST  repos/<org>/<repo>/hooks/<id>/pings        # re-trigger to test delivery
+gh api repos/<org>/<repo>/hooks/<id>/deliveries/<did> --jq '.request,.response'  # debug a 403
+```
+
+- `last_response.code` is the receiver's HTTP status; `403` with `status:"missing"`/`"-"` = blocked/dangling (see composer skill's WAF note). `"unused"` = never fired yet.
+- Ping and push payloads both embed the full `repository` object; a WAF that inspects bodies sees the same shape either way.
+- **Archived repos reject new hooks** (`403 "Repository was archived so is read-only"`) - unarchive or migrate first.
+- Scope: repo-hook admin comes with `repo`. A `422`/`404` on a malformed body can misleadingly surface a `needs admin:repo_hook` hint - fix the JSON body first before refreshing scopes.
+
 ## Aliases (you have these — `gh push` / `gh pull`)
 
 Set / list:

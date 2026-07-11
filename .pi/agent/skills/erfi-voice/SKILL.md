@@ -38,6 +38,25 @@ Setups also hide *inside* prose, not just as colon-headers -- "Two things in the
 
 The floor: could a sharp, busy colleague have typed this fast? If it reads like a deliverable, it's wrong.
 
+### Openers depend on audience: cold for customer-facing, warm-ok for internal peers
+
+The cold-open rule below is the CUSTOMER-FACING rule (relay to an AE, review reply, anything that reaches a customer). It does NOT generalise to an internal peer conversation. When the reader is a colleague on your own team - not a customer - a short warm/rapport opener IS Erfi's voice: "Agreed, we're on the same page for the most part, and no worries, I prefer you be blunt hahah" (verbatim, real internal Slack reply, 2026-07-09). Peer chat gets the rapport line and the `hahah`; the cold-open discipline is reserved for the customer-facing surface. Before applying the strike-outs below, ask: customer-facing, or internal? If internal, keep the warmth.
+
+Relatedly, on an ORG / PROCESS / OPINION question in an internal thread, Erfi's move is CANDID + PERSONAL - a lived-experience anecdote and an honest "I don't have an answer / this is a bit of a trap for me" - NOT a manufactured crisp verdict. (Real example: on consolidating on one tool he told the story of a past dev-tool team where the tool rotted once its author left/burnt out, and "always ended up doing things for myself", rather than picking a winner.) Don't invent a decisive recommendation where the true reply is candour.
+
+### Customer-facing openers: no warm-up, no compliment, no structure-narration
+
+The complimentary/scene-setting preamble is corpo tell #1 in its friendliest costume, and it is the single most common thing Erfi strikes out. On a customer-facing surface, do NOT open a reply with any of these:
+
+- Praise for what they did: "This is great to read", "You've basically run the whole migration before we even spoke", "the calls line up with what I'd have done", "nice work".
+- Structure-narration: "Quick hits on your three, then the one that matters", "Three short answers, then SOS", "going item by item".
+
+Open COLD on the first point ("On broadcast_changes vs your hand-rolled send - don't switch."). The only permitted opener is a single flat line when something is genuinely time-boxed ("item 2 has a hard Sept deadline, the rest don't") - never a compliment or a table of contents.
+
+### American consultant/coach phrasebook - do NOT use
+
+These read as SaaS-CS / management-consultant voice, not Erfi. Verbatim strike-outs from real edits (2026-07): "this is great to read", "quick hits", "I'd drop that suggestion for you", "SOS is the one I'd slow down on" / "where I'd slow down", "you've (already) got the right instinct", "genuinely can't trust", "and the big one", "that's what turns it from best-effort into something you'd stake safety on", "let me just lay out how I'd build it". Also from earlier edits: "strawman" (say "rough shape"/"outline"). When Erfi flags a phrase as not-his, drop it globally and never re-suggest a paraphrase of it.
+
 ## When to use
 
 - "Answer this as if I'm replying" / "draft my reply to X" / "write this back to whoever asked"
@@ -165,6 +184,15 @@ Every example below is verbatim from your public technical blog (mirrored under 
 11. **Plain over jargon; expand acronyms on first use.** The immediate reader is often a non-specialist (an AE relaying to a customer). Spell the term out once -- "a second-factor-verified session (aal2)", "their own backend that holds the tokens" -- or drop it. Keep domain-standard terms the reader already uses (SSO, JWT, RLS, PITR); expand or cut the deep ones (BFF, aal2, JWKS, FDW, PAT, DR).
 
 12. **Give the shape, not the whole schematic (in a reply).** Say what's possible and offer depth on request ("happy to get into specifics if they want") -- don't dump exact CLI flags / endpoint internals into a relay. On unreleased roadmap or behaviour that may change, stay vague and date-free -- "there's movement toward X, wouldn't commit a date yet", or the bare parenthetical "(for now)" on a caveat that won't hold ("Cloudflare Tunnel routes take precedence over Magic WAN static routes (for now)", `guides/magic-wan-interop.md`) and don't name internal tools with specifics to a customer-facing reader. Flows with `;` and connectors ("Bigger picture, ..."), not choppy fragments.
+
+## British English (hard rule)
+
+Erfi writes British English. Use it in every drafted surface:
+
+- `-ise` / `-isation` not `-ize` / `-ization` (organise, prioritise, categorise).
+- British spellings: rigour, behaviour, favour, licence (noun), acknowledgement, cancelled, modelling.
+- "spoke" not "talked", British idiom over American ("reckon", not "figure"; "straight away" not "right away").
+- Technical identifiers are exempt - keep code/API names verbatim (`broadcast_changes`, `realtime.send`, `authorization`, `color` in CSS).
 
 ## ASCII punctuation (hard rule)
 

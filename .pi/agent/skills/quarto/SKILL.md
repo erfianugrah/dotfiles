@@ -328,7 +328,7 @@ Then view the PNG. **Caveat:** raw headless chromium can load web fonts late, so
 | Row-heavy table overflows | Cut cell padding in theme SCSS: `.reveal table th, td { padding: 0.28em 1em }` (biggest lever) |
 | SCSS/theme edit not showing | **`quarto preview` does NOT recompile theme SCSS on change** - re-render or restart preview |
 
-### Footnote-style source citations
+### Footnote-style source citations (size + position consistency)
 
 Wrap each citation line in a fenced div, style it small + muted in the theme SCSS - keeps sources consistent and unobtrusive:
 ```markdown
@@ -336,8 +336,55 @@ Wrap each citation line in a fenced div, style it small + muted in the theme SCS
 Sources: [RLS](https://...) · [Postgres](https://...)
 :::
 ```
+
+Getting them to look identical on EVERY slide has two non-obvious traps. Both
+verified the hard way - measure with `getBoundingClientRect` (below), don't eyeball.
+
+**1. Size - `em` compounds with `.smaller`, and the vertical-stack descendant trap.**
+`.smaller` sets `section { font-size: 0.7em }`. If `.src` is sized in `em`, it
+renders LARGER on non-`.smaller` slides. Cancel the 0.7 there - but use the
+**child combinator `> .src`**: a *descendant* selector (`section:not(.smaller) .src`)
+also matches `.src` through the outer `section.stack` wrapper of a vertical
+branch (the stack is itself `:not(.smaller)`), shrinking it by an extra 0.7.
 ```scss
 .reveal .src { font-size: 0.42em; color: #7d7d7d; border-top: 1px solid #2a2a2a; padding-top: 0.3em; }
+.reveal .slides section:not(.smaller) > .src { font-size: calc(0.42em * 0.7); }  /* > not descendant */
+```
+
+**2. Position - `center: true` makes the footnote float.** With centering on,
+an in-flow footnote rides the vertically-centered content block, so its Y
+shifts with content length. Pin it: top-align every source slide, make it a
+full-height flex column, push `.src` to the bottom with `margin-top: auto`. On
+`.scrollable` slides whose content overflows, there's no free space for the
+auto margin, so add `position: sticky; bottom: 0` + an **opaque background** so
+the footnote stays glued to the visible bottom while content scrolls beneath
+it. One `:has(> .src)` rule pins the whole deck to the same on-screen Y:
+```scss
+.reveal .slides section:has(> .src) {
+  top: 16px !important; height: 688px !important;   /* fill slide; height < 720 so it fits above chrome */
+  display: flex !important; flex-direction: column; overflow-y: auto;
+}
+.reveal .slides section:has(> .src) > .src {
+  margin-top: auto;                 /* pin to bottom when content is short */
+  position: sticky; bottom: 0;      /* stay visible when content scrolls */
+  background: #0d0d0d;              /* MUST match $body-bg, opaque */
+  padding-bottom: 6px;
+}
+```
+Tradeoff: pinning **disables per-slide vertical centering** - sparse slides get
+whitespace above the footnote. That's the cost of a fixed footnote position
+under `center: true`; it's what you want for a reference-heavy deck.
+`:has(> .src)` (child) is safe against the `section.stack` wrapper - the stack's
+direct children are `<section>`s, not `.src`, so it never matches the wrapper.
+
+**Verify to the pixel** (screenshots show it; computed geometry proves it):
+```js
+// playwright/puppeteer: page.evaluate over the built deck
+[...document.querySelectorAll('.slides section .src')].map(el => ({
+  id: el.closest('section').id,
+  bottom: Math.round(el.getBoundingClientRect().bottom),   // want all equal
+  fontPx: getComputedStyle(el).fontSize,                   // want all equal
+}))
 ```
 
 ### Mermaid inside reveal
@@ -378,6 +425,10 @@ format:
 | Reveal SCSS/theme edits not visible in preview | `quarto preview` doesn't recompile theme SCSS - re-render or restart preview |
 | Dense slide overflows into footer | `.smaller` + `.scrollable`; tighten table cell padding in theme SCSS |
 | Mermaid mindmap section colors muddy/wrong | Set `cScale1..N` themeVariables (cScale0 = root section, off-by-one) |
+| Heading renders as literal text / slide boundary lost | A paragraph (or fenced-div content) directly above a `#`/`##` heading with NO blank line gets absorbed into that paragraph by Pandoc - always leave a blank line before every heading |
+| Footnote size differs `.smaller` vs plain slides | `.src` in `em` compounds with `.smaller`'s 0.7em; cancel with `section:not(.smaller) > .src` (child `>`, not descendant - else it matches through `section.stack`) |
+| Footnote Y jumps slide-to-slide | `center: true` floats it; pin via `section:has(> .src)` flex + `margin-top:auto` (+ `position:sticky;bottom:0` for scrollable) |
+| Em-dashes / smart quotes / mixed `x` vs `×` in slides | Pandoc won't smarten spaced hyphens and these mojibake on paste; normalize to ASCII (`-`, `"`, `'`, `...`) and standardize multipliers |
 
 ## Extensions
 
