@@ -53,7 +53,7 @@ import { parseHyperfineJson } from "../extensions/bench.ts";
 import { fmtDuration, makeSlug, makeSessionName, decideWaitResult, computeStatusLabel } from "../extensions/bg-tasks.ts";
 import { decideInjection, matchesIntent, looksLikeSpec } from "../extensions/superpowers.ts";
 import { _internals as osint } from "../extensions/osint.ts";
-import { safePath } from "../extensions/docs.ts";
+import { safePath, rankByTokenHits } from "../extensions/docs.ts";
 import {
   scan as scanAsciiPunct,
   isProsePath as isAsciiProsePath,
@@ -65,7 +65,7 @@ import { prune, hasImageContent, type AnyMessage } from "../extensions/tool-outp
 import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
 import { matchHints, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
 import { findLastUserEntryId } from "../extensions/session-undo.ts";
-import { isCommitPersist, scanForBlocked } from "../extensions/confidential-write-guard.ts";
+import { isCommitPersist, scanForBlocked, resolveBashCwd } from "../extensions/confidential-write-guard.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -1725,7 +1725,7 @@ describe("docs.safePath", () => {
   });
   test("./-prefixed paths get traversal-stripped then normalised (agent likely meant a docs source)", () => {
     // Defensive: `../foo/bar` gets `../` stripped first, then normalised.
-    // We don't reject these — they're ambiguous, not clearly local.
+    // We don't reject these - they're ambiguous, not clearly local.
     expect(safePath("../foo/bar.md")).toBe("/docs/foo/bar.md");
   });
   test("error message names the offending input and points at 'read' / docs_sources", () => {
@@ -1741,8 +1741,48 @@ describe("docs.safePath", () => {
   });
   test("rejects empty / non-string", () => {
     expect(() => safePath("")).toThrow(/required/);
-    // @ts-expect-error — intentionally bad input
+    // @ts-expect-error - intentionally bad input
     expect(() => safePath(undefined)).toThrow(/required/);
+  });
+});
+
+// Regression: docs_search used to pass a multi-word query straight to
+// `rg -i '<query>'` as ONE literal pattern. A space in a regex matches a
+// literal space, so a natural-language query like "password reset email
+// verification" required that exact phrase verbatim in a title/summary line
+// - which almost never happens, producing false "[no results]" and driving
+// the reformulation-loop guard (observed live: 6 docs_search + 5 docs_find
+// calls hunting for content that was in the index all along). The fix
+// tokenises the query (session_search's auto-OR semantics) before hitting
+// rg with multiple -e flags, then ranks matched lines by distinct-token-hit
+// count client-side. rankByTokenHits covers the ranking half of that fix.
+describe("docs.rankByTokenHits", () => {
+  test("single token: returns lines unchanged (no ranking needed)", () => {
+    const lines = ["b line", "a line"];
+    expect(rankByTokenHits(lines, ["line"])).toEqual(lines);
+  });
+  test("ranks lines hitting more distinct tokens first", () => {
+    const lines = [
+      "only password here",
+      "password reset AND email verification",
+      "unrelated line",
+      "password reset only",
+    ];
+    const tokens = ["password", "reset", "email", "verification"];
+    expect(rankByTokenHits(lines, tokens)).toEqual([
+      "password reset AND email verification",
+      "password reset only",
+      "only password here",
+      "unrelated line",
+    ]);
+  });
+  test("case-insensitive matching", () => {
+    const lines = ["PASSWORD Reset", "nothing"];
+    expect(rankByTokenHits(lines, ["password", "reset"])[0]).toBe("PASSWORD Reset");
+  });
+  test("stable on ties - preserves original (index) order", () => {
+    const lines = ["password one", "password two", "password three"];
+    expect(rankByTokenHits(lines, ["password", "reset"])).toEqual(lines);
   });
 });
 
@@ -3066,6 +3106,45 @@ describe("confidential-write-guard.isCommitPersist", () => {
     expect(isCommitPersist("gh pr view 3")).toBe(false);
     expect(isCommitPersist("gh pr list")).toBe(false);
     expect(isCommitPersist("echo committing now")).toBe(false);
+  });
+});
+
+// ── confidential-write-guard: resolveBashCwd (the cd-tracking fix) ───────────
+// Regression: `bash` spawns a fresh subprocess per call, so a `cd <dir> &&`
+// prefix only moves that subprocess's directory - pi's own process.cwd()
+// never changes. The guard used to check process.cwd() unconditionally,
+// which meant `cd ~/other-repo && git commit ...` got attributed to pi's
+// startup repo: wrong repo named in the COMMIT_NUDGE message, and (more
+// seriously) the WRONG per-repo blocked-terms store consulted for the scan.
+
+describe("confidential-write-guard.resolveBashCwd", () => {
+  test("no cd in the command -> falls back to the given cwd", () => {
+    expect(resolveBashCwd("git commit -m x", "/home/erfi/dotfiles")).toBe("/home/erfi/dotfiles");
+  });
+
+  test("cd <dir> && <write> -> resolves to the cd target, not the fallback", () => {
+    expect(resolveBashCwd("cd ~/docs-ssh && git commit -F -", "/home/erfi/dotfiles")).toBe(
+      resolveBashCwd("cd ~/docs-ssh", "/home/erfi/dotfiles"),
+    );
+    expect(resolveBashCwd("cd /home/erfi/docs-ssh && git commit -F -", "/home/erfi/dotfiles")).toBe(
+      "/home/erfi/docs-ssh",
+    );
+  });
+
+  test("relative cd resolves against the fallback cwd", () => {
+    expect(resolveBashCwd("cd ../sibling-repo && git commit -m x", "/home/erfi/dotfiles")).toBe(
+      "/home/erfi/sibling-repo",
+    );
+  });
+
+  test("multiple cd segments -> uses the LAST one (the active dir when the write runs)", () => {
+    expect(resolveBashCwd("cd ~/a && cd /home/erfi/b && git commit -m x", "/home/erfi/dotfiles")).toBe(
+      "/home/erfi/b",
+    );
+  });
+
+  test("cd with no write command still resolves (used for the WRITE_BASH-gated bash branch)", () => {
+    expect(resolveBashCwd("cd ~/docs-ssh", "/home/erfi/dotfiles")).toBe("/home/erfi/docs-ssh");
   });
 });
 
