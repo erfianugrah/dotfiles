@@ -23,6 +23,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn } from "child_process";
+import { tokenise } from "./session-search";
 
 const SSH_HOST = "docs@docs.erfi.io";
 const SSH_PORT = "2222";
@@ -126,6 +127,23 @@ function errorResult(message: string) {
     content: [{ type: "text" as const, text: `[error] ${message}` }],
     details: { error: message },
   };
+}
+
+// Rank index-search result lines by how many distinct query tokens they hit
+// (case-insensitive substring match), stable on ties (preserves _index.tsv
+// order - roughly source-alphabetical). Mirrors the scoring session-search
+// already does for the same auto-OR problem. Exported for unit tests.
+export function rankByTokenHits(lines: string[], tokens: string[]): string[] {
+  if (tokens.length <= 1) return lines;
+  const lower = tokens.map((t) => t.toLowerCase());
+  return lines
+    .map((line, i) => {
+      const lc = line.toLowerCase();
+      const score = lower.reduce((n, t) => n + (lc.includes(t) ? 1 : 0), 0);
+      return { line, score, i };
+    })
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .map((s) => s.line);
 }
 
 function capOutput(text: string, path?: string): string {
@@ -233,6 +251,7 @@ const docsSearch = defineTool({
   promptSnippet: "docs_search — docs.erfi.io title+summary index. First step of docs lookup.",
   promptGuidelines: [
     "Pass source= when known. Index covers 158 sources.",
+    "Multi-word queries auto-OR across tokens (e.g. 'password reset email verification' matches ANY of those words, ranked by how many hit) - same semantics as session_search. Quote a phrase for literal match.",
     "Always cite the source path(s) in your response to the user (e.g. `Source: /docs/supabase/guides/auth.md`).",
   ],
   label: "Docs Search",
@@ -246,24 +265,43 @@ const docsSearch = defineTool({
   }),
   async execute(_id, params) {
     const limit = params.maxResults ?? 15;
+    // Multi-word natural-language queries ("password reset email verification")
+    // used to be passed to `rg` as one literal pattern - since a space in a
+    // regex matches a literal space, this required that exact phrase to appear
+    // verbatim in a title/summary line, which almost never happens. Tokenise
+    // and OR the tokens (same auto-OR semantics as session_search) so any
+    // token hit surfaces the line, then rank by distinct-token-hit count.
+    const tokens = tokenise(params.query);
+    // tokenise() returns [] for an empty/whitespace-only query. An empty
+    // grepArgs would degrade `rg -i <args> /docs/_index.tsv` to
+    // `rg -i /docs/_index.tsv` - rg then treats the path as the PATTERN and
+    // blocks on stdin until the SSH timeout. Bail early with no results.
+    if (tokens.length === 0) {
+      return {
+        content: [{ type: "text", text: `[no results for "${params.query}"${params.source ? ` in ${params.source}` : ""}]` }],
+        details: { count: 0 },
+      };
+    }
+    const grepArgs = tokens.map((t) => `-e '${sq(t)}'`).join(" ");
     const filter = params.source ? `| rg '^${sq(params.source)}/'` : "";
-    const result = await ssh(
-      `rg -i '${sq(params.query)}' /docs/_index.tsv ${filter} | awk -v lim=${limit} '{ n++; if (n<=lim) print } END { if (n>lim) print "[showing "lim" of "n" results — refine query or add source filter]" }'`,
-    );
-    if (!result.trim()) {
+    const raw = await ssh(`rg -i ${grepArgs} /docs/_index.tsv ${filter}`);
+    const lines = raw.split("\n").filter(Boolean);
+    if (lines.length === 0) {
       let dir: string;
       try {
         dir = params.source ? safePath(`/docs/${sq(params.source)}/`) : "/docs/";
       } catch (e) {
         return errorResult((e as Error).message);
       }
+      const nameArgs = tokens.map((t) => `-iname '*${sq(t)}*'`).join(" -o ");
+      const contentArgs = tokens.map((t) => `-e '${sq(t)}'`).join(" ");
       const [fileMatch, contentMatch] = await Promise.all([
-        ssh(`find '${dir}' -type f -iname '*${sq(params.query)}*' | head -${limit}`),
-        ssh(`rg -il '${sq(params.query)}' '${dir}' 2>/dev/null | head -${limit}`),
+        ssh(`find '${dir}' -type f \\( ${nameArgs} \\) | head -${limit}`),
+        ssh(`rg -il ${contentArgs} '${dir}' 2>/dev/null | head -${limit}`),
       ]);
       const combined = [...new Set([...fileMatch.split("\n"), ...contentMatch.split("\n")].filter(Boolean))];
       if (combined.length) {
-        const text = `[no index matches — found via filename/content search]\n${combined.slice(0, limit).join("\n")}`;
+        const text = `[no index matches - found via filename/content search]\n${combined.slice(0, limit).join("\n")}`;
         return { content: [{ type: "text", text }], details: { count: combined.length } };
       }
       return {
@@ -271,7 +309,12 @@ const docsSearch = defineTool({
         details: { count: 0 },
       };
     }
-    return { content: [{ type: "text", text: result }], details: { source: params.source } };
+    const ranked = rankByTokenHits(lines, tokens);
+    const top = ranked.slice(0, limit);
+    const text = ranked.length > limit
+      ? `${top.join("\n")}\n[showing ${limit} of ${ranked.length} results - refine query or add source filter]`
+      : top.join("\n");
+    return { content: [{ type: "text", text }], details: { source: params.source, tokens } };
   },
 });
 

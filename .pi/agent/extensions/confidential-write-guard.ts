@@ -45,6 +45,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { extractCdTargets, expandTilde } from "./cd-agents-reload";
 
 // ── store ───────────────────────────────────────────────────────────────────
 
@@ -110,6 +111,22 @@ function writeStore(file: string, store: Store): void {
 
 function dedup(xs: string[]): string[] {
   return [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
+}
+
+// Bash tool calls spawn a fresh subprocess per invocation, so a `cd <dir> &&`
+// prefix inside the command string changes ONLY that subprocess's directory -
+// pi's own process.cwd() never moves. Blindly using process.cwd() here means
+// `cd ~/other-repo && git commit ...` gets attributed to pi's startup repo,
+// not the repo the commit actually lands in: the wrong per-repo blocked-terms
+// store gets checked (a real enforcement gap, not just a cosmetic message
+// bug), and the COMMIT_NUDGE message names the wrong directory. Resolve the
+// last `cd` target in the command (same heuristic cd-agents-reload.ts already
+// uses) and fall back to process.cwd() when there isn't one.
+export function resolveBashCwd(cmd: string, fallback: string = process.cwd()): string {
+  const targets = extractCdTargets(cmd);
+  if (targets.length === 0) return fallback;
+  const last = targets[targets.length - 1];
+  return path.resolve(fallback, expandTilde(last));
 }
 
 function isStoreFile(p: string): boolean {
@@ -360,12 +377,13 @@ export default function (pi: ExtensionAPI) {
     if (tool === "bash") {
       const cmd = (event.input as { command?: string }).command;
       if (typeof cmd !== "string" || !WRITE_BASH.test(cmd)) return undefined;
-      const hit = scanForBlocked(cmd, blockedTermsFor(process.cwd()));
+      const bashCwd = resolveBashCwd(cmd);
+      const hit = scanForBlocked(cmd, blockedTermsFor(bashCwd));
       if (hit) return { block: true, reason: blockMsg(hit.masked, "bash (writes/commits)") };
 
       // once-per-repo commit/PR/issue vet nudge (independent of the prose nudge)
       if (isCommitPersist(cmd)) {
-        const root = findRepoRoot(process.cwd());
+        const root = findRepoRoot(bashCwd);
         if (root && !commitNudgedRepos.has(root)) {
           commitNudgedRepos.add(root);
           return { block: true, reason: COMMIT_NUDGE(root, repoHasRemote(root)) };
