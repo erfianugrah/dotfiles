@@ -55,10 +55,11 @@ function pickChromium(): string {
 }
 
 /** Minimal CDP client over a single WebSocket (flat sessions). */
-class CDP {
+export class CDP {
 	private ws: WebSocket;
 	private id = 0;
 	private pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>();
+	private closed = false;
 
 	private constructor(ws: WebSocket) {
 		this.ws = ws;
@@ -71,6 +72,15 @@ class CDP {
 				else resolve(msg.result);
 			}
 		});
+		// A wedged or dropped browser must never hang the sensor: reject every
+		// in-flight command if the socket closes or errors.
+		const failAll = (reason: string) => {
+			this.closed = true;
+			for (const { reject } of this.pending.values()) reject(new Error(reason));
+			this.pending.clear();
+		};
+		this.ws.addEventListener("close", () => failAll("CDP websocket closed"));
+		this.ws.addEventListener("error", () => failAll("CDP websocket error"));
 	}
 
 	static async connect(wsUrl: string): Promise<CDP> {
@@ -82,15 +92,38 @@ class CDP {
 		return new CDP(ws);
 	}
 
-	send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> {
+	send(
+		method: string,
+		params: Record<string, unknown> = {},
+		sessionId?: string,
+		timeoutMs = 15000,
+	): Promise<any> {
+		if (this.closed) return Promise.reject(new Error("CDP connection is closed"));
 		const id = ++this.id;
 		const payload: Record<string, unknown> = { id, method, params };
 		if (sessionId) payload.sessionId = sessionId;
 		this.ws.send(JSON.stringify(payload));
-		return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+		return new Promise((resolve, reject) => {
+			const timer = setTimeout(() => {
+				if (this.pending.delete(id)) {
+					reject(new Error(`CDP ${method} timed out after ${timeoutMs}ms`));
+				}
+			}, timeoutMs);
+			this.pending.set(id, {
+				resolve: (v) => {
+					clearTimeout(timer);
+					resolve(v);
+				},
+				reject: (e) => {
+					clearTimeout(timer);
+					reject(e);
+				},
+			});
+		});
 	}
 
 	close() {
+		this.closed = true;
 		this.ws.close();
 	}
 }
@@ -194,4 +227,4 @@ async function main() {
 	}
 }
 
-await main();
+if (import.meta.main) await main();

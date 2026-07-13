@@ -89,9 +89,15 @@ loop run --dry
 # 4. run the loop
 loop run
 loop run --model claude-sonnet-5 --max 15    # weak-model test
+loop run --allow-dirty                        # skip the clean-tree guard
 ```
 
 Without `bun link`, invoke directly: `bun ~/.pi/agent/skills/self-correcting-loop/loop.ts run`.
+
+The loop refuses a **dirty working tree** by default - its `git add -A`
+checkpoint / `git checkout`+`clean` rollback would otherwise fold your
+uncommitted work into its snapshots. Commit/stash first, or pass
+`--allow-dirty`. (`--dry` is exempt: it runs no git ops.)
 
 `run` exit codes: `0` all sensors green, `1` still red after budget, `2`
 manifest/usage error.
@@ -149,8 +155,9 @@ The browser layer closes that gap, and comes in two flavours:
 
 - **Computational (the gate): `browser-assert.ts`.** Launches system Chromium
   headless over CDP, waits for a selector, evaluates in-page JS assertions,
-  exits 0/1. Deterministic - use it as a sensor. Wrap dev-server start/stop in
-  the sensor cmd:
+  exits 0/1. Deterministic and self-bounding (per-command CDP timeout + a
+  reject-on-socket-close guard, so a wedged browser fails the sensor instead of
+  hanging the loop). Wrap dev-server start/stop in the sensor cmd:
 
   ```json
   { "name": "e2e",

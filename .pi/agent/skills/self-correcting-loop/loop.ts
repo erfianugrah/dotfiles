@@ -93,6 +93,10 @@ async function isGitRepo(): Promise<boolean> {
 	return (await git("rev-parse", "--is-inside-work-tree")).code === 0;
 }
 
+async function isDirty(): Promise<boolean> {
+	return (await git("status", "--porcelain")).out.trim() !== "";
+}
+
 /**
  * Paths that differ from the baseline commit (HEAD), plus untracked files.
  * Uses name-only plumbing (no status-column prefix) so parsing is robust -
@@ -213,6 +217,17 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 	console.log(`  scope:   ${m.writeScope.length ? m.writeScope.join(", ") : "(unrestricted)"}`);
 	console.log(`  sensors: ${m.sensors.map((s) => s.name).join(", ")}`);
 
+	// Refuse to run on a dirty tree: the loop checkpoints with `git add -A` and
+	// rolls back with checkout/clean, which would fold uncommitted work into its
+	// snapshots. --dry does no git ops, so it is exempt.
+	const gitOn = await isGitRepo();
+	if (!dry && gitOn && flags["allow-dirty"] !== true && (await isDirty())) {
+		console.error(
+			"working tree is dirty; the loop's checkpoint/rollback (git add -A / checkout / clean) would fold your uncommitted work into its snapshots.\ncommit or stash first, or re-run with --allow-dirty.",
+		);
+		return 2;
+	}
+
 	// Baseline sensor run (also the --dry output).
 	console.log("\n  baseline sensors:");
 	let prev = await runAllSensors(m);
@@ -226,7 +241,6 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 	}
 
 	// Control-loop state.
-	const gitOn = await isGitRepo();
 	if (!gitOn) {
 		console.warn(
 			"\n  ! not a git repo: checkpoint/rollback/scope-guard disabled (feed-forward only).",
