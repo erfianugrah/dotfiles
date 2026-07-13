@@ -16,6 +16,12 @@ const CHROMIUM = [
 	"/usr/bin/google-chrome",
 ].find((p) => existsSync(p));
 
+// The real-browser test needs Chromium; skip when absent, and skip in CI by
+// default (kept reliable/fast - the CDP *logic* is covered by
+// browser-assert.cdp.test.ts, which needs no browser). Opt in with
+// RUN_BROWSER_TESTS=1.
+const SKIP = !CHROMIUM || (!!process.env.CI && !process.env.RUN_BROWSER_TESTS);
+
 let dir: string;
 let page: string;
 
@@ -41,7 +47,7 @@ async function run(extra: string[]): Promise<number> {
 	return await proc.exited;
 }
 
-test.skipIf(!CHROMIUM)("passes when in-page assertions hold (waits for async hydration)", async () => {
+test.skipIf(SKIP)("passes when in-page assertions hold (waits for async hydration)", async () => {
 	const code = await run([
 		"--assert",
 		'document.title==="ready"',
@@ -51,7 +57,7 @@ test.skipIf(!CHROMIUM)("passes when in-page assertions hold (waits for async hyd
 	expect(code).toBe(0);
 }, 30000);
 
-test.skipIf(!CHROMIUM)("fails (exit 1) when an assertion is false", async () => {
+test.skipIf(SKIP)("fails (exit 1) when an assertion is false", async () => {
 	const code = await run(["--assert", 'document.title==="nope"']);
 	expect(code).toBe(1);
 }, 30000);

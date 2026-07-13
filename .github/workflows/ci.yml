@@ -1,0 +1,38 @@
+name: harness-tests
+
+# Self-verify the pi-harness on every change: the extension suite (incl. the
+# manifest-coverage self-sensor that guards against the F1 class - a resource
+# silently dropped from the pi-package manifest) plus the pi-loop package suite.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".pi/agent/**"
+      - "package.json"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - ".pi/agent/**"
+      - "package.json"
+      - ".github/workflows/ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Extension suites + manifest self-sensor. No install step: the harness is
+      # dependency-free (Bun built-ins only), so there is no lockfile to honor.
+      - name: extension suite + manifest self-sensor
+        run: ./.pi/agent/tests/run.sh
+
+      # pi-loop package: pure helpers, governor integration, CDP logic. The
+      # real-Chromium e2e test self-skips under CI (see the test file).
+      - name: pi-loop suite
+        run: bun test
+        working-directory: .pi/agent/skills/self-correcting-loop
