@@ -3,6 +3,13 @@
 Cross-platform dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/).
 Targets Arch Linux (native + WSL2), macOS, and Steam Deck (SteamOS via Nix).
 
+The pi coding-agent harness under `.pi/agent/` (52 extensions, 38 skills, 8
+prompt templates, theme) is also packaged as a **pi package**
+(`@erfianugrah/pi-harness`, root `package.json`). Install it standalone on any
+machine - no stow required - with `pi install git:github.com/erfianugrah/dotfiles`.
+See [`.pi/agent/README.md`](.pi/agent/README.md) and the "Cross-machine install"
+section of [`AGENTS.md`](AGENTS.md).
+
 ## Repository layout
 
 ```

@@ -69,11 +69,47 @@ cd ~ && stow -d ~/dotfiles -t ~ -n -v .       # dry run, shows what would link
 ```
 
 `.stow-local-ignore` (at repo root) excludes files that live in the repo
-but should NOT be linked to `$HOME` — `.git`, `README.md`, `AGENTS.md`,
-package lists, nested config dirs already managed elsewhere.
+but should NOT be linked to `$HOME` - `.git`, `README.md`, `AGENTS.md`,
+the root `package.json`, package lists, nested config dirs already managed
+elsewhere.
 
 **Rule of thumb:** edit the source at `~/dotfiles/<path>`, NEVER the live
 symlink target. Changes propagate instantly through the symlink.
+
+## Cross-machine install (two paths)
+
+The pi harness (extensions / skills / prompts / theme under `.pi/agent/`)
+reaches a new machine two ways. They are complementary - pick one per
+machine; do NOT use both on the same machine or resources load twice.
+
+1. **GNU stow (primary machines - full dotfiles).** Clone + `stow` as above.
+   Gets everything (shell, terminal, git, AND the pi harness symlinked into
+   `~/.pi/agent/`). The source-of-truth workflow.
+
+2. **pi package (any machine - just the pi harness).** The repo root carries a
+   `package.json` with a `pi` manifest (keyword `pi-package`), so pi installs
+   the resources directly - no stow, no full dotfiles:
+
+   ```bash
+   pi install git:github.com/erfianugrah/dotfiles@<ref>   # pin a tag/commit
+   pi update --extensions                                 # reconcile later
+   ```
+
+   This carries the 52 extensions, 38 skills (+14 superpowers subskills), 8
+   prompt templates and the theme. It does NOT carry user config (pi packages
+   ship resources only): `settings.json`, `models.json`, `keybindings.json`,
+   `APPEND_SYSTEM.md`. Bootstrap those once (idempotent; symlinks the 4 files
+   into `~/.pi/agent/`, backing up any existing non-symlink; `COPY=1` to copy):
+
+   ```bash
+   bash ~/.pi/agent/git/github.com/erfianugrah/dotfiles/.pi/agent/install-config.sh
+   ```
+
+   `auth.json` / sessions / memories stay per-machine (never synced) - log in
+   with `pi` then `/login`.
+
+**Never run path 2 on a stow machine** - the resources are already loaded via
+the `~/.pi/agent/` symlinks, so `pi install` would double-load them.
 
 ## Pi extensions
 

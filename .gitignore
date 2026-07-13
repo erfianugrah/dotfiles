@@ -16,3 +16,7 @@ bin/knotctl
 __pycache__/
 *.pyc
 
+
+# JS package-manager artifacts (pi-harness / pi-loop packaging)
+node_modules/
+bun.lock

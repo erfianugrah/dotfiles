@@ -1,0 +1,20 @@
+{
+  "name": "@erfianugrah/pi-loop",
+  "version": "0.1.0",
+  "description": "Sensor-gated, self-correcting loop driver for pi. Language-agnostic: drives a fresh `pi -p` each iteration until deterministic sensors (build/lint/test/typecheck/e2e) pass. Ships a governor (model-escalation ladder, git checkpoint/rollback, write-scope) and a dependency-free headless-Chromium sensor.",
+  "license": "MIT",
+  "author": "Erfi Anugrah",
+  "type": "module",
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "bin": {
+    "loop": "./loop.ts",
+    "browser-assert": "./browser-assert.ts"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "keywords": ["pi", "loop", "tdd", "sensor", "self-correcting", "agent", "harness"],
+  "files": ["*.ts", "presets", "SKILL.md"]
+}
