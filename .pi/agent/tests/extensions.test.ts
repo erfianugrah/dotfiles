@@ -3144,7 +3144,7 @@ describe("confidential-write-guard.resolveBashCwd", () => {
   });
 
   test("cd with no write command still resolves (used for the WRITE_BASH-gated bash branch)", () => {
-    expect(resolveBashCwd("cd ~/docs-ssh", "/home/erfi/dotfiles")).toBe("/home/erfi/docs-ssh");
+    expect(resolveBashCwd("cd ~/docs-ssh", "/home/erfi/dotfiles")).toBe(`${require("node:os").homedir()}/docs-ssh`);
   });
 });
 
