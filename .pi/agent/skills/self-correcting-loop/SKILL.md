@@ -161,6 +161,14 @@ sensors are **specific and deterministic**. Raise sensor quality by:
   `~/authkit/.golangci.yml`), TS `dependency-cruiser`, Python `import-linter`,
   JVM ArchUnit. Pair with a `hint` naming the rule that was crossed. This is
   the cure for the "same agent wrote both sides of the contract" drift.
+- **Test-quality sensors (mutation testing)** grade whether the tests actually
+  *catch* bugs, not just whether they pass - the concrete answer to "can I
+  trust agent-written tests?". Run as an EXPENSIVE, post-fast-sensor gate (it
+  re-runs the suite per mutant): Go `gremlins unleash --threshold-efficacy N
+  ./pkg` (bump `--timeout-coefficient` so per-mutant recompiles fit, or every
+  mutant times out), TS StrykerJS, JVM PIT. Real payoff: on authkit this
+  immediately surfaced an untested default-TTL branch in the loop-built bridge
+  (93% -> 100% efficacy after one added case).
 
 ## Behaviour harness for web targets
 
