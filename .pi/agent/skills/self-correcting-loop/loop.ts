@@ -31,6 +31,8 @@ import {
 	type SensorResult,
 	advanceLadder,
 	allPass,
+	applyFreeze,
+	failingNames,
 	buildPrompt,
 	countFailing,
 	decide,
@@ -210,6 +212,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 		if (Number.isInteger(n) && n > 0) m.maxIterations = n;
 	}
 	const dry = flags.dry === true;
+	const freeze = m.baseline || flags.freeze === true;
 
 	console.log(`loop: ${manifestPath}`);
 	console.log(`  models:  ${m.models.map((x) => x || "(pi default)").join(" -> ")}`);
@@ -217,6 +220,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 	console.log(`  tools:   ${m.tools.join(",")}`);
 	console.log(`  scope:   ${m.writeScope.length ? m.writeScope.join(", ") : "(unrestricted)"}`);
 	console.log(`  sensors: ${m.sensors.map((s) => s.name).join(", ")}`);
+	if (freeze) console.log("  freeze:  on (pre-existing failures tolerated)");
 
 	// Refuse to run on a dirty tree: the loop checkpoints with `git add -A` and
 	// rolls back with checkout/clean, which would fold uncommitted work into its
@@ -231,9 +235,20 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 
 	// Baseline sensor run (also the --dry output).
 	console.log("\n  baseline sensors:");
-	let prev = await runAllSensors(m);
+	const rawBaseline = await runAllSensors(m);
+	// Freeze: sensors already failing at baseline are tolerated (debt), so only
+	// NEW failures gate. applyFreeze marks them ok for gating purposes.
+	const frozen = freeze ? failingNames(rawBaseline) : new Set<string>();
+	if (frozen.size) {
+		console.log(`  (freeze: tolerating pre-existing failures: ${[...frozen].join(", ")})`);
+	}
+	let prev = applyFreeze(rawBaseline, frozen);
 	if (allPass(prev)) {
-		console.log("\nall sensors green (nothing for the loop to do).");
+		console.log(
+			freeze
+				? "\nno failures beyond the frozen baseline (nothing for the loop to do)."
+				: "\nall sensors green (nothing for the loop to do).",
+		);
 		return 0;
 	}
 	if (dry) {
@@ -289,7 +304,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 		}
 
 		console.log("  sensors:");
-		const cur = await runAllSensors(m);
+		const cur = applyFreeze(await runAllSensors(m), frozen);
 		const curFailing = countFailing(cur);
 		const curFp = fingerprint(cur);
 		const d = decide(prevFailing, prevFp, curFailing, curFp);
