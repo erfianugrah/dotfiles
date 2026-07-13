@@ -65,6 +65,8 @@ the loader without deleting it.
 | `lsp/` | Language Server Protocol — 8 operations (hover/definition/references/implementation/document\_symbols/workspace\_symbol/incoming\_calls/outgoing\_calls) + auto-install for 14 languages via bun/go/cargo/rustup. |
 | `memory.ts` | Persistent cross-session memory + per-LLM-call inject. mtime cache (no per-call disk read), `MEMORY_INJECT_MAX_BYTES` cap, `MEMORY_OFF=1` kill switch. |
 | `oci-tags.ts` | Query OCI registries (Docker Hub, ghcr, quay) for image tags. |
+| `osint.ts` | `osint_domain/ip/email/username/url/phone/threat/cve/harvest` via the research OSINT service (`osint.erfi.io` / `:8890`). |
+| `pdf.ts` | `pdf` - diagnostic-first PDF extraction (pdftotext for born-digital, tesseract OCR for scanned, pdfplumber tables, rasterize-to-PNG visual). Fills pi's PDF-blind `read`. |
 | `question.ts` | Interactive question prompts during execution (skill-compatible). |
 | `render-diagram.ts` | Render mermaid/d2 source to SVG/PNG via local CLIs. Validates syntax. |
 | `session-search.ts` | Full-text search past sessions via SQLite FTS5 (worker-indexed) with ripgrep fallback. |
@@ -72,6 +74,7 @@ the loader without deleting it.
 | `todowrite.ts` | TodoWrite tool surface; persists per-session JSON + status indicator. |
 | `web-research.ts` | Exa search + auto-fetch top pages with Playwright fallback. Modes: default / local / fresh / crosscheck. |
 | `webfetch.ts` | Fetch URL → markdown/text/html (5MB cap). Auto-escalates to crawler `:8889/extract` with `force_js:true` on SPA-shell responses (<500 visible chars). |
+| `write-stream.ts` | `write_stream` - chunked atomic writes for content above the tool-call input ceiling (first/middle/last chunks). |
 
 ### CLI-wrapping tool extensions (token-efficient JSON output)
 
@@ -88,13 +91,21 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `go-test.ts` | `go test -json ./...` | Filters to failed tests + last 30 output lines per failure. Supports `run`, `race`, `count`, `short`, `timeout`. |
 | `bench.ts` | `hyperfine --export-json` | Statistical benchmark across N commands. Returns mean/stddev/min/max/winner/speedup. |
 | `bg-tasks.ts` (6 tools) | `tmux new-session -d` + `pi -p` / `bash` | Detached parallel work. `bg_task` spawns a pi subprocess, `bg_bash` runs any shell command (polling loops, long builds, slow downloads — anything past pi's 30s bash timeout), `bg_list` enumerates with kind glyphs (π/$), `bg_status` drills in (with persistent `.log` fallback after the 30s tmux grace), `bg_wait` blocks server-side on a regex / exit / timeout, `bg_kill` terminates a runaway task. Plus `/bg-list` and `/bg-kill` slash commands. Skips amux's Claude-Code lock-in. |
+| `sbperf.pi.ts` | `sbperf` CLI | Supabase performance audit (advisors + SQL diagnostics + config + infra metrics -> self-contained HTML/PDF report, windowed trends). Single `sbperf` tool. |
 
 ### Event / behavior extensions (no LLM-visible tool surface)
 
 | Extension | Purpose |
 |---|---|
+| `ascii-punctuation-guard.ts` | Blocks mojibake-prone smart punctuation (em/en-dash, smart quotes, ellipsis, NBSP) in write/edit/write_stream/apply_patch payloads + write/commit bash. `PI_ASCII_GUARD_OFF=1` kill switch. |
+| `bash-error-hints.ts` | Decorates bash tool results with a one-line hint when stderr matches a known footgun pattern. |
 | `bookmark.ts` | `/bookmark` + `/unbookmark` for `/tree` navigation in long sessions. |
+| `cd-agents-reload.ts` | Injects a repo's `AGENTS.md` when you `cd` into a project pi didn't load at session start - closes the cwd context gap. |
+| `clipboard-image-shrink.ts` | Auto-downscales pasted clipboard images before they enter the model context. |
+| `compaction-model.ts` | Runs pi's compaction summarizer on a cheaper/faster model than the session model. |
 | `compaction-progress.ts` | Spinner + token-delta toast during `/compact` and auto-compaction. |
+| `confidential-write-guard.ts` | Blocks confidential third-party identifiers (customer/partner/client names, codenames, named individuals, unreleased roadmap) in tracked-repo writes; one-time nudge + `confidential_terms` enforcement. |
+| `continue-after-error.ts` | Recovery affordance for provider 401/402/429 - offers retry / model-switch instead of a dead turn. |
 | `yank.ts` | `/y` (alias `/yank`) — copy ONE code block from the last assistant message to the system clipboard intact, bypassing terminal wrap. Terse syntax: `/y` (block 1), `/y 2`, `/y -1` (last), `/y ?` (list), `/y ^` (previous message), `/y 2^^` (block 2, two messages back). `/y 2!` = paste-friendly transform: ASCII-fold cosmetic Unicode (em-dash → `-`, smart quotes → ASCII, NBSP, ellipsis) so PS in CP437/CP1252 doesn't mojibake; strip comment-only lines; flatten line-continuations; join shell-family statements with ` ; ` so PowerShell parses the whole block atomically. Probes clip.exe (WSL) → pbcopy → wl-copy → xclip → xsel → termux → OSC 52 fallback. Sibling to built-in `/copy` (which grabs the whole message). |
 | `git-gh-gate.ts` | Confirms mutating git/gh commands; protects `.git/` from direct writes; **also inspects apply\_patch envelopes** so apply\_patch can't bypass the gate. |
 | `inline-bash.ts` | Expand `!{cmd}` patterns inside user prompts before send. |
@@ -105,9 +116,12 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `session-fts/` | SQLite FTS5 indexer + worker thread. Indexes session jsonl off the main loop; `/session-index status|rebuild|gc`. |
 | `session-name.ts` | `/session-name <label>` — readable identifiers in `pi -r`. |
 | `session-summary.ts` | Generates session summary on demand. |
+| `session-undo.ts` | `/undo` - opencode-style session revert (pi natively has only `/fork` + `/clone`). |
+| `slash-typo-guard.ts` | Catches typo'd slash commands (`/comapct`, `/qauit`) before they hit the LLM. |
 | `style-toggle.ts` | `/style` command for terse ↔ socratic output style; injects style prompt via `context` event. |
 | `superpowers.ts` | Intent-gated injection of obra/superpowers methodology. `SUPERPOWERS_OFF=1` to disable. |
 | `tool-guard.ts` | Block-with-reason on common anti-patterns (`bash ls /docs/`, `webfetch <docs.erfi.io>`, etc) + per-session reformulation-loop detection. **Also inspects apply\_patch envelopes** so .env / lockfiles / .git / node\_modules can't be bypassed. |
+| `tool-output-prune.ts` | opencode-style surgical tool-output pruning to reclaim context from large tool results. |
 | `tool-routing.ts` | Prepend AGENTS.md tool-routing rules to the system prompt with hard "CRITICAL MANDATORY" framing. |
 | `trigger-compact.ts` | Auto-compact when context crosses 100k tokens + `/trigger-compact`. |
 
@@ -123,11 +137,15 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `/local-model-rules` | Inject per-model rules when running gemma/qwen on llama-server |
 | `/rollback` | Revert/undo helper for recent changes |
 
+(`prompts/docs-reference.md` is not a slash command - it is the docs.erfi.io
+source reference loaded by `tool-routing.ts`.)
+
 ### Disabled
 
 | Extension | Why |
 |---|---|
 | `custom-footer.ts.disabled` | Pi's default footer now handles cache-aware token totals (`R` / `W` segments) natively. The custom footer's only remaining value was moving session-name to the right, which wasn't worth replacing the entire footer. Kept as a `.disabled` file in case we want to revisit. |
+| `stuck-state-recovery.ts.disabled` | Force-cleaned phantom-stream state on every user input (a mid-2026 failure mode). Superseded by pi's own stream-state handling; kept disabled in case it recurs. |
 
 ## Themes
 
@@ -145,24 +163,37 @@ List loaded at startup; each has its own `SKILL.md` with the actual rules.
 
 | Skill | Purpose |
 |---|---|
+| `abuse-operations` | Anti-abuse / fraud-detection system design - risk scoring, indicator/signal design, blacklists, actor tracking, campaign/pivot detection for free-tier / signup / upload / API abuse. |
+| `arr-stack` | The *arr media pipeline on `servarr` - radarr/sonarr/bazarr/prowlarr + sabnzbd/qbittorrentvpn/flaresolverr + recyclarr/decluttarr/tdarr; TRaSH guides, quality profiles, manual import, hardlink hygiene. |
 | `caddy` | Custom xcaddy build + WAF management stack (Caddyfile snippet idiom, TSIG/rfc2136 secret chain, wafctl, Authelia, the `make restart` vs `make restart-caddy` SOPS footgun). Sibling to `knot-dns`. |
 | `ci-workflows` | GitHub / Gitea Actions workflows, action pinning, CI patterns. |
 | `cloudflare` | Cloudflare API + `wrangler` CLI (Workers / Pages / R2 / D1 / KV / Tunnels) + bulk Python automation + `cf-terraforming` import workflow. Pairs with `terraform`. |
 | `comfyui` | ComfyUI image-gen via llm-compose proxy on `localhost:11434`. |
 | `composer` | Self-hosted Docker Compose management platform (your deployed instance). |
+| `deck-screenshot` | Screenshot a reveal.js / Quarto revealjs deck (one slide or a whole-deck contact sheet) so the agent can SEE layout/overflow. Raw headless chromium + decktape. |
 | `design-utilitarian` | McMaster-Carr-style information-dense UI ethos. |
 | `docker` | Dockerfile authoring, buildx (multi-arch + cache mounts + secrets), image inspection, registry workflows, container debugging. Companion to `infrastructure-stack` (Compose) and `composer` (GitOps). |
+| `erfi-voice` | Draft replies / emails / PR comments in Erfi's voice (direct register, verifiable references) rather than generic-assistant tone. |
 | `favicons-and-icons` | Favicon + PWA icon set generation. |
 | `fly` | Fly.io app lifecycle via `flyctl` — deploy, secrets (Vaultwarden → flyctl set), certs + DNS, machines, volumes, scaling, debug, cost knobs. |
 | `frontend-stack` | Astro/React/Next scaffolding with biome + tanstack + shadcn. |
 | `gh` | Full GitHub CLI workflow — PR lifecycle, issue ops, releases with assets, Actions runs + cache, auth scopes, repo ops, extensions. Sibling to `gh-search`. |
 | `gh-search` | Cross-repo GitHub code/issue/PR search via `gh search`. Sibling to `gh` (which covers everything-but-search). |
+| `git-troubleshooting` | Diagnostic battery for git mv/add/rm/checkout failures - "pathspec did not match", "not under version control", gitignore traps, dirty-tree + detached-HEAD recovery. |
 | `gloryhole` | Self-built DNS server `glory-hole` — Go binary + embedded Unbound + Astro/React dashboard. Pi-hole-style filtering, expr policy engine, sharded LRU cache, REST/WS API, DoT/DoH. Home + Fly deploy profiles. |
-| `infrastructure-stack` | Docker Compose with bridge-network + static-IP + host-mode-Caddy.
+| `gocurl` | Drive the `gocurl` CLI - HTTP latency measurement (DNS/TCP/TLS/server/transfer phase breakdown), load testing (p95/p99, RPS), streaming/SSE validation, Prometheus/JSON/CSV output. |
+| `infrastructure-stack` | Docker Compose with bridge-network + static-IP + host-mode-Caddy reverse-proxy conventions; per-stack AGENTS.md, subnet allocation, secrets, backups, when-to-graduate-to-k3s. |
+| `jellyfin` | Media-consumer stack on `servarr` - Jellyfin (NVENC transcoding), Jellyseerr (request routing into the arrs), Navidrome. Cross-stack `media` network. |
 | `knot-dns` | Self-hosted authoritative DNS — Knot DNS on Fly anycast, TSIG/rfc2136 to Caddy, CF→Knot migration. Sibling to `fly`, `cloudflare`, `caddy`. |
+| `knotctl` | Drive the `knotctl` CLI for live TSIG/RFC2136 DNS edits against the knotea authority (add/rm/set/ls/export/apply, declarative YAML reconcile). Sibling to knot-dns. |
 | `lora-train` | kohya sd-scripts LoRA training via proxy on `localhost:11434`. |
 | `mermaid-d2` | mermaid / d2 diagram authoring + render via local CLIs. |
+| `paste-formatting` | Get Markdown-drafted prose into rich-text destinations (Gmail / Docs / Slack / Notion) intact via the `mdclip` tool (Markdown -> HTML -> clipboard). |
+| `quarto` | Author / render / publish Quarto docs (`.qmd`, `_quarto.yml`) to HTML/PDF/Revealjs/Word/Typst; project types, code execution, freeze/cache, Reveal.js decks + self-verifying screenshots. |
 | `research` | SearXNG (`:8888`) + Playwright crawler (`:8889`) + OSINT (`:8890`). |
+| `sbperf` | Drive the `sbperf` CLI - Supabase performance auditor (advisors, SQL diagnostics, config, infra metrics -> self-contained HTML+PDF report, windowed trends). PAT-first + no-PAT customer-audit mode. |
+| `sbshift` | Drive the `sbshift` CLI - near-zero-downtime Postgres->Postgres migration via logical replication (cross-region / tier / self-hosted moves, cutover gate, checksum reconcile). |
+| `scaffold-new-project` | Orchestrate the concrete-tech skills (frontend-stack, infrastructure-stack, software-architecture, design-utilitarian, ...) to bootstrap a new project with the user's conventions baked in. |
 | `self-correcting-loop` | Sensor-gated autonomous loop driver (`loop` + `browser-assert` bins, `@erfianugrah/pi-loop`). Drives a fresh `pi -p` each iteration until deterministic sensors (build/lint/test/typecheck/e2e) pass; governor with model-escalation ladder, git checkpoint/rollback, and write-scope; dependency-free headless-Chromium behaviour sensor. |
 | `software-architecture` | DDD-lite system design for Go backends + full-stack apps. |
 | `supabase` | Supabase products (Database / Auth / Storage / Realtime / Edge Functions / pgvector / pgmq / Branching) + `@supabase/server` BFF patterns + RLS + migrations + connection pooling + Postgres extensions. |
@@ -226,18 +257,22 @@ Unit tests for the pure parsers in each extension:
 - tool-guard segment splitter + apply_patch path extraction
 - apply-patch envelope parser + `renderApplyDiffs` success-diff renderer
 - oci-tags image parser + version compare
-- session-search tokenizer
-- session-fts query tokenizer
-- osv-scan JSON parser
-- secret-scan gitleaks + noseyparker parsers
-- hurl-test JSON parser
-- go-test JSON event parser
-- bench hyperfine output parser
+- session-search + session-fts query tokenizers
+- osv-scan / secret-scan (gitleaks + noseyparker) / hurl-test / go-test / bench parsers
 - bg-tasks duration formatter + slug generator
+- ascii-punctuation-guard + confidential-write-guard payload scanners
+- tool-output-prune pruner + write-stream chunk assembler
 
 ```bash
-~/dotfiles/.pi/agent/tests/run.sh        # all (86 tests)
+~/dotfiles/.pi/agent/tests/run.sh        # all (408 unit + 23 integration)
 ~/dotfiles/.pi/agent/tests/run.sh -t "tool-guard"   # filter
+```
+
+The `self-correcting-loop` package has its own suite (33: pure-helper unit +
+governor + browser-sensor integration):
+
+```bash
+cd ~/.pi/agent/skills/self-correcting-loop && bun test
 ```
 
 The runner preloads `tests/preload.ts` which `mock.module()`s the
