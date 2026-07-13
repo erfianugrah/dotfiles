@@ -16,5 +16,5 @@
     "test": "bun test"
   },
   "keywords": ["pi", "loop", "tdd", "sensor", "self-correcting", "agent", "harness"],
-  "files": ["*.ts", "presets", "SKILL.md"]
+  "files": ["*.ts", "presets", "SKILL.md", "README.md"]
 }

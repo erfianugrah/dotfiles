@@ -29,13 +29,13 @@ After installing the toolkit and `/reload`-ing pi:
 command -v osv-scanner gitleaks noseyparker semgrep typos vale hurl just mise direnv hyperfine watchexec atlas
 
 # pi tools registered (in TUI: type `/` to see all)
-# Try: osv_scan, secret_scan, hurl_test, go_test, bench, bg_task, bg_list, bg_status
+# Try: osv_scan, secret_scan, hurl_test, go_test, bench, pdf, osint_domain, write_stream, bg_task, bg_list, bg_status
 
 # Run the unit test suite
 ~/dotfiles/.pi/agent/tests/run.sh
 ```
 
-Expected: all binaries resolved, 86/86 tests pass.
+Expected: all binaries resolved, 408/408 unit tests pass.
 
 ## Token-efficiency conventions
 
@@ -186,6 +186,20 @@ Defaults to `--shell=none` for accurate short-command measurement.
 
 **When to use**: confirming a refactor is actually faster, A/B-ing two
 implementations, comparing model invocations.
+
+### `pdf` - PDF text extraction
+
+```typescript
+pdf({ path: "scan.pdf" })                    // auto: text-layer -> pdftotext, scanned -> OCR
+pdf({ path: "report.pdf", mode: "tables" })  // pdfplumber -> markdown
+```
+
+Wraps `pdftotext -layout` (born-digital), `pdftoppm` + `tesseract` (scanned,
+auto-fallback), `pdfplumber` (tables), or rasterizes pages to PNG
+(`mode:visual`) for the model to read. pi's built-in `read` is blind to PDFs.
+
+**When to use**: any `.pdf`; `mode:tables` for born-digital tables,
+`mode:visual` for layout/figures the model must eyeball.
 
 ### `bg-tasks` — parallel pi sessions + arbitrary bash in detached tmux
 
@@ -530,6 +544,21 @@ bg_status({ name: "pi-bg-refactor-all-bonkled-1748...", lines: 200 })
 osv_scan({ path: "./" })       // dep-pin safety check
 secret_scan({ path: "./" })    // no creds leaked into compose
 ```
+
+### Autonomous self-correcting loop
+
+```bash
+# in the target repo: declare sensors + task, then let the loop drive pi -p
+# until build/lint/test (and optional browser e2e) are green.
+loop init                     # writes .pi/harness.json (detects stack)
+# edit .pi/harness.json: task, sensors, models ladder, writeScope
+loop run                      # governor: escalate on stall, roll back regressions
+```
+
+`@erfianugrah/pi-loop` (skill `self-correcting-loop`). The loop - not the
+model - decides done: sensor exit codes gate completion. `browser-assert`
+adds a dependency-free headless-Chromium behaviour sensor for web targets.
+Full detail in the skill's `SKILL.md`.
 
 ### Benchmark a refactor
 
