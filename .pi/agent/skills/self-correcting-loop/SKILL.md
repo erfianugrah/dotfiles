@@ -68,23 +68,30 @@ Two properties make this work on weak models:
 
 ## Usage
 
-From the **target project root** (the repo the loop should work on):
+This skill is also the `@erfianugrah/pi-loop` package. Get the `loop` and
+`browser-assert` commands on PATH once:
 
 ```bash
-LOOP=~/.pi/agent/skills/self-correcting-loop/loop.ts
+cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`
+```
 
+Then, from the **target project root** (the repo the loop should work on):
+
+```bash
 # 1. write .pi/harness.json (auto-detects stack from go.mod/package.json/...)
-bun "$LOOP" init            # or: init go | node | rust | astro | python
+loop init                   # or: init go | node | rust | astro | python
 
-# 2. edit .pi/harness.json: set "task", tune "sensors", pick "model"
+# 2. edit .pi/harness.json: set "task", tune "sensors", pick "models"
 
 # 3. see what the sensors say right now, without spawning pi
-bun "$LOOP" run --dry
+loop run --dry
 
 # 4. run the loop
-bun "$LOOP" run
-bun "$LOOP" run --model claude-sonnet-4 --max 15    # weak-model test
+loop run
+loop run --model claude-sonnet-5 --max 15    # weak-model test
 ```
+
+Without `bun link`, invoke directly: `bun ~/.pi/agent/skills/self-correcting-loop/loop.ts run`.
 
 `run` exit codes: `0` all sensors green, `1` still red after budget, `2`
 manifest/usage error.

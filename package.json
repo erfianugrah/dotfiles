@@ -1,0 +1,19 @@
+{
+  "name": "@erfianugrah/pi-harness",
+  "version": "0.1.0",
+  "description": "Erfi's pi.dev harness - extensions, skills, prompt templates and theme for the pi coding agent. Installable as a pi package (pi install) or via GNU stow.",
+  "license": "MIT",
+  "author": "Erfi Anugrah",
+  "keywords": ["pi-package", "pi", "pi.dev", "coding-agent", "harness"],
+  "homepage": "https://github.com/erfianugrah/dotfiles",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erfianugrah/dotfiles.git"
+  },
+  "pi": {
+    "extensions": [".pi/agent/extensions/*.ts"],
+    "skills": [".pi/agent/skills"],
+    "prompts": [".pi/agent/prompts"],
+    "themes": [".pi/agent/themes"]
+  }
+}

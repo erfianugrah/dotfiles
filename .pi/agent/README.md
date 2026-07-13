@@ -12,11 +12,11 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 ├── AGENTS.md          → ~/dotfiles/.config/opencode/AGENTS.md (shared with opencode)
 ├── APPEND_SYSTEM.md   → ~/dotfiles/.pi/agent/APPEND_SYSTEM.md (commit/safety rules)
 ├── models.json        → ~/dotfiles/.pi/agent/models.json (llama-server + 8 local models)
-├── skills/            → ~/.config/opencode/skills (zero-copy: 18 top-level + 14 superpowers subskills)
-├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (37 single-file + lsp/ + session-fts/)
+├── skills/            → ~/.config/opencode/skills (zero-copy: 38 top-level + 14 superpowers subskills)
+├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (52 single-file + lsp/ + session-fts/)
 ├── tests/             → ~/dotfiles/.pi/agent/tests/ (bun unit tests for pure helpers)
 ├── settings.json      → ~/dotfiles/.pi/agent/settings.json (defaultProvider/Model + theme)
-├── prompts/           → ~/dotfiles/.pi/agent/prompts/ (6 slash-command templates)
+├── prompts/           → ~/dotfiles/.pi/agent/prompts/ (8 prompt files: 7 slash commands + docs-reference)
 ├── themes/            → ~/dotfiles/.pi/agent/themes/ (opencode-dark high-contrast)
 ├── auth.json          (NOT tracked — runtime auth state)
 ├── sessions/          (NOT tracked — session JSONL files)
@@ -26,6 +26,24 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 ├── style.json         (NOT tracked — /style command state)
 └── memories.json      (NOT tracked — populated by memory extension)
 ```
+
+## Installing on another machine (pi package)
+
+This harness is packaged (`@erfianugrah/pi-harness`, repo-root `package.json`
+with a `pi` manifest), so a machine that does not run the full stow setup can
+install just the pi resources:
+
+```bash
+pi install git:github.com/erfianugrah/dotfiles@<ref>   # extensions/skills/prompts/theme
+bash ~/.pi/agent/git/github.com/erfianugrah/dotfiles/.pi/agent/install-config.sh   # config files
+pi update --extensions                                 # reconcile later
+```
+
+pi packages carry resources only, so `install-config.sh` places the four
+user-config files (`settings.json`, `models.json`, `keybindings.json`,
+`APPEND_SYSTEM.md`). Do NOT do this on a stow machine - resources would load
+twice. Full detail in [`../../AGENTS.md`](../../AGENTS.md) ("Cross-machine
+install").
 
 ## Extensions
 
@@ -103,6 +121,7 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `/pr <num\|URL>` | Fetch + review GitHub PR end-to-end; reads CI status + existing inline comments |
 | `/test [filter]` | Detect toolchain (cargo/bun/pnpm/pytest/go/etc) → run targeted tests for the diff |
 | `/local-model-rules` | Inject per-model rules when running gemma/qwen on llama-server |
+| `/rollback` | Revert/undo helper for recent changes |
 
 ### Disabled
 
@@ -144,6 +163,7 @@ List loaded at startup; each has its own `SKILL.md` with the actual rules.
 | `lora-train` | kohya sd-scripts LoRA training via proxy on `localhost:11434`. |
 | `mermaid-d2` | mermaid / d2 diagram authoring + render via local CLIs. |
 | `research` | SearXNG (`:8888`) + Playwright crawler (`:8889`) + OSINT (`:8890`). |
+| `self-correcting-loop` | Sensor-gated autonomous loop driver (`loop` + `browser-assert` bins, `@erfianugrah/pi-loop`). Drives a fresh `pi -p` each iteration until deterministic sensors (build/lint/test/typecheck/e2e) pass; governor with model-escalation ladder, git checkpoint/rollback, and write-scope; dependency-free headless-Chromium behaviour sensor. |
 | `software-architecture` | DDD-lite system design for Go backends + full-stack apps. |
 | `supabase` | Supabase products (Database / Auth / Storage / Realtime / Edge Functions / pgvector / pgmq / Branching) + `@supabase/server` BFF patterns + RLS + migrations + connection pooling + Postgres extensions. |
 | `supabase-postgres-best-practices` | Postgres perf + index choice + connection management + RLS patterns. |
