@@ -63,6 +63,8 @@ Two properties make this work on weak models:
 | `presets/*.json` | Starter manifests per stack (go/node/rust/astro/python). |
 | `harness.test.ts` | Unit tests for the pure helpers. |
 | `loop.integration.test.ts` | End-to-end governor test with a scripted fake agent (rollback / stall+escalate / scope-revert / pass) - no real model needed. |
+| `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright npm dep). The behaviour-harness layer for web targets. |
+| `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
 
 ## Usage
 
@@ -132,6 +134,33 @@ sensors are **specific and deterministic**. Raise sensor quality by:
   Weak models are far better at "make it like that" than "invent from spec".
 - **Recorded fixtures** (VCR-style cassettes) for anything that hits a network,
   so real request/response shapes are validated offline, deterministically.
+
+## Behaviour harness for web targets
+
+Build/typecheck/unit sensors do not prove a page actually renders and works.
+The browser layer closes that gap, and comes in two flavours:
+
+- **Computational (the gate): `browser-assert.ts`.** Launches system Chromium
+  headless over CDP, waits for a selector, evaluates in-page JS assertions,
+  exits 0/1. Deterministic - use it as a sensor. Wrap dev-server start/stop in
+  the sensor cmd:
+
+  ```json
+  { "name": "e2e",
+    "cmd": "bunx --bun astro build && (bunx serve dist -l 4321 & SP=$!; sleep 1; bun ~/.pi/agent/skills/self-correcting-loop/browser-assert.ts http://localhost:4321 --wait '#app' --assert 'document.title.length>0' --assert '!document.querySelector(\".error\")'; RC=$?; kill $SP; exit $RC)" }
+  ```
+
+  Put e2e AFTER the fast sensors (build/typecheck/unit) - it is the expensive,
+  slower-and-flakier tier, so it only runs once the cheap gates are green.
+
+- **Inferential (for debugging, not the gate): a screenshot the model reads.**
+  When an e2e sensor fails on layout/visual issues the DOM can't express, have
+  the agent screenshot the page and look (the `deck-screenshot` skill's
+  `chromium --headless=new --screenshot` pattern). This is a probabilistic aid,
+  not a deterministic gate - never let a screenshot decide "done".
+
+Visual-regression (screenshot diffing) and a11y (`axe`) are further sensors you
+can add the same way; they need their own baselines/tooling.
 
 ## Limits (be honest about these)
 
