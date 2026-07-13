@@ -1,31 +1,53 @@
 #!/usr/bin/env bun
 /**
- * loop.ts - sensor-gated self-correcting loop driver.
+ * loop.ts - sensor-gated self-correcting loop driver (v2: cybernetic governor).
  *
  *   bun loop.ts run   [--manifest .pi/harness.json] [--model M] [--max N] [--dry]
  *   bun loop.ts init  [go|node|rust|astro|python]   [--force]
  *
- * The driver spawns a FRESH `pi -p` each iteration (no shared conversation -
- * state lives in the filesystem + the injected sensor feedback), runs the
- * manifest's sensors, and only stops when every sensor exits 0 or the
- * iteration budget is spent. The model never decides completion.
+ * Each iteration spawns a FRESH `pi -p` (state lives in the filesystem + the
+ * injected sensor feedback, never a bloating conversation), runs the manifest
+ * sensors, and applies a control loop around them:
+ *
+ *   - git checkpoint: the index is "best known good". A regressing or stalled
+ *     iteration is rolled back to it, so the loop can never degrade.
+ *   - write-scope: edits outside manifest.writeScope are reverted each turn.
+ *   - escalation ladder: start on the cheapest model, climb a rung after
+ *     `stallPatience` consecutive no-progress iterations.
+ *   - report: per-iteration record written to .pi/harness-report.json.
+ *
+ * The model never decides completion - sensor exit codes do.
+ *
+ * Testability: the agent command is `$LOOP_PI_CMD` (default "pi"), so an
+ * integration test can substitute a scripted fake agent.
  */
 
 import { existsSync, readdirSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
+	type LadderState,
 	type Manifest,
 	type SensorResult,
+	advanceLadder,
 	allPass,
 	buildPrompt,
+	countFailing,
+	decide,
 	detectPreset,
+	fingerprint,
 	formatFailures,
+	modelAt,
+	outOfScope,
 	parseManifest,
 } from "./harness.ts";
 
 const SCRIPT_DIR = dirname(Bun.fileURLToPath(import.meta.url));
 const PRESET_DIR = join(SCRIPT_DIR, "presets");
 const DEFAULT_MANIFEST = ".pi/harness.json";
+const REPORT_PATH = ".pi/harness-report.json";
+const PI_CMD = process.env.LOOP_PI_CMD ?? "pi";
+
+// --- arg parsing ------------------------------------------------------------
 
 function parseArgs(argv: string[]): {
 	cmd: string;
@@ -53,30 +75,68 @@ function parseArgs(argv: string[]): {
 	return { cmd, positional, flags };
 }
 
-/** Run one sensor command, capturing combined stdout+stderr. */
-async function runSensor(name: string, cmd: string): Promise<SensorResult> {
-	const proc = Bun.spawn(["bash", "-lc", cmd], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [stdout, stderr, exitCode] = await Promise.all([
+// --- shelling out -----------------------------------------------------------
+
+async function sh(cmd: string[]): Promise<{ code: number; out: string }> {
+	const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+	const [stdout, stderr, code] = await Promise.all([
 		new Response(proc.stdout).text(),
 		new Response(proc.stderr).text(),
 		proc.exited,
 	]);
-	return {
-		name,
-		cmd,
-		ok: exitCode === 0,
-		exitCode,
-		output: `${stdout}${stderr}`.trim(),
-	};
+	return { code, out: `${stdout}${stderr}`.trim() };
+}
+
+const git = (...args: string[]) => sh(["git", ...args]);
+
+async function isGitRepo(): Promise<boolean> {
+	return (await git("rev-parse", "--is-inside-work-tree")).code === 0;
+}
+
+/**
+ * Paths that differ from the baseline commit (HEAD), plus untracked files.
+ * Uses name-only plumbing (no status-column prefix) so parsing is robust -
+ * porcelain's leading space on unstaged lines is a slicing trap.
+ */
+async function changedPaths(): Promise<string[]> {
+	const tracked = (await git("diff", "--name-only", "HEAD")).out;
+	const untracked = (await git("ls-files", "--others", "--exclude-standard")).out;
+	const set = new Set<string>();
+	for (const l of `${tracked}\n${untracked}`.split("\n")) {
+		const p = l.trim();
+		if (p) set.add(p);
+	}
+	return [...set];
+}
+
+/** Promote the working tree to the "best known good" checkpoint (the index). */
+async function checkpoint(): Promise<void> {
+	await git("add", "-A");
+}
+
+/** Restore the working tree to the last checkpoint. */
+async function rollback(): Promise<void> {
+	await git("checkout", "--", ".");
+	await git("clean", "-fdq");
+}
+
+/** Revert the given paths to the baseline commit (used for scope violations). */
+async function revertPaths(paths: string[]): Promise<void> {
+	for (const p of paths) {
+		await git("checkout", "HEAD", "--", p); // tracked -> baseline
+		await git("clean", "-fdq", "--", p); // untracked -> removed
+	}
+}
+
+async function runSensor(name: string, cmd: string): Promise<SensorResult> {
+	const { code, out } = await sh(["bash", "-lc", cmd]);
+	return { name, cmd, ok: code === 0, exitCode: code, output: out };
 }
 
 async function runAllSensors(m: Manifest): Promise<SensorResult[]> {
 	const results: SensorResult[] = [];
 	for (const s of m.sensors) {
-		process.stdout.write(`  - sensor ${s.name} ... `);
+		process.stdout.write(`    - ${s.name} ... `);
 		const r = await runSensor(s.name, s.cmd);
 		console.log(r.ok ? "pass" : `FAIL (exit ${r.exitCode})`);
 		results.push(r);
@@ -84,14 +144,11 @@ async function runAllSensors(m: Manifest): Promise<SensorResult[]> {
 	return results;
 }
 
-/** Spawn `pi -p` for one iteration, streaming its output through. */
-async function runPi(
-	prompt: string,
-	m: Manifest,
-): Promise<number> {
-	const args = ["-p", prompt, "--tools", m.tools.join(","), "-a"];
-	if (m.model) args.push("--model", m.model);
-	const proc = Bun.spawn(["pi", ...args], {
+/** Spawn one agent iteration (pi -p, or $LOOP_PI_CMD in tests). */
+async function runAgent(prompt: string, model: string, tools: string[]): Promise<number> {
+	const args = ["-p", prompt, "--tools", tools.join(","), "-a"];
+	if (model) args.push("--model", model);
+	const proc = Bun.spawn([PI_CMD, ...args], {
 		stdout: "inherit",
 		stderr: "inherit",
 		stdin: "inherit",
@@ -99,71 +156,201 @@ async function runPi(
 	return await proc.exited;
 }
 
+// --- report -----------------------------------------------------------------
+
+interface IterationRecord {
+	iteration: number;
+	model: string;
+	failingBefore: number;
+	failingAfter: number;
+	progressed: boolean;
+	kept: boolean;
+	escalated: boolean;
+	scopeViolations: string[];
+	sensors: { name: string; ok: boolean; exitCode: number }[];
+}
+
+interface RunReport {
+	startedAt: string;
+	finishedAt: string;
+	task: string;
+	models: string[];
+	result: "pass" | "fail" | "already-green";
+	iterations: IterationRecord[];
+}
+
+// --- commands ---------------------------------------------------------------
+
 async function cmdRun(flags: Record<string, string | boolean>): Promise<number> {
 	const manifestPath = resolve(
 		typeof flags.manifest === "string" ? flags.manifest : DEFAULT_MANIFEST,
 	);
 	if (!existsSync(manifestPath)) {
-		console.error(
-			`no manifest at ${manifestPath}\nrun \`bun loop.ts init\` first.`,
-		);
+		console.error(`no manifest at ${manifestPath}\nrun \`bun loop.ts init\` first.`);
 		return 2;
 	}
 
-	let manifest: Manifest;
+	let m: Manifest;
 	try {
-		manifest = parseManifest(await Bun.file(manifestPath).json());
+		m = parseManifest(await Bun.file(manifestPath).json());
 	} catch (err) {
 		console.error(`invalid manifest: ${(err as Error).message}`);
 		return 2;
 	}
 
 	// CLI overrides.
-	if (typeof flags.model === "string") manifest.model = flags.model;
+	if (typeof flags.model === "string") m.models = [flags.model];
 	if (typeof flags.max === "string") {
 		const n = Number.parseInt(flags.max, 10);
-		if (Number.isInteger(n) && n > 0) manifest.maxIterations = n;
+		if (Number.isInteger(n) && n > 0) m.maxIterations = n;
 	}
 	const dry = flags.dry === true;
 
 	console.log(`loop: ${manifestPath}`);
-	console.log(`  model:  ${manifest.model ?? "(pi default)"}`);
-	console.log(`  max:    ${manifest.maxIterations}`);
-	console.log(`  tools:  ${manifest.tools.join(",")}`);
-	console.log(`  sensors:${manifest.sensors.map((s) => s.name).join(", ")}`);
+	console.log(`  models:  ${m.models.map((x) => x || "(pi default)").join(" -> ")}`);
+	console.log(`  max:     ${m.maxIterations}  stallPatience: ${m.stallPatience}`);
+	console.log(`  tools:   ${m.tools.join(",")}`);
+	console.log(`  scope:   ${m.writeScope.length ? m.writeScope.join(", ") : "(unrestricted)"}`);
+	console.log(`  sensors: ${m.sensors.map((s) => s.name).join(", ")}`);
 
+	// Baseline sensor run (also the --dry output).
+	console.log("\n  baseline sensors:");
+	let prev = await runAllSensors(m);
+	if (allPass(prev)) {
+		console.log("\nall sensors green (nothing for the loop to do).");
+		return 0;
+	}
 	if (dry) {
-		// --dry: just run the sensors once, report, don't spawn pi.
-		console.log("\n[dry run] running sensors once, not spawning pi:\n");
-		const results = await runAllSensors(manifest);
-		if (allPass(results)) {
-			console.log("\nall sensors green (nothing for the loop to do).");
-			return 0;
-		}
-		console.log(`\n${formatFailures(results)}`);
+		console.log(`\n[dry run]\n${formatFailures(prev)}`);
 		return 1;
 	}
 
-	let feedback: string | undefined;
-	for (let i = 1; i <= manifest.maxIterations; i++) {
-		console.log(`\n=== iteration ${i}/${manifest.maxIterations} ===`);
-		const prompt = buildPrompt(manifest.task, feedback);
-		const piExit = await runPi(prompt, manifest);
-		if (piExit !== 0) {
-			console.warn(`  (pi exited ${piExit}; running sensors anyway)`);
+	// Control-loop state.
+	const gitOn = await isGitRepo();
+	if (!gitOn) {
+		console.warn(
+			"\n  ! not a git repo: checkpoint/rollback/scope-guard disabled (feed-forward only).",
+		);
+	} else {
+		await checkpoint(); // index := current working tree (best known good).
+	}
+
+	let ladder: LadderState = { rung: 0, noProgress: 0 };
+	let prevFailing = countFailing(prev);
+	let prevFp = fingerprint(prev);
+	const report: RunReport = {
+		startedAt: new Date().toISOString(),
+		finishedAt: "",
+		task: m.task,
+		models: m.models,
+		result: "fail",
+		iterations: [],
+	};
+
+	for (let i = 1; i <= m.maxIterations; i++) {
+		const model = modelAt(m.models, ladder.rung);
+		const notes: string[] = [];
+		console.log(
+			`\n=== iteration ${i}/${m.maxIterations}  [model: ${model || "pi default"}, rung ${ladder.rung}] ===`,
+		);
+
+		const feedback = formatFailures(prev);
+		const prompt = buildPrompt(m.task, feedback, iterationNotes(report));
+		const agentExit = await runAgent(prompt, model, m.tools);
+		if (agentExit !== 0) console.warn(`  (agent exited ${agentExit}; continuing)`);
+
+		// Enforce write-scope.
+		let scopeViolations: string[] = [];
+		if (gitOn && m.writeScope.length) {
+			const bad = outOfScope(await changedPaths(), m.writeScope);
+			if (bad.length) {
+				await revertPaths(bad);
+				scopeViolations = bad;
+				notes.push(
+					`Reverted ${bad.length} out-of-scope edit(s): ${bad.join(", ")}. Only write: ${m.writeScope.join(", ")}.`,
+				);
+				console.log(`  ! reverted out-of-scope edits: ${bad.join(", ")}`);
+			}
 		}
-		console.log("  running sensors:");
-		const results = await runAllSensors(manifest);
-		if (allPass(results)) {
+
+		console.log("  sensors:");
+		const cur = await runAllSensors(m);
+		const curFailing = countFailing(cur);
+		const curFp = fingerprint(cur);
+		const d = decide(prevFailing, prevFp, curFailing, curFp);
+
+		console.log(
+			`  -> failing ${prevFailing} -> ${curFailing}  (${d.done ? "DONE" : d.progressed ? "progress" : "no progress"})`,
+		);
+
+		if (d.keep && gitOn) await checkpoint();
+		else if (gitOn) {
+			await rollback();
+			notes.push("Your last change did not help and was rolled back. Try a different approach.");
+			console.log("  ! rolled back to last good checkpoint");
+		}
+
+		const adv = advanceLadder(ladder, d.progressed, m.stallPatience, m.models.length);
+		if (adv.escalated) {
+			console.log(
+				`  ^ escalating model rung ${ladder.rung} -> ${adv.state.rung} (${modelAt(m.models, adv.state.rung) || "pi default"})`,
+			);
+		}
+		ladder = adv.state;
+
+		report.iterations.push({
+			iteration: i,
+			model,
+			failingBefore: prevFailing,
+			failingAfter: curFailing,
+			progressed: d.progressed,
+			kept: d.keep,
+			escalated: adv.escalated,
+			scopeViolations,
+			sensors: cur.map((s) => ({ name: s.name, ok: s.ok, exitCode: s.exitCode })),
+		});
+
+		if (d.keep) {
+			// Kept: current becomes the new best.
+			prev = cur;
+			prevFailing = curFailing;
+			prevFp = curFp;
+		}
+		// If rolled back, prev/prevFailing/prevFp stay = best known good.
+
+		if (d.done) {
+			report.result = "pass";
+			report.finishedAt = new Date().toISOString();
+			await writeReport(report);
 			console.log(`\nPASS: all sensors green on iteration ${i}.`);
 			return 0;
 		}
-		feedback = formatFailures(results);
 	}
-	console.error(
-		`\nFAIL: sensors still red after ${manifest.maxIterations} iterations.`,
-	);
+
+	report.finishedAt = new Date().toISOString();
+	await writeReport(report);
+	console.error(`\nFAIL: sensors still red after ${m.maxIterations} iterations.`);
 	return 1;
+}
+
+/** Notes derived from the previous iteration record (rollback/escalation). */
+function iterationNotes(report: RunReport): string[] {
+	const last = report.iterations.at(-1);
+	if (!last) return [];
+	const notes: string[] = [];
+	if (!last.kept) notes.push("The previous attempt was rolled back (no progress); try a different approach.");
+	if (last.escalated) notes.push("A stronger model is now handling this - reconsider the problem from scratch.");
+	return notes;
+}
+
+async function writeReport(report: RunReport): Promise<void> {
+	try {
+		await Bun.$`mkdir -p ${dirname(REPORT_PATH)}`.quiet();
+		await Bun.write(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
+		console.log(`  report: ${REPORT_PATH}`);
+	} catch {
+		/* best-effort */
+	}
 }
 
 async function cmdInit(
@@ -195,10 +382,8 @@ async function cmdInit(
 		return 2;
 	}
 
-	// Validate the preset before copying so a broken preset can't be written.
 	const presetJson = await Bun.file(presetPath).json();
-	parseManifest(presetJson);
-
+	parseManifest(presetJson); // validate before writing.
 	await Bun.$`mkdir -p ${dirname(out)}`.quiet();
 	await Bun.write(out, `${JSON.stringify(presetJson, null, 2)}\n`);
 	console.log(`wrote ${out} from ${preset} preset.`);
@@ -217,15 +402,12 @@ async function main(): Promise<void> {
 			code = await cmdInit(positional, flags);
 			break;
 		default:
-			console.error(
-				`unknown command "${cmd}"\nusage: bun loop.ts [run|init] ...`,
-			);
+			console.error(`unknown command "${cmd}"\nusage: bun loop.ts [run|init] ...`);
 			code = 2;
 	}
 	process.exit(code);
 }
 
-// Only run when executed directly, not when imported by tests.
 if (basename(Bun.main) === "loop.ts") {
 	await main();
 }
