@@ -20,3 +20,7 @@ bun test --preload "$HERE/preload.ts" "$HERE/extensions.test.ts" "$@"
 
 # Integration suite (self-mocked; no preload). Always run in full.
 bun test "$HERE/integration/"
+
+# Harness self-sensor: assert the pi-package manifest ships every resource.
+# No preload (pure fs/glob). Runs in full.
+bun test "$HERE/manifest.test.ts"
