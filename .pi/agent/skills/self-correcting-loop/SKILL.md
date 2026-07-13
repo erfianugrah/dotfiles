@@ -1,6 +1,6 @@
 ---
 name: self-correcting-loop
-description: Run an unattended, sensor-gated agent loop that drives a fresh `pi -p` each iteration until deterministic checks (build/lint/test/typecheck) pass, then stops. Use when the user wants to "set an agent in a loop", run a task autonomously, self-correct without supervision, or make a weaker model (Sonnet/GLM/DeepSeek) reliably good on a scoped coding task. The model never decides "done" - the sensors do. Language-agnostic: sensors are just command strings declared in a per-project .pi/harness.json (go/node/rust/astro/python presets included). Pairs with scaffold-new-project (which builds the target) and software-architecture (tight contracts = better sensors).
+description: "Run an unattended, sensor-gated agent loop that drives a fresh pi -p each iteration until deterministic checks (build/lint/test/typecheck) pass, then stops. Use when the user wants to 'set an agent in a loop', run a task autonomously, self-correct without supervision, or make a weaker model (Sonnet/GLM/DeepSeek) reliably good on a scoped coding task. The model never decides 'done' - the sensors do. Language-agnostic - sensors are just command strings declared in a per-project .pi/harness.json (go/node/rust/astro/python presets included). Pairs with scaffold-new-project (which builds the target) and software-architecture (tight contracts = better sensors)."
 ---
 
 # Self-correcting loop
