@@ -130,6 +130,10 @@ manifest/usage error.
   `model` (string|null) is still accepted and normalized to a one-rung ladder.
   CLI `--model` overrides to a single rung.
 - `stallPatience` - consecutive no-progress iterations before climbing a rung.
+- `baseline` (or CLI `--freeze`) - freeze mode: sensors already failing at the
+  baseline run are tolerated as pre-existing debt; only NEW failures gate. Lets
+  the loop adopt a legacy repo without a green-the-world sprint first (ArchUnit
+  `freeze`).
 - `writeScope` - globs the agent may write (`*` within a segment, `**` across).
   Empty = unrestricted. Requires the target to be a git repo.
 

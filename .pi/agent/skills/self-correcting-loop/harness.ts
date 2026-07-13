@@ -41,6 +41,12 @@ export interface Manifest {
 	models: string[];
 	/** consecutive no-progress iterations before escalating one ladder rung. */
 	stallPatience: number;
+	/**
+	 * Freeze mode: tolerate sensors that were ALREADY failing at baseline
+	 * (pre-existing debt) and only gate on NEW failures. Lets the loop adopt a
+	 * legacy repo without a green-the-world sprint first (ArchUnit `freeze`).
+	 */
+	baseline: boolean;
 	/** pi --tools whitelist for the spawned agent. */
 	tools: string[];
 	/**
@@ -107,6 +113,14 @@ export function parseManifest(raw: unknown): Manifest {
 		throw new Error("manifest.stallPatience must be a positive integer");
 	}
 
+	let baseline = false;
+	if (r.baseline !== undefined) {
+		if (typeof r.baseline !== "boolean") {
+			throw new Error("manifest.baseline must be a boolean");
+		}
+		baseline = r.baseline;
+	}
+
 	let tools = DEFAULT_TOOLS;
 	if (r.tools !== undefined) {
 		if (!Array.isArray(r.tools) || !r.tools.every((t) => typeof t === "string")) {
@@ -154,7 +168,16 @@ export function parseManifest(raw: unknown): Manifest {
 	const dup = names.find((n, i) => names.indexOf(n) !== i);
 	if (dup) throw new Error(`manifest.sensors has duplicate name "${dup}"`);
 
-	return { task: r.task, maxIterations, models, stallPatience, tools, writeScope, sensors };
+	return {
+		task: r.task,
+		maxIterations,
+		models,
+		stallPatience,
+		baseline,
+		tools,
+		writeScope,
+		sensors,
+	};
 }
 
 /** Normalize the {models?, model?} pair into a non-empty ladder ("" = default). */
@@ -174,6 +197,26 @@ export function normalizeModels(models: unknown, model: unknown): string[] {
 		throw new Error("manifest.model must be a string or null");
 	}
 	return [model];
+}
+
+/**
+ * Freeze view: a sensor that was already failing at baseline (its name is in
+ * `frozen`) is treated as passing for GATING purposes, so the loop tolerates
+ * pre-existing debt and only reacts to NEW failures. Empty `frozen` = no-op.
+ */
+export function applyFreeze(
+	results: SensorResult[],
+	frozen: Set<string>,
+): SensorResult[] {
+	if (frozen.size === 0) return results;
+	return results.map((r) =>
+		!r.ok && frozen.has(r.name) ? { ...r, ok: true } : r,
+	);
+}
+
+/** Names of sensors currently failing (used to compute the freeze baseline). */
+export function failingNames(results: SensorResult[]): Set<string> {
+	return new Set(results.filter((r) => !r.ok).map((r) => r.name));
 }
 
 /** All sensors passed? */

@@ -4,7 +4,9 @@ import {
 	type SensorResult,
 	advanceLadder,
 	allPass,
+	applyFreeze,
 	buildPrompt,
+	failingNames,
 	countFailing,
 	decide,
 	detectPreset,
@@ -46,6 +48,7 @@ describe("parseManifest", () => {
 		expect(m.maxIterations).toBe(10);
 		expect(m.models).toEqual([""]);
 		expect(m.stallPatience).toBe(2);
+		expect(m.baseline).toBe(false);
 		expect(m.tools).toEqual(["read", "edit", "write", "bash"]);
 		expect(m.writeScope).toEqual([]);
 		expect(m.sensors).toHaveLength(1);
@@ -73,6 +76,11 @@ describe("parseManifest", () => {
 	test("rejects bad stallPatience and writeScope", () => {
 		expect(() => parseManifest({ ...base, stallPatience: 0 })).toThrow("stallPatience");
 		expect(() => parseManifest({ ...base, writeScope: "x" })).toThrow("writeScope");
+	});
+
+	test("accepts baseline flag; rejects non-boolean", () => {
+		expect(parseManifest({ ...base, baseline: true }).baseline).toBe(true);
+		expect(() => parseManifest({ ...base, baseline: "yes" })).toThrow("baseline");
 	});
 
 	test("accepts an optional per-sensor hint; rejects a non-string hint", () => {
@@ -106,6 +114,25 @@ describe("normalizeModels", () => {
 	test("legacy null/undefined -> default rung", () => {
 		expect(normalizeModels(undefined, null)).toEqual([""]);
 		expect(normalizeModels(undefined, undefined)).toEqual([""]);
+	});
+});
+
+describe("applyFreeze / failingNames (freeze mode)", () => {
+	test("failingNames returns the set of failing sensor names", () => {
+		expect([...failingNames([ok("a"), fail("b"), fail("c")])].sort()).toEqual(["b", "c"]);
+	});
+	test("applyFreeze passes frozen failures, leaves new failures", () => {
+		const r = applyFreeze([fail("debt"), fail("new"), ok("x")], new Set(["debt"]));
+		expect(r.find((x) => x.name === "debt")?.ok).toBe(true);
+		expect(r.find((x) => x.name === "new")?.ok).toBe(false);
+		expect(allPass(r)).toBe(false); // a NEW failure still gates
+	});
+	test("all-frozen failures -> allPass true (nothing new to fix)", () => {
+		expect(allPass(applyFreeze([fail("debt"), ok("x")], new Set(["debt"])))).toBe(true);
+	});
+	test("empty frozen set is a no-op (returns same ref)", () => {
+		const input = [fail("a"), ok("b")];
+		expect(applyFreeze(input, new Set())).toBe(input);
 	});
 });
 
