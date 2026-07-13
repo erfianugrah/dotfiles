@@ -395,6 +395,27 @@ direct children are `<section>`s, not `.src`, so it never matches the wrapper.
 - **Center a diagram** via theme SCSS: `.reveal .cell-output-display { text-align: center; } .reveal .cell-output-display svg { margin-left: auto; margin-right: auto; }`
 - Emoji (✅/❌) can render as tofu on machines lacking an emoji font (projectors!) - prefer `✓`/`✗` or text for portability.
 
+### Deterministic diagrams: prefer `{dot}` for layout-sensitive graphs
+
+Quarto renders `{mermaid}` **client-side** (a `<pre class="mermaid">` laid out by mermaid.js in the *viewer's* browser) - so the same file can lay out differently machine-to-machine (font-load timing, viewport, mermaid version), and mermaid's radial `mindmap` has no overlap/crossing control (15+ nodes collide, branch colors interleave). Quarto renders `{dot}` (Graphviz) **at build time** into an inline SVG - byte-identical for every viewer. For any diagram whose exact layout matters, reach for `{dot}`.
+
+- **Radial hub / "mindmap" look → Graphviz `{dot}` with `layout=twopi`**, not mermaid `mindmap`. Needs the `dot` binary on PATH (`sudo pacman -S graphviz`); Quarto shells out to it, honors the in-graph `layout=twopi`, and bakes the SVG inline. Recipe:
+  ````
+  ```{dot}
+  graph G {
+    layout=twopi; root=hub; overlap=prism; sep="+9"; bgcolor="transparent";
+    node [shape=box style="filled,rounded" fontname="DejaVu Sans" fontcolor=white penwidth=0];
+    hub [label="Core" shape=circle fillcolor="#3ecf8e" fontcolor="#0d0d0d"];
+    hub -- b1; b1 [label="Branch" fillcolor="#2f6f4e"];
+    b1 -- leafA; leafA [label="Leaf\nwrapped" fillcolor="#2f6f4e"];  // fillcolor per branch groups colors
+  }
+  ```
+  ````
+  Size on the slide via SCSS: wrap the cell in `::: {.myhub}` and `.reveal .myhub svg { max-height: 480px; width: auto; }`. `bgcolor="transparent"` blends with a dark theme. Fonts: graphviz uses *system* fonts at build (NOT the deck's web font) - pick one `fc-list` shows (e.g. DejaVu Sans); label boxes have padding so a font mismatch won't clip.
+  - **Make it pretty, not sparse:** plain twopi = thin uniform-grey straight spokes (looks bare). For a mindmap feel, add `splines=curved`, bump `edge [penwidth=3]`, and **colour each edge to its branch** (`sb -- b1 [color="#2f6f4e"]; b1 -- leaf [color="#2f6f4e"]`). Colour-matched curved edges group branches visually and read as intentional.
+  - **twopi allocates angular space by leaf count**, so a lopsided tree (one branch with 7 children, another with 1) skews off-centre. There's no clean fix - `overlap=prism` + `sep="+12"` and the per-branch edge colours mask it well enough; if it still bothers, rebalance by merging leaves.
+- **Only if `dot` is genuinely unavailable** (no sudo/pacman): pre-bake the mermaid to a static SVG via mermaid-cli / `render_diagram`, then embed as `<img>`. Two non-obvious gotchas: (1) set `htmlLabels:false` in the init - mermaid's default label `<foreignObject>` does NOT render when an SVG is loaded via `<img>` (secure static mode), so labels vanish; `htmlLabels:false` emits native `<text>`. (2) strip mermaid-cli's injected `style="...background-color: white;"`. This fragments the diagram across qmd + scss + a generated SVG, so commit the `.mmd` source + a `make` target that regenerates it - never hand-patch and commit an orphan SVG with no source of truth.
+
 ### Deck YAML essentials
 ```yaml
 format:
@@ -425,6 +446,8 @@ format:
 | Reveal SCSS/theme edits not visible in preview | `quarto preview` doesn't recompile theme SCSS - re-render or restart preview |
 | Dense slide overflows into footer | `.smaller` + `.scrollable`; tighten table cell padding in theme SCSS |
 | Mermaid mindmap section colors muddy/wrong | Set `cScale1..N` themeVariables (cScale0 = root section, off-by-one) |
+| Mermaid diagram lays out differently across machines / overlaps | It renders client-side; for layout-sensitive or radial graphs use a build-time `{dot}` (Graphviz) cell - `layout=twopi` + `overlap=prism` for a clean deterministic hub |
+| Baked mermaid SVG shows empty boxes when embedded as `<img>` | mermaid label `<foreignObject>` doesn't render in `<img>` secure-static mode; re-render with `htmlLabels:false` (native `<text>`), or inline the SVG instead of `<img>` |
 | Heading renders as literal text / slide boundary lost | A paragraph (or fenced-div content) directly above a `#`/`##` heading with NO blank line gets absorbed into that paragraph by Pandoc - always leave a blank line before every heading |
 | Footnote size differs `.smaller` vs plain slides | `.src` in `em` compounds with `.smaller`'s 0.7em; cancel with `section:not(.smaller) > .src` (child `>`, not descendant - else it matches through `section.stack`) |
 | Footnote Y jumps slide-to-slide | `center: true` floats it; pin via `section:has(> .src)` flex + `margin-top:auto` (+ `position:sticky;bottom:0` for scrollable) |
