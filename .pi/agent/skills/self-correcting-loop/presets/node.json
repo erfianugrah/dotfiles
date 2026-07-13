@@ -1,0 +1,11 @@
+{
+  "task": "EDIT ME: describe the change the loop should make.",
+  "maxIterations": 10,
+  "model": null,
+  "tools": ["read", "edit", "write", "bash"],
+  "sensors": [
+    { "name": "types", "cmd": "npx --no-install tsc --noEmit" },
+    { "name": "lint", "cmd": "npx --no-install biome check ." },
+    { "name": "test", "cmd": "npx --no-install vitest run" }
+  ]
+}
