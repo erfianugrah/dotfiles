@@ -122,7 +122,10 @@ manifest/usage error.
 
 - `task` - the feed-forward instruction. Keep it scoped; one module/feature.
 - `sensors` - the feedback controls. Each `cmd` runs under `bash -lc`; exit 0 =
-  pass. Order them cheap-to-expensive (build before test) - all must pass.
+  pass. Order them cheap-to-expensive (build before test) - all must pass. Each
+  sensor may carry an optional `hint` string, appended to the feedback when it
+  fails ("how to fix: ...") - author it for the *class* of failure, so the model
+  gets remediation guidance, not just the error.
 - `models` - the escalation ladder, cheapest first (`""` = pi default). Legacy
   `model` (string|null) is still accepted and normalized to a one-rung ladder.
   CLI `--model` overrides to a single rung.
@@ -147,6 +150,13 @@ sensors are **specific and deterministic**. Raise sensor quality by:
   Weak models are far better at "make it like that" than "invent from spec".
 - **Recorded fixtures** (VCR-style cassettes) for anything that hits a network,
   so real request/response shapes are validated offline, deterministically.
+- **Structural / architecture sensors** turn a boundary you *hope* holds into
+  one the build enforces - a fitness function (Böckeler; ArchUnit). They are
+  fast and deterministic, so run them alongside the fast sensors. Per stack:
+  Go `golangci-lint run` with a `depguard` rule (module-boundary example in
+  `~/authkit/.golangci.yml`), TS `dependency-cruiser`, Python `import-linter`,
+  JVM ArchUnit. Pair with a `hint` naming the rule that was crossed. This is
+  the cure for the "same agent wrote both sides of the contract" drift.
 
 ## Behaviour harness for web targets
 

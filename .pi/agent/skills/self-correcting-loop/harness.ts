@@ -20,6 +20,12 @@ export interface Sensor {
 	name: string;
 	/** shell command; exit 0 = pass, non-zero = fail. stdout+stderr captured. */
 	cmd: string;
+	/**
+	 * Optional remediation guidance appended to the feedback when this sensor
+	 * fails - a "positive prompt injection" that tells the model HOW to fix the
+	 * class of failure, not just that it failed. (OpenAI custom-lint pattern.)
+	 */
+	hint?: string;
 }
 
 export interface Manifest {
@@ -54,6 +60,8 @@ export interface SensorResult {
 	exitCode: number;
 	/** combined stdout+stderr. */
 	output: string;
+	/** remediation guidance carried from the sensor definition. */
+	hint?: string;
 }
 
 const DEFAULT_TOOLS = ["read", "edit", "write", "bash"];
@@ -132,7 +140,14 @@ export function parseManifest(raw: unknown): Manifest {
 		if (typeof so.cmd !== "string" || so.cmd.trim() === "") {
 			throw new Error(`manifest.sensors[${i}].cmd must be a non-empty string`);
 		}
-		return { name: so.name, cmd: so.cmd };
+		let hint: string | undefined;
+		if (so.hint !== undefined) {
+			if (typeof so.hint !== "string") {
+				throw new Error(`manifest.sensors[${i}].hint must be a string`);
+			}
+			hint = so.hint;
+		}
+		return { name: so.name, cmd: so.cmd, hint };
 	});
 
 	const names = sensors.map((s) => s.name);
@@ -203,7 +218,8 @@ export function formatFailures(results: SensorResult[]): string {
 				`$ ${r.cmd}\n` +
 				"```\n" +
 				truncate(r.output).trimEnd() +
-				"\n```",
+				"\n```" +
+				(r.hint ? `\n> how to fix: ${r.hint}` : ""),
 		)
 		.join("\n\n");
 }
