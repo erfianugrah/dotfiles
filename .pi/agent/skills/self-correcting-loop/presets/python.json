@@ -1,0 +1,11 @@
+{
+  "task": "EDIT ME: describe the change the loop should make.",
+  "maxIterations": 10,
+  "model": null,
+  "tools": ["read", "edit", "write", "bash"],
+  "sensors": [
+    { "name": "lint", "cmd": "ruff check ." },
+    { "name": "format", "cmd": "ruff format --check ." },
+    { "name": "test", "cmd": "pytest -q" }
+  ]
+}

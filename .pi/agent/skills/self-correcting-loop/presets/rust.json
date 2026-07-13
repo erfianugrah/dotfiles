@@ -1,0 +1,11 @@
+{
+  "task": "EDIT ME: describe the change the loop should make.",
+  "maxIterations": 10,
+  "model": null,
+  "tools": ["read", "edit", "write", "bash"],
+  "sensors": [
+    { "name": "build", "cmd": "cargo build --quiet" },
+    { "name": "clippy", "cmd": "cargo clippy --quiet -- -D warnings" },
+    { "name": "test", "cmd": "cargo test --quiet" }
+  ]
+}

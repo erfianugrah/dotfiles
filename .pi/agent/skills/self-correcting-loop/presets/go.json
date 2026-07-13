@@ -1,0 +1,11 @@
+{
+  "task": "EDIT ME: describe the change the loop should make.",
+  "maxIterations": 10,
+  "model": null,
+  "tools": ["read", "edit", "write", "bash"],
+  "sensors": [
+    { "name": "build", "cmd": "go build ./..." },
+    { "name": "vet", "cmd": "go vet ./..." },
+    { "name": "test", "cmd": "go test ./..." }
+  ]
+}

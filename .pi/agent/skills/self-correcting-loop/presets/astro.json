@@ -1,0 +1,10 @@
+{
+  "task": "EDIT ME: describe the change the loop should make.",
+  "maxIterations": 10,
+  "model": null,
+  "tools": ["read", "edit", "write", "bash"],
+  "sensors": [
+    { "name": "check", "cmd": "npx --no-install astro check" },
+    { "name": "build", "cmd": "npx --no-install astro build" }
+  ]
+}
