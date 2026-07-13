@@ -17,12 +17,31 @@ prompt.
 ## The mechanism
 
 ```
+checkpoint = git index (best known good)
 repeat until every sensor exits 0, OR maxIterations spent:
-    pi -p  <task + previous iteration's failing sensor output>
+    pi -p  <task + previous iteration's failing sensor output + loop notes>
+    revert any edits outside writeScope
     run sensors (build / vet / test / tsc / clippy / astro check ...)
-    all pass?  -> STOP, success           (deterministic gate)
-    any fail?  -> feed exact failures into the next prompt
+    all pass?       -> STOP, success                 (deterministic gate)
+    fewer failures? -> checkpoint (keep), continue
+    stalled/worse?  -> ROLL BACK to checkpoint; on repeated stalls, escalate
+                       to the next model on the ladder
+    append a per-iteration record to .pi/harness-report.json
 ```
+
+The governor around the bare loop (all deterministic, no extra model calls):
+
+- **git checkpoint + regression rollback** - the git index is the best-known-
+  good state. An iteration that increases the failing-sensor count (or makes no
+  progress) is reverted, so the loop can never degrade the tree.
+- **write-scope enforcement** - `writeScope` globs fence what the agent may
+  touch; out-of-scope edits are reverted each iteration. This structurally
+  kills the test-weakening cheat (keep tests outside the scope) and replaces
+  hand-written "integrity" guard sensors.
+- **model escalation ladder** - start on the cheapest model; climb a rung after
+  `stallPatience` consecutive no-progress iterations. Strength on demand.
+- **run report** - `.pi/harness-report.json` records model, failing-count
+  trend, kept/rolled-back, escalations, scope violations per iteration.
 
 Two properties make this work on weak models:
 
@@ -39,10 +58,11 @@ Two properties make this work on weak models:
 
 | File | Role |
 |---|---|
-| `harness.ts` | Pure core: manifest schema/validation, prompt + feedback builders, stack detection. Unit-tested. |
-| `loop.ts` | CLI driver (Bun): spawns `pi -p`, runs sensors, drives the loop. |
+| `harness.ts` | Pure core: manifest schema/validation, prompt + feedback builders, stack detection, glob/scope, decide/ladder logic. Unit-tested (30 cases). |
+| `loop.ts` | CLI driver (Bun): spawns `pi -p`, runs sensors, git checkpoint/rollback, scope guard, escalation, report. |
 | `presets/*.json` | Starter manifests per stack (go/node/rust/astro/python). |
-| `harness.test.ts` | Unit tests for the pure helpers (`bun test` in this dir). |
+| `harness.test.ts` | Unit tests for the pure helpers. |
+| `loop.integration.test.ts` | End-to-end governor test with a scripted fake agent (rollback / stall+escalate / scope-revert / pass) - no real model needed. |
 
 ## Usage
 
@@ -72,9 +92,11 @@ manifest/usage error.
 ```json
 {
   "task": "Add a WeChat OAuth provider module; loop until conformance passes.",
-  "maxIterations": 10,
-  "model": null,
+  "maxIterations": 12,
+  "models": ["claude-sonnet-5", "claude-opus-4-8"],
+  "stallPatience": 3,
   "tools": ["read", "edit", "write", "bash"],
+  "writeScope": ["providers/wechat/**"],
   "sensors": [
     { "name": "build", "cmd": "go build ./..." },
     { "name": "vet",   "cmd": "go vet ./..." },
@@ -86,8 +108,15 @@ manifest/usage error.
 - `task` - the feed-forward instruction. Keep it scoped; one module/feature.
 - `sensors` - the feedback controls. Each `cmd` runs under `bash -lc`; exit 0 =
   pass. Order them cheap-to-expensive (build before test) - all must pass.
-- `model` - `null` = pi default. Set to a weaker model to pressure-test the
-  harness. CLI `--model` overrides.
+- `models` - the escalation ladder, cheapest first (`""` = pi default). Legacy
+  `model` (string|null) is still accepted and normalized to a one-rung ladder.
+  CLI `--model` overrides to a single rung.
+- `stallPatience` - consecutive no-progress iterations before climbing a rung.
+- `writeScope` - globs the agent may write (`*` within a segment, `**` across).
+  Empty = unrestricted. Requires the target to be a git repo.
+
+> The governor (checkpoint/rollback/scope/escalation) needs a **git repo** with
+> a committed baseline. Without git it degrades to feed-forward-only and warns.
 
 ## Making the target harnessable (this is where the leverage is)
 

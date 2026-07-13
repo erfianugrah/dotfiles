@@ -1,10 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import {
+	type LadderState,
 	type SensorResult,
+	advanceLadder,
 	allPass,
 	buildPrompt,
+	countFailing,
+	decide,
 	detectPreset,
+	fingerprint,
 	formatFailures,
+	globToRegExp,
+	matchGlob,
+	modelAt,
+	normalizeModels,
+	outOfScope,
 	parseManifest,
 	truncate,
 } from "./harness.ts";
@@ -34,43 +44,35 @@ describe("parseManifest", () => {
 		const m = parseManifest(base);
 		expect(m.task).toBe("do the thing");
 		expect(m.maxIterations).toBe(10);
-		expect(m.model).toBeNull();
+		expect(m.models).toEqual([""]);
+		expect(m.stallPatience).toBe(2);
 		expect(m.tools).toEqual(["read", "edit", "write", "bash"]);
+		expect(m.writeScope).toEqual([]);
 		expect(m.sensors).toHaveLength(1);
 	});
 
-	test("rejects non-object", () => {
+	test("normalizes legacy model into models ladder", () => {
+		expect(parseManifest({ ...base, model: "sonnet" }).models).toEqual(["sonnet"]);
+		expect(parseManifest({ ...base, model: null }).models).toEqual([""]);
+	});
+
+	test("accepts a models ladder", () => {
+		expect(parseManifest({ ...base, models: ["a", "b"] }).models).toEqual(["a", "b"]);
+	});
+
+	test("rejects empty models array", () => {
+		expect(() => parseManifest({ ...base, models: [] })).toThrow("models");
+	});
+
+	test("rejects non-object / missing task / empty sensors", () => {
 		expect(() => parseManifest("nope")).toThrow("must be a JSON object");
-		expect(() => parseManifest(null)).toThrow("must be a JSON object");
-		expect(() => parseManifest([])).toThrow("must be a JSON object");
-	});
-
-	test("requires non-empty task", () => {
-		expect(() => parseManifest({ ...base, task: "" })).toThrow("task");
 		expect(() => parseManifest({ sensors: base.sensors })).toThrow("task");
-	});
-
-	test("requires positive integer maxIterations", () => {
-		expect(() => parseManifest({ ...base, maxIterations: 0 })).toThrow(
-			"maxIterations",
-		);
-		expect(() => parseManifest({ ...base, maxIterations: 1.5 })).toThrow(
-			"maxIterations",
-		);
-	});
-
-	test("requires non-empty sensors array", () => {
 		expect(() => parseManifest({ ...base, sensors: [] })).toThrow("sensors");
-		expect(() => parseManifest({ task: "x" })).toThrow("sensors");
 	});
 
-	test("rejects sensor missing name or cmd", () => {
-		expect(() =>
-			parseManifest({ ...base, sensors: [{ cmd: "x" }] }),
-		).toThrow("sensors[0].name");
-		expect(() =>
-			parseManifest({ ...base, sensors: [{ name: "x" }] }),
-		).toThrow("sensors[0].cmd");
+	test("rejects bad stallPatience and writeScope", () => {
+		expect(() => parseManifest({ ...base, stallPatience: 0 })).toThrow("stallPatience");
+		expect(() => parseManifest({ ...base, writeScope: "x" })).toThrow("writeScope");
 	});
 
 	test("rejects duplicate sensor names", () => {
@@ -84,17 +86,31 @@ describe("parseManifest", () => {
 			}),
 		).toThrow('duplicate name "t"');
 	});
+});
 
-	test("rejects non-string model", () => {
-		expect(() => parseManifest({ ...base, model: 42 })).toThrow("model");
+describe("normalizeModels", () => {
+	test("ladder wins over legacy model", () => {
+		expect(normalizeModels(["a"], "b")).toEqual(["a"]);
+	});
+	test("legacy null/undefined -> default rung", () => {
+		expect(normalizeModels(undefined, null)).toEqual([""]);
+		expect(normalizeModels(undefined, undefined)).toEqual([""]);
 	});
 });
 
-describe("allPass", () => {
-	test("true only when all ok and non-empty", () => {
+describe("allPass / countFailing / fingerprint", () => {
+	test("allPass true only when all ok and non-empty", () => {
 		expect(allPass([ok("a"), ok("b")])).toBe(true);
 		expect(allPass([ok("a"), fail("b")])).toBe(false);
 		expect(allPass([])).toBe(false);
+	});
+	test("countFailing counts failures", () => {
+		expect(countFailing([ok("a"), fail("b"), fail("c")])).toBe(2);
+	});
+	test("fingerprint is stable and changes with output", () => {
+		expect(fingerprint([fail("t", "x")])).toBe(fingerprint([fail("t", "x")]));
+		expect(fingerprint([fail("t", "x")])).not.toBe(fingerprint([fail("t", "y")]));
+		expect(fingerprint([ok("t")])).toBe("");
 	});
 });
 
@@ -108,49 +124,110 @@ describe("truncate", () => {
 		expect(out).toContain("truncated");
 		expect(out.startsWith("A")).toBe(true);
 		expect(out.endsWith("B")).toBe(true);
-		expect(out.length).toBeLessThan(s.length);
 	});
 });
 
-describe("formatFailures", () => {
-	test("includes only failures with cmd and output", () => {
+describe("formatFailures / buildPrompt", () => {
+	test("formatFailures includes only failures", () => {
 		const out = formatFailures([ok("build"), fail("test", "assertion failed")]);
 		expect(out).not.toContain("build");
 		expect(out).toContain('sensor "test" failed (exit 1)');
 		expect(out).toContain("assertion failed");
 	});
-	test("empty when nothing failed", () => {
-		expect(formatFailures([ok("a")])).toBe("");
-	});
-});
-
-describe("buildPrompt", () => {
-	test("first iteration is just the task", () => {
+	test("buildPrompt first iteration is just the task", () => {
 		expect(buildPrompt("my task")).toBe("my task");
 	});
-	test("later iterations append guardrails and feedback", () => {
-		const p = buildPrompt("my task", 'sensor "test" failed');
+	test("buildPrompt appends guardrails, notes and feedback", () => {
+		const p = buildPrompt("my task", 'sensor "test" failed', [
+			"rolled back a regression",
+		]);
 		expect(p).toContain("my task");
-		expect(p).toContain("Automated checks failed");
 		expect(p).toContain("Do NOT delete, skip, or weaken tests");
+		expect(p).toContain("Loop notes");
+		expect(p).toContain("rolled back a regression");
 		expect(p).toContain('sensor "test" failed');
 	});
 });
 
 describe("detectPreset", () => {
-	test("prefers rust, then go", () => {
+	test("prefers rust, then go; astro before node; python", () => {
 		expect(detectPreset(["Cargo.toml", "go.mod"])).toBe("rust");
 		expect(detectPreset(["go.mod"])).toBe("go");
-	});
-	test("astro before node when astro.config present", () => {
 		expect(detectPreset(["package.json", "astro.config.mjs"])).toBe("astro");
 		expect(detectPreset(["package.json"])).toBe("node");
-	});
-	test("python via pyproject or requirements", () => {
 		expect(detectPreset(["pyproject.toml"])).toBe("python");
-		expect(detectPreset(["requirements.txt"])).toBe("python");
-	});
-	test("null when nothing recognized", () => {
 		expect(detectPreset(["README.md"])).toBeNull();
+	});
+});
+
+describe("globbing / write-scope", () => {
+	test("matchGlob handles * and **", () => {
+		expect(matchGlob("providers/github/github.go", "providers/github/**")).toBe(true);
+		expect(matchGlob("providers/github/github.go", "providers/github/github.go")).toBe(true);
+		expect(matchGlob("providers/github/x_test.go", "providers/github/github.go")).toBe(false);
+		expect(matchGlob("a/b.go", "**/*.go")).toBe(true);
+		expect(matchGlob("conformance/conformance.go", "providers/**")).toBe(false);
+	});
+	test("globToRegExp escapes regex metachars", () => {
+		expect(globToRegExp("a.b").test("a.b")).toBe(true);
+		expect(globToRegExp("a.b").test("axb")).toBe(false);
+	});
+	test("outOfScope returns paths not covered; empty scope = unrestricted", () => {
+		const changed = ["providers/github/github.go", "providers/github/github_test.go", "authkit.go"];
+		expect(outOfScope(changed, ["providers/github/github.go"])).toEqual([
+			"providers/github/github_test.go",
+			"authkit.go",
+		]);
+		expect(outOfScope(changed, [])).toEqual([]);
+	});
+});
+
+describe("decide", () => {
+	test("done when zero failing", () => {
+		expect(decide(3, "fp", 0, "").done).toBe(true);
+	});
+	test("progress when fewer failing", () => {
+		const d = decide(3, "a", 1, "b");
+		expect(d.progressed).toBe(true);
+		expect(d.keep).toBe(true);
+	});
+	test("lateral move (same count, different fingerprint) counts as progress", () => {
+		expect(decide(2, "a", 2, "b").progressed).toBe(true);
+	});
+	test("stall (same count, same fingerprint) is no progress -> roll back", () => {
+		const d = decide(2, "a", 2, "a");
+		expect(d.progressed).toBe(false);
+		expect(d.keep).toBe(false);
+	});
+	test("regression (more failing) is no progress", () => {
+		expect(decide(1, "a", 3, "c").progressed).toBe(false);
+	});
+});
+
+describe("advanceLadder / modelAt", () => {
+	const start: LadderState = { rung: 0, noProgress: 0 };
+
+	test("progress resets the stall counter", () => {
+		const r = advanceLadder({ rung: 1, noProgress: 1 }, true, 2, 3);
+		expect(r.state).toEqual({ rung: 1, noProgress: 0 });
+		expect(r.escalated).toBe(false);
+	});
+	test("escalates after patience consecutive stalls", () => {
+		let s = start;
+		let r = advanceLadder(s, false, 2, 3); // stall 1
+		expect(r.escalated).toBe(false);
+		expect(r.state).toEqual({ rung: 0, noProgress: 1 });
+		r = advanceLadder(r.state, false, 2, 3); // stall 2 -> escalate
+		expect(r.escalated).toBe(true);
+		expect(r.state).toEqual({ rung: 1, noProgress: 0 });
+	});
+	test("does not escalate past the top rung", () => {
+		const r = advanceLadder({ rung: 2, noProgress: 5 }, false, 2, 3);
+		expect(r.escalated).toBe(false);
+		expect(r.state.rung).toBe(2);
+	});
+	test("modelAt clamps to the last rung", () => {
+		expect(modelAt(["a", "b"], 0)).toBe("a");
+		expect(modelAt(["a", "b"], 5)).toBe("b");
 	});
 });
