@@ -31,6 +31,9 @@ loop run --dry       # run sensors once, no pi spawn
 loop run             # drive the loop
 ```
 
+Flags: `--model <id>`, `--max <n>`, `--freeze` (tolerate pre-existing failing
+sensors), `--allow-dirty` (skip the clean-tree guard).
+
 ## What it does (governor)
 
 - **Sensors are the gate** - each iteration runs the manifest's sensor commands;
@@ -41,13 +44,24 @@ loop run             # drive the loop
   the loop never degrades the tree.
 - **write-scope** - out-of-scope edits are reverted each turn (kills the
   test-weakening cheat).
+- **remediation hints** - a per-sensor `hint` is appended to the feedback on
+  failure ("how to fix: ..."), so the model gets guidance, not just the error.
+- **freeze mode** (`baseline: true` / `--freeze`) - tolerate sensors already
+  failing at baseline; only NEW failures gate (adopt a legacy repo).
 - **browser-assert** - a dependency-free headless-Chromium behaviour sensor for
-  web targets (CDP over Bun's WebSocket; no puppeteer/playwright).
+  web targets (CDP over Bun's WebSocket; no puppeteer/playwright; self-bounding
+  per-command timeout so a wedged browser fails rather than hangs).
+
+Sensor types to reach for: build/typecheck/unit (fast gate), **structural /
+architecture** (`golangci-lint` depguard, `dependency-cruiser`, `import-linter`,
+ArchUnit - fitness functions), **mutation testing** (gremlins/StrykerJS/PIT -
+grades test quality; expensive, post-fast-sensor), and **browser e2e**
+(`browser-assert`).
 
 ## Test
 
 ```bash
-bun test    # 33: pure-helper unit + governor integration + browser-sensor integration
+bun test    # 48: pure-helper unit + governor/dirty/freeze integration + CDP + browser-sensor
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability

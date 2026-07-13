@@ -194,7 +194,7 @@ List loaded at startup; each has its own `SKILL.md` with the actual rules.
 | `sbperf` | Drive the `sbperf` CLI - Supabase performance auditor (advisors, SQL diagnostics, config, infra metrics -> self-contained HTML+PDF report, windowed trends). PAT-first + no-PAT customer-audit mode. |
 | `sbshift` | Drive the `sbshift` CLI - near-zero-downtime Postgres->Postgres migration via logical replication (cross-region / tier / self-hosted moves, cutover gate, checksum reconcile). |
 | `scaffold-new-project` | Orchestrate the concrete-tech skills (frontend-stack, infrastructure-stack, software-architecture, design-utilitarian, ...) to bootstrap a new project with the user's conventions baked in. |
-| `self-correcting-loop` | Sensor-gated autonomous loop driver (`loop` + `browser-assert` bins, `@erfianugrah/pi-loop`). Drives a fresh `pi -p` each iteration until deterministic sensors (build/lint/test/typecheck/e2e) pass; governor with model-escalation ladder, git checkpoint/rollback, and write-scope; dependency-free headless-Chromium behaviour sensor. |
+| `self-correcting-loop` | Sensor-gated autonomous loop driver (`loop` + `browser-assert` bins, `@erfianugrah/pi-loop`). Drives a fresh `pi -p` each iteration until deterministic sensors (build/lint/test/typecheck/structural/mutation/e2e) pass; governor with model-escalation ladder, git checkpoint/rollback, write-scope, per-sensor remediation hints, and freeze mode; dependency-free headless-Chromium behaviour sensor. |
 | `software-architecture` | DDD-lite system design for Go backends + full-stack apps. |
 | `supabase` | Supabase products (Database / Auth / Storage / Realtime / Edge Functions / pgvector / pgmq / Branching) + `@supabase/server` BFF patterns + RLS + migrations + connection pooling + Postgres extensions. |
 | `supabase-postgres-best-practices` | Postgres perf + index choice + connection management + RLS patterns. |
@@ -268,7 +268,7 @@ Unit tests for the pure parsers in each extension:
 ~/dotfiles/.pi/agent/tests/run.sh -t "tool-guard"   # filter
 ```
 
-The `self-correcting-loop` package has its own suite (33: pure-helper unit +
+The `self-correcting-loop` package has its own suite (48: pure-helper unit +
 governor + browser-sensor integration):
 
 ```bash
