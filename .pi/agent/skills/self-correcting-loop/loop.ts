@@ -27,6 +27,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import {
 	type LadderState,
 	type Manifest,
+	type Sensor,
 	type SensorResult,
 	advanceLadder,
 	allPass,
@@ -132,16 +133,16 @@ async function revertPaths(paths: string[]): Promise<void> {
 	}
 }
 
-async function runSensor(name: string, cmd: string): Promise<SensorResult> {
-	const { code, out } = await sh(["bash", "-lc", cmd]);
-	return { name, cmd, ok: code === 0, exitCode: code, output: out };
+async function runSensor(s: Sensor): Promise<SensorResult> {
+	const { code, out } = await sh(["bash", "-lc", s.cmd]);
+	return { name: s.name, cmd: s.cmd, ok: code === 0, exitCode: code, output: out, hint: s.hint };
 }
 
 async function runAllSensors(m: Manifest): Promise<SensorResult[]> {
 	const results: SensorResult[] = [];
 	for (const s of m.sensors) {
 		process.stdout.write(`    - ${s.name} ... `);
-		const r = await runSensor(s.name, s.cmd);
+		const r = await runSensor(s);
 		console.log(r.ok ? "pass" : `FAIL (exit ${r.exitCode})`);
 		results.push(r);
 	}

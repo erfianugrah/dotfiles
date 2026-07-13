@@ -75,6 +75,17 @@ describe("parseManifest", () => {
 		expect(() => parseManifest({ ...base, writeScope: "x" })).toThrow("writeScope");
 	});
 
+	test("accepts an optional per-sensor hint; rejects a non-string hint", () => {
+		const withHint = parseManifest({
+			...base,
+			sensors: [{ name: "test", cmd: "go test ./...", hint: "add a table case" }],
+		});
+		expect(withHint.sensors[0].hint).toBe("add a table case");
+		expect(() =>
+			parseManifest({ ...base, sensors: [{ name: "t", cmd: "c", hint: 5 }] }),
+		).toThrow("sensors[0].hint");
+	});
+
 	test("rejects duplicate sensor names", () => {
 		expect(() =>
 			parseManifest({
@@ -133,6 +144,11 @@ describe("formatFailures / buildPrompt", () => {
 		expect(out).not.toContain("build");
 		expect(out).toContain('sensor "test" failed (exit 1)');
 		expect(out).toContain("assertion failed");
+	});
+	test("formatFailures appends a remediation hint when present", () => {
+		const out = formatFailures([{ ...fail("lint", "E1"), hint: "run biome check --write" }]);
+		expect(out).toContain("how to fix: run biome check --write");
+		expect(formatFailures([fail("lint", "E1")])).not.toContain("how to fix");
 	});
 	test("buildPrompt first iteration is just the task", () => {
 		expect(buildPrompt("my task")).toBe("my task");
