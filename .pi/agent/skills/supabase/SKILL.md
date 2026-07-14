@@ -303,6 +303,58 @@ If you cache decryption keys client-side:
 - **`sessionStorage` not `localStorage`** for the master key — tab-scoped, cleared on close.
 - **None of this defends against XSS or storage-reading browser extensions.** Document this explicitly in SECURITY.md — co-locating an "encrypted" master key with the ciphertext in the same `localStorage` is theatrical security.
 
+## Reaching a project's database (access hierarchy)
+
+**Read this BEFORE running `supabase link` or asking the user for a DB
+password.** The single most common failure here is the agent burning turns
+on `supabase link` + "paste me the pooler connection string / DB password"
+when `SUPABASE_ACCESS_TOKEN` alone already runs arbitrary SQL.
+
+Tiers, cheapest first - stop at the first one that covers the task:
+
+1. **`SUPABASE_ACCESS_TOKEN` set (env) -> Management API. No DB password, no
+   `supabase link`, no pooler string.** This covers *every* project in the
+   account. It is the default path for ad-hoc SQL, inspection, schema pokes,
+   and one-off DDL/DML.
+   - List projects + refs: `supabase projects list` (reads the same token).
+   - Run ANY SQL (runs as `postgres`, full access):
+     ```bash
+     REF=<project-ref>
+     q(){ curl -s -X POST "https://api.supabase.com/v1/projects/$REF/database/query" \
+       -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+       -H "Content-Type: application/json" \
+       -d "$(jq -cn --arg q "$1" '{query:$q}')"; }
+     q "select version();"
+     q "create table public.foo(id int); insert into public.foo values (1);"
+     ```
+   - Read-only variant (runs as `supabase_read_only_user`, entity refs must be
+     schema-qualified): `POST /v1/projects/$REF/database/query/read-only`.
+   - Multi-statement strings work in one call. Returns JSON rows.
+   - Same endpoint backs MCP `execute_sql` and (when linked) `supabase db query`.
+     The raw curl needs no link step, so prefer it for scratch work.
+
+2. **`supabase` CLI subcommands** (`db`, `inspect`, `snippets`, `storage`,
+   `projects`, `config`) - also token-only for most operations. `supabase db
+   query` (v2.79.0+) routes to the same Management API endpoint once linked.
+
+3. **DB password / pooler connection string (`psql`) - ONLY when tier 1 can't
+   do it.** The HTTP endpoint is single-request and can't hold a session, so
+   you need a real Postgres connection for:
+   - `psql` meta-commands: `\copy`, `\d`, `\dt` (client-side)
+   - client-streamed `COPY ... FROM STDIN` / bulk ingest
+   - `pg_dump` / `pg_restore`
+   - interactive / multi-round-trip sessions, `LISTEN`/`NOTIFY`
+   - very large result streaming
+   Get the string from Dashboard -> Project Settings -> Database -> Connection
+   string (session pooler, port 5432), or build it (see Connection pooling
+   below). Only THEN ask the user for the password.
+
+**Anti-pattern (do not do this):** `supabase link --project-ref X` followed by
+hunting `.env` files for `DATABASE_URL` and prompting the user for a password,
+when the task was "run this SQL" and `SUPABASE_ACCESS_TOKEN` was set the whole
+time. Check `env | grep SUPABASE_ACCESS_TOKEN` first; if present, go straight
+to tier 1.
+
 ## CLI
 
 Discover commands via `--help` — never guess.
@@ -346,7 +398,7 @@ Setup if needed: [MCP setup guide](https://supabase.com/docs/guides/getting-star
 
 ## Schema Changes
 
-**Use `execute_sql` (MCP) or `supabase db query` (CLI) for iterating on schema changes.** Run SQL directly, no migration history entries. Iterate freely, generate a clean migration when ready.
+**Use the Management API `database/query` (token-only, no link - see access hierarchy above), `execute_sql` (MCP), or `supabase db query` (CLI) for iterating on schema changes.** Run SQL directly, no migration history entries. Iterate freely, generate a clean migration when ready.
 
 Do NOT use `apply_migration` for local iteration — writes migration history every call. Can't iterate. `supabase db diff`/`supabase db pull` produce empty/conflicting diffs.
 
