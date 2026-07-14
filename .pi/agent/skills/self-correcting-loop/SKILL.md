@@ -207,6 +207,24 @@ The browser layer closes that gap, and comes in two flavours:
 
   Put e2e AFTER the fast sensors (build/typecheck/unit) - it is the expensive,
   slower-and-flakier tier, so it only runs once the cheap gates are green.
+  Capture is **hardened by default** (device-scale=1, reduced-motion,
+  animations/transitions/caret zeroed, waits on `document.fonts.ready`), so
+  screenshots and visual diffs are deterministic; `--no-stabilize` opts out.
+
+- **Deterministic layout assertions (computational - prefer these over the
+  vision judge where they apply).** A lot of "gross breakage" is exactly
+  checkable with `--assert`, which turns a probabilistic visual guess into a
+  hard gate with no baseline and no model:
+  - horizontal overflow: `--assert 'document.documentElement.scrollWidth <= window.innerWidth'`
+  - element actually rendered a box: `--assert 'document.querySelector("nav").getBoundingClientRect().height > 0'`
+  - no unstyled-content flash / stylesheet actually applied:
+    `--assert 'getComputedStyle(document.querySelector("h1")).fontSize !== "16px"'` (or pin the exact expected value)
+  - two elements do not overlap (stacking correct): compare their
+    `getBoundingClientRect()` boxes in one expression
+  - no raw error banner / framework error overlay:
+    `--assert '!document.querySelector(".error, #vite-error-overlay, astro-dev-overlay")'`
+  Reach for the vision judge (below) only for what genuinely needs eyes
+  (spacing/contrast/"looks off"); everything mechanical should be an `--assert`.
 
 - **Inferential (as a debugging aid): a screenshot the model reads.**
   `browser-assert ... --screenshot /tmp/x.png` captures the post-interaction

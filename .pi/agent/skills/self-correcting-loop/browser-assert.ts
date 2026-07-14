@@ -13,6 +13,10 @@
  *   --assert <jsExpr>          evaluate in page; must be truthy
  *   --screenshot <path>        write a PNG of the current page (+ --full-page)
  *
+ * Capture is HARDENED by default (--no-stabilize to disable): device-scale=1,
+ * prefers-reduced-motion, animations/transitions/caret-blink zeroed, and a wait
+ * on document.fonts.ready - so screenshots and visual diffs are deterministic.
+ *
  * Drives system Chromium over the Chrome DevTools Protocol (Bun's built-in
  * WebSocket + fetch - no puppeteer/playwright). Exits 0 iff every --assert is
  * truthy and no step errored; non-zero otherwise with actual values printed.
@@ -39,6 +43,13 @@ export interface Args {
 	chromium: string;
 	viewport: { width: number; height: number };
 	fullPage: boolean;
+	/**
+	 * Capture hardening (default ON): pin device-scale-factor to 1, emulate
+	 * prefers-reduced-motion, kill animations/transitions/caret-blink via an
+	 * injected stylesheet, and wait for `document.fonts.ready` before asserting
+	 * or shooting. De-flakes screenshots + visual diffs. `--no-stabilize` off.
+	 */
+	stabilize: boolean;
 }
 
 function pickChromium(): string {
@@ -60,7 +71,7 @@ export function parseArgs(argv: string[]): Args {
 	const [url, ...rest] = argv;
 	if (!url || url.startsWith("--")) {
 		throw new Error(
-			"usage: browser-assert <url> [--wait sel] [--click sel] [--type sel text] [--press key] [--assert expr] [--screenshot path] [--viewport WxH] [--full-page] [--timeout ms] [--chromium path]",
+			"usage: browser-assert <url> [--wait sel] [--click sel] [--type sel text] [--press key] [--assert expr] [--screenshot path] [--viewport WxH] [--full-page] [--timeout ms] [--chromium path] [--no-stabilize]",
 		);
 	}
 	const args: Args = {
@@ -70,6 +81,7 @@ export function parseArgs(argv: string[]): Args {
 		chromium: pickChromium(),
 		viewport: { width: 1280, height: 800 },
 		fullPage: false,
+		stabilize: true,
 	};
 	for (let i = 0; i < rest.length; i++) {
 		const a = rest[i];
@@ -96,6 +108,7 @@ export function parseArgs(argv: string[]): Args {
 				break;
 			}
 			case "--full-page": args.fullPage = true; break;
+			case "--no-stabilize": args.stabilize = false; break;
 			case "--timeout": args.timeout = Number.parseInt(need(), 10); break;
 			case "--chromium": args.chromium = need(); break;
 			default: throw new Error(`unknown flag: ${a}`);
@@ -236,6 +249,28 @@ async function main() {
 		const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
 		await cdp.send("Page.enable", {}, sessionId);
 		await cdp.send("Runtime.enable", {}, sessionId);
+
+		// Capture hardening (pre-navigate half): pin device-scale-factor to 1 so
+		// screenshots are deterministic across hosts, and emulate reduced-motion so
+		// motion-gated CSS settles. Best-effort - tolerate headless variants that
+		// reject either domain.
+		if (args.stabilize) {
+			try {
+				await cdp.send(
+					"Emulation.setDeviceMetricsOverride",
+					{ width: args.viewport.width, height: args.viewport.height, deviceScaleFactor: 1, mobile: false },
+					sessionId,
+				);
+			} catch {}
+			try {
+				await cdp.send(
+					"Emulation.setEmulatedMedia",
+					{ features: [{ name: "prefers-reduced-motion", value: "reduce" }] },
+					sessionId,
+				);
+			} catch {}
+		}
+
 		await cdp.send("Page.navigate", { url: args.url }, sessionId);
 
 		const evalExpr = async (expr: string) => {
@@ -305,6 +340,21 @@ async function main() {
 		while (Date.now() < loadDl) {
 			if (await evalExpr("document.readyState==='complete'")) break;
 			await Bun.sleep(120);
+		}
+
+		// Capture hardening (post-load half): kill animations/transitions/caret-blink
+		// via an injected stylesheet, then block on web-font loading so text is not
+		// captured mid-swap. Both are the dominant sources of visual false positives.
+		if (args.stabilize) {
+			await evalExpr(
+				"(()=>{const s=document.createElement('style');" +
+					"s.textContent='*,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;" +
+					"transition-duration:0s!important;transition-delay:0s!important;caret-color:transparent!important;" +
+					"scroll-behavior:auto!important}';document.head.appendChild(s);return true;})()",
+			);
+			try {
+				await evalExpr("document.fonts&&document.fonts.ready?document.fonts.ready.then(()=>true):true");
+			} catch {}
 		}
 
 		// Execute steps in order. --assert failures are counted; anything else

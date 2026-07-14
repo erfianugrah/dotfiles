@@ -14,6 +14,11 @@ describe("browser-assert parseArgs", () => {
 		expect(a.timeout).toBe(15000);
 		expect(a.viewport).toEqual({ width: 1280, height: 800 });
 		expect(a.fullPage).toBe(false);
+		expect(a.stabilize).toBe(true); // hardening on by default
+	});
+
+	test("--no-stabilize disables hardening", () => {
+		expect(parseArgs(["http://x", "--no-stabilize"]).stabilize).toBe(false);
 	});
 
 	test("preserves step ORDER across kinds (scripts a flow)", () => {

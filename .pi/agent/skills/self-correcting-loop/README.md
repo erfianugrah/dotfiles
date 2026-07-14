@@ -71,7 +71,7 @@ gate** (`judge` - correctness against the spec).
 ## Test
 
 ```bash
-bun test    # 87: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot; judge code + visual gate
+bun test    # 88: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot/hardening; judge code + visual gate
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability
