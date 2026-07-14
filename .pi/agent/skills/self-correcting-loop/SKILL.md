@@ -9,10 +9,13 @@ A deterministic **outer harness** around `pi -p`. It exists to answer one
 question: *how do you let an agent run unattended - and be good even on a
 sub-Opus model - without it declaring victory on broken code?*
 
-The answer (from Bockeler's "Harness engineering", the article that seeded
-this): **externalize the feedback control.** The loop, not the model, decides
-completion. The model only ever sees the failing sensor output as its next
-prompt.
+The answer (from Birgitta Bockeler's "Harness engineering"[^harness], the
+article that seeded this): **externalize the feedback control.** The loop, not
+the model, decides completion. The model only ever sees the failing sensor
+output as its next prompt.
+
+[^harness]: <https://martinfowler.com/articles/harness-engineering.html>
+    (Thoughtworks cross-post: <https://www.thoughtworks.com/en-us/insights/blog/generative-ai/harness-engineering-agent-feedback-exploring-ai-coding-sensors>).
 
 ## The mechanism
 
