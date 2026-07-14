@@ -7,15 +7,15 @@ loop - not the model - decides "done"**, which is what makes it hold up on
 sub-Opus models.
 
 This directory is both a pi **skill** (`SKILL.md`) and an installable package
-(`bin`: `loop`, `browser-assert`, `judge`). Full concepts, manifest schema, the
-governor, and honest limits live in [`SKILL.md`](./SKILL.md) - this README is
-the 30-second start.
+(`bin`: `loop`, `browser-assert`, `judge`, `pixel-diff`). Full concepts, manifest
+schema, the governor, and honest limits live in [`SKILL.md`](./SKILL.md) - this
+README is the 30-second start.
 
 ## Install
 
 ```bash
 # it ships inside the pi-harness; to get the CLIs on PATH:
-cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`, `judge`
+cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`, `judge`, `pixel-diff`
 ```
 
 Bun >= 1.3. Zero runtime dependencies (Bun built-ins only).
@@ -60,6 +60,10 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   browser-assert and has a vision model judge the rendered **UI/UX** (layout,
   overflow, unstyled/broken render) - the gate a DOM assert can't be. Both gate
   on `VERDICT: PASS/FAIL`, fail-closed; run LAST with a stronger `--model`.
+- **pixel-diff** - a *computational* visual-regression sensor: diffs a capture
+  against a committed approved-baseline PNG (YIQ perceptual, AA-tolerant; zero
+  dep). The deterministic counterpart to the vision judge - use it to lock a
+  stable page against exact pixel regressions; `--update-baseline` to reapprove.
 
 Sensor types to reach for: build/typecheck/unit (fast gate), **structural /
 architecture** (`golangci-lint` depguard, `dependency-cruiser`, `import-linter`,
@@ -71,7 +75,7 @@ gate** (`judge` - correctness against the spec).
 ## Test
 
 ```bash
-bun test    # 88: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot/hardening; judge code + visual gate
+bun test    # 114: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot/hardening; judge code + visual gate; pixel-diff decode/diff/baseline
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability

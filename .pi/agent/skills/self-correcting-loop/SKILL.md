@@ -70,6 +70,8 @@ Two properties make this work on weak models:
 | `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
 | `judge.ts` | Inferential (LLM-as-judge) sensor with two modes: CODE (feeds the git diff + spec to a second `pi -p`) and VISUAL (screenshots a live URL via browser-assert and has a vision model assess the rendered UI/UX). Both gate on `VERDICT: PASS/FAIL`. The computational sensors check the code compiles/passes; this checks it did the *right thing* / *looks right*. Fail-closed by default. |
 | `judge.{parse,integration}.test.ts` | Unit (arg + verdict parsing) and end-to-end (scripted fake judge via `$LOOP_JUDGE_CMD`) tests. |
+| `pixel-diff.ts` | Computational visual-regression sensor: diffs a capture against a committed approved-baseline PNG (YIQ perceptual threshold, AA-tolerant). Zero-dep - PNG decode/encode via `node:zlib`. The deterministic half of the visual gate. |
+| `pixel-diff.{parse,integration}.test.ts` | Unit (decode/encode round-trip, YIQ delta, diff logic) and end-to-end (baseline lifecycle, tolerance, `--url` capture) tests. |
 
 ## Usage
 
@@ -303,8 +305,41 @@ flash, overlap, raw-markup/error banners - against the spec, gating on the same
 
 Caveat: a vision judgment is coarser than a human's eye and non-deterministic -
 it reliably catches gross breakage (overflow, unstyled content, blank/error
-pages) and is far weaker on pixel-level polish. For exact regressions, diff the
-PNG against an approved baseline (computational) instead.
+pages) and is far weaker on pixel-level polish. For exact regressions, use the
+computational baseline diff below.
+
+### Computational visual regression: baseline PNG diff (`pixel-diff.ts`)
+
+The deterministic half of the visual gate: capture the current render and diff
+it against a committed, human-**approved** baseline PNG, failing when too many
+pixels changed. Zero-dep (PNG decode/encode via `node:zlib`), with a YIQ
+perceptual per-pixel threshold so anti-aliasing / sub-pixel noise does not
+false-positive.
+
+```json
+{ "name": "visual-regression",
+  "cmd": "bun ~/.pi/agent/skills/self-correcting-loop/pixel-diff.ts --url http://localhost:4333/guides/x --baseline .pi/baselines/guide-x.png --wait 'main' --full-page --viewport 1280x800 --max-diff-ratio 0.001 --diff-out /tmp/guide-x.diff.png" }
+```
+
+- **Approved-baseline lifecycle:** generate baselines as a SETUP step and COMMIT
+  them (committing = approval). On a missing baseline the sensor writes it and
+  FAILs ("review and commit it") - so a stray baseline can never silently gate.
+  Refresh an intentionally-changed reference with `--update-baseline`.
+- **`--baseline <png>`** is the reference; the current render comes from `--url`
+  (captured via browser-assert, forwarding `--wait`/`--viewport`/`--full-page`)
+  or `--current <png>` (pre-captured).
+- **`--threshold 0..1`** = per-pixel YIQ sensitivity (default 0.1); **`--max-diff-ratio 0..1`** = allowed fraction of changed pixels (default 0). Capture
+  hardening (on by default in browser-assert) makes same-host re-captures
+  bit-identical, so 0 is realistic; bump the ratio for cross-host noise.
+- **`--ignore-region x,y,w,h`** (repeatable) zeroes dynamic areas (timestamps,
+  avatars) before diffing. **`--diff-out <png>`** writes a red-highlight image
+  the agent can `read` to see exactly what moved.
+- Run it LAST with the fast sensors green, same as the other visual gates.
+
+When to use which visual gate: **`pixel-diff`** for "nothing should change"
+(regression-locking a stable page - exact, deterministic); **`judge` VISUAL**
+for "does this new/changed page look right" (no baseline exists yet, or the
+change is intended and you want a judgment not a byte-compare).
 
 ## Limits (be honest about these)
 

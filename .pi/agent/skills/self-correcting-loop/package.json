@@ -11,7 +11,8 @@
   "bin": {
     "loop": "./loop.ts",
     "browser-assert": "./browser-assert.ts",
-    "judge": "./judge.ts"
+    "judge": "./judge.ts",
+    "pixel-diff": "./pixel-diff.ts"
   },
   "scripts": {
     "test": "bun test"
