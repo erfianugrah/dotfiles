@@ -64,7 +64,7 @@ grades test quality; expensive, post-fast-sensor), and **browser e2e**
 ## Test
 
 ```bash
-bun test    # 57: pure-helper + arg-parser unit; governor/dirty/freeze integration; CDP; browser flow/screenshot
+bun test    # 58: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability

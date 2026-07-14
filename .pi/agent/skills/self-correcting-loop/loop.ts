@@ -104,14 +104,22 @@ async function isDirty(): Promise<boolean> {
  * Paths that differ from the baseline commit (HEAD), plus untracked files.
  * Uses name-only plumbing (no status-column prefix) so parsing is robust -
  * porcelain's leading space on unstaged lines is a slicing trap.
+ *
+ * git reports paths relative to the REPO ROOT, but writeScope globs are
+ * cwd-relative. When the loop runs in a subdir of the repo, strip the
+ * repo-root->cwd prefix (`git rev-parse --show-prefix`) so the two line up.
+ * Changes outside cwd keep their repo-relative form so the scope fence still
+ * flags them (they can never match a cwd-relative glob).
  */
 async function changedPaths(): Promise<string[]> {
 	const tracked = (await git("diff", "--name-only", "HEAD")).out;
 	const untracked = (await git("ls-files", "--others", "--exclude-standard")).out;
+	const prefix = (await git("rev-parse", "--show-prefix")).out.trim();
 	const set = new Set<string>();
 	for (const l of `${tracked}\n${untracked}`.split("\n")) {
 		const p = l.trim();
-		if (p) set.add(p);
+		if (!p) continue;
+		set.add(prefix && p.startsWith(prefix) ? p.slice(prefix.length) : p);
 	}
 	return [...set];
 }

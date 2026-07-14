@@ -135,6 +135,9 @@ manifest/usage error.
   the loop adopt a legacy repo without a green-the-world sprint first (ArchUnit
   `freeze`).
 - `writeScope` - globs the agent may write (`*` within a segment, `**` across).
+  Globs are **cwd-relative** (the dir you launch the loop from), so running in
+  a repo subdir with `writeScope: ["bin/migrate.sh"]` matches correctly even
+  though git reports repo-root-relative paths internally.
   Empty = unrestricted. Requires the target to be a git repo.
 
 > The governor (checkpoint/rollback/scope/escalation) needs a **git repo** with
