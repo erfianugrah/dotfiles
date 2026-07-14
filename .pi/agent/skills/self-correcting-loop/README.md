@@ -7,15 +7,15 @@ loop - not the model - decides "done"**, which is what makes it hold up on
 sub-Opus models.
 
 This directory is both a pi **skill** (`SKILL.md`) and an installable package
-(`bin`: `loop`, `browser-assert`). Full concepts, manifest schema, the governor,
-and honest limits live in [`SKILL.md`](./SKILL.md) - this README is the
-30-second start.
+(`bin`: `loop`, `browser-assert`, `judge`). Full concepts, manifest schema, the
+governor, and honest limits live in [`SKILL.md`](./SKILL.md) - this README is
+the 30-second start.
 
 ## Install
 
 ```bash
 # it ships inside the pi-harness; to get the CLIs on PATH:
-cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`
+cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`, `judge`
 ```
 
 Bun >= 1.3. Zero runtime dependencies (Bun built-ins only).
@@ -54,17 +54,23 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   `--press` (trusted Input events)/`--assert`/`--screenshot` (+`--viewport`/
   `--full-page`) - so it gates real interactions, produces a PNG the model can
   `read`, and doubles as a UI live-smoke tool against a deployed URL.
+- **judge** - an *inferential* (LLM-as-judge) sensor: feeds the git diff + spec
+  to a second `pi -p` and gates on its `VERDICT: PASS/FAIL`. The computational
+  sensors prove the code passes the checks; the judge checks it did the *right
+  thing* (green-but-wrong, misunderstood spec, self-weakened tests). Fail-closed;
+  run it LAST with a stronger `--model` than the writer.
 
 Sensor types to reach for: build/typecheck/unit (fast gate), **structural /
 architecture** (`golangci-lint` depguard, `dependency-cruiser`, `import-linter`,
-ArchUnit - fitness functions), **mutation testing** (gremlins/StrykerJS/PIT -
-grades test quality; expensive, post-fast-sensor), and **browser e2e**
-(`browser-assert`).
+ArchUnit - fitness functions), **security / drift** (`osv-scanner`, `gitleaks`),
+**mutation testing** (gremlins/StrykerJS/PIT - grades test quality; expensive,
+post-fast-sensor), **browser e2e** (`browser-assert`), and the **inferential
+gate** (`judge` - correctness against the spec).
 
 ## Test
 
 ```bash
-bun test    # 58: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot
+bun test    # 77: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot; judge verdict + gate
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability

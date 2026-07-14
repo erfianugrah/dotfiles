@@ -68,6 +68,8 @@ Two properties make this work on weak models:
 | `loop.integration.test.ts` | End-to-end governor test with a scripted fake agent (rollback / stall+escalate / scope-revert / pass) - no real model needed. |
 | `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright). Ordered flow steps (wait/click/type/press/assert/screenshot) + viewport/full-page. The behaviour-harness layer for web targets; also a UI live-smoke tool. |
 | `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
+| `judge.ts` | Inferential (LLM-as-judge) sensor: feeds the git diff + spec to a second `pi -p` and gates on its `VERDICT: PASS/FAIL`. The computational sensors check the code compiles/passes; this checks it did the *right thing*. Fail-closed by default. |
+| `judge.{parse,integration}.test.ts` | Unit (arg + verdict parsing) and end-to-end (scripted fake judge via `$LOOP_JUDGE_CMD`) tests. |
 
 ## Usage
 
@@ -75,7 +77,7 @@ This skill is also the `@erfianugrah/pi-loop` package. Get the `loop` and
 `browser-assert` commands on PATH once:
 
 ```bash
-cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`
+cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`, `judge`
 ```
 
 Then, from the **target project root** (the repo the loop should work on):
@@ -175,6 +177,13 @@ sensors are **specific and deterministic**. Raise sensor quality by:
   mutant times out), TS StrykerJS, JVM PIT. Real payoff: on authkit this
   immediately surfaced an untested default-TTL branch in the loop-built bridge
   (93% -> 100% efficacy after one added case).
+- **Security / drift sensors** are cheap computational gates the article files
+  under "continuous drift" - wire them so an unattended loop physically cannot
+  land a leaked key or a known-vulnerable dep. Run them alongside the fast
+  sensors: `{ "name": "vuln", "cmd": "osv-scanner -r --lockfile ..." }` (or a
+  language lockfile scan) and `{ "name": "secrets", "cmd": "gitleaks detect
+  --no-banner -v" }`. Pair each with a `hint` telling the model to bump/remove
+  the offending dep or move the secret to env, not to delete the scanner.
 
 ## Behaviour harness for web targets
 
@@ -210,6 +219,41 @@ Visual-regression (diff the `--screenshot` PNG against a baseline) and a11y
 tooling. `--type`/`--click` use trusted CDP Input events, but for complex flows
 (multi-tab, downloads, network mocking) a target's own Playwright suite is still
 the right tool - `browser-assert` is the zero-dep gate.
+
+## Inferential gate: correctness the computational sensors miss (`judge.ts`)
+
+Bockeler splits sensors into **computational** (tests/linters/types -
+deterministic, cheap, every change) and **inferential** (semantic AI review /
+"LLM as judge" - slower, non-deterministic, richer judgment). Everything above
+is computational: it proves the code *passes the checks*, never that it did the
+*right thing*. A misunderstood-but-green change, over-engineering, or an agent
+that weakened its own tests all sail through. `judge.ts` adds the inferential
+column as an actual **gate**:
+
+```json
+{ "name": "judge",
+  "cmd": "bun ~/.pi/agent/skills/self-correcting-loop/judge.ts --spec 'the task, restated as acceptance criteria' --model claude-opus-4-8" }
+```
+
+It collects `git diff HEAD` (plus untracked files), feeds it with the spec to a
+SECOND `pi -p`, and exits on the model's `VERDICT: PASS/FAIL`. Use it well:
+
+- **Put it LAST** (keep quality left): it is the expensive, probabilistic tier -
+  it should only run once the cheap computational gates are green.
+- **Use a DIFFERENT / stronger model** than the one writing the code (`--model`).
+  A judge that is the same model that wrote the diff is a closed loop, same as
+  self-graded tests.
+- **Fail-closed by default**: an unparseable / errored verdict counts as FAIL,
+  so the loop keeps trying rather than declaring victory on an unclear answer.
+  `--lenient` flips to fail-open for noisy judges.
+- **Read-only tools** (`--tools read` default) - the judge inspects, never edits.
+- `--rubric "..."` appends task-specific acceptance criteria; `--base <ref>`
+  changes what the diff is taken against (default `HEAD`, the loop's baseline).
+
+Honest caveat: it is inferential, so it is non-deterministic and costs a model
+call per iteration. It raises confidence, it does not replace a specification -
+a vague `--spec` judges vaguely. It is the answer to "green but wrong", not a
+license to skip writing down what "right" means.
 
 ## Limits (be honest about these)
 

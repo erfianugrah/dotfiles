@@ -10,7 +10,8 @@
   },
   "bin": {
     "loop": "./loop.ts",
-    "browser-assert": "./browser-assert.ts"
+    "browser-assert": "./browser-assert.ts",
+    "judge": "./judge.ts"
   },
   "scripts": {
     "test": "bun test"
