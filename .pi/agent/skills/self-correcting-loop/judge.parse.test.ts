@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { type Args, buildJudgePrompt, parseArgs, parseVerdict } from "./judge.ts";
+import {
+	type Args,
+	buildJudgePrompt,
+	buildVisualPrompt,
+	isVisual,
+	parseArgs,
+	parseVerdict,
+} from "./judge.ts";
 
 describe("judge parseArgs", () => {
 	test("requires --spec", () => {
@@ -16,7 +23,28 @@ describe("judge parseArgs", () => {
 			rubric: "",
 			tools: ["read"],
 			lenient: false,
+			url: "",
+			screenshot: "",
+			wait: "",
+			viewport: "",
+			fullPage: false,
 		} satisfies Args);
+	});
+
+	test("parses visual-mode flags", () => {
+		const a = parseArgs([
+			"--spec", "page looks right",
+			"--url", "http://localhost:4333/x",
+			"--wait", "#app",
+			"--viewport", "1280x800",
+			"--full-page",
+			"--screenshot", "/tmp/x.png",
+		]);
+		expect(a.url).toBe("http://localhost:4333/x");
+		expect(a.wait).toBe("#app");
+		expect(a.viewport).toBe("1280x800");
+		expect(a.fullPage).toBe(true);
+		expect(a.screenshot).toBe("/tmp/x.png");
 	});
 
 	test("parses all flags", () => {
@@ -42,6 +70,18 @@ describe("judge parseArgs", () => {
 
 	test("rejects unknown args", () => {
 		expect(() => parseArgs(["--spec", "s", "--nope"])).toThrow("unknown arg: --nope");
+	});
+});
+
+describe("judge isVisual", () => {
+	test("code mode by default", () => {
+		expect(isVisual(parseArgs(["--spec", "s"]))).toBe(false);
+	});
+	test("--url => visual", () => {
+		expect(isVisual(parseArgs(["--spec", "s", "--url", "http://x"]))).toBe(true);
+	});
+	test("--screenshot (no url) => visual", () => {
+		expect(isVisual(parseArgs(["--spec", "s", "--screenshot", "/tmp/x.png"]))).toBe(true);
 	});
 });
 
@@ -94,5 +134,23 @@ describe("judge buildJudgePrompt", () => {
 
 	test("empty diff is spelled out, not left blank", () => {
 		expect(buildJudgePrompt("s", "   ", "")).toContain("no diff");
+	});
+});
+
+describe("judge buildVisualPrompt", () => {
+	test("embeds the absolute screenshot path, spec and output contract", () => {
+		const p = buildVisualPrompt("header must not overflow", "/tmp/shot.png", "");
+		expect(p).toContain("/tmp/shot.png");
+		expect(p).toContain("read tool");
+		expect(p).toContain("header must not overflow");
+		expect(p).toContain("VERDICT: PASS");
+		expect(p).toContain("VERDICT: FAIL");
+	});
+
+	test("judges rendered UI, not the diff", () => {
+		const p = buildVisualPrompt("s", "/tmp/a.png", "");
+		expect(p).toContain("UI/UX");
+		expect(p).toContain("overflow");
+		expect(p).not.toContain("git diff");
 	});
 });

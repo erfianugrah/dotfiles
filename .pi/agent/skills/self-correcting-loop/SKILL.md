@@ -68,7 +68,7 @@ Two properties make this work on weak models:
 | `loop.integration.test.ts` | End-to-end governor test with a scripted fake agent (rollback / stall+escalate / scope-revert / pass) - no real model needed. |
 | `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright). Ordered flow steps (wait/click/type/press/assert/screenshot) + viewport/full-page. The behaviour-harness layer for web targets; also a UI live-smoke tool. |
 | `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
-| `judge.ts` | Inferential (LLM-as-judge) sensor: feeds the git diff + spec to a second `pi -p` and gates on its `VERDICT: PASS/FAIL`. The computational sensors check the code compiles/passes; this checks it did the *right thing*. Fail-closed by default. |
+| `judge.ts` | Inferential (LLM-as-judge) sensor with two modes: CODE (feeds the git diff + spec to a second `pi -p`) and VISUAL (screenshots a live URL via browser-assert and has a vision model assess the rendered UI/UX). Both gate on `VERDICT: PASS/FAIL`. The computational sensors check the code compiles/passes; this checks it did the *right thing* / *looks right*. Fail-closed by default. |
 | `judge.{parse,integration}.test.ts` | Unit (arg + verdict parsing) and end-to-end (scripted fake judge via `$LOOP_JUDGE_CMD`) tests. |
 
 ## Usage
@@ -208,11 +208,13 @@ The browser layer closes that gap, and comes in two flavours:
   Put e2e AFTER the fast sensors (build/typecheck/unit) - it is the expensive,
   slower-and-flakier tier, so it only runs once the cheap gates are green.
 
-- **Inferential (for debugging, not the gate): a screenshot the model reads.**
+- **Inferential (as a debugging aid): a screenshot the model reads.**
   `browser-assert ... --screenshot /tmp/x.png` captures the post-interaction
   page; the agent then `read`s the PNG to reason about layout/visual issues the
-  DOM can't express. This is a probabilistic aid - never let a screenshot decide
-  "done".
+  DOM can't express. On its own this is a probabilistic aid, not a gate - but
+  when you *do* want rendered-UI to gate the loop, use `judge.ts` VISUAL mode
+  (next section), which captures the same way and puts a second model's verdict
+  behind it. The bare screenshot-read stays the free-form debugging path.
 
 Visual-regression (diff the `--screenshot` PNG against a baseline) and a11y
 (`axe`) are further sensors you can layer on; they need their own baselines/
@@ -254,6 +256,37 @@ Honest caveat: it is inferential, so it is non-deterministic and costs a model
 call per iteration. It raises confidence, it does not replace a specification -
 a vague `--spec` judges vaguely. It is the answer to "green but wrong", not a
 license to skip writing down what "right" means.
+
+### VISUAL mode: UI/UX awareness for a live dev server
+
+DOM asserts (`browser-assert`) prove elements *exist*; they cannot see that the
+page *looks* right. `judge.ts --url` closes that: it screenshots a live dev
+server (reusing `browser-assert` under the hood) and asks a vision-capable
+`pi -p` to judge the render - layout, overflow/clipping, contrast, unstyled
+flash, overlap, raw-markup/error banners - against the spec, gating on the same
+`VERDICT: PASS/FAIL`.
+
+```json
+{ "name": "ux",
+  "cmd": "bun ~/.pi/agent/skills/self-correcting-loop/judge.ts --url http://localhost:4333/guides/x --wait 'main' --full-page --viewport 1280x800 --model claude-opus-4-8 --spec 'the guide page renders: readable prose, code blocks styled (not raw), no horizontal overflow, no error banners'" }
+```
+
+- `--url` captures to a temp PNG (or `--screenshot <path>` to keep it); pass
+  `--screenshot <path>` WITHOUT `--url` to judge a pre-captured PNG instead.
+- `--wait <sel>` / `--viewport WxH` / `--full-page` are forwarded to the
+  capture, so you gate the *hydrated* page at a real size, full-height.
+- The judge opens the PNG with its `read` tool (pi renders images to the model),
+  so `read` is forced into `--tools` automatically.
+- Same discipline as code mode: run it LAST (it is the slowest/most expensive
+  tier), use a strong `--model`, fail-closed by default. A capture failure
+  (server down, wedged browser) is a FAIL unless `--lenient`.
+- Wrap the dev-server lifecycle in the sensor `cmd` if it is not already up,
+  e.g. `(bun dev & SP=$!; sleep 2; bun judge.ts --url ...; RC=$?; kill $SP; exit $RC)`.
+
+Caveat: a vision judgment is coarser than a human's eye and non-deterministic -
+it reliably catches gross breakage (overflow, unstyled content, blank/error
+pages) and is far weaker on pixel-level polish. For exact regressions, diff the
+PNG against an approved baseline (computational) instead.
 
 ## Limits (be honest about these)
 

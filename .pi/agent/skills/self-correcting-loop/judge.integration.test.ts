@@ -9,13 +9,15 @@
  */
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const JUDGE = join(import.meta.dir, "judge.ts");
 let repo: string;
 let fake: string;
+let fakeCapture: string;
+let fakeCaptureFail: string;
 
 async function sh(cmd: string[], cwd: string, env: Record<string, string> = {}) {
 	const p = Bun.spawn(cmd, {
@@ -44,6 +46,7 @@ beforeAll(async () => {
 		`#!/usr/bin/env bash
 prompt="$2"
 case "$prompt" in *DIFF_MARKER_XYZ*) echo "saw the diff" ;; esac
+case "$prompt" in *.png*) echo "saw a screenshot" ;; esac
 case "\${FAKE_VERDICT:-PASS}" in
   PASS) echo "looks correct"; echo "VERDICT: PASS" ;;
   FAIL) echo "REASONS:"; echo "- spec not met"; echo "VERDICT: FAIL" ;;
@@ -53,6 +56,25 @@ exit 0
 `,
 	);
 	chmodSync(fake, 0o755);
+
+	// Fake capture: mimics browser-assert - writes a PNG to the path after
+	// --screenshot (always the last two args here) and exits 0.
+	fakeCapture = join(repo, "fake-capture.sh");
+	writeFileSync(
+		fakeCapture,
+		`#!/usr/bin/env bash
+out=""; prev=""
+for a in "$@"; do [ "$prev" = "--screenshot" ] && out="$a"; prev="$a"; done
+[ -n "$out" ] && printf 'PNG-BYTES' > "$out"
+exit 0
+`,
+	);
+	chmodSync(fakeCapture, 0o755);
+
+	// Fake capture that fails (browser wedged / server down).
+	fakeCaptureFail = join(repo, "fake-capture-fail.sh");
+	writeFileSync(fakeCaptureFail, "#!/usr/bin/env bash\necho 'capture boom' >&2\nexit 1\n");
+	chmodSync(fakeCaptureFail, 0o755);
 
 	await sh(["git", "init", "-q"], repo);
 	await sh(["git", "config", "user.email", "t@t.t"], repo);
@@ -107,4 +129,46 @@ test("no verdict + --lenient => fail-open (exit 0)", async () => {
 test("usage error (no --spec) => exit 2", async () => {
 	const { code } = await sh(["bun", JUDGE], repo, { LOOP_JUDGE_CMD: fake });
 	expect(code).toBe(2);
+});
+
+test("VISUAL --url: captures a screenshot, judges it, PASS => exit 0", async () => {
+	const shot = join(repo, "ux.png");
+	const { code } = await sh(
+		["bun", JUDGE, "--spec", "page looks right", "--url", "http://localhost:4333/", "--screenshot", shot],
+		repo,
+		{ LOOP_JUDGE_CMD: fake, LOOP_CAPTURE_CMD: fakeCapture, FAKE_VERDICT: "PASS" },
+	);
+	expect(code).toBe(0);
+	expect(existsSync(shot)).toBe(true); // capture actually ran
+});
+
+test("VISUAL FAIL: exit 1 and the screenshot path reached the judge prompt", async () => {
+	const { code, out } = await sh(
+		["bun", JUDGE, "--spec", "page looks right", "--url", "http://x/", "--screenshot", join(repo, "ux2.png")],
+		repo,
+		{ LOOP_JUDGE_CMD: fake, LOOP_CAPTURE_CMD: fakeCapture, FAKE_VERDICT: "FAIL" },
+	);
+	expect(code).toBe(1);
+	expect(out).toContain("saw a screenshot"); // visual prompt embedded the .png path
+});
+
+test("VISUAL --screenshot only (pre-captured, no --url): no capture needed", async () => {
+	const shot = join(repo, "pre.png");
+	writeFileSync(shot, "PNG-BYTES");
+	const { code } = await sh(
+		["bun", JUDGE, "--spec", "looks right", "--screenshot", shot],
+		repo,
+		// capture cmd deliberately set to the FAILING one to prove it is NOT called.
+		{ LOOP_JUDGE_CMD: fake, LOOP_CAPTURE_CMD: fakeCaptureFail, FAKE_VERDICT: "PASS" },
+	);
+	expect(code).toBe(0);
+});
+
+test("VISUAL capture failure => fail-closed (exit 1)", async () => {
+	const { code } = await sh(
+		["bun", JUDGE, "--spec", "x", "--url", "http://down/"],
+		repo,
+		{ LOOP_JUDGE_CMD: fake, LOOP_CAPTURE_CMD: fakeCaptureFail },
+	);
+	expect(code).toBe(1);
 });

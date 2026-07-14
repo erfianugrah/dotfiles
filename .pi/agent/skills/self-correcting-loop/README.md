@@ -54,11 +54,12 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   `--press` (trusted Input events)/`--assert`/`--screenshot` (+`--viewport`/
   `--full-page`) - so it gates real interactions, produces a PNG the model can
   `read`, and doubles as a UI live-smoke tool against a deployed URL.
-- **judge** - an *inferential* (LLM-as-judge) sensor: feeds the git diff + spec
-  to a second `pi -p` and gates on its `VERDICT: PASS/FAIL`. The computational
-  sensors prove the code passes the checks; the judge checks it did the *right
-  thing* (green-but-wrong, misunderstood spec, self-weakened tests). Fail-closed;
-  run it LAST with a stronger `--model` than the writer.
+- **judge** - an *inferential* (LLM-as-judge) sensor, two modes: **code** feeds
+  the git diff + spec to a second `pi -p` (green-but-wrong, misunderstood spec,
+  self-weakened tests); **visual** (`--url`) screenshots a live dev server via
+  browser-assert and has a vision model judge the rendered **UI/UX** (layout,
+  overflow, unstyled/broken render) - the gate a DOM assert can't be. Both gate
+  on `VERDICT: PASS/FAIL`, fail-closed; run LAST with a stronger `--model`.
 
 Sensor types to reach for: build/typecheck/unit (fast gate), **structural /
 architecture** (`golangci-lint` depguard, `dependency-cruiser`, `import-linter`,
@@ -70,7 +71,7 @@ gate** (`judge` - correctness against the spec).
 ## Test
 
 ```bash
-bun test    # 77: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot; judge verdict + gate
+bun test    # 87: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot; judge code + visual gate
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability
