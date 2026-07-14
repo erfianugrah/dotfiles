@@ -1,7 +1,7 @@
 {
   "name": "@erfianugrah/pi-loop",
-  "version": "0.1.0",
-  "description": "Sensor-gated, self-correcting loop driver for pi. Language-agnostic: drives a fresh `pi -p` each iteration until deterministic sensors (build/lint/test/typecheck/e2e) pass. Ships a governor (model-escalation ladder, git checkpoint/rollback, write-scope) and a dependency-free headless-Chromium sensor.",
+  "version": "0.2.0",
+  "description": "Sensor-gated, self-correcting loop driver for pi. Language-agnostic: drives a fresh `pi -p` each iteration until the sensors pass. Sensors span computational (build/lint/test/typecheck/structural/security/browser-DOM) and inferential (LLM-as-judge on the diff; vision judge + baseline pixel-diff for UI/UX). Ships a governor (model-escalation ladder, git checkpoint/rollback, write-scope) plus dependency-free headless-Chromium, judge, and visual-regression sensors.",
   "license": "MIT",
   "author": "Erfi Anugrah",
   "type": "module",
@@ -17,6 +17,6 @@
   "scripts": {
     "test": "bun test"
   },
-  "keywords": ["pi", "loop", "tdd", "sensor", "self-correcting", "agent", "harness"],
+  "keywords": ["pi", "loop", "tdd", "sensor", "self-correcting", "agent", "harness", "llm-as-judge", "visual-regression", "browser"],
   "files": ["*.ts", "presets", "SKILL.md", "README.md"]
 }

@@ -1,10 +1,12 @@
 # @erfianugrah/pi-loop
 
 A sensor-gated, self-correcting loop driver for [pi](https://pi.dev).
-Language-agnostic: it drives a fresh `pi -p` each iteration until deterministic
-sensors (build / lint / test / typecheck / browser e2e) pass, then stops. **The
-loop - not the model - decides "done"**, which is what makes it hold up on
-sub-Opus models.
+Language-agnostic: it drives a fresh `pi -p` each iteration until the sensors
+pass, then stops. Sensors run from cheap+computational (build / lint / test /
+typecheck / structural / security) up to browser (DOM asserts + screenshots) and
+inferential (LLM-as-judge on the diff, vision judge + baseline pixel-diff for
+UI/UX). **The loop - not the model - decides "done"**, which is what makes it
+hold up on sub-Opus models.
 
 This directory is both a pi **skill** (`SKILL.md`) and an installable package
 (`bin`: `loop`, `browser-assert`, `judge`, `pixel-diff`). Full concepts, manifest

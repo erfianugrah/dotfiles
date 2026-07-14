@@ -1,6 +1,6 @@
 ---
 name: self-correcting-loop
-description: "Run an unattended, sensor-gated agent loop that drives a fresh pi -p each iteration until deterministic checks (build/lint/test/typecheck) pass, then stops. Use when the user wants to 'set an agent in a loop', run a task autonomously, self-correct without supervision, or make a weaker model (Sonnet/GLM/DeepSeek) reliably good on a scoped coding task. The model never decides 'done' - the sensors do. Language-agnostic - sensors are just command strings declared in a per-project .pi/harness.json (go/node/rust/astro/python presets included). Pairs with scaffold-new-project (which builds the target) and software-architecture (tight contracts = better sensors)."
+description: "Run an unattended, sensor-gated agent loop that drives a fresh pi -p each iteration until the sensors pass, then stops. Sensors span computational (build/lint/test/typecheck, structural/architecture fitness, mutation testing, security/drift scans, headless-browser DOM asserts) and inferential (LLM-as-judge on the code diff; a vision judge and a baseline pixel-diff for rendered UI/UX). Use when the user wants to 'set an agent in a loop', run a task autonomously, self-correct without supervision, add a UI/UX or visual-regression gate against a live dev server, add an LLM-as-judge correctness gate, or make a weaker model (Sonnet/GLM/DeepSeek) reliably good on a scoped coding task. The model never decides 'done' - the sensors do. Language-agnostic - sensors are command strings in a per-project .pi/harness.json (go/node/rust/astro/python presets). Ships browser-assert (headless-Chromium DOM/flow/screenshot sensor, hardened capture), judge (code + visual UI/UX gate), and pixel-diff (baseline visual-regression). Pairs with scaffold-new-project, frontend-stack / design-utilitarian (visual gates), and software-architecture (tight contracts = better sensors)."
 ---
 
 # Self-correcting loop
@@ -61,7 +61,7 @@ Two properties make this work on weak models:
 
 | File | Role |
 |---|---|
-| `harness.ts` | Pure core: manifest schema/validation, prompt + feedback builders, stack detection, glob/scope, decide/ladder logic. Unit-tested (30 cases). |
+| `harness.ts` | Pure core: manifest schema/validation, prompt + feedback builders, stack detection, glob/scope, decide/ladder logic. Unit-tested (37 cases). |
 | `loop.ts` | CLI driver (Bun): spawns `pi -p`, runs sensors, git checkpoint/rollback, scope guard, escalation, report. |
 | `presets/*.json` | Starter manifests per stack (go/node/rust/astro/python). |
 | `harness.test.ts` | Unit tests for the pure helpers. |
@@ -343,10 +343,14 @@ change is intended and you want a judgment not a byte-compare).
 
 ## Limits (be honest about these)
 
-- **Behaviour harness gap.** Green sensors prove the code passes *the checks*,
-  not that it does *the right thing*. If the model wrote the tests too, that's
-  a closed loop. Mitigate with conformance suites + fixtures you control, and
-  mutation testing where it matters.
+- **Behaviour harness gap.** Green *computational* sensors prove the code passes
+  *the checks*, not that it does *the right thing*; if the model wrote the tests
+  too, that's a closed loop. Mitigations shipped: conformance suites + fixtures
+  you control, mutation testing (test quality), the inferential `judge` (code
+  correctness + rendered UI/UX), and `pixel-diff` (exact visual regression). But
+  inferential sensors are probabilistic and `pixel-diff` needs an approved
+  baseline - they raise confidence, they do not remove the need for a clear
+  spec (next point).
 - **Correctness needs specification.** The loop cannot fix a vague `task`. A
   misunderstood instruction converges on green-but-wrong. Scope tightly.
 - **Not for unfenced blast radius.** Great for greenfield modules and
