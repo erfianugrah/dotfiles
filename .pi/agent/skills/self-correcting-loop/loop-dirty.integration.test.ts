@@ -32,7 +32,7 @@ beforeAll(async () => {
 	await sh(["git", "commit", "-q", "-m", "baseline"], repo);
 	// make the tree dirty (untracked file)
 	writeFileSync(join(repo, "scratch.txt"), "uncommitted work\n");
-});
+}, 30000); // generous: git setup can starve under concurrent-suite load
 
 afterAll(() => rmSync(repo, { recursive: true, force: true }));
 

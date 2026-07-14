@@ -63,7 +63,7 @@ Two properties make this work on weak models:
 | `presets/*.json` | Starter manifests per stack (go/node/rust/astro/python). |
 | `harness.test.ts` | Unit tests for the pure helpers. |
 | `loop.integration.test.ts` | End-to-end governor test with a scripted fake agent (rollback / stall+escalate / scope-revert / pass) - no real model needed. |
-| `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright npm dep). The behaviour-harness layer for web targets. |
+| `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright). Ordered flow steps (wait/click/type/press/assert/screenshot) + viewport/full-page. The behaviour-harness layer for web targets; also a UI live-smoke tool. |
 | `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
 
 ## Usage
@@ -176,10 +176,14 @@ Build/typecheck/unit sensors do not prove a page actually renders and works.
 The browser layer closes that gap, and comes in two flavours:
 
 - **Computational (the gate): `browser-assert.ts`.** Launches system Chromium
-  headless over CDP, waits for a selector, evaluates in-page JS assertions,
-  exits 0/1. Deterministic and self-bounding (per-command CDP timeout + a
-  reject-on-socket-close guard, so a wedged browser fails the sensor instead of
-  hanging the loop). Wrap dev-server start/stop in the sensor cmd:
+  headless over CDP and runs ORDERED steps: `--wait <sel>`, `--click <sel>`,
+  `--type <sel> <text>`, `--press <key>` (trusted CDP Input events),
+  `--assert <jsExpr>`, `--screenshot <path>` (+ `--viewport WxH`, `--full-page`).
+  So it scripts a real flow (sign-in, form, wizard), not just a static-render
+  check. Exits 0/1. Deterministic and self-bounding (per-command CDP timeout +
+  reject-on-socket-close, so a wedged browser fails instead of hanging the
+  loop). Also doubles as a **UI live-smoke** tool: point `<url>` at a deployed
+  environment. Wrap dev-server start/stop in the sensor cmd:
 
   ```json
   { "name": "e2e",
@@ -190,13 +194,16 @@ The browser layer closes that gap, and comes in two flavours:
   slower-and-flakier tier, so it only runs once the cheap gates are green.
 
 - **Inferential (for debugging, not the gate): a screenshot the model reads.**
-  When an e2e sensor fails on layout/visual issues the DOM can't express, have
-  the agent screenshot the page and look (the `deck-screenshot` skill's
-  `chromium --headless=new --screenshot` pattern). This is a probabilistic aid,
-  not a deterministic gate - never let a screenshot decide "done".
+  `browser-assert ... --screenshot /tmp/x.png` captures the post-interaction
+  page; the agent then `read`s the PNG to reason about layout/visual issues the
+  DOM can't express. This is a probabilistic aid - never let a screenshot decide
+  "done".
 
-Visual-regression (screenshot diffing) and a11y (`axe`) are further sensors you
-can add the same way; they need their own baselines/tooling.
+Visual-regression (diff the `--screenshot` PNG against a baseline) and a11y
+(`axe`) are further sensors you can layer on; they need their own baselines/
+tooling. `--type`/`--click` use trusted CDP Input events, but for complex flows
+(multi-tab, downloads, network mocking) a target's own Playwright suite is still
+the right tool - `browser-assert` is the zero-dep gate.
 
 ## Limits (be honest about these)
 

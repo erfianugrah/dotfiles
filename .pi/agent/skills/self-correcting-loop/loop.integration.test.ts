@@ -77,7 +77,7 @@ exit 0
 	await sh(["git", "config", "user.name", "t"], repo);
 	await sh(["git", "add", "-A"], repo);
 	await sh(["git", "commit", "-q", "-m", "baseline"], repo);
-});
+}, 30000); // generous: git setup can starve under concurrent-suite load
 
 afterAll(() => {
 	rmSync(repo, { recursive: true, force: true });

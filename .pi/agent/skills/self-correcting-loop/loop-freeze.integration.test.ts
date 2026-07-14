@@ -24,7 +24,7 @@ beforeAll(async () => {
 			],
 		}),
 	);
-});
+}, 30000);
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 

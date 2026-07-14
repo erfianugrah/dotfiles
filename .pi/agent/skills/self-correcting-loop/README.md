@@ -50,7 +50,10 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   failing at baseline; only NEW failures gate (adopt a legacy repo).
 - **browser-assert** - a dependency-free headless-Chromium behaviour sensor for
   web targets (CDP over Bun's WebSocket; no puppeteer/playwright; self-bounding
-  per-command timeout so a wedged browser fails rather than hangs).
+  per-command timeout). Scripts ordered flows - `--wait`/`--click`/`--type`/
+  `--press` (trusted Input events)/`--assert`/`--screenshot` (+`--viewport`/
+  `--full-page`) - so it gates real interactions, produces a PNG the model can
+  `read`, and doubles as a UI live-smoke tool against a deployed URL.
 
 Sensor types to reach for: build/typecheck/unit (fast gate), **structural /
 architecture** (`golangci-lint` depguard, `dependency-cruiser`, `import-linter`,
@@ -61,7 +64,7 @@ grades test quality; expensive, post-fast-sensor), and **browser e2e**
 ## Test
 
 ```bash
-bun test    # 48: pure-helper unit + governor/dirty/freeze integration + CDP + browser-sensor
+bun test    # 57: pure-helper + arg-parser unit; governor/dirty/freeze integration; CDP; browser flow/screenshot
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability

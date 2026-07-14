@@ -1,57 +1,107 @@
 #!/usr/bin/env bun
 /**
- * browser-assert.ts - a dependency-free headless-browser SENSOR.
+ * browser-assert.ts - a dependency-free headless-browser SENSOR + smoke tool.
  *
- *   bun browser-assert.ts <url> [--wait <cssSelector>] [--assert <jsExpr>]...
- *                         [--timeout <ms>] [--chromium <path>]
+ *   bun browser-assert.ts <url> [step ...] [--timeout ms] [--chromium path]
+ *                         [--viewport WxH] [--full-page]
  *
- * Launches the system Chromium headless, drives it over the Chrome DevTools
- * Protocol (Bun's built-in WebSocket + fetch - no puppeteer/playwright npm
- * dep), navigates to <url>, optionally waits for a selector, then evaluates
- * each --assert expression in the page. Exits 0 iff every assert is truthy,
- * non-zero otherwise with the actual values printed (good loop feedback).
+ * Steps run IN ORDER (so you can script a flow), each is one flag:
+ *   --wait <cssSelector>       block until the selector exists
+ *   --click <cssSelector>      trusted mouse click at the element centre
+ *   --type <cssSelector> <txt> click to focus, then insert text (fires input)
+ *   --press <key>              Enter|Tab|Escape|Backspace|Arrow{Up,Down,Left,Right}
+ *   --assert <jsExpr>          evaluate in page; must be truthy
+ *   --screenshot <path>        write a PNG of the current page (+ --full-page)
  *
- * This is the "behaviour harness" layer for web targets: a deterministic,
- * computational browser check you can drop into a manifest sensor, e.g.
- *   { "name": "e2e", "cmd": "bun .../browser-assert.ts http://localhost:4321 \
- *                            --wait '#app' --assert 'document.title.length>0'" }
+ * Drives system Chromium over the Chrome DevTools Protocol (Bun's built-in
+ * WebSocket + fetch - no puppeteer/playwright). Exits 0 iff every --assert is
+ * truthy and no step errored; non-zero otherwise with actual values printed.
  *
- * For a running dev server, wrap start/stop around this in the sensor cmd.
+ * Two uses:
+ *   sensor  - `... http://localhost:4321 --wait '#app' --assert 'document.title.length>0'`
+ *   flow    - `... $URL --click '#login' --type '#email' me@x.com --press Enter
+ *                     --wait '#dashboard' --assert '...' --screenshot /tmp/after.png`
+ *   smoke   - point <url> at a live/prod deployment; same flags.
  */
 
-interface Args {
+export type Step =
+	| { kind: "wait"; selector: string }
+	| { kind: "click"; selector: string }
+	| { kind: "type"; selector: string; text: string }
+	| { kind: "press"; key: string }
+	| { kind: "assert"; expr: string }
+	| { kind: "screenshot"; path: string };
+
+export interface Args {
 	url: string;
-	wait?: string;
-	asserts: string[];
+	steps: Step[];
 	timeout: number;
 	chromium: string;
-}
-
-function parseArgs(argv: string[]): Args {
-	const [url, ...rest] = argv;
-	if (!url) {
-		console.error("usage: bun browser-assert.ts <url> [--wait sel] [--assert expr]...");
-		process.exit(2);
-	}
-	const args: Args = { url, asserts: [], timeout: 15000, chromium: pickChromium() };
-	for (let i = 0; i < rest.length; i++) {
-		const a = rest[i];
-		const v = rest[i + 1];
-		if (a === "--wait") { args.wait = v; i++; }
-		else if (a === "--assert") { args.asserts.push(v); i++; }
-		else if (a === "--timeout") { args.timeout = Number.parseInt(v, 10); i++; }
-		else if (a === "--chromium") { args.chromium = v; i++; }
-	}
-	return args;
+	viewport: { width: number; height: number };
+	fullPage: boolean;
 }
 
 function pickChromium(): string {
-	for (const c of ["/usr/sbin/chromium", "/usr/bin/chromium", "/usr/bin/google-chrome-stable", "/usr/bin/google-chrome"]) {
+	for (const c of [
+		"/usr/sbin/chromium",
+		"/usr/bin/chromium",
+		"/usr/bin/google-chrome-stable",
+		"/usr/bin/google-chrome",
+	]) {
 		try {
 			if (Bun.file(c).size >= 0) return c;
 		} catch {}
 	}
 	return "chromium";
+}
+
+/** Pure arg parser - ordered steps + flags. Throws on misuse (main exits 2). */
+export function parseArgs(argv: string[]): Args {
+	const [url, ...rest] = argv;
+	if (!url || url.startsWith("--")) {
+		throw new Error(
+			"usage: browser-assert <url> [--wait sel] [--click sel] [--type sel text] [--press key] [--assert expr] [--screenshot path] [--viewport WxH] [--full-page] [--timeout ms] [--chromium path]",
+		);
+	}
+	const args: Args = {
+		url,
+		steps: [],
+		timeout: 15000,
+		chromium: pickChromium(),
+		viewport: { width: 1280, height: 800 },
+		fullPage: false,
+	};
+	for (let i = 0; i < rest.length; i++) {
+		const a = rest[i];
+		const need = () => {
+			const v = rest[++i];
+			if (v === undefined) throw new Error(`${a} needs an argument`);
+			return v;
+		};
+		switch (a) {
+			case "--wait": args.steps.push({ kind: "wait", selector: need() }); break;
+			case "--click": args.steps.push({ kind: "click", selector: need() }); break;
+			case "--type": {
+				const selector = need();
+				args.steps.push({ kind: "type", selector, text: need() });
+				break;
+			}
+			case "--press": args.steps.push({ kind: "press", key: need() }); break;
+			case "--assert": args.steps.push({ kind: "assert", expr: need() }); break;
+			case "--screenshot": args.steps.push({ kind: "screenshot", path: need() }); break;
+			case "--viewport": {
+				const [w, h] = need().split("x").map((n) => Number.parseInt(n, 10));
+				if (!w || !h) throw new Error("--viewport wants WxH, e.g. 1440x900");
+				args.viewport = { width: w, height: h };
+				break;
+			}
+			case "--full-page": args.fullPage = true; break;
+			case "--timeout": args.timeout = Number.parseInt(need(), 10); break;
+			case "--chromium": args.chromium = need(); break;
+			default: throw new Error(`unknown flag: ${a}`);
+		}
+	}
+	return args;
 }
 
 /** Minimal CDP client over a single WebSocket (flat sessions). */
@@ -110,14 +160,8 @@ export class CDP {
 				}
 			}, timeoutMs);
 			this.pending.set(id, {
-				resolve: (v) => {
-					clearTimeout(timer);
-					resolve(v);
-				},
-				reject: (e) => {
-					clearTimeout(timer);
-					reject(e);
-				},
+				resolve: (v) => { clearTimeout(timer); resolve(v); },
+				reject: (e) => { clearTimeout(timer); reject(e); },
 			});
 		});
 	}
@@ -128,8 +172,26 @@ export class CDP {
 	}
 }
 
+const KEYS: Record<string, { key: string; code: string; vk: number }> = {
+	Enter: { key: "Enter", code: "Enter", vk: 13 },
+	Tab: { key: "Tab", code: "Tab", vk: 9 },
+	Escape: { key: "Escape", code: "Escape", vk: 27 },
+	Backspace: { key: "Backspace", code: "Backspace", vk: 8 },
+	ArrowUp: { key: "ArrowUp", code: "ArrowUp", vk: 38 },
+	ArrowDown: { key: "ArrowDown", code: "ArrowDown", vk: 40 },
+	ArrowLeft: { key: "ArrowLeft", code: "ArrowLeft", vk: 37 },
+	ArrowRight: { key: "ArrowRight", code: "ArrowRight", vk: 39 },
+};
+
 async function main() {
-	const args = parseArgs(Bun.argv.slice(2));
+	let args: Args;
+	try {
+		args = parseArgs(Bun.argv.slice(2));
+	} catch (err) {
+		console.error((err as Error).message);
+		process.exit(2);
+	}
+
 	const port = 30000 + Math.floor(Math.random() * 5000);
 	const userDir = `/tmp/browser-assert-${port}-${Date.now()}`;
 
@@ -142,8 +204,8 @@ async function main() {
 			"--no-first-run",
 			"--no-default-browser-check",
 			"--hide-scrollbars",
-			// Chromium 111+ rejects non-browser WS clients without this:
-			"--remote-allow-origins=*",
+			`--window-size=${args.viewport.width},${args.viewport.height}`,
+			"--remote-allow-origins=*", // Chromium 111+ rejects non-browser WS clients otherwise
 			`--remote-debugging-port=${port}`,
 			`--user-data-dir=${userDir}`,
 			"about:blank",
@@ -186,39 +248,110 @@ async function main() {
 			return r.result?.value;
 		};
 
-		// Wait for document ready (+ optional selector).
-		const waitDeadline = Date.now() + args.timeout;
-		const readyExpr = args.wait
-			? `document.readyState==='complete' && !!document.querySelector(${JSON.stringify(args.wait)})`
-			: `document.readyState==='complete'`;
-		let ready = false;
-		while (Date.now() < waitDeadline) {
-			if (await evalExpr(readyExpr)) { ready = true; break; }
+		const waitFor = async (selector: string) => {
+			const dl = Date.now() + args.timeout;
+			while (Date.now() < dl) {
+				if (await evalExpr(`!!document.querySelector(${JSON.stringify(selector)})`)) return true;
+				await Bun.sleep(120);
+			}
+			return false;
+		};
+
+		const centerOf = async (selector: string) =>
+			evalExpr(
+				`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return null;` +
+					`e.scrollIntoView({block:'center',inline:'center'});const r=e.getBoundingClientRect();` +
+					`return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};})()`,
+			);
+
+		const clickSel = async (selector: string) => {
+			if (!(await waitFor(selector))) throw new Error(`click: selector not found: ${selector}`);
+			const c = await centerOf(selector);
+			if (!c) throw new Error(`click: element has no box: ${selector}`);
+			for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+				await cdp.send(
+					"Input.dispatchMouseEvent",
+					{ type, x: c.x, y: c.y, button: "left", clickCount: 1 },
+					sessionId,
+				);
+			}
+		};
+
+		const press = async (keyName: string) => {
+			const k = KEYS[keyName];
+			if (!k) throw new Error(`press: unsupported key ${keyName} (${Object.keys(KEYS).join("|")})`);
+			for (const type of ["keyDown", "keyUp"]) {
+				await cdp.send(
+					"Input.dispatchKeyEvent",
+					{ type, key: k.key, code: k.code, windowsVirtualKeyCode: k.vk, nativeVirtualKeyCode: k.vk },
+					sessionId,
+				);
+			}
+		};
+
+		const screenshot = async (path: string) => {
+			const params: Record<string, unknown> = { format: "png", captureBeyondViewport: args.fullPage };
+			if (args.fullPage) {
+				const { cssContentSize } = await cdp.send("Page.getLayoutMetrics", {}, sessionId);
+				params.clip = { x: 0, y: 0, width: cssContentSize.width, height: cssContentSize.height, scale: 1 };
+			}
+			const { data } = await cdp.send("Page.captureScreenshot", params, sessionId);
+			await Bun.write(path, Buffer.from(data as string, "base64"));
+			console.log(`  SHOT  ${path}`);
+		};
+
+		// Settle: wait for the initial navigation to finish loading.
+		const loadDl = Date.now() + args.timeout;
+		while (Date.now() < loadDl) {
+			if (await evalExpr("document.readyState==='complete'")) break;
 			await Bun.sleep(120);
 		}
-		if (!ready) {
-			const title = await evalExpr("document.title").catch(() => "?");
-			throw new Error(
-				`timed out after ${args.timeout}ms waiting for ${args.wait ? `selector ${args.wait}` : "load"} (title: ${JSON.stringify(title)})`,
-			);
-		}
 
-		// Run assertions.
+		// Execute steps in order. --assert failures are counted; anything else
+		// that goes wrong throws (which fails the sensor).
+		let asserts = 0;
 		let failed = 0;
-		for (const expr of args.asserts) {
-			const val = await evalExpr(expr);
-			const ok = Boolean(val);
-			console.log(`  ${ok ? "PASS" : "FAIL"}  ${expr}  => ${JSON.stringify(val)}`);
-			if (!ok) failed++;
+		for (const step of args.steps) {
+			switch (step.kind) {
+				case "wait":
+					if (!(await waitFor(step.selector)))
+						throw new Error(`timed out after ${args.timeout}ms waiting for ${step.selector}`);
+					console.log(`  WAIT  ${step.selector}`);
+					break;
+				case "click":
+					await clickSel(step.selector);
+					console.log(`  CLICK ${step.selector}`);
+					break;
+				case "type":
+					await clickSel(step.selector);
+					await cdp.send("Input.insertText", { text: step.text }, sessionId);
+					console.log(`  TYPE  ${step.selector} <- ${JSON.stringify(step.text)}`);
+					break;
+				case "press":
+					await press(step.key);
+					console.log(`  PRESS ${step.key}`);
+					break;
+				case "screenshot":
+					await screenshot(step.path);
+					break;
+				case "assert": {
+					asserts++;
+					const val = await evalExpr(step.expr);
+					const ok = Boolean(val);
+					console.log(`  ${ok ? "PASS" : "FAIL"}  ${step.expr}  => ${JSON.stringify(val)}`);
+					if (!ok) failed++;
+					break;
+				}
+			}
 		}
 
 		cdp.close();
 		await cleanup();
 		if (failed > 0) {
-			console.error(`browser-assert: ${failed}/${args.asserts.length} assertion(s) failed`);
+			console.error(`browser-assert: ${failed}/${asserts} assertion(s) failed`);
 			process.exit(1);
 		}
-		console.log(`browser-assert: ${args.asserts.length} assertion(s) passed at ${args.url}`);
+		console.log(`browser-assert: ${asserts} assertion(s) passed at ${args.url}`);
 		process.exit(0);
 	} catch (err) {
 		await cleanup();
