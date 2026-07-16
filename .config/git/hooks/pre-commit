@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+#
+# pre-commit - contextual-confidentiality reminder + chainer.
+#
+# WHY (2026-07 retro): the dangerous leak is CONTEXTUAL - a name that is
+# confidential only because of its business framing ("X is our customer", "the
+# public counterpart to internal Y"). A term denylist can't judge context; only
+# the human/agent reading the draft can. The pi confidential-write-guard nudges
+# once per repo per process, which is too thin - the risky commit might be #4.
+#
+# This fires on EVERY commit (session-independent, git-level) as a NON-BLOCKING
+# reminder: it prints a short vet prompt to stderr and lets the commit proceed.
+# It never blocks (contextual judgment is not a regex) and never inspects for a
+# denylist - it just makes sure the classifier is reminded each time. It grounds
+# the reminder with the staged file count and elevates when business-context
+# cue words appear in the staged additions.
+#
+# Only fires for repos with a remote (a leak only matters if it can be pushed).
+#
+# Silence:  PI_CONFIDENTIAL_GUARD_OFF=1 git commit ...
+# Bypass all hooks: git commit --no-verify ...
+#
+# Under a global core.hooksPath this replaces the repo-local hook, so we chain
+# to <repo>/.git/hooks/pre-commit at the end if one exists (preserves e.g. the
+# templateDir SOPS "no unencrypted secrets" check).
+
+if [ "${PI_CONFIDENTIAL_GUARD_OFF:-0}" != "1" ] && git remote 2>/dev/null | grep -q .; then
+  staged="$(git diff --cached --name-only 2>/dev/null | awk 'NF')"
+  if [ -n "$staged" ]; then
+    nfiles="$(printf '%s\n' "$staged" | wc -l | tr -d ' ')"
+    # business-context cue words in the ADDED lines only (generic English, not
+    # secrets - safe to echo; they just tell you where to look).
+    cues="$(git diff --cached --no-color 2>/dev/null \
+      | grep -E '^\+' \
+      | grep -ioE '\b(internal|confidential|proprietary|codename|customer|client|partner|nda|unreleased|roadmap|do not share)\b' \
+      | tr '[:upper:]' '[:lower:]' | sort -u | tr '\n' ' ')"
+    {
+      echo "pre-commit[confidential]: committing ${nfiles} staged file(s) to a repo with a remote."
+      echo "  Vet the message + staged changes for confidential third-party identifiers judged IN CONTEXT"
+      echo "  (a public name in a non-public business framing is still confidential). You are the classifier;"
+      echo "  rephrase or placeholder anything you are not certain is safe to publish."
+      [ -n "$cues" ] && echo "  business-context cues in staged diff: ${cues}(look closely)"
+      echo "  silence: PI_CONFIDENTIAL_GUARD_OFF=1 ; bypass all hooks: git commit --no-verify"
+    } >&2
+  fi
+fi
+
+# chain to a repo-local pre-commit hook (preserved under a global hooksPath).
+# NB: under core.hooksPath, `git rev-parse --git-path hooks/X` points back at
+# THIS dir, so resolve the repo-local hook via the git-dir explicitly.
+self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
+if [ -n "$git_dir" ] && [ -x "$git_dir/hooks/pre-commit" ]; then
+  local_hook_abs="$(cd "$git_dir/hooks" && pwd)/pre-commit"
+  if [ "$local_hook_abs" != "$self" ]; then
+    exec "$local_hook_abs" "$@"
+  fi
+fi
+
+exit 0

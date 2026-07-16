@@ -65,7 +65,13 @@ import { prune, hasImageContent, type AnyMessage } from "../extensions/tool-outp
 import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
 import { matchHints, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
 import { findLastUserEntryId } from "../extensions/session-undo.ts";
-import { isCommitPersist, scanForBlocked, resolveBashCwd } from "../extensions/confidential-write-guard.ts";
+import {
+  isCommitPersist,
+  scanForBlocked,
+  resolveBashCwd,
+  extractMessageFilePaths,
+  collectCommitPayload,
+} from "../extensions/confidential-write-guard.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -3099,11 +3105,19 @@ describe("confidential-write-guard.isCommitPersist", () => {
     expect(isCommitPersist("gh release create v2 --notes '...'")).toBe(true);
   });
 
-  test("does NOT match read-only or non-persisting commands", () => {
+  test("does NOT match read-only or non-persisting commands (the false-positive class)", () => {
     expect(isCommitPersist("git status")).toBe(false);
     expect(isCommitPersist("git log --oneline -5")).toBe(false);
     expect(isCommitPersist("git diff --cached")).toBe(false);
     expect(isCommitPersist("gh pr view 3")).toBe(false);
+    // regression: read/search/scrub commands that the OLD WRITE_BASH matched via
+    // its `>>?` / tee / sd / dd tokens must NOT be treated as writes now.
+    expect(isCommitPersist("grep 'order_history' src/ 2>/dev/null")).toBe(false);
+    expect(isCommitPersist("rg 'AcmeCo' | tee /tmp/out")).toBe(false);
+    expect(isCommitPersist("git log | rg AcmeCo")).toBe(false);
+    expect(isCommitPersist("git filter-repo --replace-text expr.txt")).toBe(false);
+    expect(isCommitPersist("echo done > /tmp/status")).toBe(false);
+    expect(isCommitPersist("sed -i 's/a/b/' file.md")).toBe(false);
     expect(isCommitPersist("gh pr list")).toBe(false);
     expect(isCommitPersist("echo committing now")).toBe(false);
   });
@@ -3143,8 +3157,79 @@ describe("confidential-write-guard.resolveBashCwd", () => {
     );
   });
 
-  test("cd with no write command still resolves (used for the WRITE_BASH-gated bash branch)", () => {
+  test("cd with no write command still resolves (used for the commit-persist bash branch)", () => {
     expect(resolveBashCwd("cd ~/docs-ssh", "/home/erfi/dotfiles")).toBe(`${require("node:os").homedir()}/docs-ssh`);
+  });
+});
+
+// ── confidential-write-guard: extractMessageFilePaths (payload file sourcing) ──
+// A commit's persisted payload includes the CONTENTS of -F / --body-file, not
+// just argv. These paths get read + scanned so an identifier in a message file
+// (never in the command string) is still caught.
+describe("confidential-write-guard.extractMessageFilePaths", () => {
+  test("extracts -F and --file (space and = forms)", () => {
+    expect(extractMessageFilePaths("git commit -F msg.txt")).toEqual(["msg.txt"]);
+    expect(extractMessageFilePaths("git commit --file=/tmp/m")).toEqual(["/tmp/m"]);
+    expect(extractMessageFilePaths("git tag -a v1 -F notes.md")).toEqual(["notes.md"]);
+  });
+
+  test("extracts gh --body-file", () => {
+    expect(extractMessageFilePaths("gh pr create --body-file body.md")).toEqual(["body.md"]);
+    expect(extractMessageFilePaths("gh issue create --body-file=./b.md")).toEqual(["./b.md"]);
+  });
+
+  test("unwraps quotes around the path", () => {
+    expect(extractMessageFilePaths(`git commit -F "notes.md"`)).toEqual(["notes.md"]);
+    expect(extractMessageFilePaths("git commit -F 'notes.md'")).toEqual(["notes.md"]);
+  });
+
+  test("excludes the stdin sentinel `-`", () => {
+    expect(extractMessageFilePaths("git commit -F -")).toEqual([]);
+    expect(extractMessageFilePaths("git commit -F - <<'EOF'\nfeat: x\nEOF")).toEqual([]);
+  });
+
+  test("returns empty when there is no message file", () => {
+    expect(extractMessageFilePaths("git commit -m 'inline'")).toEqual([]);
+    expect(extractMessageFilePaths("gh pr create --title x --body y")).toEqual([]);
+  });
+});
+
+// ── confidential-write-guard: collectCommitPayload (what actually gets scanned) ─
+describe("confidential-write-guard.collectCommitPayload", () => {
+  const noDiff = () => "";
+  const noFile = () => "";
+
+  test("always includes the command string (catches inline -m / --body)", () => {
+    const parts = collectCommitPayload("git commit -m 'AcmeCo ships'", "/repo", noFile, noDiff);
+    expect(parts).toContain("git commit -m 'AcmeCo ships'");
+  });
+
+  test("pulls in -F message-file contents (identifier not in argv)", () => {
+    const parts = collectCommitPayload("git commit -F msg.txt", "/repo", () => "secret AcmeCo body", noDiff);
+    expect(parts.some((p) => p.includes("AcmeCo"))).toBe(true);
+  });
+
+  test("includes staged diff for `git commit` (identifier in staged content)", () => {
+    const parts = collectCommitPayload("git commit -m x", "/repo", noFile, () => "+const customer = 'AcmeCo';");
+    expect(parts.some((p) => p.includes("AcmeCo"))).toBe(true);
+  });
+
+  test("does NOT pull a staged diff for tag / gh (no `git commit`)", () => {
+    let called = false;
+    const diff = () => {
+      called = true;
+      return "leak";
+    };
+    collectCommitPayload("gh pr create --body y", "/repo", noFile, diff);
+    collectCommitPayload("git tag -a v1 -m x", "/repo", noFile, diff);
+    expect(called).toBe(false);
+  });
+
+  test("end-to-end: a blocked term only in the staged diff is detectable", () => {
+    const parts = collectCommitPayload("git commit -m 'chore: cleanup'", "/repo", noFile, () => "+// re: AcmeCo");
+    const hit = parts.map((p) => scanForBlocked(p, ["AcmeCo"])).find(Boolean);
+    expect(hit).toBeTruthy();
+    expect(hit!.masked).toContain("[REDACTED]");
   });
 });
 

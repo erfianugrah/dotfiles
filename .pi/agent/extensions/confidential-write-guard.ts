@@ -29,6 +29,20 @@
  *      identifier, so it gets its own vet reminder even if (a) already fired.
  *      (Each nudge fires once per repo per process - separate trackers.)
  *
+ * Enforcement scans the PAYLOAD, not the raw command. For write/edit/apply_patch
+ * that's the content being written. For a bash commit/PR it's the message text +
+ * the contents of -F/--body-file message files + `git diff --cached` (the staged
+ * content) - assembled by collectCommitPayload(). We deliberately do NOT scan
+ * arbitrary bash: read/search commands (grep/rg/git log, redirects, the
+ * git filter-repo that REMOVES a term) must never be blocked just because the
+ * term appears as a search pattern. See isCommitPersist() for the narrow trigger.
+ *
+ * Cross-session backstop: this is a same-session, commit-time gate - it cannot
+ * catch commits authored in a PRIOR session (term not yet blocked / agent not
+ * running). That gap is closed by the git pre-push hook at
+ * dotfiles/.config/git/hooks/pre-push (installed via global core.hooksPath),
+ * which scans the push rev-range against the SAME blocked-term stores + gitleaks.
+ *
  * The block reason never echoes the term (that re-propagates it into the
  * session log — the exact mistake that motivated this); it masks the term as
  * [REDACTED] in a short context snippet.
@@ -43,6 +57,7 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { extractCdTargets, expandTilde } from "./cd-agents-reload";
@@ -294,19 +309,101 @@ const confidentialTermsTool = defineTool({
   },
 });
 
-// ── bash commands that WRITE (so a term in them is about to be persisted) ───
-const WRITE_BASH =
-  /(\bgit\s+commit\b|\btee\b|>>?|\bsd\b|\bsed\s+-i\b|\bperl\s+-i\b|\bdd\b|\bgit\s+(?:tag|notes)\b|\bgh\s+(?:pr|issue|release)\s+(?:create|edit|comment)\b)/;
-
 // bash commands that PERSIST PROSE TO A (possibly shared/public) REMOTE - commit
-// messages, tags, PR/issue/release bodies. The highest-risk moment for a novel
-// confidential identifier to land, so they get a dedicated vet nudge.
+// messages, tags, PR/issue/release bodies. This is BOTH the vet-nudge trigger
+// AND the enforcement trigger: the guard scans the *payload* of these commands
+// (message text + staged diff + message-file contents), never arbitrary bash.
+//
+// Deliberately narrow. The old WRITE_BASH also matched `>>?`, `\btee\b`,
+// `\bsd\b`, `\bsed -i\b`, `\bdd\b` - which meant a READ/SEARCH command that
+// merely contained a redirect or a coincidental word (`grep x 2>/dev/null`,
+// `rg term | tee log`, even the `git filter-repo` that REMOVES a term) tripped
+// the scan and got blocked because the search *pattern* was a blocked term.
+// Reading/searching is the safest possible op; it must never be blocked. Normal
+// file writes are already covered by the write/edit/apply_patch payload scan
+// above, and a `>`-redirect into a tracked prose file is caught by the pre-push
+// hook backstop - so dropping those tokens here is a net safety gain.
 const COMMIT_PERSIST =
   /\bgit\s+commit\b|\bgit\s+(?:tag|notes)\b|\bgh\s+(?:pr|issue|release)\s+(?:create|edit|comment)\b/;
 
 /** True when a bash command persists a commit message / PR / issue body. */
 export function isCommitPersist(cmd: string): boolean {
   return COMMIT_PERSIST.test(cmd);
+}
+
+// Message-file flags whose *contents* are part of the persisted payload:
+//   git commit -F <file> / --file=<file>
+//   git tag    -F <file> / --file=<file>
+//   gh ... --body-file <file>
+// The `-` sentinel (stdin) is excluded - we can't read it here; the heredoc
+// body (if any) is already inline in the command string and gets scanned.
+const MESSAGE_FILE_FLAG =
+  /(?:^|\s)(?:-F|--file|--body-file)(?:=|\s+)(['"]?)([^'"\s]+)\1/g;
+
+/** Paths whose contents form part of a commit/PR payload (excludes stdin `-`). */
+export function extractMessageFilePaths(cmd: string): string[] {
+  const out: string[] = [];
+  MESSAGE_FILE_FLAG.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = MESSAGE_FILE_FLAG.exec(cmd)) !== null) {
+    const p = m[2];
+    if (p && p !== "-") out.push(p);
+  }
+  return out;
+}
+
+// Cap how much staged diff / message-file text we pull into the scan. A blocked
+// identifier appearing anywhere trips the boundary regex, so we don't need the
+// whole thing - just enough to catch the common case without stalling a huge
+// commit. 512 KiB is generous for messages + a normal diff.
+const PAYLOAD_SCAN_CAP = 512 * 1024;
+
+/** Staged diff for a repo (the content half of a `git commit` payload). */
+function stagedDiff(cwd: string): string {
+  try {
+    return execFileSync("git", ["diff", "--cached", "--no-color"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 4000,
+      maxBuffer: 4 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).slice(0, PAYLOAD_SCAN_CAP);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Assemble the persisted-payload text for a commit/PR/issue bash command:
+ *   - the command string itself (captures inline `-m` / `--body` / heredoc)
+ *   - the contents of any -F / --body-file message files
+ *   - for `git commit`, the staged diff (`git diff --cached`)
+ * We scan THIS, not the raw command alone, so an identifier that lands in the
+ * staged content or a message file is caught even though it's not in argv.
+ */
+export function collectCommitPayload(
+  cmd: string,
+  cwd: string,
+  readFile: (p: string) => string = (p) => {
+    try {
+      return fs.readFileSync(p, "utf8").slice(0, PAYLOAD_SCAN_CAP);
+    } catch {
+      return "";
+    }
+  },
+  diff: (c: string) => string = stagedDiff,
+): string[] {
+  const parts: string[] = [cmd];
+  for (const rel of extractMessageFilePaths(cmd)) {
+    const abs = path.isAbsolute(rel) ? rel : path.resolve(cwd, expandTilde(rel));
+    const body = readFile(abs);
+    if (body) parts.push(body);
+  }
+  if (/\bgit\s+commit\b/.test(cmd)) {
+    const d = diff(cwd);
+    if (d) parts.push(d);
+  }
+  return parts;
 }
 
 function extractPatchPaths(patchText: string): string[] {
@@ -373,21 +470,28 @@ export default function (pi: ExtensionAPI) {
       return undefined;
     }
 
-    // bash - only when the command writes/commits
+    // bash - ONLY commit/PR/issue persists (never read/search/redirect commands).
+    // We scan the persisted PAYLOAD (message + staged diff + message files), not
+    // the raw argv, so search patterns in read commands can't false-positive and
+    // an identifier in the staged content is still caught.
     if (tool === "bash") {
       const cmd = (event.input as { command?: string }).command;
-      if (typeof cmd !== "string" || !WRITE_BASH.test(cmd)) return undefined;
+      if (typeof cmd !== "string" || !isCommitPersist(cmd)) return undefined;
       const bashCwd = resolveBashCwd(cmd);
-      const hit = scanForBlocked(cmd, blockedTermsFor(bashCwd));
-      if (hit) return { block: true, reason: blockMsg(hit.masked, "bash (writes/commits)") };
+
+      const blocked = blockedTermsFor(bashCwd);
+      if (blocked.length > 0) {
+        for (const blob of collectCommitPayload(cmd, bashCwd)) {
+          const hit = scanForBlocked(blob, blocked);
+          if (hit) return { block: true, reason: blockMsg(hit.masked, "bash (commit/PR payload)") };
+        }
+      }
 
       // once-per-repo commit/PR/issue vet nudge (independent of the prose nudge)
-      if (isCommitPersist(cmd)) {
-        const root = findRepoRoot(bashCwd);
-        if (root && !commitNudgedRepos.has(root)) {
-          commitNudgedRepos.add(root);
-          return { block: true, reason: COMMIT_NUDGE(root, repoHasRemote(root)) };
-        }
+      const root = findRepoRoot(bashCwd);
+      if (root && !commitNudgedRepos.has(root)) {
+        commitNudgedRepos.add(root);
+        return { block: true, reason: COMMIT_NUDGE(root, repoHasRemote(root)) };
       }
       return undefined;
     }

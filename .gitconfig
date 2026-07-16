@@ -21,6 +21,11 @@
 	dsf = diff --color
 [core]
 	pager = delta
+	; Global hooks dir (stow-linked to dotfiles/.config/git/hooks). Runs the
+	; pre-push confidential/secret backstop in EVERY repo, retroactively. The
+	; pre-commit here chains to each repo's own .git/hooks/pre-commit so the
+	; templateDir SOPS check is preserved. Unset to revert: git config --global --unset core.hooksPath
+	hooksPath = ~/.config/git/hooks
 [interactive]
 	diffFilter = delta --color-only
 [color]

@@ -3,6 +3,7 @@
 .oh-my-zsh
 .config/*
 !.config/atuin
+!.config/git
 !.config/opencode
 !.config/systemd
 .config/systemd/user/*.wants

@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+#
+# pre-push - confidential-identifier + secret backstop for the push rev-range.
+#
+# WHY THIS EXISTS (2026-07 retro): the confidential-write-guard pi extension is
+# a same-session, commit-time gate. It cannot catch commits authored in a PRIOR
+# session (the guard's block-list didn't have the term yet, or the agent wasn't
+# running). A leak reaches the remote at PUSH time, and the push is often of
+# already-existing commits. This hook is the only layer that scans the actual
+# bytes about to leave the machine, across every repo, regardless of which
+# session created the commits.
+#
+# It scans the exact commit range being pushed (messages + diffs) for:
+#   1. user-confirmed blocked terms (same stores the pi guard uses:
+#      ~/.pi/agent/confidential-terms.local.json + <repo>/.git/info/confidential-terms.json)
+#   2. secrets, via gitleaks (if installed) over the same range
+#
+# It NEVER prints a blocked term (that re-propagates it): matches are shown as
+# masked context "...before[REDACTED]after...".
+#
+# Bypass:
+#   PI_CONFIDENTIAL_GUARD_OFF=1 git push ...   # skip the confidential-term scan
+#   PI_PREPUSH_GITLEAKS=0        git push ...   # skip only the gitleaks pass
+#   git push --no-verify ...                    # skip ALL hooks (git native)
+#
+# Fails OPEN on infrastructure errors (missing jq/git failure): this is a
+# backstop, not the primary gate, and a hook that hard-blocks every push over a
+# tooling hiccup just gets disabled wholesale. It fails CLOSED (blocks) only on
+# an actual term/secret hit.
+#
+# Under a global core.hooksPath this replaces the repo-local hook, so we chain
+# to <repo>/.git/hooks/pre-push at the end if one exists.
+
+remote_name="${1:-}"
+Z="0000000000000000000000000000000000000000"
+
+GLOBAL_STORE="${HOME}/.pi/agent/confidential-terms.local.json"
+REPO_STORE="$(git rev-parse --git-path info/confidential-terms.json 2>/dev/null || true)"
+
+MAX_COMMITS=2000
+MAX_BYTES=4000000
+
+# collect user-blocked terms (fail open if jq/stores unavailable)
+collect_terms() {
+  command -v jq >/dev/null 2>&1 || return 0
+  local f
+  for f in "$GLOBAL_STORE" "$REPO_STORE"; do
+    [ -n "$f" ] && [ -f "$f" ] || continue
+    jq -r '.blocked[]?' "$f" 2>/dev/null || true
+  done | awk 'NF' | sort -u
+}
+
+# scan a text blob for a single term without ever echoing the term.
+# stdin: the blob. env T: the term. exit 1 + masked context on STDERR if hit.
+scan_one() {
+  T="$1" perl -0777 -e '
+    my $t = $ENV{T};
+    my $txt = do { local $/; <STDIN> };
+    if ($txt =~ /(?<![A-Za-z0-9])\Q$t\E(?![A-Za-z0-9])/i) {
+      my ($s, $e) = ($-[0], $+[0]);
+      my $a = $s - 24 > 0 ? $s - 24 : 0;
+      my $before = substr($txt, $a, $s - $a);
+      my $after  = substr($txt, $e, 24);
+      $before =~ s/\s+/ /g; $after =~ s/\s+/ /g;
+      my $lead  = $a > 0 ? "..." : "";
+      my $trail = ($e + 24 < length($txt)) ? "..." : "";
+      print STDERR "  context: ${lead}${before}[REDACTED]${after}${trail}\n";
+      exit 1;
+    }
+    exit 0;
+  '
+}
+
+fail=0
+
+# stdin lines: <local ref> <local sha> <remote ref> <remote sha>
+while read -r localref localsha remoteref remotesha; do
+  # deleting a remote ref: nothing to scan
+  [ "$localsha" = "$Z" ] && continue
+
+  if [ "$remotesha" = "$Z" ]; then
+    # new remote branch: only commits not already present on this remote
+    revargs=("$localsha" "--not" "--remotes=${remote_name}")
+    logopts="$localsha --not --remotes=${remote_name}"
+  else
+    revargs=("${remotesha}..${localsha}")
+    logopts="${remotesha}..${localsha}"
+  fi
+
+  # commit list for this push line
+  commits="$(git rev-list "${revargs[@]}" 2>/dev/null | head -n "$MAX_COMMITS")"
+  [ -n "$commits" ] || continue
+
+  # blob = per-commit `git show` (message + patch), capped
+  blob="$(printf '%s\n' "$commits" | xargs -r -n1 git show --no-color 2>/dev/null | head -c "$MAX_BYTES")"
+
+  # 1. confidential-term scan
+  if [ "${PI_CONFIDENTIAL_GUARD_OFF:-0}" != "1" ]; then
+    terms="$(collect_terms)"
+    if [ -n "$terms" ]; then
+      while IFS= read -r term; do
+        [ -n "$term" ] || continue
+        if ! printf '%s' "$blob" | scan_one "$term"; then
+          echo "pre-push[confidential]: BLOCKED - a user-confirmed confidential identifier is present in the push range ${logopts}." >&2
+          fail=1
+        fi
+      done <<< "$terms"
+    fi
+  fi
+
+  # 2. gitleaks secret scan over the same range
+  if [ "${PI_PREPUSH_GITLEAKS:-1}" != "0" ] && command -v gitleaks >/dev/null 2>&1; then
+    if ! gitleaks git --no-banner --redact --log-opts="$logopts" . >/dev/null 2>&1; then
+      echo "pre-push[gitleaks]: BLOCKED - gitleaks flagged a secret in the push range ${logopts}." >&2
+      echo "  run: gitleaks git --redact --log-opts=\"$logopts\" .   # to see redacted findings" >&2
+      fail=1
+    fi
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  cat >&2 <<'MSG'
+
+Push blocked by the confidential/secret backstop.
+  - Rewrite the offending commit(s) to remove the identifier/secret, OR
+  - record the term as safe (pi `confidential_terms` action "allow") if it is not confidential, OR
+  - bypass intentionally: PI_CONFIDENTIAL_GUARD_OFF=1 git push ...  (term scan)
+                          git push --no-verify ...                  (all hooks)
+MSG
+  exit 1
+fi
+
+# chain to a repo-local pre-push hook (preserved under a global hooksPath).
+# NB: under core.hooksPath, `git rev-parse --git-path hooks/X` points back at
+# THIS dir, so resolve the repo-local hook via the git-dir explicitly.
+self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
+if [ -n "$git_dir" ] && [ -x "$git_dir/hooks/pre-push" ]; then
+  local_hook_abs="$(cd "$git_dir/hooks" && pwd)/pre-push"
+  if [ "$local_hook_abs" != "$self" ]; then
+    exec "$local_hook_abs" "$@"
+  fi
+fi
+
+exit 0
