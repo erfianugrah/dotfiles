@@ -76,8 +76,42 @@ export interface Bundle {
   frames?: Frame[];
   speakers: string[];
   hasWordSpeakers: boolean;
+  /** Per-speaker 256-d WeSpeaker voice embeddings, keyed by the segment
+   * speaker label. Present when a diarized job returned them. Used for
+   * voice-print identification. */
+  speakerEmbeddings?: Record<string, number[]>;
+  /** label -> assigned real name, from voice-print match or manual/LLM map. */
+  names?: Record<string, string>;
   createdAt: string;
   params: Record<string, unknown>;
+}
+
+// ── speaker naming (pure) ─────────────────────────────────────
+// Voice-print enrollment + cosine identification live SERVER-SIDE (whisper
+// app.py) so the SPA, bot, and plain-curl transcription all get named
+// speakers - not just this extension. The client keeps only manual/LLM
+// relabeling of an already-cached bundle.
+
+/**
+ * Relabel a bundle in place from a { oldLabel: newName } map: rewrites
+ * seg.speaker, each word.speaker, the speakers list, and the embeddings keys,
+ * and records bundle.names. Returns the same bundle for chaining. Unmapped
+ * labels are left untouched.
+ */
+export function applyNameMap(bundle: Bundle, map: Record<string, string>): Bundle {
+  const remap = (label: string | undefined) => (label && map[label] ? map[label] : label);
+  for (const seg of bundle.segments) {
+    seg.speaker = remap(seg.speaker);
+    for (const w of seg.words ?? []) w.speaker = remap(w.speaker);
+  }
+  bundle.speakers = [...new Set(bundle.segments.map((s) => s.speaker).filter((x): x is string => !!x))].sort();
+  if (bundle.speakerEmbeddings) {
+    const ne: Record<string, number[]> = {};
+    for (const [k, v] of Object.entries(bundle.speakerEmbeddings)) ne[remap(k) ?? k] = v;
+    bundle.speakerEmbeddings = ne;
+  }
+  bundle.names = { ...(bundle.names ?? {}), ...map };
+  return bundle;
 }
 
 // ── file resolution (pure) ────────────────────────────────────────────────
@@ -357,7 +391,7 @@ async function runTranscriptionJob(
   opts: { diarize: boolean; minSpeakers: number; maxSpeakers: number; language: string; translate: boolean | "auto"; timeoutMs: number },
   onUpdate: ((m: string) => void) | undefined,
   signal: AbortSignal | undefined,
-): Promise<Bundle["segments"]> {
+): Promise<{ segments: Segment[]; speakerEmbeddings?: Record<string, number[]>; names?: Record<string, string> }> {
   const submit = await whisperPostJson<{ job_id: string }>(
     "/api/jobs",
     {
@@ -389,8 +423,12 @@ async function runTranscriptionJob(
       const sub = st.result?.subtitle_file;
       if (!sub) throw new Error("job done but no subtitle_file (word-level JSON) was produced");
       const raw = await whisperGet(`/api/artifact?path=${encodeURIComponent(sub)}`, signal).then((r) => r.text());
-      const parsed = JSON.parse(raw) as { segments: Segment[] };
-      return parsed.segments ?? [];
+      const parsed = JSON.parse(raw) as {
+        segments: Segment[];
+        speaker_embeddings?: Record<string, number[]>;
+        speaker_names?: Record<string, string>;
+      };
+      return { segments: parsed.segments ?? [], speakerEmbeddings: parsed.speaker_embeddings, names: parsed.speaker_names };
     }
     if (st.status === "failed" || st.status === "cancelled") {
       throw new Error(`transcription ${st.status}${st.error ? `: ${st.error}` : ""}`);
@@ -491,7 +529,7 @@ async function ensureBundle(
     if (cached) return { bundle: cached, path: cachePath(key), key, fromCache: true };
   }
 
-  const segments = await runTranscriptionJob(
+  const { segments, speakerEmbeddings, names } = await runTranscriptionJob(
     serverPath,
     { diarize: opts.diarize, minSpeakers: opts.minSpeakers, maxSpeakers: opts.maxSpeakers, language: opts.language, translate: opts.translate, timeoutMs: opts.timeoutMs },
     onUpdate,
@@ -514,6 +552,8 @@ async function ensureBundle(
     frames,
     speakers,
     hasWordSpeakers,
+    speakerEmbeddings,
+    names: names && Object.keys(names).length ? names : undefined,
     createdAt: new Date().toISOString(),
     params,
   };
@@ -576,6 +616,11 @@ const videoExtract = defineTool({
     lines.push(`file: ${bundle.file}`);
     lines.push(`duration: ${hhmmss(bundle.duration)}  |  segments: ${bundle.segments.length}  |  speakers: ${bundle.speakers.length ? bundle.speakers.join(", ") : "(none / diarize off)"}`);
     if (bundle.frames) lines.push(`frames described: ${bundle.frames.length}`);
+    if (bundle.names && Object.keys(bundle.names).length) {
+      lines.push(`auto-identified: ${Object.values(bundle.names).join(", ")} (server voice prints)`);
+    } else if (bundle.hasWordSpeakers) {
+      lines.push(`names: none matched - enroll with video_enroll, or label via video_name`);
+    }
     lines.push(`word-level speaker timing: ${bundle.hasWordSpeakers ? "yes (overlap analysis available)" : "NO (re-run with diarize:true for overlap)"}`);
     lines.push(fromCache ? "(served from local bundle cache)" : "(fresh run)");
     lines.push("");
@@ -733,6 +778,148 @@ const videoDoc = defineTool({
   },
 });
 
+// ── name-map parsing (pure) ───────────────────────────────────────────────
+
+/**
+ * Parse a name map from either JSON ({"SPEAKER_00":"Erfi"}) or a compact
+ * comma/newline-separated k=v form ("SPEAKER_00=Erfi, M-SPEAKER_01=Alice").
+ * Returns {} on empty / unparseable input.
+ */
+export function parseNameMap(input: string): Record<string, string> {
+  const s = (input ?? "").trim();
+  if (!s) return {};
+  if (s.startsWith("{")) {
+    try {
+      const o = JSON.parse(s) as Record<string, unknown>;
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(o)) if (v != null) out[k] = String(v);
+      return out;
+    } catch {
+      return {};
+    }
+  }
+  const out: Record<string, string> = {};
+  for (const pair of s.split(/[,\n]/)) {
+    const m = pair.split("=");
+    if (m.length >= 2) {
+      const k = m[0].trim();
+      const v = m.slice(1).join("=").trim();
+      if (k && v) out[k] = v;
+    }
+  }
+  return out;
+}
+
+// ── voice-print HTTP (server-side store) ──────────────────────────────────
+
+interface VoicePrintInfo {
+  name: string;
+  count: number;
+}
+async function listVoiceprints(signal: AbortSignal | undefined): Promise<VoicePrintInfo[]> {
+  const r = (await whisperGet("/api/voiceprints", signal).then((x) => x.json())) as { voiceprints?: VoicePrintInfo[] };
+  return r.voiceprints ?? [];
+}
+
+// ── tool: video_enroll ────────────────────────────────────────────────────
+
+const videoEnroll = defineTool({
+  name: "video_enroll",
+  promptSnippet: "video_enroll - enroll/list/remove a voice print so the whisper server auto-names that speaker in ALL future transcripts (UI, bot, curl, extension).",
+  promptGuidelines: [
+    "Enroll from an existing bundle: pass name + bundle + speaker (the diarized label, e.g. 'M-SPEAKER_01'). Pulls that speaker's embedding from the bundle - no re-run.",
+    "Or enroll from a clean clip: pass name + file (+ optional start/end seconds) and the server embeds it.",
+    "action:'list' shows enrolled names; action:'remove' + name deletes.",
+    "Identification is server-side, so enrolled names appear in plain transcription too - not just via this extension.",
+    "Enrolling the same name twice adds a second reference vector (improves matching); it does not overwrite.",
+  ],
+  label: "Video Enroll",
+  description:
+    "Manage server-side voice prints for automatic speaker naming. Enroll a name from a cached bundle's speaker (by embedding) or from an audio/video clip; list or remove enrolled prints. Enrolled speakers are auto-named in every diarized transcript the server produces.",
+  parameters: Type.Object({
+    action: Type.Optional(Type.Union([Type.Literal("add"), Type.Literal("list"), Type.Literal("remove")], { description: "'add' (default), 'list', or 'remove'." })),
+    name: Type.Optional(Type.String({ description: "Person's name (required for add/remove)." })),
+    bundle: Type.Optional(Type.String({ description: "add: cached bundle path to pull the speaker embedding from." })),
+    speaker: Type.Optional(Type.String({ description: "add-from-bundle: the diarized speaker label to enroll (e.g. 'M-SPEAKER_01')." })),
+    file: Type.Optional(Type.String({ description: "add-from-clip: server-side path / 'latest' / filename substring the server will embed." })),
+    start: Type.Optional(Type.Number({ description: "add-from-clip: clip start (seconds)." })),
+    end: Type.Optional(Type.Number({ description: "add-from-clip: clip end (seconds)." })),
+  }),
+  async execute(_id, params, signal) {
+    const action = params.action ?? "add";
+    if (action === "list") {
+      const vps = await listVoiceprints(signal);
+      const text = vps.length ? vps.map((v) => `  ${v.name} (${v.count} print${v.count === 1 ? "" : "s"})`).join("\n") : "(no voice prints enrolled)";
+      return { content: [{ type: "text", text: `enrolled voice prints:\n${text}` }], details: { voiceprints: vps } };
+    }
+    if (action === "remove") {
+      if (!params.name) throw new Error("remove requires `name`");
+      const r = await fetch(`${WHISPER_URL}/api/voiceprints/${encodeURIComponent(params.name)}`, { method: "DELETE", signal });
+      if (!r.ok) throw new Error(`remove failed: HTTP ${r.status}`);
+      return { content: [{ type: "text", text: `removed voice print: ${params.name}` }], details: { removed: params.name } };
+    }
+    // add
+    if (!params.name) throw new Error("add requires `name`");
+    let body: Record<string, unknown>;
+    if (params.bundle) {
+      const b = readBundleByPath(params.bundle);
+      if (!b) throw new Error(`bundle not found: ${params.bundle}`);
+      if (!params.speaker) throw new Error("add-from-bundle requires `speaker` (a diarized label)");
+      const vec = b.speakerEmbeddings?.[params.speaker];
+      if (!vec) {
+        const avail = Object.keys(b.speakerEmbeddings ?? {}).join(", ") || "(none - was the bundle diarized?)";
+        throw new Error(`no embedding for speaker "${params.speaker}". Available: ${avail}`);
+      }
+      body = { name: params.name, embedding: vec, source: `${b.file}#${params.speaker}` };
+    } else if (params.file) {
+      const serverPath = await resolveToServerPath(params.file, signal);
+      body = { name: params.name, file_path: serverPath, start: params.start, end: params.end };
+    } else {
+      throw new Error("add requires either `bundle`+`speaker` or `file`");
+    }
+    const res = await whisperPostJson<{ name: string; count: number; dim?: number }>("/api/voiceprints", body, signal);
+    return {
+      content: [{ type: "text", text: `enrolled "${res.name}" (now ${res.count} reference print${res.count === 1 ? "" : "s"}). Future diarized transcripts will auto-name this speaker.` }],
+      details: res,
+    };
+  },
+});
+
+// ── tool: video_name ──────────────────────────────────────────────────────
+
+const videoName = defineTool({
+  name: "video_name",
+  promptSnippet: "video_name - relabel speakers in a cached bundle from a manual/LLM-inferred {label:name} map (client-side; does not enroll).",
+  promptGuidelines: [
+    "Use for one-off naming or correcting a transcript WITHOUT re-running the server - e.g. you inferred names from the transcript ('thanks, Alice').",
+    "`map` accepts JSON {\"M-SPEAKER_01\":\"Alice\"} or compact 'M-SPEAKER_01=Alice, M-SPEAKER_00=Erfi'.",
+    "To make a name stick across FUTURE calls, use video_enroll instead (server-side voice print).",
+    "Rewrites the cached bundle in place; video_overlap / video_doc then show the names.",
+  ],
+  label: "Video Name",
+  description:
+    "Relabel speakers in a cached bundle from a {label:name} map (manual or LLM-inferred). Client-side only - rewrites the bundle so downstream tools show real names. Does not enroll a voice print (use video_enroll for that).",
+  parameters: Type.Object({
+    bundle: Type.String({ description: "Path to a cached bundle from video_extract." }),
+    map: Type.String({ description: "Name map: JSON {\"M-SPEAKER_01\":\"Alice\"} or compact 'M-SPEAKER_01=Alice, M-SPEAKER_00=Erfi'." }),
+  }),
+  async execute(_id, params) {
+    const b = readBundleByPath(params.bundle);
+    if (!b) throw new Error(`bundle not found: ${params.bundle}`);
+    const map = parseNameMap(params.map);
+    if (!Object.keys(map).length) throw new Error("empty/unparseable map - use JSON or 'LABEL=Name, ...'");
+    const before = [...b.speakers];
+    applyNameMap(b, map);
+    // persist back to the same cache file
+    const key = bundleKeyFromPath(params.bundle);
+    writeBundle(key, b);
+    return {
+      content: [{ type: "text", text: `relabeled: ${Object.entries(map).map(([k, v]) => `${k} -> ${v}`).join(", ")}\nspeakers now: ${b.speakers.join(", ")}\n(was: ${before.join(", ")})` }],
+      details: { map, speakers: b.speakers },
+    };
+  },
+});
+
 // ── bundle-path helpers ───────────────────────────────────────────────────
 
 // A bundle arg may be a full cache path or a bare key; support both.
@@ -755,4 +942,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(videoExtract);
   pi.registerTool(videoOverlap);
   pi.registerTool(videoDoc);
+  pi.registerTool(videoEnroll);
+  pi.registerTool(videoName);
 }

@@ -200,6 +200,41 @@ JSON the job writes server-side; path-guarded to the temp dir). `video_extract`
 passes `refresh:true` because the transcript cache stores text only and nulls
 `subtitle_file` on a hit.
 
+### Automatic speaker names (voice prints)
+
+Speaker identification is **server-side** so names land in every output (SPA,
+bot, curl, extension) - not just via pi. A voice print is a 256-d WeSpeaker
+embedding (from the diarization pipeline) tagged with a person's name, stored
+on the persistent `/data` volume (`/data/voiceprints.json`).
+
+- Diarized `format:json` jobs now emit `speaker_embeddings` ({label: 256-vec})
+  and, when prints match, `speaker_names` ({label: name}) - and the transcript
+  labels are rewritten to the names in ALL formats (txt/srt/vtt/json).
+- Matching is greedy one-to-one cosine (threshold `VOICEPRINT_THRESHOLD`,
+  default 0.5; self-cos ~1.0 vs cross-speaker ~0.13, so it is well separated).
+- Toggle with `IDENTIFY_SPEAKERS=0`.
+
+Endpoints:
+
+```bash
+# enroll from a clean clip (server embeds it)
+curl -sX POST :7860/api/voiceprints -d '{"name":"Erfi","file_path":"/media/clip.mkv","start":0,"end":20}'
+# or enroll a vector directly (e.g. pulled from a prior job's speaker_embeddings)
+curl -sX POST :7860/api/voiceprints -d '{"name":"Erfi","embedding":[...]}'
+curl -s   :7860/api/voiceprints            # list names + counts
+curl -sX DELETE :7860/api/voiceprints/Erfi # remove
+```
+
+Enrolling the same name twice appends a second reference vector (improves
+matching). From pi, the `video_enroll` tool wraps these (enroll from a cached
+bundle's speaker, or from a clip); `video_name` does client-side manual/LLM
+relabel of a cached bundle without re-running the server.
+
+**Host-from-track (future):** with multi-track OBS recordings, transcribing
+track 2 (mic) separately would name the host with zero ML. Not yet wired -
+enrolling your own voice print covers the host in the meantime, on single- and
+multi-track files alike.
+
 **Limitation - single-stream diarization cannot see dense simultaneous
 speech.** WhisperX transcribes one audio stream and assigns each word to
 exactly one speaker, so genuinely overlapping talk gets serialized rather

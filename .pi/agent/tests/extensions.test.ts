@@ -30,7 +30,10 @@ import {
   mergeUtterances,
   computeOverlap,
   hhmmss,
+  parseNameMap,
+  applyNameMap,
   type Segment,
+  type Bundle,
 } from "../extensions/video-review.ts";
 import {
   dateFromName,
@@ -3441,5 +3444,63 @@ describe("video-review / computeOverlap", () => {
     ];
     const r = computeOverlap(mergeUtterances(segs), 0.3);
     expect(r.events).toHaveLength(0);
+  });
+});
+
+describe("video-review / parseNameMap", () => {
+  test("parses JSON form", () => {
+    expect(parseNameMap('{"M-SPEAKER_00":"Erfi","M-SPEAKER_01":"Alice"}')).toEqual({
+      "M-SPEAKER_00": "Erfi",
+      "M-SPEAKER_01": "Alice",
+    });
+  });
+  test("parses compact k=v form (comma + newline)", () => {
+    expect(parseNameMap("M-SPEAKER_00=Erfi, M-SPEAKER_01=Alice")).toEqual({
+      "M-SPEAKER_00": "Erfi",
+      "M-SPEAKER_01": "Alice",
+    });
+    expect(parseNameMap("A=Erfi\nB=Bob")).toEqual({ A: "Erfi", B: "Bob" });
+  });
+  test("handles names with spaces and empty input", () => {
+    expect(parseNameMap("SPEAKER_00=Jane Doe")).toEqual({ SPEAKER_00: "Jane Doe" });
+    expect(parseNameMap("")).toEqual({});
+    expect(parseNameMap("garbage")).toEqual({});
+  });
+});
+
+describe("video-review / applyNameMap", () => {
+  function bundle(): Bundle {
+    return {
+      file: "/media/x.mkv",
+      language: "",
+      duration: 5,
+      segments: [
+        { start: 0, end: 1, text: "hi", speaker: "M-SPEAKER_00", words: [{ word: "hi", start: 0, end: 1, speaker: "M-SPEAKER_00" }] },
+        { start: 1, end: 2, text: "yo", speaker: "M-SPEAKER_01", words: [{ word: "yo", start: 1, end: 2, speaker: "M-SPEAKER_01" }] },
+      ],
+      speakers: ["M-SPEAKER_00", "M-SPEAKER_01"],
+      hasWordSpeakers: true,
+      speakerEmbeddings: { "M-SPEAKER_00": [1, 0], "M-SPEAKER_01": [0, 1] },
+      createdAt: "now",
+      params: {},
+    };
+  }
+  test("rewrites segments, words, speakers list, embeddings keys, and records names", () => {
+    const b = bundle();
+    applyNameMap(b, { "M-SPEAKER_00": "Erfi" });
+    expect(b.segments[0].speaker).toBe("Erfi");
+    expect(b.segments[0].words![0].speaker).toBe("Erfi");
+    expect(b.segments[1].speaker).toBe("M-SPEAKER_01"); // unmapped untouched
+    expect(b.speakers).toEqual(["Erfi", "M-SPEAKER_01"]);
+    expect(b.speakerEmbeddings!["Erfi"]).toEqual([1, 0]);
+    expect(b.speakerEmbeddings!["M-SPEAKER_00"]).toBeUndefined();
+    expect(b.names).toEqual({ "M-SPEAKER_00": "Erfi" });
+  });
+  test("merges successive maps into names", () => {
+    const b = bundle();
+    applyNameMap(b, { "M-SPEAKER_00": "Erfi" });
+    applyNameMap(b, { "M-SPEAKER_01": "Alice" });
+    expect(b.names).toEqual({ "M-SPEAKER_00": "Erfi", "M-SPEAKER_01": "Alice" });
+    expect(b.speakers).toEqual(["Alice", "Erfi"]); // applyNameMap sorts speakers
   });
 });
