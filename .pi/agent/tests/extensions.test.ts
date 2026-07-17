@@ -25,6 +25,14 @@ import {
 } from "../extensions/write-stream.ts";
 import { parseImage, versionCompare } from "../extensions/oci-tags.ts";
 import {
+  resolveMediaPath,
+  bundleCacheKey,
+  mergeUtterances,
+  computeOverlap,
+  hhmmss,
+  type Segment,
+} from "../extensions/video-review.ts";
+import {
   dateFromName,
   extractText,
   formatHit,
@@ -3317,5 +3325,121 @@ describe("ascii-punctuation-guard / WRITE_BASH", () => {
     expect(ASCII_WRITE_BASH.test("echo hello")).toBe(false);
     expect(ASCII_WRITE_BASH.test("rg pattern src/")).toBe(false);
     expect(ASCII_WRITE_BASH.test("git log --oneline")).toBe(false);
+  });
+});
+
+// ── video-review ────────────────────────────────────────────────────────────
+
+describe("video-review / resolveMediaPath", () => {
+  const files = [
+    { name: "2026-07-17 12-50-00.mkv", path: "/media/2026-07-17 12-50-00.mkv" },
+    { name: "2026-07-17 11-29-45.mkv", path: "/media/2026-07-17 11-29-45.mkv" },
+  ];
+  test("passes server-side paths through untouched", () => {
+    expect(resolveMediaPath("/media/foo.mkv", files)).toBe("/media/foo.mkv");
+    expect(resolveMediaPath("/tmp/x.wav", files)).toBe("/tmp/x.wav");
+  });
+  test("latest/newest -> first (newest-first list)", () => {
+    expect(resolveMediaPath("latest", files)).toBe("/media/2026-07-17 12-50-00.mkv");
+    expect(resolveMediaPath("newest", files)).toBe("/media/2026-07-17 12-50-00.mkv");
+  });
+  test("substring match, newest wins", () => {
+    expect(resolveMediaPath("11-29", files)).toBe("/media/2026-07-17 11-29-45.mkv");
+  });
+  test("no match -> null", () => {
+    expect(resolveMediaPath("nope", files)).toBeNull();
+    expect(resolveMediaPath("", files)).toBeNull();
+  });
+});
+
+describe("video-review / bundleCacheKey", () => {
+  test("stable + params-sensitive", () => {
+    const a = bundleCacheKey("/media/x.mkv", { diarize: true });
+    const b = bundleCacheKey("/media/x.mkv", { diarize: true });
+    const c = bundleCacheKey("/media/x.mkv", { diarize: false });
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
+    expect(a).toHaveLength(16);
+  });
+});
+
+describe("video-review / hhmmss", () => {
+  test("formats", () => {
+    expect(hhmmss(0)).toBe("0:00");
+    expect(hhmmss(65)).toBe("1:05");
+    expect(hhmmss(3661)).toBe("1:01:01");
+    expect(hhmmss(-5)).toBe("0:00");
+  });
+});
+
+// Build a segment carrying word-level speaker timing.
+function seg(speaker: string, words: [string, number, number][]): Segment {
+  return {
+    start: words[0][1],
+    end: words[words.length - 1][2],
+    text: words.map((w) => w[0]).join(" "),
+    speaker,
+    words: words.map(([word, start, end]) => ({ word, start, end, speaker })),
+  };
+}
+
+describe("video-review / mergeUtterances", () => {
+  test("merges same-speaker words within gap, splits on speaker change", () => {
+    const segs = [
+      seg("A", [["hello", 0, 0.4], ["there", 0.5, 0.9]]),
+      seg("B", [["hi", 1.2, 1.5]]),
+      seg("A", [["again", 5.0, 5.4]]), // big gap -> new utterance
+    ];
+    const u = mergeUtterances(segs, 0.6);
+    expect(u).toHaveLength(3);
+    expect(u[0].speaker).toBe("A");
+    expect(u[0].wordCount).toBe(2);
+    expect(u[1].speaker).toBe("B");
+    expect(u[2].speaker).toBe("A");
+  });
+  test("skips words lacking timing/speaker", () => {
+    const segs: Segment[] = [
+      { start: 0, end: 1, text: "x", speaker: "A", words: [{ word: "x" }] },
+    ];
+    expect(mergeUtterances(segs)).toHaveLength(0);
+  });
+});
+
+describe("video-review / computeOverlap", () => {
+  test("detects a talk-over: B starts inside A's utterance and A yields", () => {
+    // A talks 0-3s; B comes in at 2.0s and runs to 4s -> A ends first (yields).
+    const segs = [
+      seg("A", [["long", 0, 1], ["winded", 1, 2], ["point", 2, 3]]),
+      seg("B", [["wait", 2.0, 2.6], ["actually", 2.6, 4.0]]),
+    ];
+    const r = computeOverlap(mergeUtterances(segs), 0.3);
+    expect(r.events).toHaveLength(1);
+    const e = r.events[0];
+    expect(e.interrupter).toBe("B");
+    expect(e.interruptee).toBe("A");
+    expect(e.yielded).toBe("A"); // A ends (3s) before B (4s)
+    expect(e.overlapSec).toBeCloseTo(1.0, 1);
+    const a = r.speakers.find((s) => s.speaker === "A")!;
+    const b = r.speakers.find((s) => s.speaker === "B")!;
+    expect(b.startedOverOthers).toBe(1);
+    expect(a.wasStartedOver).toBe(1);
+    expect(r.pairCounts[0].pair).toBe("B over A");
+  });
+  test("clean turns with a gap produce no overlaps", () => {
+    const segs = [
+      seg("A", [["done", 0, 1]]),
+      seg("B", [["ok", 2, 3]]),
+    ];
+    const r = computeOverlap(mergeUtterances(segs), 0.3);
+    expect(r.events).toHaveLength(0);
+    expect(r.totalOverlapSec).toBe(0);
+  });
+  test("sub-threshold backchannel is filtered", () => {
+    const segs = [
+      seg("A", [["a", 0, 1], ["b", 1, 2]]),
+      seg("B", [["mm", 1.9, 2.0]]), // 0.1s overlap < 0.3 threshold
+    ];
+    const r = computeOverlap(mergeUtterances(segs), 0.3);
+    expect(r.events).toHaveLength(0);
   });
 });

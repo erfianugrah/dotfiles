@@ -179,8 +179,40 @@ JOB=$(curl -sX POST http://localhost:7860/api/jobs \
 - **Long delay on YouTube**: yt-dlp deno path may need fresh remote-components. Check whisper service logs.
 - **Path not found**: `file_path` must exist on whisper server's filesystem, not yours. Use `/api/yt-download` to materialise YouTube URLs first.
 
+## Video-to-docs / conversation review (video-review extension)
+
+The pi extension `video-review.ts` orchestrates the primitives above into a
+video-to-docs / call-review pipeline. Three tools:
+
+- **`video_extract`** - transcribe + diarize (word-level speaker timing),
+  optionally VLM-describe frames. Runs the slow GPU work ONCE, caches the
+  full bundle to `/tmp/video-review/<key>.json`, and returns only a compact
+  summary + bundle path (the huge word array never enters model context).
+- **`video_overlap`** - pure-TS conversation analysis over the cached bundle:
+  objective speech-overlap events, speaking-time %, turn-taking latency
+  (median entry gap per speaker), who-came-in-over-whom, pair clustering.
+- **`video_doc`** - markdown-ready evidence bundle (metadata + speaking-time
+  + diarized transcript + visual timeline + overlap summary) for the agent to
+  synthesise the final notes/review.
+
+Depends on the `GET /api/artifact?path=...` endpoint (serves the word-level
+JSON the job writes server-side; path-guarded to the temp dir). `video_extract`
+passes `refresh:true` because the transcript cache stores text only and nulls
+`subtitle_file` on a hit.
+
+**Limitation - single-stream diarization cannot see dense simultaneous
+speech.** WhisperX transcribes one audio stream and assigns each word to
+exactly one speaker, so genuinely overlapping talk gets serialized rather
+than represented as two colliding word spans. `video_overlap` therefore
+detects turn-boundary collisions and reports the median-entry-gap signal
+reliably, but under-counts true talk-over. For an acoustically exact overlap
+measurement, record with **OBS multi-track** (mic on track 2, desktop audio on
+track 3, mkv container), then compare the isolated tracks with VAD/RMS - no
+diarization needed. New OBS recordings should enable this.
+
 ## Related docs
 
+- Extension: `~/dotfiles/.pi/agent/extensions/video-review.ts` (unit tests in `~/dotfiles/.pi/agent/tests/extensions.test.ts`)
 - Service repo: `~/whisper-transcribe`
 - MCP wrapper (Python): `~/llm-compose/mcp/whisper-server.py`
 - Compose definitions: `~/llm-compose/compose.yaml` (whisper + bot services)
