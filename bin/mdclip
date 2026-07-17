@@ -3,15 +3,23 @@
 # target actually accepts, so pasting preserves formatting instead of showing
 # raw markdown.
 #
-# Two modes:
-#   (default)   Markdown -> HTML, clipboard as rich text. For Gmail / Outlook /
-#               Google Docs / any WYSIWYG box: bold, bullets, headings, links,
-#               tables, monospace all survive paste.
-#   --slack     Markdown -> Slack mrkdwn, clipboard as plain text ONLY. Slack
-#               ignores pasted rich text and reads the plain-text slot, so this
-#               converts **bold** -> *bold*, *italic*/_italic_ -> _italic_,
-#               [text](url) -> <url|text>, # Heading -> *Heading*, and
-#               -/*/+ bullets -> "* ". Code spans and ``` fences pass through.
+# Modes:
+#   (default)      Markdown -> HTML, clipboard as rich text. For Gmail / Outlook
+#                  / Google Docs / any WYSIWYG box: bold, bullets, headings,
+#                  links, tables, monospace all survive paste.
+#   chat flavours  Markdown -> that app's plain-text markup, clipboard as plain
+#                  text ONLY. These apps ignore pasted HTML and read the plain
+#                  slot, applying their own inline markup on send:
+#     --slack      **bold**->*bold*, italic->_i_, [t](u)-><u|t>, #H->*H*,
+#                  bullets->bullet dot, strike ~~x~~->~x~.
+#     --discord    near-identity GFM: keeps **bold**, *italic*, `code`, ```fences
+#                  (with lang highlight), # headers, - bullets, ~~strike~~;
+#                  [t](u)->"t (u)" (Discord masked links are embed-only).
+#     --telegram   **bold** kept, italic->__i__, [t](u) kept, #H->**H**, `code`
+#                  and ```fences``` kept, strike ~~x~~ kept.
+#     --whatsapp   **bold**->*bold*, italic->_i_, strike ~~x~~->~x~, #H->*H*,
+#                  [t](u)->"t (u)", `code`/```fences``` and - bullets kept.
+#   All chat flavours drop GFM table delimiter rows and pass code fences verbatim.
 #
 # Cross-OS. The Markdown -> HTML render is portable (Quarto's bundled pandoc);
 # only the clipboard-set step is platform-specific:
@@ -21,15 +29,18 @@
 #   X11      xclip -t text/html                (rich) / xclip (plain)
 #
 # Usage:
-#   mdclip reply.md              # rich text (Gmail/Docs)
+#   mdclip reply.md              # rich text (Gmail/Docs/WYSIWYG)
 #   mdclip < reply.md            # from stdin
-#   mdclip --slack reply.md      # Slack mrkdwn, plain text
-#   mdclip -s < reply.md
+#   mdclip --slack     reply.md  # Slack mrkdwn, plain text
+#   mdclip --discord   reply.md  # Discord markdown
+#   mdclip --telegram  reply.md  # Telegram markdown
+#   mdclip --whatsapp  reply.md  # WhatsApp markup
+#   mdclip -s < reply.md         # short flags: -s -d -t -w
 #
 # Notes:
-#   - Input is treated as GitHub-Flavoured Markdown (gfm). In --slack mode a
-#     single *word* is markdown ITALIC and becomes _word_; use **word** for
-#     Slack bold. (Don't feed already-Slack-formatted text through --slack.)
+#   - Input is treated as GitHub-Flavoured Markdown (gfm). In every chat flavour
+#     a single *word* is markdown ITALIC; use **word** for bold. (Don't feed
+#     already-app-formatted text back through a chat flavour.)
 #   - Rich mode: code blocks arrive as monospace; Gmail will not syntax-
 #     highlight them. For highlighted/long code, link a gist or paste a shot.
 #   - Only WSL sets BOTH a rich flavour and a plain-text fallback in one shot.
@@ -155,21 +166,23 @@ paste_hint() {
 # ---------------------------------------------------------------------------
 # Arg parse.
 # ---------------------------------------------------------------------------
-slack=0
+flavor=""
 args=()
 for a in "$@"; do
   case "$a" in
-    -s|--slack) slack=1 ;;
+    -s|--slack)    flavor=slack ;;
+    -d|--discord)  flavor=discord ;;
+    -t|--telegram) flavor=telegram ;;
+    -w|--whatsapp) flavor=whatsapp ;;
     *) args+=("$a") ;;
   esac
 done
 set -- "${args[@]:-}"
 
-if [ "$slack" -eq 0 ]; then
+if [ -z "$flavor" ]; then
   need quarto "needed for its bundled pandoc"
-fi
-if [ "$slack" -eq 1 ]; then
-  need perl "needed for --slack conversion"
+else
+  need perl "needed for the $flavor conversion"
 fi
 
 # Read markdown from a file arg or stdin.
@@ -181,31 +194,57 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Slack mode: convert Markdown -> Slack mrkdwn, set plain text only.
+# Chat flavours: convert Markdown -> the app's plain-text markup, set plain
+# text only. One parametric transform; per-app token table selects the markup.
 # ---------------------------------------------------------------------------
-if [ "$slack" -eq 1 ]; then
-  slacktext="$(printf '%s' "$src" | perl -CSD -Mstrict -Mwarnings -e '
+if [ -n "$flavor" ]; then
+  chattext="$(printf '%s' "$src" | FLAVOR="$flavor" perl -CSD -Mstrict -Mwarnings -e '
+    my %F = (
+      slack    => { bo=>"*",  bc=>"*",  io=>"_",  ic=>"_",  so=>"~",  sc=>"~",  hdr=>"bold", bullet=>"\x{2022} ", link=>"slack" },
+      discord  => { bo=>"**", bc=>"**", io=>"*",  ic=>"*",  so=>"~~", sc=>"~~", hdr=>"keep", bullet=>"- ",        link=>"plain" },
+      telegram => { bo=>"**", bc=>"**", io=>"__", ic=>"__", so=>"~~", sc=>"~~", hdr=>"bold", bullet=>"\x{2022} ", link=>"keep"  },
+      whatsapp => { bo=>"*",  bc=>"*",  io=>"_",  ic=>"_",  so=>"~",  sc=>"~",  hdr=>"bold", bullet=>"- ",        link=>"plain" },
+    );
+    my $f = $F{$ENV{FLAVOR}} or die "mdclip: unknown flavor: $ENV{FLAVOR}\n";
+    my ($bo,$bc,$io,$ic,$so,$sc)=@{$f}{qw(bo bc io ic so sc)};
     my $in_code = 0;
     while (my $line = <STDIN>) {
       chomp $line;
       if ($line =~ /^\s*```/) { $in_code = !$in_code; print "$line\n"; next; }
       if ($in_code)           { print "$line\n"; next; }
+      # drop GFM table delimiter rows (pipes + dashes/colons/space only)
+      next if ($line =~ /\|/ && $line =~ /-/ && $line =~ /^[\s|:\-]+$/);
       # protect inline code spans from the transforms below
       my @spans;
       $line =~ s/(`[^`]*`)/push @spans, $1; "\x00" . $#spans . "\x00"/ge;
-      # ATX headings -> bold line (sentinel so the italic pass below leaves it)
-      $line =~ s/^\s{0,3}\#{1,6}\s+(.*?)\s*\#*\s*$/\x01$1\x01/;
-      # -,*,+ bullets -> Slack bullet (before bold/italic touch the *)
-      $line =~ s/^(\s*)[-*+]\s+/$1\x{2022} /;
-      # [text](url) -> <url|text>
-      $line =~ s/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/<$2|$1>/g;
-      # **bold** / __bold__ -> sentinel (so italic pass ignores them)
-      $line =~ s/\*\*(.+?)\*\*/\x01$1\x01/g;
-      $line =~ s/__(.+?)__/\x01$1\x01/g;
-      # remaining *italic* -> _italic_ ( _italic_ is already correct )
-      $line =~ s/\*(\S(?:.*?\S)?)\*/_$1_/g;
-      # bold sentinel -> single *
-      $line =~ s/\x01/*/g;
+      # strikethrough ~~x~~ -> sentinel (before other tilde handling)
+      $line =~ s/~~(.+?)~~/\x04$1\x05/g;
+      # ATX heading -> bold sentinel, or keep (# ) for flavours with headers
+      if ($line =~ /^\s{0,3}\#{1,6}\s+(.*?)\s*\#*\s*$/) {
+        my $h = $1;
+        $line = "\x02$h\x03" if $f->{hdr} eq "bold";
+      }
+      # -,*,+ bullets -> per-flavour bullet (before bold/italic touch the *)
+      $line =~ s/^(\s*)[-*+]\s+/$1$f->{bullet}/;
+      # masked links per flavour
+      if ($f->{link} eq "slack") {
+        $line =~ s/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/<$2|$1>/g;
+      } elsif ($f->{link} eq "plain") {
+        $line =~ s/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/$1 ($2)/g;
+      }
+      # ***bold+italic*** first (else the ** and * passes split it wrong)
+      $line =~ s/\*\*\*(.+?)\*\*\*/\x02\x06$1\x07\x03/g;
+      # **bold** / __bold__ -> bold sentinel (so italic pass ignores them)
+      $line =~ s/\*\*(.+?)\*\*/\x02$1\x03/g;
+      $line =~ s/(?<!\w)__(.+?)__(?!\w)/\x02$1\x03/g;
+      # *italic* (GFM allows intraword) / _italic_ (word-boundary only, so
+      # some_var_name is left intact)
+      $line =~ s/\*(\S(?:.*?\S)?)\*/\x06$1\x07/g;
+      $line =~ s/(?<!\w)_(\S(?:.*?\S)?)_(?!\w)/\x06$1\x07/g;
+      # emit per-flavour tokens
+      $line =~ s/\x02/$bo/g; $line =~ s/\x03/$bc/g;
+      $line =~ s/\x06/$io/g; $line =~ s/\x07/$ic/g;
+      $line =~ s/\x04/$so/g; $line =~ s/\x05/$sc/g;
       # restore code spans
       $line =~ s/\x00(\d+)\x00/$spans[$1]/g;
       print "$line\n";
@@ -214,9 +253,9 @@ if [ "$slack" -eq 1 ]; then
 
   tmptxt="$(mktemp --suffix=.txt)"
   trap 'rm -f "$tmptxt"' EXIT
-  printf '%s' "$slacktext" > "$tmptxt"
+  printf '%s' "$chattext" > "$tmptxt"
   set_clip_plain "$tmptxt"
-  echo "Slack mrkdwn is on the clipboard (plain text). Paste into Slack with $(paste_hint)." >&2
+  echo "$flavor markup is on the clipboard (plain text). Paste with $(paste_hint)." >&2
   exit 0
 fi
 
