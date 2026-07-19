@@ -57,8 +57,10 @@ curl -sX POST http://localhost:7860/api/yt-download \
   -d '{"url": "https://youtube.com/watch?v=..."}'
 ```
 
-Returns `{ "path": "/tmp/<download>.<ext>" }` on the whisper server's
-filesystem (NOT your local FS — pass the returned path to `/api/jobs`).
+Returns `{ "filename": "/tmp/yt-dlp-XXXX/<id>.wav", "title": ...,
+"duration": <seconds>, "was_live": false, "live_status": ... }` on the whisper
+server's filesystem (NOT your local FS). The download path is under
+**`.filename`** (NOT `.path`) - pass it to `/api/jobs` as `file_path`.
 
 ### Transcribe a file (async via queue — canonical)
 
@@ -138,7 +140,7 @@ URL='https://youtube.com/watch?v=...'
 # Single shot
 DL=$(curl -sX POST http://localhost:7860/api/yt-download \
   -H 'content-type: application/json' \
-  -d "{\"url\":\"$URL\"}" | jq -r .path)
+  -d "{\"url\":\"$URL\"}" | jq -r .filename)   # .filename, NOT .path
 
 JOB=$(curl -sX POST http://localhost:7860/api/jobs \
   -H 'content-type: application/json' \
