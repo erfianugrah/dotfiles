@@ -136,6 +136,24 @@ manifest/usage error.
 - `models` - the escalation ladder, cheapest first (`""` = pi default). Legacy
   `model` (string|null) is still accepted and normalized to a one-rung ladder.
   CLI `--model` overrides to a single rung.
+  - **Cheap-but-accurate open-weight rungs (via the opencode-zen gateway; ids
+    verified in `~/.pi/agent/models-store.json`, which the picker refreshes).**
+    `opencode/deepseek-v4-pro` is the cheapest near-frontier rung (top
+    open-weight SWE-bench Verified; Artificial Analysis clocks it ~40x cheaper
+    per task than Opus 4.8). `opencode/glm-5.2` is the best accuracy-per-dollar
+    rung (top open-weight on the AA Intelligence Index, beats GPT-5.5 on
+    SWE-bench Pro, roughly 6-8x cheaper output than Opus). The two make a strong
+    cheap base under a frontier top (`anthropic/claude-sonnet-5`, or
+    `claude-opus-4-8` only if you want the ceiling). `opencode/deepseek-v4-flash-free`
+    is a $0 bottom rung for high-volume iterations. Working example:
+    `~/knotea/.pi/harness.json` uses
+    `["opencode/deepseek-v4-pro", "opencode/glm-5.2", "anthropic/claude-sonnet-5"]`.
+  - **Gotcha: Kimi K3 is NOT a cheap rung.** It matches Opus 4.8 on quality (AA
+    Intelligence Index ~57) but is frontier-priced (~$3/$15 per M) and is not in
+    the opencode-zen catalog anyway. For a Kimi rung use `opencode/kimi-k2.5`
+    (cheapest) / `kimi-k2.6` / `kimi-k2.7-code` (coding-tuned). Re-verify all ids
+    before relying on them - gateway catalogs drift, and exact prices rot faster
+    than the ladder strategy does.
 - `stallPatience` - consecutive no-progress iterations before climbing a rung.
 - `baseline` (or CLI `--freeze`) - freeze mode: sensors already failing at the
   baseline run are tolerated as pre-existing debt; only NEW failures gate. Lets
