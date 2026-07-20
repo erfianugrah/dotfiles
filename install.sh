@@ -64,8 +64,10 @@ case "$OS" in
   nixos)
     if [ "$LINKS_ONLY" = 0 ]; then
       echo ">> installing packages via home-manager (flake: packages/nix#$(whoami))"
-      run nix --extra-experimental-features "nix-command flakes" \
-        run home-manager/master -- switch --flake "$DOTFILES/packages/nix#$(whoami)" \
+      # NIX_CONFIG env (not CLI flags) so home-manager's own child nix calls
+      # inherit experimental-features too (CLI flags don't propagate).
+      run env NIX_CONFIG="experimental-features = nix-command flakes" \
+        nix run home-manager/master -- switch --flake "$DOTFILES/packages/nix#$(whoami)" \
         || echo "!! home-manager failed (missing '$(whoami)' config in flake?) - continuing with stow links"
     fi
     do_stow
@@ -73,8 +75,8 @@ case "$OS" in
   steamos)
     if [ "$LINKS_ONLY" = 0 ]; then
       echo ">> installing packages via home-manager (flake: packages/nix#deck)"
-      run nix --extra-experimental-features "nix-command flakes" \
-        run home-manager/master -- switch --flake "$DOTFILES/packages/nix#deck"
+      run env NIX_CONFIG="experimental-features = nix-command flakes" \
+        nix run home-manager/master -- switch --flake "$DOTFILES/packages/nix#deck"
     fi
     do_stow
     ;;
