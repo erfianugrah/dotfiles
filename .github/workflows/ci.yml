@@ -24,7 +24,11 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pin an explicit version rather than `latest`: `latest` makes
+          # setup-bun hit GitHub's release API on every run to resolve the
+          # newest Bun, which fails fast during GitHub API/Actions outages.
+          # A fixed version downloads from a deterministic release asset URL.
+          bun-version: 1.3.13
 
       # Extension suites + manifest self-sensor. No install step: the harness is
       # dependency-free (Bun built-ins only), so there is no lockfile to honor.
