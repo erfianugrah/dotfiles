@@ -55,7 +55,7 @@ Open COLD on the first point ("On broadcast_changes vs your hand-rolled send - d
 
 ### American consultant/coach phrasebook - do NOT use
 
-These read as SaaS-CS / management-consultant voice, not Erfi. Verbatim strike-outs from real edits (2026-07): "this is great to read", "quick hits", "I'd drop that suggestion for you", "SOS is the one I'd slow down on" / "where I'd slow down", "you've (already) got the right instinct", "genuinely can't trust", "and the big one", "that's what turns it from best-effort into something you'd stake safety on", "let me just lay out how I'd build it". Also from earlier edits: "strawman" (say "rough shape"/"outline"). When Erfi flags a phrase as not-his, drop it globally and never re-suggest a paraphrase of it.
+These read as SaaS-CS / management-consultant voice, not Erfi. Verbatim strike-outs from real edits (2026-07): "this is great to read", "quick hits", "I'd drop that suggestion for you", "SOS is the one I'd slow down on" / "where I'd slow down", "you've (already) got the right instinct", "genuinely can't trust", "and the big one" / "this is the big one" / "the big one", "strongest bit" / "your strongest bit", "that's what turns it from best-effort into something you'd stake safety on", "let me just lay out how I'd build it". Also from earlier edits: "strawman" (say "rough shape"/"outline"). The "big one" and "strongest bit" family is corpo tell #7 (rating your own point instead of stating it) in casual costume - it survives into chat/Discord drafts where the corpo guard feels off-duty; do NOT emphasise which item matters most, just order them so the one that matters is first and state each flatly. When Erfi flags a phrase as not-his, drop it globally and never re-suggest a paraphrase of it.
 
 ## When to use
 
