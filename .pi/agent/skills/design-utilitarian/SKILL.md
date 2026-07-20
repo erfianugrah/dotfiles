@@ -22,6 +22,20 @@ The user's default visual + interaction language is utilitarian, modelled on mcm
 11. **Print-friendly.** Tabular layouts print well; card grids don't. Test `Cmd-P` on data views.
 12. **No marketing prose in product surfaces.** "Empower your team to seamlessly..." is for landing pages. Product pages should read like specs: nouns + numbers + states.
 
+## Kill the AI copy tells (product prose)
+
+Extends #12. Any prose that ships in a product surface - a finding card, an empty state, a tooltip, a generated report, a status line - must not read like default LLM output. The fingerprint is a *cluster* of habits, not one banned word (research: Kobak et al. 2024, *Science Advances*, on the post-ChatGPT vocabulary surge; Wikipedia "Signs of AI writing"). The ones that actually bite in product copy:
+
+1. **Significance-inflation - the worst offender.** LLMs *tell you something matters* instead of showing the cost. "Left alone they inflate latency and CPU, pushing you toward a bigger, costlier tier" says nothing a number wouldn't say better. Show the mechanism or the cost; cut the "this is important because" scaffolding. **Participial closers** are the same tell wearing a gerund: "...highlighting the importance of X", "...ensuring optimal performance", "...reflecting the need for Y" - delete them, they add the *feeling* of a point without a point.
+2. **Tier-1 vocab -> plain word.** leverage->use, utilize->use, facilitate->let, robust->reliable/solid (or a number), seamless->(cut it), comprehensive->(say what it covers), crucial/pivotal/paramount->key, or just state the thing; streamline->simplify, harness->use, foster->build, elevate->improve, unlock/empower->(cut), delve->dig into, myriad/plethora->many, navigate the complexities of->(cut). "highest-leverage" -> "biggest".
+3. **Filler openers + hedges - cut the whole phrase.** "It's important to note that X" -> "X". Also: "it's worth mentioning", "in order to" -> "to", "plays a crucial role in", "when it comes to", "at the end of the day", "in today's ... world".
+4. **Structural tics.** The triad ("clean, concise, and correct"), the "not just X, but Y" reframe, rhetorical question-then-answer, and metronomic transitions (Moreover / Furthermore / Additionally stacked). One is fine; one-per-paragraph is the machine signature.
+5. **Repetition across surfaces - the strongest smell in a generated report.** The SAME rationale paragraph under every card. If ten finding cards share one "why it matters", it's boilerplate: make it specific to each object, or drop it and let the item's own detail carry.
+
+**The test:** could this exact line sit under a different finding / product / topic unchanged? If yes, it's generic filler - rewrite it to name the actual object, number, or state (principle #12: nouns + numbers + states). Read it aloud; a phrase you'd never say gets cut.
+
+Two caveats. These are probabilistic *tells, not proof* - the same words appear in fine human writing, and detectors false-positive on non-native English >60% of the time. The goal is concrete, specific copy, **not** passing a detector - chase specificity, not a score. And the punctuation tells (em-dash density, smart quotes, the tidy ellipsis) are already handled repo-side by the `ascii-punctuation-guard`, so the work left here is vocabulary + structure.
+
 ## Concrete Tailwind defaults
 
 ```html
