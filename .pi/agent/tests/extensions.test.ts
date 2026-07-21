@@ -32,8 +32,14 @@ import {
   hhmmss,
   parseNameMap,
   applyNameMap,
+  resolveEmbedding,
+  countFillers,
+  isAssent,
+  analyzeQuestions,
+  computeMetrics,
   type Segment,
   type Bundle,
+  type Utterance,
 } from "../extensions/video-review.ts";
 import {
   dateFromName,
@@ -3485,15 +3491,17 @@ describe("video-review / applyNameMap", () => {
       params: {},
     };
   }
-  test("rewrites segments, words, speakers list, embeddings keys, and records names", () => {
+  test("rewrites segments, words, speakers list, and records names - embedding keys stay stable", () => {
     const b = bundle();
     applyNameMap(b, { "M-SPEAKER_00": "Erfi" });
     expect(b.segments[0].speaker).toBe("Erfi");
     expect(b.segments[0].words![0].speaker).toBe("Erfi");
     expect(b.segments[1].speaker).toBe("M-SPEAKER_01"); // unmapped untouched
     expect(b.speakers).toEqual(["Erfi", "M-SPEAKER_01"]);
-    expect(b.speakerEmbeddings!["Erfi"]).toEqual([1, 0]);
-    expect(b.speakerEmbeddings!["M-SPEAKER_00"]).toBeUndefined();
+    // stable IDs: embeddings remain keyed by the ORIGINAL diarized label so
+    // video_enroll can always pull a vector by label after any relabel
+    expect(b.speakerEmbeddings!["M-SPEAKER_00"]).toEqual([1, 0]);
+    expect(b.speakerEmbeddings!["Erfi"]).toBeUndefined();
     expect(b.names).toEqual({ "M-SPEAKER_00": "Erfi" });
   });
   test("merges successive maps into names", () => {
@@ -3502,5 +3510,123 @@ describe("video-review / applyNameMap", () => {
     applyNameMap(b, { "M-SPEAKER_01": "Alice" });
     expect(b.names).toEqual({ "M-SPEAKER_00": "Erfi", "M-SPEAKER_01": "Alice" });
     expect(b.speakers).toEqual(["Alice", "Erfi"]); // applyNameMap sorts speakers
+  });
+  test("re-rename normalises instead of chaining (M-SPEAKER_05 -> Jess -> Tim)", () => {
+    const b = bundle();
+    applyNameMap(b, { "M-SPEAKER_00": "Jess" });
+    applyNameMap(b, { Jess: "Tim" });
+    expect(b.names).toEqual({ "M-SPEAKER_00": "Tim" });
+    expect(b.speakers).toEqual(["M-SPEAKER_01", "Tim"]);
+    expect(b.speakerEmbeddings!["M-SPEAKER_00"]).toEqual([1, 0]);
+  });
+});
+
+describe("video-review / resolveEmbedding", () => {
+  test("resolves by original label and by display name after relabel", () => {
+    const b: Bundle = {
+      file: "/media/x.mkv",
+      language: "",
+      duration: 5,
+      segments: [{ start: 0, end: 1, text: "hi", speaker: "M-SPEAKER_00", words: [{ word: "hi", start: 0, end: 1, speaker: "M-SPEAKER_00" }] }],
+      speakers: ["M-SPEAKER_00"],
+      hasWordSpeakers: true,
+      speakerEmbeddings: { "M-SPEAKER_00": [1, 0] },
+      createdAt: "now",
+      params: {},
+    };
+    expect(resolveEmbedding(b, "M-SPEAKER_00")).toEqual({ label: "M-SPEAKER_00", vec: [1, 0] });
+    applyNameMap(b, { "M-SPEAKER_00": "Erfi" });
+    // the bug this fixes: enroll-after-relabel must still find the vector
+    expect(resolveEmbedding(b, "M-SPEAKER_00")).toEqual({ label: "M-SPEAKER_00", vec: [1, 0] });
+    expect(resolveEmbedding(b, "Erfi")).toEqual({ label: "M-SPEAKER_00", vec: [1, 0] });
+    expect(resolveEmbedding(b, "Nobody")).toBeNull();
+  });
+});
+
+// ── video-review metrics ─────────────────────────────────────────────────
+
+function utt(speaker: string, start: number, end: number, text: string): Utterance {
+  return { speaker, start, end, text, wordCount: text.split(/\s+/).filter(Boolean).length };
+}
+
+describe("video-review / countFillers", () => {
+  test("counts single and multi-word fillers case-insensitively", () => {
+    expect(countFillers("um so basically I mean you know it's fine")).toBe(4);
+    expect(countFillers("no fillers here")).toBe(0);
+    expect(countFillers("Um, UM uh")).toBe(3);
+  });
+});
+
+describe("video-review / isAssent", () => {
+  test("short acknowledgements are assent", () => {
+    expect(isAssent("yeah exactly", 2)).toBe(true);
+    expect(isAssent("Okay, that makes sense.", 4)).toBe(true);
+    expect(isAssent("yes", 1)).toBe(true);
+  });
+  test("long or substantive replies are not assent", () => {
+    expect(isAssent("yeah but we actually query it a lot in the beginning", 9)).toBe(false);
+    expect(isAssent("we are going to query it", 5)).toBe(false);
+  });
+});
+
+describe("video-review / analyzeQuestions", () => {
+  test("elaboration: different speaker responds substantively", () => {
+    const events = analyzeQuestions([
+      utt("A", 0, 1, "what is your workflow right now?"),
+      utt("B", 2, 6, "well I use a bunch of agents and a runbook for everything"),
+    ]);
+    expect(events).toHaveLength(1);
+    expect(events[0].outcome).toBe("elaboration");
+    expect(events[0].responder).toBe("B");
+  });
+  test("assent: short acknowledgement response", () => {
+    const events = analyzeQuestions([
+      utt("A", 0, 1, "so you need the storage tier right?"),
+      utt("B", 1.5, 2, "yeah exactly"),
+    ]);
+    expect(events[0].outcome).toBe("assent");
+  });
+  test("self-answered: no substantive reply, asker continues", () => {
+    const events = analyzeQuestions([
+      utt("A", 0, 2, "is it because the cache keys are always changing?"),
+      utt("B", 2.2, 2.5, "mm"), // backchannel, skipped
+      utt("A", 3, 5, "because the only way it gets that low is constant change"),
+    ]);
+    expect(events[0].outcome).toBe("self-answered");
+  });
+  test("unanswered: silence within the window", () => {
+    const events = analyzeQuestions([
+      utt("A", 0, 1, "any questions for me?"),
+      utt("A", 20, 21, "moving on then"),
+    ]);
+    expect(events[0].outcome).toBe("unanswered");
+  });
+  test("skips rhetorical tags under 3 words", () => {
+    expect(analyzeQuestions([utt("A", 0, 1, "right?")])).toHaveLength(0);
+  });
+});
+
+describe("video-review / computeMetrics", () => {
+  test("per-speaker delivery stats, gap percentiles, pair matrix, question summary", () => {
+    const us: Utterance[] = [
+      utt("A", 0, 2, "hello there friend"),
+      utt("B", 2.2, 4, "hi how are you doing today"),
+      utt("A", 4.1, 6, "um basically what is your workflow like?"),
+      utt("B", 7, 12, "well I use agents and a runbook for all of my work"),
+      utt("A", 12.3, 14, "interesting tell me more about that please"),
+      utt("B", 15, 16, "yeah exactly"),
+    ];
+    const r = computeMetrics(us);
+    const a = r.speakers.find((s) => s.speaker === "A")!;
+    const b = r.speakers.find((s) => s.speaker === "B")!;
+    expect(a.words).toBe(17);
+    expect(b.wpm).not.toBeNull();
+    expect(a.gapMedian).not.toBeNull();
+    expect(a.fillersPer100).toBeGreaterThan(0); // "um" + "basically"
+    expect(r.pairGaps.length).toBeGreaterThan(0);
+    expect(r.pairGaps[0].samples).toBeGreaterThanOrEqual(3 - 2); // pair appears
+    const qa = r.questions.find((q) => q.asker === "A")!;
+    expect(qa.questions).toBe(1);
+    expect(qa.elaboration).toBe(1);
   });
 });

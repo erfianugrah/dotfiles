@@ -131,6 +131,42 @@ WhisperX's `initial_prompt` + `hotwords` share a **448-token budget**. Long
 prompts crowd out hotwords. Empirical rule: cap `initial_prompt` at ~600 chars
 and skip `hotwords` when the prompt is non-trivial.
 
+### Auto-hotwords (vocabulary + voice-print names)
+
+Every job's hotwords are **automatically merged** server-side
+(`_build_hotwords`) from three sources, in priority order:
+
+1. the request's own `hotwords` field (wins position),
+2. enrolled voice-print names (`/data/voiceprints.json`),
+3. the persistent vocabulary file `/data/vocabulary.txt` (one term per line,
+   `#` comments) - company / product / account names whisper would otherwise
+   mangle ("Supabase" -> "superbase", "Erfi" -> "Erfie").
+
+Case-insensitive dedupe; capped at `HOTWORDS_MAX_TERMS` (default 60) to
+protect the prompt budget. Env: `AUTO_HOTWORDS=0` disables the automatic
+sources; `VOCABULARY_FILE` relocates the file.
+
+Manage the vocabulary over HTTP (also editable in the SPA Voices tab):
+
+```bash
+curl -s :7860/api/vocabulary                              # terms + state
+curl -sX PUT :7860/api/vocabulary -H 'content-type: application/json' \
+  -d '{"terms":["Supabase","PostgREST","Acme Corp"]}'    # replace whole list
+```
+
+## Diarization quality
+
+- **Micro-turn cleanup**: a < 1s diarized turn sandwiched between two turns of
+  the SAME speaker (A -> B -> A flicker) is reassigned to the flanking speaker
+  before word-speaker assignment. Fixes single sentences split across two
+  labels and keeps voice-print enrollment clean. Env: `MICRO_TURN_CLEANUP=0`
+  to disable, `MICRO_TURN_MAX_SEC` to tune the threshold.
+- **Duplicate recordings**: `GET /api/media` annotates files whose
+  name-embedded start times are within `MEDIA_DUPE_WINDOW_SEC` (default 120s)
+  with `possible_duplicate_of` - OBS false starts show up flagged in the SPA
+  picker.
+
+
 ## Common workflows
 
 ### YouTube → transcript
@@ -184,18 +220,28 @@ JOB=$(curl -sX POST http://localhost:7860/api/jobs \
 ## Video-to-docs / conversation review (video-review extension)
 
 The pi extension `video-review.ts` orchestrates the primitives above into a
-video-to-docs / call-review pipeline. Three tools:
+video-to-docs / call-review pipeline. Five tools:
 
 - **`video_extract`** - transcribe + diarize (word-level speaker timing),
   optionally VLM-describe frames. Runs the slow GPU work ONCE, caches the
-  full bundle to `/tmp/video-review/<key>.json`, and returns only a compact
-  summary + bundle path (the huge word array never enters model context).
+  full bundle to `~/.local/share/video-review/<key>.json` (persistent; an
+  `index.json` beside the bundles enables cross-bundle lookups), and returns
+  only a compact summary + bundle path (the huge word array never enters
+  model context).
 - **`video_overlap`** - pure-TS conversation analysis over the cached bundle:
   objective speech-overlap events, speaking-time %, turn-taking latency
   (median entry gap per speaker), who-came-in-over-whom, pair clustering.
+- **`video_metrics`** - speaking-style metrics: per-speaker wpm, words/turn,
+  filler rate, turn-gap p25/median/p75 (p25 exposes the fast tail a median
+  hides), per-pair gap matrix, and question-flow classification
+  (self-answered vs assent vs elaboration after each question).
 - **`video_doc`** - markdown-ready evidence bundle (metadata + speaking-time
-  + diarized transcript + visual timeline + overlap summary) for the agent to
-  synthesise the final notes/review.
+  + diarized transcript + visual timeline + overlap summary). Transcript can
+  be filtered with `speaker=`, `start=`, `end=` to keep context small.
+- **`video_enroll` / `video_name`** - voice-print management + client-side
+  relabel. `video_name` with `enroll:true` relabels AND enrolls in one step.
+  Bundles keep embeddings keyed by the ORIGINAL diarized label (stable ID);
+  `video_enroll` accepts either the label or the current display name.
 
 Depends on the `GET /api/artifact?path=...` endpoint (serves the word-level
 JSON the job writes server-side; path-guarded to the temp dir). `video_extract`

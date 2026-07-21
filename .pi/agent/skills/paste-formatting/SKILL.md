@@ -41,7 +41,9 @@ mdclip --whatsapp reply.md  # WhatsApp markup   (plain text)
 
 ## Chat apps: Slack / Discord / Telegram / WhatsApp
 
-Chat apps are NOT rich-text HTML fields. They **ignore the clipboard's HTML slot entirely**, read the **plain-text** slot, and apply their *own* inline markup when the message is sent. So the rich (default) mode is useless for them - you need the app's specific plain-text dialect. Each `mdclip` chat flavour converts a normal GFM draft into that dialect and sets plain text only:
+Chat apps historically read only the clipboard's **plain-text** slot and apply their *own* inline markup when the message is sent - so for them the rich (default) mode was useless and you needed the app's specific plain-text dialect. One exception emerged in 2026: **Telegram Desktop now preserves formatting from the rich-text clipboard slot on paste** (maintainer-confirmed, tdesktop#30827: "Before we didn't preserve copied formatting on paste, now we do"). So for Telegram Desktop specifically, `mdclip`'s default rich mode is now viable - bold/italic/code/links carried as real formatting. Mobile clients are still plain-text-only, so `--telegram` remains the safe cross-client path; if a rich paste misbehaves, Ctrl+Shift+V (paste without formatting) then `--telegram` markup is the fallback. Slack / Discord / WhatsApp still ignore the HTML slot entirely.
+
+Each `mdclip` chat flavour converts a normal GFM draft into that dialect and sets plain text only:
 
 | App | flag | bold | italic | strike | inline code | link | heading | bullets |
 |---|---|---|---|---|---|---|---|---|
@@ -53,7 +55,7 @@ Chat apps are NOT rich-text HTML fields. They **ignore the clipboard's HTML slot
 All four **drop GFM table delimiter rows** (`|---|`) and pass ` ``` ` code fences through verbatim (Discord/Telegram keep the language hint for syntax highlighting; Slack/WhatsApp render the block as monospace). Notes on the deliberate per-app choices:
 
 - **Discord** is almost identical to standard GFM (`**bold**`, `# headers`, `- bullets`, ` ``` ` fences all native), so the transform is nearly identity - it only rewrites masked links to `text (url)` because Discord renders `[text](url)` only inside bot/webhook embeds, not in normal user messages.
-- **Telegram** desktop/mobile parses `**bold**` / `__italic__` / `` `code` `` / `[text](url)` in the composed message on send. If pasted markers stay literal, the markdown-in-input setting is off - re-enable it, or select + Ctrl/Cmd+B.
+- **Telegram** desktop/mobile parses `**bold**` / `__italic__` / `` `code` `` / `[text](url)` in the composed message on send. If pasted markers stay literal, the markdown-in-input setting is off - re-enable it, or select + Ctrl/Cmd+B. Two research notes (2026-07): the authoritative client-side composer reference is core.telegram.org/api/entities (which also lists `*italic*` single-asterisk and `~~strike~~` as composer syntax - `__i__` and `~~s~~` both work in practice); Bot API MarkdownV2 / HTML `parse_mode` is a DIFFERENT dialect that only applies to bots (`*bold*`, `_italic_`, `__underline__`, `||spoiler||`, `<b>`/`<i>`/`<u>`/`<blockquote>` tags) - do not use Bot API docs as the reference for user-composed messages. User messages have no native tables/headings; Bot API 10.x Rich Messages (tables, headings, lists) are bots-only. Messages cap at 4096 chars - Telegram Desktop auto-splits longer pastes on send.
 - **WhatsApp** bold is a SINGLE `*` (so `**bold**` -> `*bold*`); it has no headings or masked links, so those degrade to bold and `text (url)`. Bulleted/numbered lists and block quotes (`- `, `1.`, `> `) and single-backtick inline code are native since the 2024 formatting update.
 - **Tables** render in none of the four; the delimiter row is dropped and the `| a | b |` content rows are left as readable pipe-separated lines. For anything genuinely tabular, send a code-fenced block or a screenshot.
 
@@ -91,7 +93,7 @@ A blank line between list items makes pandoc emit a **loose list** - each `<li>`
 | Google Docs | HTML (mdclip / browser) | same as Gmail, cleaner | best rich-text fidelity of the lot |
 | Slack | `mdclip --slack` (plain mrkdwn) | Slack markup | See the Chat apps section. `**bold**`->`*bold*`, `[t](u)`->`<u\|t>`, `# H`->`*H*`, bullets->`•`. A single `*word*` is markdown italic, so use `**word**` for bold. Do NOT use default HTML mode for Slack. |
 | Discord | `mdclip --discord` (plain md) | Discord markdown | Near-identity GFM: `**bold**`, `*italic*`, `# headers`, `- bullets`, ` ``` `fences with lang highlight all native. Masked links -> `text (url)` (Discord masked links are embed-only). |
-| Telegram | `mdclip --telegram` (plain md) | Telegram markdown | `**bold**` kept, italic -> `__i__`, `[text](url)` masked links kept, `# H` -> `**H**`. Parsed on send if input-markdown is enabled. |
+| Telegram | `mdclip --telegram` (plain md) | Telegram markdown | `**bold**` kept, italic -> `__i__`, `[text](url)` masked links kept, `# H` -> `**H**`. Parsed on send if input-markdown is enabled. NEW 2026-07: Telegram Desktop also accepts the default rich (HTML) mode on paste - use plain `--telegram` for mobile/cross-client safety. 4096-char cap per message, desktop auto-splits. |
 | WhatsApp | `mdclip --whatsapp` (plain markup) | WhatsApp markup | Single-asterisk bold `*b*`, `_i_`, `~s~`, `` `code` ``, `- `/`1.`/`> ` lists (2024+). No headings (->bold) or masked links (->`text (url)`). |
 | Notion / most WYSIWYG | often accepts Markdown on paste | varies | many convert `**`/`-`/`#` on paste; try plain first, fall back to HTML |
 | Terminal, code review, a `.md` file, GitHub comment | the raw Markdown | n/a | these ARE markdown-aware or want the source; do not render |

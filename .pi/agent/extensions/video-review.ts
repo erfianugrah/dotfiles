@@ -42,11 +42,14 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 const WHISPER_URL = process.env.WHISPER_URL ?? "http://localhost:7860";
-const CACHE_DIR = join(tmpdir(), "video-review");
+// Persistent store (survives reboots - /tmp does not; a lost bundle costs a
+// full GPU re-extract). LEGACY dir kept as a read fallback for pre-move bundles.
+const CACHE_DIR = join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "video-review");
+const LEGACY_CACHE_DIR = join(tmpdir(), "video-review");
 
 // ── types ───────────────────────────────────────────────────────────────
 
@@ -94,9 +97,13 @@ export interface Bundle {
 
 /**
  * Relabel a bundle in place from a { oldLabel: newName } map: rewrites
- * seg.speaker, each word.speaker, the speakers list, and the embeddings keys,
- * and records bundle.names. Returns the same bundle for chaining. Unmapped
- * labels are left untouched.
+ * seg.speaker, each word.speaker, and the speakers list. Embedding keys are
+ * deliberately NOT renamed: speakerEmbeddings stays keyed by the original
+ * diarized label (a stable ID) so video_enroll can always pull a vector by
+ * label, and bundle.names carries the label -> display-name mapping.
+ * Re-renames are normalised: if a map key is an existing names VALUE
+ * (e.g. Jess -> Tim after M-SPEAKER_05 -> Jess), that entry is updated in
+ * place instead of chaining {M-SPEAKER_05: Jess, Jess: Tim}.
  */
 export function applyNameMap(bundle: Bundle, map: Record<string, string>): Bundle {
   const remap = (label: string | undefined) => (label && map[label] ? map[label] : label);
@@ -105,13 +112,27 @@ export function applyNameMap(bundle: Bundle, map: Record<string, string>): Bundl
     for (const w of seg.words ?? []) w.speaker = remap(w.speaker);
   }
   bundle.speakers = [...new Set(bundle.segments.map((s) => s.speaker).filter((x): x is string => !!x))].sort();
-  if (bundle.speakerEmbeddings) {
-    const ne: Record<string, number[]> = {};
-    for (const [k, v] of Object.entries(bundle.speakerEmbeddings)) ne[remap(k) ?? k] = v;
-    bundle.speakerEmbeddings = ne;
+  const names = { ...(bundle.names ?? {}) };
+  for (const [k, v] of Object.entries(map)) {
+    const prior = Object.keys(names).find((label) => names[label] === k);
+    if (prior) names[prior] = v;
+    else names[k] = v;
   }
-  bundle.names = { ...(bundle.names ?? {}), ...map };
+  bundle.names = names;
   return bundle;
+}
+
+/**
+ * Resolve a speaker argument (original diarized label OR current display
+ * name) to that speaker's embedding. Returns null when unknown.
+ */
+export function resolveEmbedding(bundle: Bundle, speakerArg: string): { label: string; vec: number[] } | null {
+  const embs = bundle.speakerEmbeddings ?? {};
+  if (embs[speakerArg]) return { label: speakerArg, vec: embs[speakerArg] };
+  for (const [label, name] of Object.entries(bundle.names ?? {})) {
+    if (name === speakerArg && embs[label]) return { label, vec: embs[label] };
+  }
+  return null;
 }
 
 // ── file resolution (pure) ────────────────────────────────────────────────
@@ -340,6 +361,274 @@ export function computeOverlap(utterances: Utterance[], minOverlapSec = 0.3): Ov
   };
 }
 
+// ── speaking-metrics analysis (pure) ──────────────────────────────────────
+
+function percentile(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null;
+  const s = [...sorted].sort((a, b) => a - b);
+  const idx = (p / 100) * (s.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  const v = s[lo] + (s[hi] - s[lo]) * (idx - lo);
+  return Math.round(v * 100) / 100;
+}
+
+/** Filler/hedge lexicon. Multi-word entries matched as substrings on the
+ * lowercased utterance text; single words with word boundaries. */
+const FILLER_PATTERNS: RegExp[] = [
+  /\bum+\b/i,
+  /\buh+\b/i,
+  /\byou know\b/i,
+  /\bsort of\b/i,
+  /\bkind of\b/i,
+  /\bbasically\b/i,
+  /\bactually\b/i,
+  /\bi mean\b/i,
+  /\bto some extent\b/i,
+  /\beffectively\b/i,
+];
+
+export function countFillers(text: string): number {
+  let n = 0;
+  for (const re of FILLER_PATTERNS) {
+    const m = text.match(new RegExp(re.source, "gi"));
+    if (m) n += m.length;
+  }
+  return n;
+}
+
+/** Short acknowledgement lexicon: a response made of only these (<= 6 words)
+ * is assent, not elaboration. Multi-word phrases are stripped greedily from
+ * the front, so "yeah exactly" and "okay that makes sense" both qualify. */
+const ASSENT_PHRASES = [
+  "that makes sense", "makes sense", "sounds good", "fair enough", "of course", "no worries", "all right", "thank you", "got it", "i see", "uh-huh", "mm-hmm",
+  "yeah", "yes", "yep", "yup", "okay", "ok", "sure", "right", "correct", "exactly", "indeed", "true", "cool", "nice", "perfect", "great", "good", "mm", "mhm", "agreed", "absolutely", "definitely", "interesting", "wow", "oh", "ah", "huh", "thanks", "alright",
+];
+
+export function isAssent(text: string, wordCount: number): boolean {
+  if (wordCount > 6) return false;
+  let t = text
+    .trim()
+    .toLowerCase()
+    .replace(/[?!.,;:'"-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  let changed = true;
+  while (changed && t) {
+    changed = false;
+    for (const p of ASSENT_PHRASES) {
+      if (t === p) return true;
+      if (t.startsWith(p + " ")) {
+        t = t.slice(p.length).trim();
+        changed = true;
+        break;
+      }
+    }
+  }
+  return t === "";
+}
+
+export type QuestionOutcome = "self-answered" | "assent" | "elaboration" | "unanswered";
+
+export interface QuestionEvent {
+  at: number;
+  asker: string;
+  question: string;
+  outcome: QuestionOutcome;
+  responder?: string;
+  responseSnippet?: string;
+  responseGapSec?: number;
+}
+
+/**
+ * Question-flow analysis over time-sorted utterances. For each utterance
+ * containing '?', find what happened next:
+ *  - a different speaker's substantive response within `windowSec` ->
+ *    'assent' (short ack) or 'elaboration' (new information)
+ *  - only backchannels from others, then the ASKER's own next utterance ->
+ *    'self-answered' (the ask-then-self-answer move)
+ *  - nothing within the window -> 'unanswered'
+ * Backchannels (< 4 words matching the assent lexicon) are skipped over when
+ * looking for a substantive response.
+ */
+export function analyzeQuestions(utterances: Utterance[], windowSec = 10): QuestionEvent[] {
+  const us = [...utterances].sort((a, b) => a.start - b.start);
+  const events: QuestionEvent[] = [];
+  for (let i = 0; i < us.length; i++) {
+    const u = us[i];
+    if (!u.text.includes("?") || u.wordCount < 3) continue;
+    let responder: Utterance | null = null;
+    let firstAck: Utterance | null = null;
+    let selfNext: Utterance | null = null;
+    for (let j = i + 1; j < us.length; j++) {
+      const v = us[j];
+      if (v.start - u.end > windowSec) break;
+      if (v.speaker === u.speaker) {
+        if (!selfNext) selfNext = v;
+        continue;
+      }
+      // backchannel from someone else: remember it but keep scanning for a
+      // substantive response
+      if (v.wordCount < 4 && isAssent(v.text, v.wordCount)) {
+        if (!firstAck) firstAck = v;
+        continue;
+      }
+      responder = v;
+      break;
+    }
+    // A lone acknowledgement with nothing substantive behind it is normally
+    // the response (assent). But when the asker's own continuation follows
+    // and is NOT itself a new question, the asker answered despite the ack -
+    // that's the self-answered move; the ack was just a backchannel.
+    if (!responder && firstAck && (!selfNext || selfNext.text.includes("?"))) responder = firstAck;
+    if (responder) {
+      const assent = isAssent(responder.text, responder.wordCount);
+      events.push({
+        at: u.start,
+        asker: u.speaker,
+        question: u.text.slice(0, 120),
+        outcome: assent ? "assent" : "elaboration",
+        responder: responder.speaker,
+        responseSnippet: responder.text.slice(0, 80),
+        responseGapSec: Math.round((responder.start - u.end) * 100) / 100,
+      });
+    } else if (selfNext) {
+      events.push({
+        at: u.start,
+        asker: u.speaker,
+        question: u.text.slice(0, 120),
+        outcome: "self-answered",
+        responder: u.speaker,
+        responseSnippet: selfNext.text.slice(0, 80),
+        responseGapSec: Math.round((selfNext.start - u.end) * 100) / 100,
+      });
+    } else {
+      events.push({ at: u.start, asker: u.speaker, question: u.text.slice(0, 120), outcome: "unanswered" });
+    }
+  }
+  return events;
+}
+
+export interface MetricsSpeaker {
+  speaker: string;
+  speakingSec: number;
+  sharePct: number;
+  utterances: number;
+  words: number;
+  wordsPerTurn: number | null;
+  wpm: number | null;
+  gapP25: number | null;
+  gapMedian: number | null;
+  gapP75: number | null;
+  cameInOver: number;
+  wasCut: number;
+  fillersPer100: number | null;
+}
+
+export interface PairGap {
+  pair: string; // "B after A"
+  medianGapSec: number | null;
+  samples: number;
+}
+
+export interface QuestionSummary {
+  asker: string;
+  questions: number;
+  selfAnswered: number;
+  assent: number;
+  elaboration: number;
+  unanswered: number;
+}
+
+export interface MetricsReport {
+  speakers: MetricsSpeaker[];
+  pairGaps: PairGap[];
+  questions: QuestionSummary[];
+  questionEvents: QuestionEvent[];
+  clocked: number;
+}
+
+/**
+ * Full speaking-style metrics: delivery stats (rate, density, fillers),
+ * turn-gap DISTRIBUTIONS (p25/median/p75 - the median alone hides the fast
+ * tail), a per-pair gap matrix (who enters fast after WHOM), and the
+ * question-flow classifier (self-answered vs assent vs elaboration).
+ * Overlap counts reuse computeOverlap so both tools agree.
+ */
+export function computeMetrics(utterances: Utterance[], minOverlapSec = 0.3): MetricsReport {
+  const us = [...utterances].sort((a, b) => a.start - b.start);
+  const overlap = computeOverlap(us, minOverlapSec);
+  const clocked = overlap.clocked;
+
+  const gaps = new Map<string, number[]>();
+  const pairGaps = new Map<string, number[]>();
+  const fillers = new Map<string, number>();
+  for (const u of us) {
+    fillers.set(u.speaker, (fillers.get(u.speaker) ?? 0) + countFillers(u.text));
+  }
+  for (let i = 1; i < us.length; i++) {
+    const prev = us[i - 1];
+    const cur = us[i];
+    if (prev.speaker === cur.speaker) continue;
+    const gap = Math.round((cur.start - prev.end) * 100) / 100;
+    let g = gaps.get(cur.speaker);
+    if (!g) gaps.set(cur.speaker, (g = []));
+    g.push(gap);
+    const key = `${cur.speaker} after ${prev.speaker}`;
+    let pg = pairGaps.get(key);
+    if (!pg) pairGaps.set(key, (pg = []));
+    pg.push(gap);
+  }
+
+  const speakers: MetricsSpeaker[] = overlap.speakers.map((s) => {
+    const g = gaps.get(s.speaker) ?? [];
+    const wpt = s.utterances ? Math.round((s.words / s.utterances) * 10) / 10 : null;
+    const wpm = s.speakingSec > 0 ? Math.round(s.words / (s.speakingSec / 60)) : null;
+    const f = fillers.get(s.speaker) ?? 0;
+    return {
+      speaker: s.speaker,
+      speakingSec: s.speakingSec,
+      sharePct: clocked ? Math.round((s.speakingSec / clocked) * 100) : 0,
+      utterances: s.utterances,
+      words: s.words,
+      wordsPerTurn: wpt,
+      wpm,
+      gapP25: percentile(g, 25),
+      gapMedian: percentile(g, 50),
+      gapP75: percentile(g, 75),
+      cameInOver: s.startedOverOthers,
+      wasCut: s.wasStartedOver,
+      fillersPer100: s.words ? Math.round((f / s.words) * 1000) / 10 : null,
+    };
+  });
+
+  const pairGapList: PairGap[] = [...pairGaps.entries()]
+    .filter(([, v]) => v.length >= 3)
+    .map(([pair, v]) => ({ pair, medianGapSec: percentile(v, 50), samples: v.length }))
+    .sort((a, b) => (a.medianGapSec ?? 99) - (b.medianGapSec ?? 99));
+
+  const questionEvents = analyzeQuestions(us);
+  const qsum = new Map<string, QuestionSummary>();
+  for (const e of questionEvents) {
+    let q = qsum.get(e.asker);
+    if (!q) qsum.set(e.asker, (q = { asker: e.asker, questions: 0, selfAnswered: 0, assent: 0, elaboration: 0, unanswered: 0 }));
+    q.questions += 1;
+    if (e.outcome === "self-answered") q.selfAnswered += 1;
+    else if (e.outcome === "assent") q.assent += 1;
+    else if (e.outcome === "elaboration") q.elaboration += 1;
+    else q.unanswered += 1;
+  }
+
+  return {
+    speakers,
+    pairGaps: pairGapList,
+    questions: [...qsum.values()].sort((a, b) => b.questions - a.questions),
+    questionEvents,
+    clocked,
+  };
+}
+
 // ── time formatting (pure) ────────────────────────────────────────────────
 
 export function hhmmss(sec: number): string {
@@ -463,12 +752,42 @@ function cachePath(key: string): string {
 }
 
 function readBundle(key: string): Bundle | null {
-  const p = cachePath(key);
-  if (!existsSync(p)) return null;
+  for (const dir of [CACHE_DIR, LEGACY_CACHE_DIR]) {
+    const p = join(dir, `${key}.json`);
+    if (existsSync(p)) {
+      try {
+        return JSON.parse(readFileSync(p, "utf8")) as Bundle;
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+interface IndexEntry {
+  key: string;
+  file: string;
+  duration: number;
+  speakers: string[];
+  createdAt: string;
+}
+
+/** Maintain a lightweight index.json beside the bundles for cross-bundle
+ * (longitudinal) lookups without parsing every bundle file. */
+function updateIndex(key: string, b: Bundle): void {
   try {
-    return JSON.parse(readFileSync(p, "utf8")) as Bundle;
+    const p = join(CACHE_DIR, "index.json");
+    let idx: Record<string, IndexEntry> = {};
+    try {
+      idx = JSON.parse(readFileSync(p, "utf8")) as Record<string, IndexEntry>;
+    } catch {
+      /* start fresh */
+    }
+    idx[key] = { key, file: b.file, duration: b.duration, speakers: b.speakers, createdAt: b.createdAt };
+    writeFileSync(p, JSON.stringify(idx, null, 2));
   } catch {
-    return null;
+    /* index is advisory - never fail a write over it */
   }
 }
 
@@ -476,6 +795,7 @@ function writeBundle(key: string, b: Bundle): string {
   mkdirSync(CACHE_DIR, { recursive: true });
   const p = cachePath(key);
   writeFileSync(p, JSON.stringify(b));
+  updateIndex(key, b);
   return p;
 }
 
@@ -703,6 +1023,86 @@ const videoOverlap = defineTool({
   },
 });
 
+// ── tool: video_metrics ───────────────────────────────────────────────────
+
+const videoMetrics = defineTool({
+  name: "video_metrics",
+  promptSnippet: "video_metrics - speaking-style metrics over a cached bundle: rate/density/fillers, turn-gap distributions, per-pair gap matrix, and question-flow classification (self-answered vs assent vs elaboration).",
+  promptGuidelines: [
+    "Pass `bundle` (from video_extract) OR `file`.",
+    "Gap percentiles matter more than the median: p25 exposes the fast tail that a median hides.",
+    "Question outcomes are heuristic: 'self-answered' = no substantive other-speaker response within the window. Verify flagged instances against the transcript before asserting them.",
+    "Assent vs elaboration tells you whether questions are extracting information or just confirmation - the core signal for discovery-quality review.",
+  ],
+  label: "Video Metrics",
+  description:
+    "Compute speaking-style metrics from a diarized bundle: per-speaker wpm, words/turn, filler rate, turn-gap p25/median/p75, per-pair gap matrix, and question-flow analysis (ask-then-self-answer detection, assent-vs-elaboration after each question).",
+  parameters: Type.Object({
+    bundle: Type.Optional(Type.String({ description: "Path to a cached bundle from video_extract." })),
+    file: Type.Optional(Type.String({ description: "Video file ref (if no bundle) - runs video_extract with diarize:true first." })),
+    min_overlap_sec: Type.Optional(Type.Number({ description: "Minimum collision duration to count (default 0.3)." })),
+    max_events: Type.Optional(Type.Number({ description: "Cap the returned question-event list (default 30)." })),
+    question_window_sec: Type.Optional(Type.Number({ description: "Seconds to wait for a response before classifying a question self-answered/unanswered (default 10)." })),
+  }),
+  async execute(_id, params, signal, onUpdate) {
+    const emit = (m: string) => onUpdate?.({ content: [{ type: "text", text: m }] });
+    let bundle: Bundle | null = null;
+    if (params.bundle) bundle = readBundleByPath(params.bundle);
+    if (!bundle && params.file) {
+      const opts = extractOpts({ diarize: true });
+      bundle = (await ensureBundle(params.file, opts, emit, signal)).bundle;
+    }
+    if (!bundle) throw new Error("provide `bundle` (from video_extract) or `file`");
+    if (!bundle.hasWordSpeakers) throw new Error("bundle has no word-level speaker timing; re-run video_extract with diarize:true");
+
+    const report = computeMetrics(mergeUtterances(bundle.segments), params.min_overlap_sec ?? 0.3);
+    // re-run question analysis with a custom window when requested
+    const events = params.question_window_sec != null ? analyzeQuestions(mergeUtterances(bundle.segments), params.question_window_sec) : report.questionEvents;
+    const maxEv = params.max_events ?? 30;
+
+    const fmtGap = (v: number | null) => (v == null ? "n/a" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}s`);
+    const lines: string[] = [];
+    lines.push(`speaking-style metrics (clocked ${hhmmss(report.clocked)}):`);
+    for (const s of report.speakers) {
+      lines.push(
+        `  ${s.speaker}: ${hhmmss(s.speakingSec)} (${s.sharePct}%)  utt=${s.utterances}  words=${s.words}  words/turn=${s.wordsPerTurn ?? "n/a"}  wpm=${s.wpm ?? "n/a"}  fillers/100w=${s.fillersPer100 ?? "n/a"}`,
+      );
+      lines.push(
+        `    gap p25=${fmtGap(s.gapP25)} median=${fmtGap(s.gapMedian)} p75=${fmtGap(s.gapP75)}  came-in-over=${s.cameInOver}  was-cut=${s.wasCut}`,
+      );
+    }
+    if (report.pairGaps.length) {
+      lines.push("");
+      lines.push("pair gap matrix (median, fastest first; >=3 samples):");
+      for (const p of report.pairGaps) lines.push(`  ${p.pair}: ${fmtGap(p.medianGapSec)} (n=${p.samples})`);
+    }
+    if (report.questions.length) {
+      lines.push("");
+      lines.push("question flow:");
+      for (const q of report.questions) {
+        lines.push(
+          `  ${q.asker}: ${q.questions} questions -> ${q.elaboration} elaborated, ${q.assent} assent, ${q.selfAnswered} self-answered, ${q.unanswered} unanswered`,
+        );
+      }
+    }
+    const selfAnswered = events.filter((e) => e.outcome === "self-answered");
+    lines.push("");
+    lines.push(`question events (first ${Math.min(maxEv, events.length)} of ${events.length}; ${selfAnswered.length} self-answered):`);
+    for (const e of events.slice(0, maxEv)) {
+      const resp = e.responder ? ` -> ${e.responder}${e.responseGapSec != null ? ` (${e.responseGapSec >= 0 ? "+" : ""}${e.responseGapSec}s)` : ""}: \"${e.responseSnippet}\"` : "";
+      lines.push(`  [${hhmmss(e.at)}] ${e.asker} [${e.outcome}] \"${e.question}\"${resp}`);
+    }
+    lines.push("");
+    lines.push(
+      "note: gap p25 exposes the fast-entry tail the median hides. 'self-answered' means no substantive other-speaker response within the window - verify flagged instances against the transcript before asserting intent.",
+    );
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      details: { speakers: report.speakers, pairGaps: report.pairGaps, questions: report.questions, selfAnsweredCount: selfAnswered.length },
+    };
+  },
+});
+
 // ── tool: video_doc ───────────────────────────────────────────────────────
 
 const videoDoc = defineTool({
@@ -723,6 +1123,9 @@ const videoDoc = defineTool({
     include_transcript: Type.Optional(Type.Boolean({ description: "Include the full diarized transcript (default true; can be large)." })),
     include_frames: Type.Optional(Type.Boolean({ description: "Include the VLM visual timeline if present (default true)." })),
     include_overlap: Type.Optional(Type.Boolean({ description: "Include the overlap summary (default true when diarized)." })),
+    speaker: Type.Optional(Type.String({ description: "Filter transcript to these speakers (comma-separated, e.g. 'Erfi,Max')." })),
+    start: Type.Optional(Type.Number({ description: "Only include transcript segments ending after this time (seconds)." })),
+    end: Type.Optional(Type.Number({ description: "Only include transcript segments starting before this time (seconds)." })),
   }),
   async execute(_id, params, signal, onUpdate) {
     const emit = (m: string) => onUpdate?.({ content: [{ type: "text", text: m }] });
@@ -766,8 +1169,17 @@ const videoDoc = defineTool({
     }
 
     if (wantTranscript) {
+      const speakerFilter = params.speaker ? new Set(params.speaker.split(",").map((s) => s.trim()).filter(Boolean)) : null;
+      const startS = params.start ?? -Infinity;
+      const endS = params.end ?? Infinity;
+      const tsegs = bundle.segments.filter(
+        (s) => s.end >= startS && s.start <= endS && (!speakerFilter || (s.speaker != null && speakerFilter.has(s.speaker))),
+      );
       md.push(`## Transcript`);
-      for (const seg of bundle.segments) {
+      if (speakerFilter || params.start != null || params.end != null) {
+        md.push(`(filtered${speakerFilter ? ` speakers: ${[...speakerFilter].join(", ")}` : ""}${params.start != null ? ` from ${hhmmss(params.start)}` : ""}${params.end != null ? ` to ${hhmmss(params.end)}` : ""} - ${tsegs.length} of ${bundle.segments.length} segments)`);
+      }
+      for (const seg of tsegs) {
         const sp = seg.speaker ? `[${seg.speaker}] ` : "";
         md.push(`[${hhmmss(seg.start)}] ${sp}${seg.text.trim()}`);
       }
@@ -864,13 +1276,15 @@ const videoEnroll = defineTool({
     if (params.bundle) {
       const b = readBundleByPath(params.bundle);
       if (!b) throw new Error(`bundle not found: ${params.bundle}`);
-      if (!params.speaker) throw new Error("add-from-bundle requires `speaker` (a diarized label)");
-      const vec = b.speakerEmbeddings?.[params.speaker];
-      if (!vec) {
-        const avail = Object.keys(b.speakerEmbeddings ?? {}).join(", ") || "(none - was the bundle diarized?)";
+      if (!params.speaker) throw new Error("add-from-bundle requires `speaker` (a diarized label or display name)");
+      const hit = resolveEmbedding(b, params.speaker);
+      if (!hit) {
+        const labels = Object.keys(b.speakerEmbeddings ?? {});
+        const names = Object.entries(b.names ?? {}).map(([l, n]) => `${n} (label ${l})`);
+        const avail = [...labels, ...names].join(", ") || "(none - was the bundle diarized?)";
         throw new Error(`no embedding for speaker "${params.speaker}". Available: ${avail}`);
       }
-      body = { name: params.name, embedding: vec, source: `${b.file}#${params.speaker}` };
+      body = { name: params.name, embedding: hit.vec, source: `${b.file}#${hit.label}` };
     } else if (params.file) {
       const serverPath = await resolveToServerPath(params.file, signal);
       body = { name: params.name, file_path: serverPath, start: params.start, end: params.end };
@@ -902,8 +1316,9 @@ const videoName = defineTool({
   parameters: Type.Object({
     bundle: Type.String({ description: "Path to a cached bundle from video_extract." }),
     map: Type.String({ description: "Name map: JSON {\"M-SPEAKER_01\":\"Alice\"} or compact 'M-SPEAKER_01=Alice, M-SPEAKER_00=Erfi'." }),
+    enroll: Type.Optional(Type.Boolean({ description: "Also enroll each mapped name as a server-side voice print (from the bundle embeddings) so future calls auto-name them. Default false." })),
   }),
-  async execute(_id, params) {
+  async execute(_id, params, signal) {
     const b = readBundleByPath(params.bundle);
     if (!b) throw new Error(`bundle not found: ${params.bundle}`);
     const map = parseNameMap(params.map);
@@ -913,8 +1328,25 @@ const videoName = defineTool({
     // persist back to the same cache file
     const key = bundleKeyFromPath(params.bundle);
     writeBundle(key, b);
+    const lines = [`relabeled: ${Object.entries(map).map(([k, v]) => `${k} -> ${v}`).join(", ")}`, `speakers now: ${b.speakers.join(", ")}`, `(was: ${before.join(", ")})`];
+    if (params.enroll) {
+      const names = [...new Set(Object.values(map))];
+      for (const name of names) {
+        const hit = resolveEmbedding(b, name);
+        if (!hit) {
+          lines.push(`enroll ${name}: FAILED (no embedding for that speaker)`);
+          continue;
+        }
+        try {
+          const res = await whisperPostJson<{ name: string; count: number }>("/api/voiceprints", { name, embedding: hit.vec, source: `${b.file}#${hit.label}` }, signal);
+          lines.push(`enroll ${name}: ok (${res.count} print${res.count === 1 ? "" : "s"})`);
+        } catch (e) {
+          lines.push(`enroll ${name}: FAILED (${e instanceof Error ? e.message : String(e)})`);
+        }
+      }
+    }
     return {
-      content: [{ type: "text", text: `relabeled: ${Object.entries(map).map(([k, v]) => `${k} -> ${v}`).join(", ")}\nspeakers now: ${b.speakers.join(", ")}\n(was: ${before.join(", ")})` }],
+      content: [{ type: "text", text: lines.join("\n") }],
       details: { map, speakers: b.speakers },
     };
   },
@@ -941,6 +1373,7 @@ function readBundleByPath(p: string): Bundle | null {
 export default function (pi: ExtensionAPI) {
   pi.registerTool(videoExtract);
   pi.registerTool(videoOverlap);
+  pi.registerTool(videoMetrics);
   pi.registerTool(videoDoc);
   pi.registerTool(videoEnroll);
   pi.registerTool(videoName);

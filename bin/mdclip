@@ -8,8 +8,11 @@
 #                  / Google Docs / any WYSIWYG box: bold, bullets, headings,
 #                  links, tables, monospace all survive paste.
 #   chat flavours  Markdown -> that app's plain-text markup, clipboard as plain
-#                  text ONLY. These apps ignore pasted HTML and read the plain
-#                  slot, applying their own inline markup on send:
+#                  text ONLY. These apps read the plain slot and apply their own
+#                  inline markup on send. (Exception since mid-2026: Telegram
+#                  Desktop preserves rich-text clipboard formatting on paste, so
+#                  the default rich mode also works there; the --telegram plain
+#                  path remains the cross-client-safe option.):
 #     --slack      **bold**->*bold*, italic->_i_, [t](u)-><u|t>, #H->*H*,
 #                  bullets->bullet dot, strike ~~x~~->~x~.
 #     --discord    near-identity GFM: keeps **bold**, *italic*, `code`, ```fences
