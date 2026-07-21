@@ -38,6 +38,19 @@ Setups also hide *inside* prose, not just as colon-headers -- "Two things in the
 
 The floor: could a sharp, busy colleague have typed this fast? If it reads like a deliverable, it's wrong.
 
+### Structural AI tells (sentence-shape patterns, not vocabulary)
+
+These are the patterns AI-writing guides (Wikipedia's "Signs of AI writing" names the first two) and sharp readers flag hardest. They are register-independent, none of them is a shape Erfi uses, so kill on sight in any drafted surface:
+
+1. **Negative parallelism ("It's not X, it's Y").** All forms: "Not just X, but Y", "It isn't about X, it's about Y", "Less X, more Y", and the cross-sentence version ("People think it's a tooling problem. It's a mindset problem."). State what it IS, or correct the wrong assumption plainly -- characteristic 3 already does the honest version of this move.
+2. **Automatic rule-of-three triplets.** "fast, simple, and powerful" / "secure, scalable, and reliable". Use one item, or two, or four -- whatever is true. A triplet assembled for rhythm rather than truth is the tell.
+3. **Rhetorical question + immediate self-answer reframe.** "Is this a tooling problem? No. It's a mindset problem." Corpo tell #2 (announce-before-stating) wearing a question mark. Kill the setup; state the point.
+4. **Present-participle padding.** Trailing "-ing" clauses that add verdict, not content: "..., highlighting its importance", "..., ensuring a seamless experience", "..., underscoring the need for". If the clause only grades what you just said, delete it (same family as corpo tell #7).
+5. **Significance inflation.** "stands as a testament", "a pivotal moment", "plays a crucial role", "underscores", "indelible". Replace with the fact (characteristic 10: numbers and nouns over adjectives).
+6. **The slop watchlist.** High-signal AI vocabulary that is never Erfi's: delve, tapestry, leverage, utilize, foster, underscore, testament, realm, landscape (metaphorical), pivotal, vibrant, seamless, robust, cutting-edge, game-changer.
+
+Two guards against overcorrection. First, the generic "humanize" prompts go much further -- banning semicolons, dashes, "however / while / although / because", and mandating 10-20-word sentences. Do NOT import those: connectors, subordination, and the `;`-flow ARE the voice (disposition #2, characteristic 12), and a sentence-length metronome reads as more machine-made, not less. Second, the goal is sounding like Erfi, not fooling a detector -- a lone flagged word is not a crime. Kill clusters of tells; never flatten the voice to dodge a wordlist.
+
 ### Openers depend on audience: cold for customer-facing, warm-ok for internal peers
 
 The cold-open rule below is the CUSTOMER-FACING rule (relay to an AE, review reply, anything that reaches a customer). It does NOT generalise to an internal peer conversation. When the reader is a colleague on your own team - not a customer - a short warm/rapport opener IS Erfi's voice: "Agreed, we're on the same page for the most part, and no worries, I prefer you be blunt hahah" (verbatim, real internal Slack reply, 2026-07-09). Peer chat gets the rapport line and the `hahah`; the cold-open discipline is reserved for the customer-facing surface. Before applying the strike-outs below, ask: customer-facing, or internal? If internal, keep the warmth.
