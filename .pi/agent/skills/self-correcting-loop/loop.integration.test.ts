@@ -22,6 +22,7 @@ const LOOP = join(import.meta.dir, "loop.ts");
 let repo: string;
 let counter: string;
 let fake: string;
+let promptLog: string;
 
 async function sh(cmd: string[], cwd: string) {
 	const p = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
@@ -33,12 +34,14 @@ beforeAll(async () => {
 	const box = mkdtempSync(join(tmpdir(), "loop-it-box-"));
 	counter = join(box, "counter");
 	fake = join(box, "fake-agent.sh");
+	promptLog = join(box, "prompts.log");
 
 	// Scripted fake agent (ignores the pi args it receives).
 	writeFileSync(
 		fake,
 		`#!/usr/bin/env bash
 n=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$COUNTER_FILE"
+printf '\n===PROMPT===\n%s\n' "$2" >> "$PROMPT_LOG"
 case "$n" in
   1) echo broken > fileC.txt ;;
   2) : ;;
@@ -86,7 +89,12 @@ afterAll(() => {
 test("governor: rollback, stall+escalate, scope-revert, then pass", async () => {
 	const proc = Bun.spawn(["bun", LOOP, "run"], {
 		cwd: repo,
-		env: { ...process.env, LOOP_PI_CMD: fake, COUNTER_FILE: counter },
+		env: {
+			...process.env,
+			LOOP_PI_CMD: fake,
+			COUNTER_FILE: counter,
+			PROMPT_LOG: promptLog,
+		},
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -108,6 +116,7 @@ test("governor: rollback, stall+escalate, scope-revert, then pass", async () => 
 	expect(it1.failingAfter).toBe(3);
 	expect(it1.kept).toBe(false);
 	expect(it1.model).toBe("weak");
+	expect(it1.changedFiles).toEqual(["fileC.txt"]);
 
 	// iter 2: stall -> escalate to rung 1.
 	expect(it2.progressed).toBe(false);
@@ -128,4 +137,11 @@ test("governor: rollback, stall+escalate, scope-revert, then pass", async () => 
 	expect(readFileSync(join(repo, "fileB.txt"), "utf8")).toContain("B-ok");
 	expect(readFileSync(join(repo, "fileC.txt"), "utf8")).toContain("C-ok");
 	expect(existsSync(join(repo, "OUTSIDE.txt"))).toBe(false);
+
+	// Negative knowledge: iteration 2's prompt must name the rolled-back
+	// approach from iteration 1 (fileC.txt) so the fresh agent can't repeat it.
+	const prompts = readFileSync(promptLog, "utf8").split("===PROMPT===");
+	expect(prompts[1]).not.toContain("Previous approaches that were rolled back");
+	expect(prompts[2]).toContain("Previous approaches that were rolled back");
+	expect(prompts[2]).toContain("fileC.txt");
 }, 30000);

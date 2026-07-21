@@ -46,6 +46,10 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   the loop never degrades the tree.
 - **write-scope** - out-of-scope edits are reverted each turn (kills the
   test-weakening cheat).
+- **negative-knowledge history** - each iteration's touched files are recorded
+  (pre-revert), and rolled-back attempts are injected into later prompts
+  ("Previous approaches that were rolled back - do not repeat them"), so a
+  fresh iteration can't re-attempt a proven dead end.
 - **remediation hints** - a per-sensor `hint` is appended to the feedback on
   failure ("how to fix: ..."), so the model gets guidance, not just the error.
 - **freeze mode** (`baseline: true` / `--freeze`) - tolerate sensors already
@@ -77,7 +81,7 @@ gate** (`judge` - correctness against the spec).
 ## Test
 
 ```bash
-bun test    # 114: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot/hardening; judge code + visual gate; pixel-diff decode/diff/baseline
+bun test    # 120: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot/hardening; judge code + visual gate; pixel-diff decode/diff/baseline
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability

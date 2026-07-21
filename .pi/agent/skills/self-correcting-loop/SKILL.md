@@ -22,7 +22,8 @@ output as its next prompt.
 ```
 checkpoint = git index (best known good)
 repeat until every sensor exits 0, OR maxIterations spent:
-    pi -p  <task + previous iteration's failing sensor output + loop notes>
+    pi -p  <task + previous iteration's failing sensor output + loop notes
+            + rolled-back attempt history (negative knowledge)>
     revert any edits outside writeScope
     run sensors (build / vet / test / tsc / clippy / astro check ...)
     all pass?       -> STOP, success                 (deterministic gate)
@@ -43,8 +44,16 @@ The governor around the bare loop (all deterministic, no extra model calls):
   hand-written "integrity" guard sensors.
 - **model escalation ladder** - start on the cheapest model; climb a rung after
   `stallPatience` consecutive no-progress iterations. Strength on demand.
+- **negative-knowledge history** - each iteration's touched files are recorded
+  BEFORE any revert, and rolled-back attempts are injected into later prompts
+  ("Previous approaches that were rolled back - do not repeat them"). A fresh
+  `pi -p` otherwise can't tell a dead end from an untried path, so it can
+  re-attempt the exact approach iteration N-3 already proved wrong.
+  `formatAttemptHistory` caps the block at the 5 most recent rolled-back
+  attempts and truncates long file lists, so the prompt stays sharp.
 - **run report** - `.pi/harness-report.json` records model, failing-count
-  trend, kept/rolled-back, escalations, scope violations per iteration.
+  trend, kept/rolled-back, escalations, scope violations, and changed files
+  per iteration.
 
 Two properties make this work on weak models:
 
@@ -61,7 +70,7 @@ Two properties make this work on weak models:
 
 | File | Role |
 |---|---|
-| `harness.ts` | Pure core: manifest schema/validation, prompt + feedback builders, stack detection, glob/scope, decide/ladder logic. Unit-tested (37 cases). |
+| `harness.ts` | Pure core: manifest schema/validation, prompt + feedback + attempt-history builders, stack detection, glob/scope, decide/ladder logic. Unit-tested (43 cases). |
 | `loop.ts` | CLI driver (Bun): spawns `pi -p`, runs sensors, git checkpoint/rollback, scope guard, escalation, report. |
 | `presets/*.json` | Starter manifests per stack (go/node/rust/astro/python). |
 | `harness.test.ts` | Unit tests for the pure helpers. |

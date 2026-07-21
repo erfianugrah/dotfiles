@@ -268,17 +268,65 @@ export function formatFailures(results: SensorResult[]): string {
 }
 
 /**
+ * One loop iteration's footprint, as needed for negative-knowledge feedback.
+ * Mirrors the report record in loop.ts (structural typing keeps the pure
+ * core independent of loop.ts's concrete RunReport type).
+ */
+export interface AttemptRecord {
+	iteration: number;
+	/** false = rolled back: this approach is a known dead end. */
+	kept: boolean;
+	/** files the agent touched that iteration (pre-revert). */
+	changedFiles: string[];
+	failingBefore: number;
+	failingAfter: number;
+}
+
+/**
+ * Render the rolled-back attempts as a negative-knowledge block for the next
+ * prompt. Only ROLLED-BACK attempts with file evidence count - kept attempts
+ * are visible in the tree itself. Without this, a fresh `pi -p` iteration
+ * cannot tell which approaches were already tried and rejected, so it can
+ * re-attempt a dead end (OpenAI "exec-plans with decision logs" pattern,
+ * mechanically derived instead of agent-narrated). Most recent `max` shown.
+ */
+export function formatAttemptHistory(attempts: AttemptRecord[], max = 5): string {
+	const dead = attempts.filter((a) => !a.kept && a.changedFiles.length > 0);
+	if (dead.length === 0) return "";
+	const shown = dead.slice(-max);
+	const lines = shown.map((a) => {
+		const files =
+			a.changedFiles.length <= 4
+				? a.changedFiles.join(", ")
+				: `${a.changedFiles.slice(0, 4).join(", ")} +${a.changedFiles.length - 4} more`;
+		return `- iteration ${a.iteration}: touched ${files} (failing ${a.failingBefore} -> ${a.failingAfter}, rolled back)`;
+	});
+	const overflow = dead.length - shown.length;
+	if (overflow > 0) lines.unshift(`(${overflow} earlier rolled-back attempt(s) omitted)`);
+	return lines.join("\n");
+}
+
+/**
  * Build the prompt for one iteration. First iteration (no feedback) is just
  * the task. Later iterations append the failing-sensor block plus anti-cheat
  * guardrails. `notes` carries loop-level signals (rollback happened, escalated,
- * out-of-scope edits reverted).
+ * out-of-scope edits reverted). `history` carries the negative-knowledge
+ * block from formatAttemptHistory.
  */
-export function buildPrompt(task: string, feedback?: string, notes?: string[]): string {
+export function buildPrompt(
+	task: string,
+	feedback?: string,
+	notes?: string[],
+	history?: string,
+): string {
 	if (!feedback) return task;
 	const noteBlock =
 		notes && notes.length
 			? `\n\n## Loop notes\n${notes.map((n) => `- ${n}`).join("\n")}`
 			: "";
+	const historyBlock = history
+		? `\n\n## Previous approaches that were rolled back - do not repeat them\n${history}`
+		: "";
 	return (
 		`${task}\n\n` +
 		"## Automated checks failed on the previous attempt\n" +
@@ -288,6 +336,7 @@ export function buildPrompt(task: string, feedback?: string, notes?: string[]): 
 		"- Do NOT change the sensor commands or the manifest.\n" +
 		"- Make the smallest change that addresses the reported errors.\n" +
 		noteBlock +
+		historyBlock +
 		"\n\n" +
 		feedback
 	);

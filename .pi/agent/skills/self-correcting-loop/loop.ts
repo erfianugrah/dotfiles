@@ -38,6 +38,7 @@ import {
 	decide,
 	detectPreset,
 	fingerprint,
+	formatAttemptHistory,
 	formatFailures,
 	modelAt,
 	outOfScope,
@@ -182,6 +183,8 @@ interface IterationRecord {
 	kept: boolean;
 	escalated: boolean;
 	scopeViolations: string[];
+	/** files the agent touched this iteration (pre-revert); negative knowledge. */
+	changedFiles: string[];
 	sensors: { name: string; ok: boolean; exitCode: number }[];
 }
 
@@ -293,14 +296,23 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 		);
 
 		const feedback = formatFailures(prev);
-		const prompt = buildPrompt(m.task, feedback, iterationNotes(report));
+		const prompt = buildPrompt(
+			m.task,
+			feedback,
+			iterationNotes(report),
+			formatAttemptHistory(report.iterations),
+		);
 		const agentExit = await runAgent(prompt, model, m.tools);
 		if (agentExit !== 0) console.warn(`  (agent exited ${agentExit}; continuing)`);
+
+		// Capture the attempt's footprint BEFORE any revert: this is the
+		// negative knowledge fed to later iterations via formatAttemptHistory.
+		const changed = gitOn ? await changedPaths() : [];
 
 		// Enforce write-scope.
 		let scopeViolations: string[] = [];
 		if (gitOn && m.writeScope.length) {
-			const bad = outOfScope(await changedPaths(), m.writeScope);
+			const bad = outOfScope(changed, m.writeScope);
 			if (bad.length) {
 				await revertPaths(bad);
 				scopeViolations = bad;
@@ -345,6 +357,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 			kept: d.keep,
 			escalated: adv.escalated,
 			scopeViolations,
+			changedFiles: changed,
 			sensors: cur.map((s) => ({ name: s.name, ok: s.ok, exitCode: s.exitCode })),
 		});
 

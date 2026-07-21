@@ -11,6 +11,8 @@ import {
 	decide,
 	detectPreset,
 	fingerprint,
+	type AttemptRecord,
+	formatAttemptHistory,
 	formatFailures,
 	globToRegExp,
 	matchGlob,
@@ -189,6 +191,63 @@ describe("formatFailures / buildPrompt", () => {
 		expect(p).toContain("Loop notes");
 		expect(p).toContain("rolled back a regression");
 		expect(p).toContain('sensor "test" failed');
+	});
+	test("buildPrompt includes attempt-history section when provided", () => {
+		const p = buildPrompt("my task", 'sensor "test" failed', [], "- iteration 2: touched a.ts");
+		expect(p).toContain("Previous approaches that were rolled back");
+		expect(p).toContain("- iteration 2: touched a.ts");
+	});
+	test("buildPrompt omits attempt-history section when empty", () => {
+		const p = buildPrompt("my task", 'sensor "test" failed');
+		expect(p).not.toContain("Previous approaches");
+	});
+});
+
+describe("formatAttemptHistory", () => {
+	const attempt = (over: Partial<AttemptRecord>): AttemptRecord => ({
+		iteration: 1,
+		kept: false,
+		changedFiles: ["src/foo.ts"],
+		failingBefore: 3,
+		failingAfter: 3,
+		...over,
+	});
+
+	test("empty when there are no rolled-back attempts", () => {
+		expect(formatAttemptHistory([])).toBe("");
+		expect(formatAttemptHistory([attempt({ kept: true })])).toBe("");
+		expect(formatAttemptHistory([attempt({ changedFiles: [] })])).toBe("");
+	});
+
+	test("lists only rolled-back attempts with files and sensor delta", () => {
+		const out = formatAttemptHistory([
+			attempt({ iteration: 1, kept: true, changedFiles: ["kept.ts"] }),
+			attempt({ iteration: 2, changedFiles: ["src/a.ts", "src/b.ts"], failingBefore: 3, failingAfter: 4 }),
+		]);
+		expect(out).not.toContain("kept.ts");
+		expect(out).toContain("iteration 2");
+		expect(out).toContain("src/a.ts, src/b.ts");
+		expect(out).toContain("failing 3 -> 4");
+	});
+
+	test("caps at max most recent rolled-back attempts and notes overflow", () => {
+		const attempts = Array.from({ length: 7 }, (_, i) =>
+			attempt({ iteration: i + 1, changedFiles: [`f${i + 1}.ts`] }),
+		);
+		const out = formatAttemptHistory(attempts, 3);
+		expect(out).toContain("f5.ts");
+		expect(out).toContain("f7.ts");
+		expect(out).not.toContain("f4.ts");
+		expect(out).toContain("4 earlier");
+	});
+
+	test("truncates long file lists", () => {
+		const out = formatAttemptHistory([
+			attempt({ changedFiles: ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts"] }),
+		]);
+		expect(out).toContain("a.ts");
+		expect(out).toContain("+2 more");
+		expect(out).not.toContain("e.ts");
 	});
 });
 
