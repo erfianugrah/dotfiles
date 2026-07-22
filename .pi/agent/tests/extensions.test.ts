@@ -15,6 +15,14 @@ import {
   checkReformulationLoop,
   stripAnsiCSpans,
 } from "../extensions/tool-guard.ts";
+import {
+  matchIntent,
+  matchPath,
+  matchBash,
+  extractPatchPaths as sgExtractPatchPaths,
+  intentMessage,
+  actionReason,
+} from "../extensions/skill-guard.ts";
 import { parsePatch, renderApplyDiffs } from "../extensions/apply-patch.ts";
 import {
   HARD_CAP_BYTES,
@@ -3628,5 +3636,118 @@ describe("video-review / computeMetrics", () => {
     const qa = r.questions.find((q) => q.asker === "A")!;
     expect(qa.questions).toBe(1);
     expect(qa.elaboration).toBe(1);
+  });
+});
+
+// -- skill-guard: pure matchers ---------------------------------------------
+
+describe("skill-guard.matchIntent", () => {
+  test("scaffold phrasing fires scaffold-new-project", () => {
+    expect(matchIntent("can you scaffold a new dashboard for me").map((h) => h.skill)).toContain(
+      "scaffold-new-project",
+    );
+    expect(matchIntent("let's bootstrap this").map((h) => h.skill)).toContain("scaffold-new-project");
+    expect(matchIntent("build a new service").map((h) => h.skill)).toContain("scaffold-new-project");
+  });
+
+  test("PoV phrasing fires sa-pov", () => {
+    expect(matchIntent("write the kickoff doc for the PoV").map((h) => h.skill)).toContain("sa-pov");
+    expect(matchIntent("draft success criteria").map((h) => h.skill)).toContain("sa-pov");
+  });
+
+  test("fly phrasing fires fly", () => {
+    expect(matchIntent("deploy this to fly.io").map((h) => h.skill)).toContain("fly");
+    expect(matchIntent("run flyctl deploy").map((h) => h.skill)).toContain("fly");
+  });
+
+  test("PR/release phrasing fires gh", () => {
+    expect(matchIntent("open a PR for this branch").map((h) => h.skill)).toContain("gh");
+    expect(matchIntent("cut a release").map((h) => h.skill)).toContain("gh");
+  });
+
+  test("ordinary prose fires nothing (precision)", () => {
+    expect(matchIntent("please fix the typo in the readme")).toEqual([]);
+    expect(matchIntent("what does this function do")).toEqual([]);
+    expect(matchIntent("")).toEqual([]);
+  });
+
+  test("a prompt can match multiple intents", () => {
+    const skills = matchIntent("scaffold a new app then open a PR").map((h) => h.skill);
+    expect(skills).toContain("scaffold-new-project");
+    expect(skills).toContain("gh");
+  });
+});
+
+describe("skill-guard.matchPath", () => {
+  test("compose files -> infrastructure-stack", () => {
+    expect(matchPath("stacks/servarr/docker-compose.yml")?.skill).toBe("infrastructure-stack");
+    expect(matchPath("compose.yaml")?.skill).toBe("infrastructure-stack");
+  });
+  test("Dockerfile -> docker", () => {
+    expect(matchPath("app/Dockerfile")?.skill).toBe("docker");
+    expect(matchPath("Dockerfile.prod")?.skill).toBe("docker");
+  });
+  test("terraform files -> terraform", () => {
+    expect(matchPath("infra/main.tf")?.skill).toBe("terraform");
+    expect(matchPath("infra/prod.tfvars")?.skill).toBe("terraform");
+  });
+  test("qmd -> quarto, Caddyfile -> caddy", () => {
+    expect(matchPath("deck.qmd")?.skill).toBe("quarto");
+    expect(matchPath("caddy-compose/Caddyfile")?.skill).toBe("caddy");
+  });
+  test("unrelated paths match nothing", () => {
+    expect(matchPath("src/index.ts")).toBeNull();
+    expect(matchPath("README.md")).toBeNull();
+    expect(matchPath("notes.tfx")).toBeNull(); // .tfx is not .tf/.tfvars
+    expect(matchPath("")).toBeNull();
+  });
+});
+
+describe("skill-guard.matchBash", () => {
+  test("flyctl / terraform / wrangler / supabase commands map to their skills", () => {
+    expect(matchBash("flyctl deploy -a foo")?.skill).toBe("fly");
+    expect(matchBash("terraform apply")?.skill).toBe("terraform");
+    expect(matchBash("tofu plan")?.skill).toBe("terraform");
+    expect(matchBash("wrangler deploy")?.skill).toBe("cloudflare");
+    expect(matchBash("supabase db push")?.skill).toBe("supabase");
+  });
+  test("bare / unrelated commands match nothing", () => {
+    expect(matchBash("ls -la")).toBeNull();
+    expect(matchBash("git status")).toBeNull();
+    expect(matchBash("echo fly")).toBeNull(); // 'fly' as a word, not a subcommand
+    expect(matchBash("")).toBeNull();
+  });
+});
+
+describe("skill-guard.extractPatchPaths", () => {
+  test("pulls Add/Update/Delete targets and Move src+dst", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Add File: a/Dockerfile",
+      "+FROM scratch",
+      "*** Update File: b/main.tf",
+      "*** Move File: old.qmd -> new.qmd",
+      "*** End Patch",
+    ].join("\n");
+    const paths = sgExtractPatchPaths(patch);
+    expect(paths).toContain("a/Dockerfile");
+    expect(paths).toContain("b/main.tf");
+    expect(paths).toContain("old.qmd");
+    expect(paths).toContain("new.qmd");
+  });
+});
+
+describe("skill-guard.message builders", () => {
+  test("intentMessage lists skill + path + /skill: hint", () => {
+    const msg = intentMessage([{ id: "fly_intent", skill: "fly", why: "flyctl lifecycle" }]);
+    expect(msg).toContain("`fly`");
+    expect(msg).toContain("/skill:fly");
+    expect(msg).toContain("SKILL.md");
+  });
+  test("actionReason carries the rule id + fires-once note", () => {
+    const r = actionReason({ id: "compose_infra", skill: "infrastructure-stack", why: "conventions" });
+    expect(r).toContain("skill-guard[compose_infra]");
+    expect(r).toContain("infrastructure-stack");
+    expect(r).toContain("once per session");
   });
 });
