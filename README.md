@@ -55,15 +55,22 @@ bin/
 .config/
   atuin/config.toml            # Atuin shell history (self-hosted sync)
   systemd/user/bw-serve.service  # Bitwarden CLI REST API service
-  opencode/                    # opencode AI coding agent (custom fork)
-    AGENTS.md                  # shared agent context (linked from .pi/agent/)
+  opencode/                    # opencode AI coding agent (custom fork, LEGACY - see Coding-agents)
+    AGENTS.md                  # canonical tool-routing context (linked from .pi/agent/AGENTS.md)
     opencode.json              # MCP servers (context7, gh-grep, whisper, comfyui, lora-train, research)
     plugins/output-rules.ts    # prepends AGENTS.md output rules to system prompt
     tools/docs.ts              # docs.erfi.io SSH tool (docs_search/read/grep/find/summary/sources)
-    skills/                    # 23 skills (see Coding-agents section)
+    skills/                    # back-compat symlink -> ../../.pi/agent/skills
 
-.pi/agent/                     # pi AI coding agent (sibling to opencode)
-  APPEND_SYSTEM.md             # appended to system prompt: Commit/PR + Safety only
+.claude/                       # Claude Code wiring (user-level, stow-linked to ~/.claude/)
+  CLAUDE.md                    # universal agent rules (harness-agnostic subset of APPEND_SYSTEM.md)
+  skills/                      # per-skill relative symlinks -> ../../.pi/agent/skills/<name>
+                               # (15 domain skills; coexists with the local Cloudflare skill set.
+                               #  settings.json deliberately NOT tracked - Claude mutates it live)
+
+.pi/agent/                     # pi AI coding agent (PRIMARY harness; canonical skills + resources)
+  APPEND_SYSTEM.md             # appended: Commit/PR, Safety, Epistemic calibration, Confidential-IDs, Output
+  skills/                      # 39 skills + 6 superpowers subskills (canonical since 2026-05-27)
   prompts/                     # markdown sources loaded by extensions
     tool-routing.md            #   prepended via before_agent_start with CRITICAL framing
     local-model-rules.md       #   prepended only for gemma/qwen/llama-server models
@@ -632,21 +639,26 @@ Docker-based test matrix covering all three platforms:
 Arch test caches system packages in a Docker layer — rebuilds only re-run
 ecosystem installs unless `packages/arch-repo.txt` changes.
 
-## Coding agents (opencode + pi)
+## Coding agents (pi.dev primary; opencode + Claude Code alternates)
 
-Two AI coding agents are configured side-by-side and share a single skills /
-AGENTS.md surface so behaviour stays consistent across both. opencode is the
-primary daily driver (a custom fork at `~/opencode`); pi is the secondary
-harness for sessions where its TUI / extension model fits better.
+pi.dev (Earendil Works) is the current primary harness - it owns the
+daily-driver TUI, extension model, skills loader, and sessions. opencode (a
+custom fork at `~/opencode`) and Claude Code are alternates the user may
+also run. All three are wired to a single skills / AGENTS.md surface, so any
+rule or skill applies to every harness: opencode via the back-compat symlink
+chain, Claude Code by pointing its skill discovery at the same tree.
 
 ### Shared surface
 
-`AGENTS.md` lives once at `.config/opencode/AGENTS.md` and is symlinked from
-`.pi/agent/AGENTS.md`. Skills live once at `.config/opencode/skills/` and are
-linked into pi via `~/.pi/agent/skills`.
+The tool-routing `AGENTS.md` lives once at `.config/opencode/AGENTS.md` and is
+symlinked from `~/.pi/agent/AGENTS.md`. Skills were relocated to be
+pi-canonical on 2026-05-27: the source of truth is now `.pi/agent/skills/`,
+and opencode reads the same tree through a back-compat symlink chain
+(`~/.config/opencode/skills` -> `~/dotfiles/.config/opencode/skills` ->
+`../../.pi/agent/skills`).
 
-Result: any skill added or AGENTS rule edited applies to both agents on the
-next launch.
+Result: any skill added or AGENTS rule edited applies to pi on the next launch
+(and to opencode via the symlink if it is ever run).
 
 ### Tool routing (the policy layer)
 
@@ -667,7 +679,7 @@ pipeline (search → summary → read), LSP for code intel, subagent
 delegation, memory + session_search, bash discipline (no `find`, sd /
 ast-grep for large edits, lockfile guards).
 
-### Skills (`.config/opencode/skills/`)
+### Skills (`.pi/agent/skills/`)
 
 Harness audit 2026-05-25: superpowers methodology gates (using-superpowers,
 brainstorming, executing-plans, dispatching-parallel-agents,
@@ -685,7 +697,10 @@ rationale.
 |---|---|
 | `scaffold-new-project` | Triggers on "start / build / scaffold a new X" — routes to the relevant concrete-tech skills below, asks at most 3 batched questions, produces project skeleton + repo-level AGENTS.md cross-referencing user-level skills. **No design doc, no plan doc** — just code with conventions baked in |
 | `software-architecture` | Backend/system design — DDD bounded contexts, interface-driven deps, REST+WS surface with correlation IDs, Postgres+Valkey persistence (with the user's signature flat-single-binary go:embed full-stack Go pattern documented), slog+Prometheus observability |
-| `superpowers` (residual) | obra/superpowers — only `verification-before-completion` (always-on), `writing-plans`, `subagent-driven-development`, `systematic-debugging`, `requesting-code-review`, `writing-skills` survive (opt-in only). Conditional injection extension defaults to OFF; opt back in per-session via `SUPERPOWERS_ON=1` |
+| `superpowers` (residual) | obra/superpowers - only `verification-before-completion` (always-on), `writing-plans`, `subagent-driven-development`, `systematic-debugging`, `requesting-code-review`, `writing-skills` survive as 6 opt-in subskills. Conditional injection extension defaults to OFF; opt back in per-session via `SUPERPOWERS_ON=1` |
+| `sa-pov` | Solutions-Architect PoV / PoC methodology - scope + negotiate success criteria, validate each live (not from docs), solution runbook with real evidence, package for the customer |
+| `self-correcting-loop` | Unattended sensor-gated agent loop - runs a fresh `pi -p` per iteration until computational + inferential sensors (build / test / judge / visual) pass |
+| `abuse-operations` | Anti-abuse / fraud-detection system design - risk scoring, indicator design, actor / campaign tracking, false-positive handling |
 
 **Frontend + UI**:
 
@@ -694,14 +709,23 @@ rationale.
 | `frontend-stack` | Astro 6 / React (tsrouter) / Next.js with biome / shadcn v4 / Tailwind v4 / zod v4 / tanstack-form+query+router — includes embedded-into-Go-binary Astro pattern for full-stack Go |
 | `design-utilitarian` | McMaster-Carr visual + interaction ethos for ANY web UI work — info density, tables over cards, no animation tax, two-color palette, no marketing prose in product surfaces |
 | `mermaid-d2` | Diagram language picker + render via `render_diagram` tool |
-| `favicons-and-icons` | SVG-first or ComfyUI-raster → `build_favicon_set` → full PWA favicon set |
+| `favicons-and-icons` | SVG-first or ComfyUI-raster to `build_favicon_set` to full PWA favicon set |
+
+**Writing + docs**:
+
+| Skill | Purpose |
+|---|---|
+| `erfi-voice` | Draft replies / emails / reviews / PR comments in Erfi's voice with verifiable references |
+| `paste-formatting` | Get Markdown prose into WYSIWYG (Gmail / Docs / Notion) or chat (Slack / Discord / Telegram) targets intact via `mdclip` |
+| `quarto` | Quarto documents + projects - multi-format output (HTML / PDF / Revealjs / Typst), freeze/cache, and reveal.js deck building |
+| `deck-screenshot` | Screenshot or contact-sheet a reveal.js / Quarto deck to view + visually verify it inside a session |
 
 **Infrastructure + deploy**:
 
 | Skill | Purpose |
 |---|---|
 | `infrastructure-stack` | Self-hosted Docker Compose stacks — bridge networks + static IPs, expose-not-ports, host-mode Caddy, PUID/PGID, cross-stack shared networks |
-| `composer` | Self-hosted Docker Compose mgmt platform at composer.erfi.io — 106-endpoint REST API, auth, pipeline footguns, release workflow |
+| `composer` | Self-hosted Docker Compose mgmt platform at composer.erfi.io - ~109-endpoint REST API, auth, pipeline footguns, release workflow |
 | `docker` | Dockerfile authoring, buildx multi-arch + cache, image inspection, registry workflows, BuildKit cache mounts / secrets / SSH |
 | `fly` | Fly.io app lifecycle — deploy, secrets, certs, machines, volumes, scale + auto-stop, .internal DNS |
 | `terraform` | OpenTofu (preferred) / Terraform — module structure, state backends, SOPS+age secrets, `terraform import` + `cf-terraforming` for adopting existing resources |
@@ -710,6 +734,10 @@ rationale.
 | `ci-workflows` | GitHub + Gitea Actions YAML — verified-current action pins, language setup, Docker build+push, pages deploy |
 | `gh` | gh CLI ops: PR/issue/release lifecycle, Actions runs + cache, repo + auth, gh extensions — token-efficient `--json` + `--jq` patterns |
 | `gh-search` | Cross-repo GitHub code/issue/PR search via `gh` CLI |
+| `caddy` | Custom Caddy build + WAF stack at `~/ergo/caddy-compose` - xcaddy plugin set, snippet idiom, wafctl dashboard, TSIG/rfc2136 chain to Knot |
+| `knotctl` | `knotctl` CLI for live DNS edits (TSIG RFC 2136 over TCP) against the merged knotea authority |
+| `gloryhole` | Self-built DNS resolver `glory-hole` (Go + embedded Unbound + loopback knotd + dashboard); also authoritative NS for the zones post-cutover |
+| `tailscale-homelab` | SSH into + operate the tailscale-routed homelab (servarr etc.) - per-host identity convention, subnet routing, the `ssh servarr docker ...` operator idiom |
 
 **Database + data**:
 
@@ -717,6 +745,8 @@ rationale.
 |---|---|
 | `supabase` | All Supabase products (db, auth, edge fns, storage, realtime, ssr) |
 | `supabase-postgres-best-practices` | Postgres query/schema/index patterns from Supabase |
+| `sbperf` | `sbperf` CLI - Supabase performance analyzer (advisors + SQL diagnostics + infra metrics) rendering self-contained HTML + PDF reports with windowed trends |
+| `sbshift` | `sbshift` CLI - near-zero-downtime Postgres to Postgres migration via native logical replication |
 
 **Local services + AI**:
 
@@ -726,6 +756,14 @@ rationale.
 | `comfyui` | SDXL / Illustrious / Flux image generation via llm-compose proxy |
 | `lora-train` | LoRA fine-tuning for SDXL / Flux via kohya sd-scripts |
 | `whisper` | WhisperX audio/video transcription (YouTube, local files) |
+| `gocurl` | `gocurl` CLI - HTTP performance measurement: httptrace phase breakdown (DNS / TCP / TLS / TTFB / transfer), load testing, streaming analysis |
+
+**Homelab media (servarr)**:
+
+| Skill | Purpose |
+|---|---|
+| `arr-stack` | The *arr pipeline on servarr (radarr / sonarr / prowlarr / bazarr + sabnzbd / qbittorrent / flaresolverr), TRaSH guides, quality profiles |
+| `jellyfin` | Media-consumer stack on servarr - Jellyfin + Jellyseerr + Navidrome, NVENC transcoding on the GTX 1070 |
 
 **Diagnostics**:
 
@@ -769,13 +807,30 @@ DB access, session lifecycle hooks).
 | `memory.ts` | Persistent cross-session memory |
 | `todowrite.ts` | Session todo list |
 | `lsp/` | LSP integration (multi-language: ts, rust, py, go, lua, clangd) |
+| `write-stream.ts` | Chunked atomic file writes for content above the tool-call-input size ceiling (`first` / `middle` / `last`) |
+| `pdf.ts` | Diagnostic-first PDF extraction: born-digital to `pdftotext`, scanned to `tesseract` OCR, plus tables + visual rasterize modes |
+| `osint.ts` | OSINT tools (domain / IP / email / username / phone / URL / threat / CVE / harvest) via the research FastAPI service |
+| `bench.ts` | Statistical command benchmarking via `hyperfine` (mean / stddev / winner) |
+| `go-test.ts` | `go test -json` wrapper - failures-only triage |
+| `hurl-test.ts` | Run a `.hurl` file, return only failing entries |
+| `osv-scan.ts` | `osv-scanner` wrapper - one flattened line per vuln |
+| `secret-scan.ts` | `gitleaks` / `noseyparker` wrapper - secret values truncated out of context |
+| `video-review.ts` | Transcribe + diarize a video, overlap / metrics analysis, evidence bundle (whisper stack) |
+| `sbperf.pi.ts` | Drive the `sbperf` Supabase performance analyzer as a single tool |
+| `session-ledger/` | Cross-session work ledger - queryable structured summaries of past sessions (`ledger_search` / `ledger_sql`) |
+| `yank.ts` | Copy a code block from the last assistant message to the system clipboard |
 
 **Gates + safety** (intercept tool calls):
 
 | Extension | Provides |
 |---|---|
-| `tool-guard.ts` | 29 rules blocking bash + write anti-patterns: npm-when-bun, `sed -i` on source files, `:latest` docker images, unsigned commits, hallucinated CLIs (`bun create @tanstack/router`), `\uXXXX` escapes in bash strings, `chmod 777`, force-push to main, edits on `.env` / lockfiles / `node_modules` / `.git` internals. Also a reformulation-loop guard that blocks the 4th consecutive search-family call when no drill-in tool fired between |
+| `tool-guard.ts` | ~30 rules blocking bash + write anti-patterns (incl. docs-first chain + oversized-`write` -> `write_stream`): npm-when-bun, `sed -i` on source files, `:latest` docker images, unsigned commits, hallucinated CLIs (`bun create @tanstack/router`), `\uXXXX` escapes in bash strings, `chmod 777`, force-push to main, edits on `.env` / lockfiles / `node_modules` / `.git` internals. Also a reformulation-loop guard that blocks the 4th consecutive search-family call when no drill-in tool fired between |
 | `git-gh-gate.ts` | Confirmation modal before mutating git/gh commands (truncates display body to avoid long-session scroll cascade) |
+| `ascii-punctuation-guard.ts` | Blocks mojibake-prone smart punctuation (em/en dash, smart quotes, ellipsis) in write / edit / apply_patch / commit payloads - keeps committed + pasted text ASCII |
+| `confidential-write-guard.ts` | Nudges once per repo before persisting prose to a remote-backed repo; hard-blocks user-confirmed confidential third-party identifiers |
+| `skill-guard.ts` | Actively routes to a matching skill the model would otherwise skip: intent nudge on the prompt (`before_agent_start`) + block-once on skill-relevant file edits / commands (`tool_call`). Companion to the passive skill-description layer |
+| `slash-typo-guard.ts` | Catches typo'd slash commands before they reach the LLM |
+| `cd-agents-reload.ts` | Warns when you `cd` into a repo whose `AGENTS.md` was not loaded at session start |
 
 **Prompt + policy layer:**
 
@@ -790,22 +845,33 @@ DB access, session lifecycle hooks).
 
 | Extension | Provides |
 |---|---|
-| `custom-footer.ts` | Default-on footer: cumulative cost + per-turn delta, true input tokens (sums `input + cacheRead + cacheWrite` — the prior version of summing only `usage.input` undercounted by 6 orders of magnitude in cache-heavy sessions), context % (falls back to absolute `~Nk` when model maxTokens unknown), session name, thinking level, cwd/branch, model. Width-aware right-side drop: fields disappear front-first when terminal is narrow, model always kept. NaN-guarded accumulators (pi#4158). Aggregates `ctx.ui.setStatus()` text from other extensions as a yellow middle segment. Re-installs on session_start to survive `/new` / `/resume` / `/reload` / `/fork` |
+| `custom-footer.ts` (**disabled**) | Retired to `custom-footer.ts.disabled` - pi's built-in footer now covers cost/tokens/context. Kept for reference: cumulative cost + per-turn delta, true input tokens (sums `input + cacheRead + cacheWrite`), width-aware right-side field drop, NaN-guarded accumulators (pi#4158), status aggregation |
 | `session-auto-title.ts` | Auto-generates a 3-6 word session title from the first user message via a small cheap model. Model picker reads `~/.pi/agent/models.json`, scores every configured `provider/id` pair by (provider weight + name pattern weight) — local llama-server / ollama / lmstudio first, then haiku / mini / nano patterns, then gemma / qwen3-4 / phi / llama-3-small patterns. First with valid auth wins. Falls back to current session model only if nothing else has auth. Records a marker so it runs once per session and respects manual `/session-name` overrides |
 | `session-summary.ts` | On `startup` / `new` session_start, injects a project briefing: branch + ahead/behind, working-tree status counts, last 3 commits, up to 3 open PRs. Hard 1.5s budget; silent outside git working trees |
 | `session-fts/` | Background SQLite FTS5 indexer for `~/.pi/agent/sessions/`. Two files: `index.ts` (main-thread façade — spawns worker, owns read-only DB handle for `searchFts()` + `indexStats()`) and `worker.ts` (Bun Worker — owns writer-side DB, runs all synchronous SQLite churn off the main event loop). On a 1.3GB index every INSERT costs ~3ms because FTS5 has to update its inverted index; 100 files × ~150 rows = ~45s of unyielding work that previously caused visible typing lag at every session_start. Worker thread eliminates that. WAL mode allows concurrent reader+writer. 100 newest-first files per startup, 5s startup delay, single-flight guard prevents stacked requests. `/session-index status \| rebuild \| gc` |
 | `compaction-progress.ts` | Live spinner + token-before/after toast during /compact |
-| `bookmark.ts`, `migrate-sessions.ts`, `notify.ts`, `question.ts`, `session-name.ts`, `trigger-compact.ts`, `inline-bash.ts` | Smaller utilities |
+| `tool-output-prune.ts` | opencode-style surgical pruning of oversized tool outputs to preserve context |
+| `compaction-model.ts` | Runs pi's compaction summarizer on a cheaper / faster model |
+| `continue-after-error.ts` | Recovery affordance for provider 401 / 402 / 429 - resume instead of ending the run |
+| `clipboard-image-shrink.ts` | Auto-downscales pasted clipboard images before they reach the model |
+| `bookmark.ts`, `migrate-sessions.ts`, `notify.ts`, `question.ts`, `session-name.ts`, `session-undo.ts`, `trigger-compact.ts`, `inline-bash.ts` | Smaller utilities (`/undo`, bookmarks, desktop notify, prompts, session naming, threshold compaction, `!{cmd}` inline bash) |
 
-### Why two agents
+Two extensions are parked as `.disabled`: `custom-footer.ts` (superseded by pi's built-in footer) and `stuck-state-recovery.ts`.
 
-opencode is the daily-driver fork with better default TUI, builtin Exa /
-codesearch / context7 integration, and the `output-rules.ts` plugin pattern.
-pi is from a different ecosystem (Earendil Works) with a richer extension
-API (`before_agent_start`, `tool_execution_*`, custom tool rendering),
-larger TUI primitives (modals, widgets, status slots), and a `task` /
-subagent system. Keeping both wired to the same skills + AGENTS.md means
-zero ergonomic delta when switching.
+### Why pi.dev (and why the shared surface matters)
+
+pi.dev is the current daily driver: a richer extension API
+(`before_agent_start`, `tool_call` / `tool_result` gating, custom tool
+rendering), larger TUI primitives (modals, widgets, status slots), a `task` /
+subagent system, and the ~57-extension surface documented above. opencode (the
+earlier fork, with its `output-rules.ts` plugin pattern and builtin Exa /
+codesearch / context7) and Claude Code are not abandoned - the point of the
+shared skills + AGENTS.md surface is that switching harnesses has zero
+ergonomic delta. To point Claude Code at the same skills, symlink individual skills into
+`~/.claude/skills/` (whole-dir symlink would clobber the existing Cloudflare
+skill set there; a tracked `dotfiles/.claude/skills/<name>` ->
+`../../.pi/agent/skills/<name>` per-skill symlink stows cleanly alongside
+them). A user-level `~/.claude/CLAUDE.md` carries the universal rules.
 
 ## Other tools
 

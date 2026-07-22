@@ -31,7 +31,7 @@ exactly:
   in this repo and are partially shared with pi via symlink
   (`~/.config/opencode/skills` → `~/dotfiles/.pi/agent/skills` since the
   2026-05-27 relocation; pi is canonical, opencode is the back-compat
-  hop). The legacy app is NOT running. Only reach for opencode docs / source when answering a
+  hop). It is an occasional alternate harness (pi.dev is the daily driver), not the current primary. Only reach for opencode docs / source when answering a
   question about the upstream project this codebase forked patterns from
   (e.g. the `tool-output-prune` algorithm is a port from
   `~/opencode/packages/opencode/src/session/compaction.ts`).
@@ -95,8 +95,9 @@ machine; do NOT use both on the same machine or resources load twice.
    pi update --extensions                                 # reconcile later
    ```
 
-   This carries the 52 extensions, 38 skills (+14 superpowers subskills), 8
-   prompt templates and the theme. It does NOT carry user config (pi packages
+   This carries the 54 top-level + 3 directory extensions, 39 skills (+6
+   superpowers subskills), 8 prompt templates and the theme. It does NOT carry
+   user config (pi packages
    ship resources only): `settings.json`, `models.json`, `keybindings.json`,
    `APPEND_SYSTEM.md`. Bootstrap those once (idempotent; symlinks the 4 files
    into `~/.pi/agent/`, backing up any existing non-symlink; `COPY=1` to copy):
@@ -110,6 +111,23 @@ machine; do NOT use both on the same machine or resources load twice.
 
 **Never run path 2 on a stow machine** - the resources are already loaded via
 the `~/.pi/agent/` symlinks, so `pi install` would double-load them.
+
+## Claude Code wiring (.claude/)
+
+Claude Code is wired into the same canonical skills tree via per-skill
+symlinks, NOT a whole-dir link (`~/.claude/skills/` already holds a locally
+installed Cloudflare skill set a whole-dir link would clobber):
+
+- `.claude/skills/<name>` -> `../../.pi/agent/skills/<name>` - one relative
+  symlink per shared skill (15 domain skills today). Add another the same
+  way + stow; stow nests it alongside the local skills, no folding.
+- `.claude/CLAUDE.md` - universal agent rules (authorship, safety,
+  confidential IDs, ASCII output, calibration). A handwritten
+  harness-agnostic subset of `.pi/agent/APPEND_SYSTEM.md`, kept in sync
+  manually - pi's APPEND_SYSTEM has no include mechanism, so a shared file
+  with includes would be a sync hazard.
+- `.claude/settings.json` is deliberately NOT tracked - Claude mutates it
+  live (`enabledPlugins` is machine-specific).
 
 ## Pi extensions
 
