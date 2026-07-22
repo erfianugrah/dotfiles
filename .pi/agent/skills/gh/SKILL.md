@@ -1,6 +1,6 @@
 ---
 name: gh
-description: GitHub workflow operations via the `gh` CLI — PR lifecycle (create / view / merge / review), issue management, releases with assets, GitHub Actions runs + cache, repo + auth ops, gh extensions. Token-efficient `--json` + `--jq` patterns throughout. Sibling to `gh-search` (which covers cross-repo code/issue search). Use whenever the work involves a real PR / issue / release / Action run on a repo you own
+description: Use when the task touches a real PR, issue, release, or GitHub Actions run on a repo you own - creating, viewing, merging, or reviewing a PR; filing or triaging an issue; cutting a release with assets; inspecting or re-running an Actions workflow or its cache; repo and auth ops. Fires the moment you are about to hand-roll a raw git or gh command for any of those. Sibling to gh-search (cross-repo code/issue search); this is the write/lifecycle side.
 ---
 
 # gh — full GitHub CLI workflow

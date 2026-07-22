@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..", "..", ".."); // tests -> agent -> .pi -> repo root
@@ -58,6 +58,69 @@ function extensionsOnDisk(): string[] {
 	}
 	return truth;
 }
+
+// ---- Skill description lint -----------------------------------------------
+//
+// The description is the ONLY thing in context before a skill loads (pi
+// docs/skills.md: progressive disclosure). It is the trigger, not docs.
+// Conventions from the in-repo writing-skills skill + pi's frontmatter cap:
+//   - pi hard cap: description <= 1024 chars (docs/skills.md frontmatter table)
+//   - writing-skills: lead with "Use when", triggers-only, <500 chars, ASCII
+// The trained-overlap skills (gh/docker/git-troubleshooting) were hardened to
+// the full convention; the repo-wide checks keep every skill under pi's cap.
+const SKILLS_DIR = join(ROOT, ".pi/agent/skills");
+const HARDENED = ["gh", "docker", "git-troubleshooting"];
+const SMART_PUNCT = /[\u2013\u2014\u2018\u2019\u201c\u201d\u2026]/;
+
+function skillMdFiles(): string[] {
+	return Array.from(
+		new Bun.Glob("**/SKILL.md").scanSync({ cwd: SKILLS_DIR, onlyFiles: true, dot: true }),
+	);
+}
+
+function readDescription(relPath: string): string | null {
+	const txt = readFileSync(join(SKILLS_DIR, relPath), "utf8");
+	const m = txt.match(/^description:[ \t]*(.+)$/m);
+	if (!m) return null;
+	let v = m[1].trim();
+	if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+		v = v.slice(1, -1);
+	}
+	return v;
+}
+
+describe("skill description lint", () => {
+	test("every skill has a non-empty description", () => {
+		const missing = skillMdFiles().filter((f) => {
+			const d = readDescription(f);
+			return !d || d.length === 0;
+		});
+		expect(missing).toEqual([]);
+	});
+
+	test("every skill description is within pi's 1024-char cap", () => {
+		const over = skillMdFiles()
+			.map((f) => ({ f, len: Buffer.byteLength(readDescription(f) ?? "", "utf8") }))
+			.filter((x) => x.len > 1024);
+		expect(over).toEqual([]);
+	});
+
+	test("hardened skills lead with 'Use when' (writing-skills convention)", () => {
+		for (const name of HARDENED) {
+			const d = readDescription(`${name}/SKILL.md`);
+			expect(d, `${name} description missing`).toBeTruthy();
+			expect(d!, `${name} must start with "Use when"`).toMatch(/^Use when/i);
+		}
+	});
+
+	test("hardened skills are <=500 chars and ASCII-clean", () => {
+		for (const name of HARDENED) {
+			const d = readDescription(`${name}/SKILL.md`)!;
+			expect(Buffer.byteLength(d, "utf8"), `${name} over 500 chars`).toBeLessThanOrEqual(500);
+			expect(SMART_PUNCT.test(d), `${name} has smart punctuation`).toBe(false);
+		}
+	});
+});
 
 describe("pi-harness manifest coverage", () => {
 	test("every extension on disk is matched by an extensions glob", () => {

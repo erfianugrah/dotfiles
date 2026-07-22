@@ -1,6 +1,6 @@
 ---
 name: git-troubleshooting
-description: Diagnose `git mv` / `git add` / `git rm` / `git checkout` failures, "not under version control" / "pathspec did not match" / "refusing to lose untracked file" errors, files mysteriously absent from `git status`, gitignore-trap confusion, dirty-tree commit failures, and detached-HEAD recovery. The diagnostic battery to run before guessing.
+description: Use when a git command fails or behaves oddly - git mv, git add, git rm, or git checkout errors; messages like not under version control, pathspec did not match, or refusing to lose untracked file; files mysteriously absent from git status; gitignore-trap confusion; dirty-tree commit failures; or detached-HEAD recovery. Run this diagnostic battery BEFORE guessing at a fix.
 ---
 
 # git-troubleshooting

@@ -1,6 +1,6 @@
 ---
 name: docker
-description: Dockerfile authoring, buildx (multi-arch + cache), image inspection, registry workflows, container debugging, and BuildKit features (cache mounts / secrets / SSH). The lower-level container work that complements `infrastructure-stack` (which covers Compose patterns) and `composer` (which covers your GitOps platform). Use when writing or optimizing a Dockerfile, building images for ghcr.io, debugging a running container, inspecting layers, or managing image storage / pruning.
+description: Use when writing or optimizing a Dockerfile, building or tagging an image for ghcr.io, running buildx (multi-arch, cache mounts, BuildKit secrets or SSH), debugging or inspecting a running container, or managing image layers, storage, and pruning. The container-level work beneath infrastructure-stack (which owns Compose stack authoring) and composer (GitOps deploy) - reach for those instead when the task is a Compose stack rather than an image or container.
 ---
 
 # docker — Dockerfile + buildx + inspection + registry
