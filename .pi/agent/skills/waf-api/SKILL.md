@@ -56,10 +56,12 @@ by `deployMu`. `POST /api/config/generate` is preview-only. None reload Caddy.
 - **Response `total:-1`** = partial results (timeout or export stream), not a bug.
 - **Rule mutations return success without deploying** - the dashboard calls
   `POST /api/deploy` explicitly; API/CLI callers must too (`wafctl deploy`).
-- **Stale figures in caddy-compose/AGENTS.md** (verified 2026-06 against source):
-  "155 mux routes" -> actually ~94; `validWAFModes` does NOT exist (config is
-  thresholds + `detection_only`; `inbound_threshold: 0` = blocking disabled);
-  blocklist.go comments say "reload Caddy" but it calls `deployAll` (no reload).
+- **Doc figures corrected 2026-06** (previously stale in caddy-compose/AGENTS.md):
+  "155 mux routes" -> actually 94 API routes + UI catch-all; `validWAFModes` was
+  removed from the code (config is thresholds + `detection_only`;
+  `inbound_threshold: 0` = blocking disabled); blocklist.go comments used to claim
+  "reload Caddy" but it calls `deployAll` (no reload). If an old doc/memory
+  disagrees with the skill, the skill (verified against source) wins.
 
 ## Adding things end-to-end
 
