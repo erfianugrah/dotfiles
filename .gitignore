@@ -21,3 +21,6 @@ __pycache__/
 # JS package-manager artifacts (pi-harness / pi-loop packaging)
 node_modules/
 bun.lock
+
+# vim session state - never commit (has held CF analytics token before)
+.viminfo
