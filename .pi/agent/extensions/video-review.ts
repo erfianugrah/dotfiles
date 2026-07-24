@@ -135,6 +135,130 @@ export function resolveEmbedding(bundle: Bundle, speakerArg: string): { label: s
   return null;
 }
 
+// ── name suggestion from transcript cues (pure) ───────────────────────────
+
+export interface NameSuggestion {
+  label: string;
+  name: string;
+  confidence: "high" | "medium" | "low"; // low = greeting pile-in, timing can't attribute
+  evidence: string;
+  at: number;
+}
+
+/**
+ * Suggest real names for unlabeled diarized speakers from address cues in
+ * the transcript ("Hi, Alice" -> the next different speaker to talk is
+ * probably Alice). Prior art (text-based SpeakerID, Nguyen et al. 2024):
+ * a mentioned name usually attaches to the previous/current/next speaker
+ * around the mention (~80% precision) - so these are SUGGESTIONS to verify
+ * against the transcript, never auto-applied.
+ */
+export function suggestNames(bundle: Bundle): NameSuggestion[] {
+  const segs = [...bundle.segments].sort((a, b) => a.start - b.start);
+  const isUnnamed = (s?: string) => !!s && /speaker/i.test(s);
+  const known = new Set(Object.values(bundle.names ?? {}).map((n) => n.toLowerCase()));
+  const out: NameSuggestion[] = [];
+  const claimedName = new Set<string>();
+  // per-label candidates, resolved to the strongest at the end: in a greeting
+  // pile-in the nearest responder is often NOT the greeted person, so a weak
+  // early claim must not block a stronger later one (direct reciprocal > bare
+  // greeting > substantive reply).
+  const byLabel = new Map<string, { name: string; score: number; gap: number; pileIn: boolean; evidence: string; at: number }>();
+  const VOCATIVE = /(?:^|\b)(?:hi|hey|hello|good morning|good afternoon|good evening|thanks|thank you|sorry|welcome|bye),?\s+([A-Za-z][a-z]{2,})\b/i;
+  const GREETING_BACK = /\b(hi|hey|hello|morning|afternoon|evening|thanks|thank you)\b/i;
+  const NOT_A_NAME = new Set(["guys", "everyone", "everybody", "team", "folks", "people", "all"]);
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i];
+    const m = s.text.match(VOCATIVE);
+    if (!m) continue;
+    const name = m[1];
+    const key = name.toLowerCase();
+    // the /i flag makes the capture case-insensitive too - re-assert name shape
+    if (!/^[A-Z][a-z]{2,}$/.test(name) || NOT_A_NAME.has(key)) continue;
+    if (known.has(key) || claimedName.has(key)) continue;
+    // greeting pile-in: the SAME speaker vocatively greets someone else within
+    // +/-8s (join phase: "Hi, Bob" ... "Hi, Alice"). In a pile-in every
+    // unnamed speaker is greeting back at once and timing cannot attribute a
+    // responder to THIS greeting - emit at low confidence only.
+    let pileIn = false;
+    for (const o of segs) {
+      if (o === s || o.speaker !== s.speaker || Math.abs(o.start - s.start) > 8) continue;
+      const om = o.text.match(VOCATIVE);
+      if (om && om[1].toLowerCase() !== key) { pileIn = true; break; }
+    }
+    for (let j = i + 1; j < segs.length; j++) {
+      const v = segs[j];
+      if (v.start - s.end > 20) break;
+      if (!v.speaker || v.speaker === s.speaker || !isUnnamed(v.speaker)) continue;
+      const t = v.text.toLowerCase();
+      const score = /\b(hi|hello|hey)\b/.test(t) ? 2 : GREETING_BACK.test(t) ? 1 : 0;
+      const gap = v.start - s.end;
+      const cur = byLabel.get(v.speaker);
+      if (!cur || score > cur.score || (score === cur.score && gap < cur.gap)) {
+        byLabel.set(v.speaker, { name, score, gap, pileIn, evidence: `${s.speaker ?? "?"}: "${s.text.trim().slice(0, 60)}"`, at: s.start });
+        claimedName.add(key);
+      }
+      if (score >= 2) break;
+    }
+  }
+  for (const [label, c] of byLabel) {
+    out.push({
+      label,
+      name: c.name,
+      confidence: c.pileIn ? "low" : c.score >= 2 && c.gap <= 6 ? "high" : "medium",
+      evidence: c.evidence,
+      at: c.at,
+    });
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
+// ── longitudinal metrics history (side-effectful, advisory) ───────────────
+
+export interface MetricsHistoryRow {
+  ts: string;
+  key: string;
+  file: string;
+  format: string | null;
+  speaker: string;
+  sharePct: number;
+  wpm: number | null;
+  fillersPer100: number | null;
+  gapMedian: number | null;
+  wordsPerTurn: number | null;
+  longBlockSharePct: number;
+  questions: number;
+  elaboration: number;
+  selfAnswered: number;
+}
+
+function metricsHistoryPath(): string {
+  return join(CACHE_DIR, "metrics-history.jsonl");
+}
+
+export function readMetricsHistory(): MetricsHistoryRow[] {
+  try {
+    return readFileSync(metricsHistoryPath(), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as MetricsHistoryRow);
+  } catch {
+    return [];
+  }
+}
+
+/** Idempotent per (key, speaker): re-running metrics on the same bundle
+ * replaces that bundle's rows rather than duplicating them. */
+function upsertMetricsHistory(rows: MetricsHistoryRow[]): void {
+  try {
+    mkdirSync(CACHE_DIR, { recursive: true });
+    const kept = readMetricsHistory().filter((r) => !rows.some((n) => n.key === r.key && n.speaker === r.speaker));
+    writeFileSync(metricsHistoryPath(), [...kept, ...rows].map((r) => JSON.stringify(r)).join("\n") + "\n");
+  } catch {
+    /* history is advisory - never fail metrics over it */
+  }
+}
+
 // ── file resolution (pure) ────────────────────────────────────────────────
 
 export interface MediaFile {
@@ -429,6 +553,224 @@ export function isAssent(text: string, wordCount: number): boolean {
   return t === "";
 }
 
+// ── block (multi-unit-turn) analysis (pure) ──────────────────────────────
+
+export interface BlockInfo {
+  speaker: string;
+  start: number;
+  end: number;
+  wordCount: number;
+  text: string;
+}
+
+export interface BlockSpeakerStat {
+  speaker: string;
+  blocks: number;
+  p50DurSec: number | null;
+  p90DurSec: number | null;
+  longBlockWords: number; // words inside blocks >= longBlockSec
+  totalWords: number;
+  longBlockSharePct: number;
+}
+
+/**
+ * Multi-unit turns (Sacks/Schegloff; Gardner et al. 2025): merge consecutive
+ * same-speaker utterances separated by <= gapTolSec into BLOCKS. Monologuing
+ * is a block property, not a turn property - diarization fragments a held
+ * floor into many short "turns", so words/turn hides it. Long blocks are NOT
+ * inherently a defect (expert answers, stacked questions are legitimately
+ * long) - read the top-block evidence list before judging.
+ */
+export function computeBlocks(utterances: Utterance[], gapTolSec = 3, longBlockSec = 30): { blocks: BlockInfo[]; perSpeaker: BlockSpeakerStat[] } {
+  const us = [...utterances].sort((a, b) => a.start - b.start);
+  const blocks: BlockInfo[] = [];
+  for (const u of us) {
+    const last = blocks[blocks.length - 1];
+    if (last && last.speaker === u.speaker && u.start - last.end <= gapTolSec) {
+      last.end = u.end;
+      last.wordCount += u.wordCount;
+      last.text += " " + u.text;
+    } else {
+      blocks.push({ speaker: u.speaker, start: u.start, end: u.end, wordCount: u.wordCount, text: u.text });
+    }
+  }
+  const per = new Map<string, { n: number; durs: number[]; longW: number; totW: number }>();
+  for (const b of blocks) {
+    let p = per.get(b.speaker);
+    if (!p) per.set(b.speaker, (p = { n: 0, durs: [], longW: 0, totW: 0 }));
+    p.n += 1;
+    p.durs.push(b.end - b.start);
+    p.totW += b.wordCount;
+    if (b.end - b.start >= longBlockSec) p.longW += b.wordCount;
+  }
+  const perSpeaker = [...per.entries()]
+    .map(([speaker, p]) => ({
+      speaker,
+      blocks: p.n,
+      p50DurSec: percentile(p.durs, 50),
+      p90DurSec: percentile(p.durs, 90),
+      longBlockWords: p.longW,
+      totalWords: p.totW,
+      longBlockSharePct: p.totW ? Math.round((p.longW / p.totW) * 100) : 0,
+    }))
+    .sort((a, b) => b.totalWords - a.totalWords);
+  return { blocks, perSpeaker };
+}
+
+// ── verbatim self-repetition (pure) ───────────────────────────────────────
+
+/** Function words - a repeated n-gram needs >= 2 non-stopword tokens to
+ * count, so "we are going to" style glue doesn't register. Tokens are
+ * post-normalisation (lowercase, apostrophes kept). */
+const REPEAT_STOP = new Set(
+  (
+    "the a an and or but so to of in on for with is it its it's i i'm i've i'd you you're you've your we we're we've our they they're their them he he's his she she's her that that's this these those be are was were been being have has had having do does did don't doesn't didn't will would can could can't should wouldn't couldn't may might must shall not no yes yeah yep ok okay just even really very well too also there there's here what what's when where which who whom whose why how if then than as at by from about into over up out again once more most much some any all each other me my us him one two get got go going gonna want make take say said see know think like come let's thing things something anything everything now still only"
+  ).split(" "),
+);
+
+export interface RepeatPhrase {
+  speaker: string;
+  phrase: string;
+  count: number;
+  at: number; // start of the block where it repeats
+}
+
+function countPhraseOccurrences(toks: string[], phrase: string[]): number {
+  let n = 0;
+  for (let i = 0; i + phrase.length <= toks.length; i++) {
+    let ok = true;
+    for (let j = 0; j < phrase.length; j++)
+      if (toks[i + j] !== phrase[j]) {
+        ok = false;
+        break;
+      }
+    if (ok) n++;
+  }
+  return n;
+}
+
+function firstOccurrence(toks: string[], phrase: string[]): number {
+  for (let i = 0; i + phrase.length <= toks.length; i++) {
+    let ok = true;
+    for (let j = 0; j < phrase.length; j++)
+      if (toks[i + j] !== phrase[j]) {
+        ok = false;
+        break;
+      }
+    if (ok) return i;
+  }
+  return -1;
+}
+
+/**
+ * Verbatim repeated phrases (4+ tokens, >= 2 content words) inside a single
+ * block - the composing-aloud signature ("don't feel like you're hassling
+ * us" twice in one pitch). Cross-block TOPICAL repetition (the same CTA
+ * phrased differently) is deliberately NOT attempted: lexical matching has
+ * ~zero recall for it (verified on real calls) - that needs embeddings or an
+ * LLM pass.
+ */
+export function findBlockRepetitions(blocks: BlockInfo[]): RepeatPhrase[] {
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9\s']/g, " ").split(/\s+/).filter(Boolean);
+  const out: RepeatPhrase[] = [];
+  for (const b of blocks) {
+    if (b.wordCount < 12) continue;
+    const toks = norm(b.text);
+    const counts = new Map<string, number>();
+    for (let i = 0; i + 4 <= toks.length; i++) {
+      const gram = toks.slice(i, i + 4);
+      if (gram.filter((w) => !REPEAT_STOP.has(w)).length < 2) continue;
+      const key = gram.join(" ");
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const kept: { phrase: string[]; count: number }[] = [];
+    for (const [key, count] of counts) {
+      if (count < 2) continue;
+      let phrase = key.split(" ");
+      // grow right, then left, while the longer phrase still repeats
+      for (;;) {
+        const idx = firstOccurrence(toks, phrase);
+        if (idx < 0 || idx + phrase.length >= toks.length) break;
+        const extended = [...phrase, toks[idx + phrase.length]];
+        if (countPhraseOccurrences(toks, extended) < 2) break;
+        phrase = extended;
+      }
+      for (;;) {
+        const idx = firstOccurrence(toks, phrase);
+        if (idx <= 0) break;
+        const extended = [toks[idx - 1], ...phrase];
+        if (countPhraseOccurrences(toks, extended) < 2) break;
+        phrase = extended;
+      }
+      kept.push({ phrase, count: countPhraseOccurrences(toks, phrase) });
+    }
+    // drop phrases contained in a longer kept phrase
+    const final = kept.filter((k) => !kept.some((o) => o !== k && o.phrase.length >= k.phrase.length && o.phrase.join(" ").includes(k.phrase.join(" "))));
+    for (const k of final) out.push({ speaker: b.speaker, phrase: k.phrase.join(" "), count: k.count, at: b.start });
+  }
+  return out.sort((a, b) => b.count * b.phrase.split(" ").length - a.count * a.phrase.split(" ").length);
+}
+
+// ── question-act classification (DAMSL-lite, pure) ────────────────────────
+
+export type QuestionAct = "question" | "check" | "tag" | "backchannel";
+
+/** Split utterance text into sentences (punctuation survives in word tokens). */
+export function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+const TAG_TAILS = [
+  "is that right", "know what i mean", "get what i mean", "you know",
+  "isn't it", "is it", "right", "yeah", "yes", "correct", "okay", "ok",
+  "eh", "huh", "man", "lah", "lor", "hor", "no",
+];
+const BACKCHANNEL_QUESTIONS = new Set([
+  "right", "is that right", "that right", "really", "oh really", "yeah", "yes",
+  "is it", "is that so", "that so", "does it", "do they", "ok", "okay",
+  "you know", "you know what i mean", "know what i mean", "get what i mean",
+]);
+const INTERROGATIVE_LEADS = new Set([
+  "what", "why", "how", "when", "where", "which", "who", "whom", "whose",
+  "is", "are", "was", "were", "do", "does", "did", "can", "could", "should",
+  "would", "will", "have", "has", "had", "may", "might", "shall",
+]);
+
+/**
+ * DAMSL-lite dialogue-act classification for question-form sentences
+ * (Stolcke et al. 2000, SWBD-DAMSL):
+ *  - "backchannel" (bh / lone ^g): "Right?", "Is that right?", "Really?" -
+ *    NOT an elicitation; excluded from question flow.
+ *  - "tag" (^g): declarative stem + short tag tail: "That's with NHID,
+ *    right?" - phatic confirmation; excluded from question flow.
+ *  - "check" (qy^d): statement-form confirmation: "So I use the admin SDK?" -
+ *    response-mobilising; kept in the flow with outcomes tracked.
+ *  - "question" (qy/qw/qo): interrogative lead; kept in the flow.
+ * Form-based heuristics - expect machine-DA accuracy (~70%), not perfection.
+ */
+export function classifyQuestion(sentence: string): QuestionAct {
+  const flat = sentence
+    .replace(/\?+\s*$/, "")
+    .toLowerCase()
+    .replace(/[.,;:!"]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!flat) return "backchannel";
+  const words = flat.split(" ");
+  if (BACKCHANNEL_QUESTIONS.has(flat)) return "backchannel";
+  if (words.length <= 2) return "tag"; // echo fragments: "Tokyo?", "Seven?"
+  for (const tail of TAG_TAILS) {
+    const tailWords = tail.split(" ").length;
+    if (flat === tail) return "backchannel";
+    if (words.length - tailWords >= 3 && flat.endsWith(" " + tail)) return "tag";
+  }
+  if (!INTERROGATIVE_LEADS.has(words[0])) return "check";
+  return "question";
+}
+
 export type QuestionOutcome = "self-answered" | "assent" | "elaboration" | "unanswered";
 
 export interface QuestionEvent {
@@ -436,78 +778,99 @@ export interface QuestionEvent {
   asker: string;
   question: string;
   outcome: QuestionOutcome;
+  act: "question" | "check";
   responder?: string;
   responseSnippet?: string;
   responseGapSec?: number;
 }
 
 /**
- * Question-flow analysis over time-sorted utterances. For each utterance
- * containing '?', find what happened next:
+ * Question-flow analysis over time-sorted utterances, at QUESTION-SENTENCE
+ * level (a tag question mid-utterance is not an elicitation attempt). Each
+ * question sentence is act-classified first (DAMSL-lite); tags/backchannels
+ * are counted per asker but excluded from outcomes. For each remaining
+ * question, find what happened next:
  *  - a different speaker's substantive response within `windowSec` ->
  *    'assent' (short ack) or 'elaboration' (new information)
  *  - only backchannels from others, then the ASKER's own next utterance ->
  *    'self-answered' (the ask-then-self-answer move)
- *  - nothing within the window -> 'unanswered'
+ *  - nothing within the window -> 'unanswered' (in-window only; the answer
+ *    may arrive later - treat as low-confidence)
  * Backchannels (< 4 words matching the assent lexicon) are skipped over when
  * looking for a substantive response.
  */
-export function analyzeQuestions(utterances: Utterance[], windowSec = 10): QuestionEvent[] {
+export interface QuestionFlow {
+  events: QuestionEvent[];
+  excludedTags: { asker: string; tags: number }[];
+}
+
+export function analyzeQuestionFlow(utterances: Utterance[], windowSec = 10): QuestionFlow {
   const us = [...utterances].sort((a, b) => a.start - b.start);
   const events: QuestionEvent[] = [];
+  const tagCounts = new Map<string, number>();
   for (let i = 0; i < us.length; i++) {
     const u = us[i];
-    if (!u.text.includes("?") || u.wordCount < 3) continue;
-    let responder: Utterance | null = null;
-    let firstAck: Utterance | null = null;
-    let selfNext: Utterance | null = null;
-    for (let j = i + 1; j < us.length; j++) {
-      const v = us[j];
-      if (v.start - u.end > windowSec) break;
-      if (v.speaker === u.speaker) {
-        if (!selfNext) selfNext = v;
+    if (!u.text.includes("?")) continue;
+    for (const sent of splitSentences(u.text)) {
+      if (!sent.includes("?")) continue;
+      const act = classifyQuestion(sent);
+      if (act === "tag" || act === "backchannel") {
+        tagCounts.set(u.speaker, (tagCounts.get(u.speaker) ?? 0) + 1);
         continue;
       }
-      // backchannel from someone else: remember it but keep scanning for a
-      // substantive response
-      if (v.wordCount < 4 && isAssent(v.text, v.wordCount)) {
-        if (!firstAck) firstAck = v;
-        continue;
+      let responder: Utterance | null = null;
+      let firstAck: Utterance | null = null;
+      let selfNext: Utterance | null = null;
+      for (let j = i + 1; j < us.length; j++) {
+        const v = us[j];
+        if (v.start - u.end > windowSec) break;
+        if (v.speaker === u.speaker) {
+          if (!selfNext) selfNext = v;
+          continue;
+        }
+        // backchannel from someone else: remember it but keep scanning for a
+        // substantive response
+        if (v.wordCount < 4 && isAssent(v.text, v.wordCount)) {
+          if (!firstAck) firstAck = v;
+          continue;
+        }
+        responder = v;
+        break;
       }
-      responder = v;
-      break;
-    }
-    // A lone acknowledgement with nothing substantive behind it is normally
-    // the response (assent). But when the asker's own continuation follows
-    // and is NOT itself a new question, the asker answered despite the ack -
-    // that's the self-answered move; the ack was just a backchannel.
-    if (!responder && firstAck && (!selfNext || selfNext.text.includes("?"))) responder = firstAck;
-    if (responder) {
-      const assent = isAssent(responder.text, responder.wordCount);
-      events.push({
-        at: u.start,
-        asker: u.speaker,
-        question: u.text.slice(0, 120),
-        outcome: assent ? "assent" : "elaboration",
-        responder: responder.speaker,
-        responseSnippet: responder.text.slice(0, 80),
-        responseGapSec: Math.round((responder.start - u.end) * 100) / 100,
-      });
-    } else if (selfNext) {
-      events.push({
-        at: u.start,
-        asker: u.speaker,
-        question: u.text.slice(0, 120),
-        outcome: "self-answered",
-        responder: u.speaker,
-        responseSnippet: selfNext.text.slice(0, 80),
-        responseGapSec: Math.round((selfNext.start - u.end) * 100) / 100,
-      });
-    } else {
-      events.push({ at: u.start, asker: u.speaker, question: u.text.slice(0, 120), outcome: "unanswered" });
+      // A lone acknowledgement with nothing substantive behind it is normally
+      // the response (assent). But when the asker's own continuation follows
+      // and is NOT itself a new question, the asker answered despite the ack -
+      // that's the self-answered move; the ack was just a backchannel.
+      if (!responder && firstAck && (!selfNext || selfNext.text.includes("?"))) responder = firstAck;
+      const base = { at: u.start, asker: u.speaker, question: sent.slice(0, 120), act };
+      if (responder) {
+        const assent = isAssent(responder.text, responder.wordCount);
+        events.push({
+          ...base,
+          outcome: assent ? "assent" : "elaboration",
+          responder: responder.speaker,
+          responseSnippet: responder.text.slice(0, 80),
+          responseGapSec: Math.round((responder.start - u.end) * 100) / 100,
+        });
+      } else if (selfNext) {
+        events.push({
+          ...base,
+          outcome: "self-answered",
+          responder: u.speaker,
+          responseSnippet: selfNext.text.slice(0, 80),
+          responseGapSec: Math.round((selfNext.start - u.end) * 100) / 100,
+        });
+      } else {
+        events.push({ ...base, outcome: "unanswered" });
+      }
     }
   }
-  return events;
+  return { events, excludedTags: [...tagCounts.entries()].map(([asker, tags]) => ({ asker, tags })) };
+}
+
+/** Back-compat wrapper: events only. */
+export function analyzeQuestions(utterances: Utterance[], windowSec = 10): QuestionEvent[] {
+  return analyzeQuestionFlow(utterances, windowSec).events;
 }
 
 export interface MetricsSpeaker {
@@ -534,7 +897,9 @@ export interface PairGap {
 
 export interface QuestionSummary {
   asker: string;
-  questions: number;
+  questions: number; // outcome-classified only (question + check acts)
+  checks: number; // of `questions`, how many were declarative confirmation checks
+  tags: number; // tag/backchannel question-forms excluded from flow
   selfAnswered: number;
   assent: number;
   elaboration: number;
@@ -546,6 +911,9 @@ export interface MetricsReport {
   pairGaps: PairGap[];
   questions: QuestionSummary[];
   questionEvents: QuestionEvent[];
+  blocks: BlockSpeakerStat[];
+  topBlocks: BlockInfo[];
+  repeats: RepeatPhrase[];
   clocked: number;
 }
 
@@ -608,23 +976,33 @@ export function computeMetrics(utterances: Utterance[], minOverlapSec = 0.3): Me
     .map(([pair, v]) => ({ pair, medianGapSec: percentile(v, 50), samples: v.length }))
     .sort((a, b) => (a.medianGapSec ?? 99) - (b.medianGapSec ?? 99));
 
-  const questionEvents = analyzeQuestions(us);
+  const flow = analyzeQuestionFlow(us);
+  const questionEvents = flow.events;
+  const tagMap = new Map(flow.excludedTags.map((t) => [t.asker, t.tags]));
   const qsum = new Map<string, QuestionSummary>();
   for (const e of questionEvents) {
     let q = qsum.get(e.asker);
-    if (!q) qsum.set(e.asker, (q = { asker: e.asker, questions: 0, selfAnswered: 0, assent: 0, elaboration: 0, unanswered: 0 }));
+    if (!q) qsum.set(e.asker, (q = { asker: e.asker, questions: 0, checks: 0, tags: tagMap.get(e.asker) ?? 0, selfAnswered: 0, assent: 0, elaboration: 0, unanswered: 0 }));
     q.questions += 1;
+    if (e.act === "check") q.checks += 1;
     if (e.outcome === "self-answered") q.selfAnswered += 1;
     else if (e.outcome === "assent") q.assent += 1;
     else if (e.outcome === "elaboration") q.elaboration += 1;
     else q.unanswered += 1;
   }
 
+  const { blocks, perSpeaker: blockStats } = computeBlocks(us);
+  const repeats = findBlockRepetitions(blocks);
+  const topBlocks = [...blocks].sort((a, b) => b.end - b.start - (a.end - a.start)).slice(0, 5);
+
   return {
     speakers,
     pairGaps: pairGapList,
     questions: [...qsum.values()].sort((a, b) => b.questions - a.questions),
     questionEvents,
+    blocks: blockStats,
+    topBlocks,
+    repeats,
     clocked,
   };
 }
@@ -828,6 +1206,7 @@ async function ensureBundle(
     maxFrames: number;
     timeoutMs: number;
     refresh: boolean;
+    format?: string;
   },
   onUpdate: ((m: string) => void) | undefined,
   signal: AbortSignal | undefined,
@@ -846,7 +1225,14 @@ async function ensureBundle(
   const key = bundleCacheKey(serverPath, params);
   if (!opts.refresh) {
     const cached = readBundle(key);
-    if (cached) return { bundle: cached, path: cachePath(key), key, fromCache: true };
+    if (cached) {
+      // a format tag set after the fact sticks to the cached bundle
+      if (opts.format && cached.params?.format !== opts.format) {
+        cached.params = { ...(cached.params ?? {}), format: opts.format };
+        writeBundle(key, cached);
+      }
+      return { bundle: cached, path: cachePath(key), key, fromCache: true };
+    }
   }
 
   const { segments, speakerEmbeddings, names } = await runTranscriptionJob(
@@ -875,7 +1261,7 @@ async function ensureBundle(
     speakerEmbeddings,
     names: names && Object.keys(names).length ? names : undefined,
     createdAt: new Date().toISOString(),
-    params,
+    params: opts.format ? { ...params, format: opts.format } : params,
   };
   const path = writeBundle(key, bundle);
   return { bundle, path, key, fromCache: false };
@@ -896,6 +1282,7 @@ function extractOpts(p: any) {
     maxFrames: p.max_frames ?? 60,
     timeoutMs: (p.timeout_sec ?? 1800) * 1000,
     refresh: p.refresh ?? false,
+    format: p.format as string | undefined,
   };
 }
 
@@ -925,6 +1312,7 @@ const videoExtract = defineTool({
     max_frames: Type.Optional(Type.Number({ description: "Cap on described frames (default 60; only with frames:true)." })),
     timeout_sec: Type.Optional(Type.Number({ description: "Max seconds to wait for transcription (default 1800)." })),
     refresh: Type.Optional(Type.Boolean({ description: "Bypass the local bundle cache and re-run (default false)." })),
+    format: Type.Optional(Type.String({ description: "Call format tag (review, customer, discovery, 1:1) - stored on the bundle so video_metrics can build per-format longitudinal baselines." })),
   }),
   async execute(_id, params, signal, onUpdate) {
     const opts = extractOpts(params);
@@ -940,6 +1328,11 @@ const videoExtract = defineTool({
       lines.push(`auto-identified: ${Object.values(bundle.names).join(", ")} (server voice prints)`);
     } else if (bundle.hasWordSpeakers) {
       lines.push(`names: none matched - enroll with video_enroll, or label via video_name`);
+    }
+    const suggestions = bundle.hasWordSpeakers ? suggestNames(bundle) : [];
+    if (suggestions.length) {
+      lines.push("name suggestions (verify against the transcript, apply via video_name):");
+      for (const s of suggestions) lines.push(`  ${s.label} -> ${s.name} (${s.confidence}: ${s.evidence} @${hhmmss(s.at)})`);
     }
     lines.push(`word-level speaker timing: ${bundle.hasWordSpeakers ? "yes (overlap analysis available)" : "NO (re-run with diarize:true for overlap)"}`);
     lines.push(fromCache ? "(served from local bundle cache)" : "(fresh run)");
@@ -1027,11 +1420,13 @@ const videoOverlap = defineTool({
 
 const videoMetrics = defineTool({
   name: "video_metrics",
-  promptSnippet: "video_metrics - speaking-style metrics over a cached bundle: rate/density/fillers, turn-gap distributions, per-pair gap matrix, and question-flow classification (self-answered vs assent vs elaboration).",
+  promptSnippet: "video_metrics - speaking-style metrics over a cached bundle: rate/density/fillers, turn-gap distributions, per-pair gap matrix, block (multi-unit-turn) floor-holding stats, verbatim repeats, and question-flow classification (DAMSL-lite; self-answered vs assent vs elaboration).",
   promptGuidelines: [
     "Pass `bundle` (from video_extract) OR `file`.",
     "Gap percentiles matter more than the median: p25 exposes the fast tail that a median hides.",
     "Question outcomes are heuristic: 'self-answered' = no substantive other-speaker response within the window. Verify flagged instances against the transcript before asserting them.",
+    "Blocks (multi-unit turns) expose floor-holding that words/turn hides - but long blocks are not inherently monologuing (expert answers are long too); read the top-block evidence before judging.",
+    "Pass format= (review, customer, discovery, 1:1) to tag the call - metrics history is stored per speaker and deltas vs prior calls print automatically.",
     "Assent vs elaboration tells you whether questions are extracting information or just confirmation - the core signal for discovery-quality review.",
   ],
   label: "Video Metrics",
@@ -1043,17 +1438,30 @@ const videoMetrics = defineTool({
     min_overlap_sec: Type.Optional(Type.Number({ description: "Minimum collision duration to count (default 0.3)." })),
     max_events: Type.Optional(Type.Number({ description: "Cap the returned question-event list (default 30)." })),
     question_window_sec: Type.Optional(Type.Number({ description: "Seconds to wait for a response before classifying a question self-answered/unanswered (default 10)." })),
+    format: Type.Optional(Type.String({ description: "Call format tag (review, customer, discovery, 1:1) for longitudinal baselines; persisted on the bundle. Overrides the tag set at extract time." })),
   }),
   async execute(_id, params, signal, onUpdate) {
     const emit = (m: string) => onUpdate?.({ content: [{ type: "text", text: m }] });
     let bundle: Bundle | null = null;
-    if (params.bundle) bundle = readBundleByPath(params.bundle);
+    let bundleKey: string | null = null;
+    if (params.bundle) {
+      bundle = readBundleByPath(params.bundle);
+      bundleKey = bundleKeyFromPath(params.bundle);
+    }
     if (!bundle && params.file) {
       const opts = extractOpts({ diarize: true });
-      bundle = (await ensureBundle(params.file, opts, emit, signal)).bundle;
+      const eb = await ensureBundle(params.file, opts, emit, signal);
+      bundle = eb.bundle;
+      bundleKey = eb.key;
     }
     if (!bundle) throw new Error("provide `bundle` (from video_extract) or `file`");
     if (!bundle.hasWordSpeakers) throw new Error("bundle has no word-level speaker timing; re-run video_extract with diarize:true");
+
+    if (params.format && bundleKey && bundle.params?.format !== params.format) {
+      bundle.params = { ...(bundle.params ?? {}), format: params.format };
+      writeBundle(bundleKey, bundle);
+    }
+    const callFormat = params.format ?? (bundle.params?.format as string | undefined) ?? null;
 
     const report = computeMetrics(mergeUtterances(bundle.segments), params.min_overlap_sec ?? 0.3);
     // re-run question analysis with a custom window when requested
@@ -1076,12 +1484,32 @@ const videoMetrics = defineTool({
       lines.push("pair gap matrix (median, fastest first; >=3 samples):");
       for (const p of report.pairGaps) lines.push(`  ${p.pair}: ${fmtGap(p.medianGapSec)} (n=${p.samples})`);
     }
+    if (report.blocks.length) {
+      lines.push("");
+      lines.push("blocks (same-speaker runs, gap<=3s; long = >=30s - floor-holding evidence, not a verdict):");
+      for (const b of report.blocks) {
+        lines.push(
+          `  ${b.speaker}: ${b.blocks} blocks  p50=${b.p50DurSec?.toFixed(0) ?? "n/a"}s  p90=${b.p90DurSec?.toFixed(0) ?? "n/a"}s  words-in-long=${b.longBlockSharePct}% (${b.longBlockWords}/${b.totalWords})`,
+        );
+      }
+      lines.push("top blocks (verify against the transcript before asserting monologuing):");
+      for (const b of report.topBlocks) {
+        lines.push(`  [${hhmmss(b.start)}] ${b.speaker} ${Math.round(b.end - b.start)}s w=${b.wordCount} "${b.text.slice(0, 70)}"`);
+      }
+    }
+    if (report.repeats.length) {
+      lines.push("");
+      lines.push("verbatim repeats (>=2x within one block - the composing-aloud signature):");
+      for (const r of report.repeats.slice(0, 8)) {
+        lines.push(`  ${r.speaker}: "${r.phrase}" x${r.count} @${hhmmss(r.at)}`);
+      }
+    }
     if (report.questions.length) {
       lines.push("");
       lines.push("question flow:");
       for (const q of report.questions) {
         lines.push(
-          `  ${q.asker}: ${q.questions} questions -> ${q.elaboration} elaborated, ${q.assent} assent, ${q.selfAnswered} self-answered, ${q.unanswered} unanswered`,
+          `  ${q.asker}: ${q.questions} questions -> ${q.elaboration} elaborated, ${q.assent} assent, ${q.selfAnswered} self-answered, ${q.unanswered} unanswered${q.checks ? ` (${q.checks} declarative checks)` : ""}${q.tags ? ` (+${q.tags} tag/backchannel excluded)` : ""}`,
         );
       }
     }
@@ -1090,12 +1518,52 @@ const videoMetrics = defineTool({
     lines.push(`question events (first ${Math.min(maxEv, events.length)} of ${events.length}; ${selfAnswered.length} self-answered):`);
     for (const e of events.slice(0, maxEv)) {
       const resp = e.responder ? ` -> ${e.responder}${e.responseGapSec != null ? ` (${e.responseGapSec >= 0 ? "+" : ""}${e.responseGapSec}s)` : ""}: \"${e.responseSnippet}\"` : "";
-      lines.push(`  [${hhmmss(e.at)}] ${e.asker} [${e.outcome}] \"${e.question}\"${resp}`);
+      lines.push(`  [${hhmmss(e.at)}] ${e.asker} [${e.outcome}${e.act === "check" ? "/check" : ""}] \"${e.question}\"${resp}`);
     }
     lines.push("");
     lines.push(
-      "note: gap p25 exposes the fast-entry tail the median hides. 'self-answered' means no substantive other-speaker response within the window - verify flagged instances against the transcript before asserting intent.",
+      "note: gap p25 exposes the fast-entry tail the median hides. Questions are sentence-level (DAMSL-lite): tag/backchannel forms are excluded from flow, [/check] marks declarative confirmation checks. 'self-answered' = no substantive other-speaker response within the window; 'unanswered' = none in-window (the answer may arrive later - low confidence). Verify flagged instances against the transcript before asserting intent.",
     );
+    if (bundleKey) {
+      const prior = readMetricsHistory().filter((r) => r.key !== bundleKey);
+      const rows: MetricsHistoryRow[] = report.speakers.map((s) => {
+        const q = report.questions.find((x) => x.asker === s.speaker);
+        const b = report.blocks.find((x) => x.speaker === s.speaker);
+        return {
+          ts: new Date().toISOString(),
+          key: bundleKey,
+          file: bundle.file,
+          format: callFormat,
+          speaker: s.speaker,
+          sharePct: s.sharePct,
+          wpm: s.wpm,
+          fillersPer100: s.fillersPer100,
+          gapMedian: s.gapMedian,
+          wordsPerTurn: s.wordsPerTurn,
+          longBlockSharePct: b?.longBlockSharePct ?? 0,
+          questions: q?.questions ?? 0,
+          elaboration: q?.elaboration ?? 0,
+          selfAnswered: q?.selfAnswered ?? 0,
+        };
+      });
+      upsertMetricsHistory(rows);
+      const deltaLines: string[] = [];
+      for (const r of rows) {
+        const cands = prior.filter((p) => p.speaker === r.speaker);
+        if (!cands.length) continue;
+        const prev = cands.find((p) => p.format && p.format === r.format) ?? cands[cands.length - 1];
+        const f2 = (v: number | null) => (v == null ? "n/a" : `${v}`);
+        const g2 = (v: number | null) => (v == null ? "n/a" : `${v >= 0 ? "+" : ""}${v}s`);
+        deltaLines.push(
+          `  ${r.speaker} (vs ${prev.ts.slice(0, 10)}${prev.format ? ` [${prev.format}]` : ""}): airtime ${prev.sharePct}%->${r.sharePct}%  fillers/100w ${f2(prev.fillersPer100)}->${f2(r.fillersPer100)}  gap-med ${g2(prev.gapMedian)}->${g2(r.gapMedian)}  words-in-long ${prev.longBlockSharePct}%->${r.longBlockSharePct}%`,
+        );
+      }
+      if (deltaLines.length) {
+        lines.push("");
+        lines.push(`history deltas (this call tagged format=${callFormat ?? "untagged"}):`);
+        lines.push(...deltaLines);
+      }
+    }
     return {
       content: [{ type: "text", text: lines.join("\n") }],
       details: { speakers: report.speakers, pairGaps: report.pairGaps, questions: report.questions, selfAnsweredCount: selfAnswered.length },
@@ -1329,6 +1797,9 @@ const videoName = defineTool({
     const key = bundleKeyFromPath(params.bundle);
     writeBundle(key, b);
     const lines = [`relabeled: ${Object.entries(map).map(([k, v]) => `${k} -> ${v}`).join(", ")}`, `speakers now: ${b.speakers.join(", ")}`, `(was: ${before.join(", ")})`];
+    if (!params.enroll && b.speakerEmbeddings && Object.keys(b.speakerEmbeddings).length) {
+      lines.push("tip: re-run with enroll:true to also store these as server-side voice prints (auto-named in future transcripts).");
+    }
     if (params.enroll) {
       const names = [...new Set(Object.values(map))];
       for (const name of names) {
