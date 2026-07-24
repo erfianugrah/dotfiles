@@ -3589,7 +3589,7 @@ describe("video-review / analyzeQuestions", () => {
   });
   test("assent: short acknowledgement response", () => {
     const events = analyzeQuestions([
-      utt("A", 0, 1, "so you need the storage tier right?"),
+      utt("A", 0, 1, "so you need the storage tier for this?"),
       utt("B", 1.5, 2, "yeah exactly"),
     ]);
     expect(events[0].outcome).toBe("assent");
