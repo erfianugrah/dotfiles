@@ -2,6 +2,32 @@
 # Encryption / Decryption — SOPS + Age
 # ---------------------------------------------------------------------------
 
+# bcrypt_hash [rounds] - prompt for a password (hidden, with confirmation),
+# print its bcrypt hash. Verifies the hash round-trips before printing.
+# Default cost factor is 12. Needs the `bcrypt` python package.
+bcrypt_hash() {
+    local rounds="${1:-12}"
+    if ! [[ "$rounds" == <-> ]]; then
+        echo "Usage: bcrypt_hash [rounds]  (rounds is an integer, default 12)" >&2
+        return 1
+    fi
+    BCRYPT_ROUNDS="$rounds" python3 - <<'PY'
+import bcrypt, getpass, os, sys
+rounds = int(os.environ["BCRYPT_ROUNDS"])
+pw = getpass.getpass("Password: ").encode()
+if pw != getpass.getpass("Confirm : ").encode():
+    print("Passwords do not match.", file=sys.stderr)
+    sys.exit(1)
+h = bcrypt.hashpw(pw, bcrypt.gensalt(rounds=rounds))
+assert bcrypt.checkpw(pw, h)  # proves the hash matches what you typed
+print(h.decode())
+PY
+}
+
+# ---------------------------------------------------------------------------
+# SOPS + Age helpers
+# ---------------------------------------------------------------------------
+
 # Extract Age private key from SOPS_AGE_KEYS (explicit match, not tail -n 1)
 _sops_age_private_key() {
     local key

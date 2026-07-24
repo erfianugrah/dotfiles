@@ -479,7 +479,12 @@ OS-aware — detects platform and package manager at source time
 | `update_all` / `upall` | Update all detected package managers (apt, dnf, pacman + AUR, zypper, brew, flatpak, snap) |
 | `fix_file_limits` / `fixfiles` | Inspect and optionally raise file descriptor limits (Linux: `limits.conf` + sysctl, macOS: `launchctl` + LaunchDaemon) |
 
-### `crypto.zsh` — SOPS / Age encryption
+### `crypto.zsh` — password hashing + SOPS / Age encryption
+
+`bcrypt_hash [rounds]` prompts for a password (hidden, entered twice for
+confirmation) and prints its bcrypt hash, verifying the hash round-trips
+before printing. Default cost factor 12; requires the `bcrypt` python
+package. Useful for seeding htpasswd / Authelia / app credential hashes.
 
 Encrypt and decrypt files in-place using SOPS with Age keys. Requires
 `SOPS_AGE_KEYS` to be set (use `load_sops_age_keys` or `load_bw`).
@@ -490,6 +495,7 @@ duration of each command.
 
 | Function | Description |
 |---|---|
+| `bcrypt_hash [rounds]` | Prompt for a password (hidden, confirmed) and print its bcrypt hash (default cost 12); verifies round-trip before printing |
 | `encrypt <file\|dir>` | Encrypt a file or all files in a directory |
 | `decrypt <file\|dir>` | Decrypt a file or all files in a directory |
 | `encrypt_all` / `decrypt_all` | Operate on current directory (alias for `encrypt .` / `decrypt .`) |
