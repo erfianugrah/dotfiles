@@ -255,6 +255,13 @@ The browser layer closes that gap, and comes in two flavours:
   Reach for the vision judge (below) only for what genuinely needs eyes
   (spacing/contrast/"looks off"); everything mechanical should be an `--assert`.
 
+- **Style-ethos gates: computed-style asserts are the pressure, the vision judge is the tiebreaker** (learned the hard way on the docs-ssh landing restyle: the vision judge PASSed the original off-ethos page - it only fails *ugly*, not *off-brief*). When the task is "restyle to ethos X" (dense / flat / sharp / single-accent), encode the ethos as computed-style asserts; they are what create real selection pressure:
+  - density: `--assert 'parseFloat(getComputedStyle(document.querySelector("main")).paddingTop) <= 32'`
+  - sharp corners: `--assert '[...document.querySelectorAll("*")].every(e => parseFloat(getComputedStyle(e).borderTopLeftRadius) <= 6)'`
+  - flat: same `.every()` shape for `getComputedStyle(e).boxShadow === "none"` and `!getComputedStyle(e).backgroundImage.includes("gradient")`
+  - single accent: count distinct saturated text colors outside `<pre>`/code blocks (parse the rgb() triple, flag max-min > 60, dedupe in a Set), assert `<= 1` - working IIFE in `~/docs-ssh/.pi/harness.json` ("dom" sensor)
+  Then keep the vision judge LAST for what computed styles can't express (overlap, clipping, unstyled flash) - as tiebreaker, not primary gate.
+
 - **Inferential (as a debugging aid): a screenshot the model reads.**
   `browser-assert ... --screenshot /tmp/x.png` captures the post-interaction
   page; the agent then `read`s the PNG to reason about layout/visual issues the
