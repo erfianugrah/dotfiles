@@ -296,18 +296,33 @@ _bw_load_items() {
     print "[bw] Done: $loaded loaded, $skipped unchanged, $failed failed (of $total)"
 }
 
+# load_sops_age_keys [version] - load a SOPS Age keypair from Bitwarden into
+# SOPS_AGE_KEYS. Version selects which rotated key to use (default 2, the
+# current recipient after the key-1 compromise in deb8318):
+#   1 -> notes SOPS_AGE_PUB_KEY    / SOPS_AGE_SECRET_KEY   (old, compromised)
+#   2 -> notes SOPS_AGE_PUB_KEY_2  / SOPS_AGE_SECRET_KEY_2  (current)
+# Higher versions follow the same _N suffix convention. Switch back to key 1
+# only to decrypt files not yet re-encrypted to the current key.
 load_sops_age_keys() {
     emulate -L zsh
     setopt typeset_silent
-    print "Loading SOPS Age keys"
+
+    local version="${1:-2}"
+    if ! [[ "$version" == <1-> ]]; then
+        print -u2 "Usage: load_sops_age_keys [version]  (version is 1, 2, ...; default 2)"
+        return 1
+    fi
+    local suffix=""
+    (( version > 1 )) && suffix="_${version}"
+    print "Loading SOPS Age keys (key ${version})"
 
     local public_key secret_key combined
-    public_key=$(_bw_get "SOPS_AGE_PUB_KEY") || {
-        print -u2 "Failed to retrieve SOPS Age public key."
+    public_key=$(_bw_get "SOPS_AGE_PUB_KEY${suffix}") || {
+        print -u2 "Failed to retrieve SOPS Age public key (key ${version})."
         return 1
     }
-    secret_key=$(_bw_get "SOPS_AGE_SECRET_KEY") || {
-        print -u2 "Failed to retrieve SOPS Age secret key."
+    secret_key=$(_bw_get "SOPS_AGE_SECRET_KEY${suffix}") || {
+        print -u2 "Failed to retrieve SOPS Age secret key (key ${version})."
         return 1
     }
 

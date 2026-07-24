@@ -518,7 +518,7 @@ source of truth for `load_bw`, `load_wrangler_token`, and `unset_bw_vars`.
 | `clear_bw_cache` | Flush in-memory key-value cache |
 | `load_bw` | Export personal secrets (Cloudflare, AWS, Authentik, SOPS Age keys, etc.) |
 | `load_wrangler_token` | Export Cloudflare Wrangler API token |
-| `load_sops_age_keys` | Export SOPS Age public + secret key into `SOPS_AGE_KEYS` |
+| `load_sops_age_keys [version]` | Export a SOPS Age keypair into `SOPS_AGE_KEYS`; `version` selects the rotated key (default 2 = current, 1 = old pre-rotation key) |
 | `unset_bw_vars` | Wipe all Bitwarden-loaded env vars from current shell |
 
 ### `terraform.zsh` — Terraform / OpenTofu
