@@ -88,7 +88,7 @@ import { extractCdTargets, decideTarget } from "../extensions/cd-agents-reload.t
 import { rewriteClipboardPaths, shrunkSibling } from "../extensions/clipboard-image-shrink.ts";
 import { prune, hasImageContent, type AnyMessage } from "../extensions/tool-output-prune.ts";
 import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
-import { matchHints, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
+import { matchHints, matchHintsDetailed, applyOncePerSession, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
 import { findLastUserEntryId } from "../extensions/session-undo.ts";
 import {
   isCommitPersist,
@@ -2816,6 +2816,45 @@ describe("bash-error-hints.HINTS — sanity invariants", () => {
       expect(typeof h.hint).toBe("string");
       expect(h.hint.length).toBeGreaterThan(20);
     }
+  });
+});
+
+describe("bash-error-hints.applyOncePerSession", () => {
+  const jsonlOut =
+    "/home/erfi/.pi/agent/sessions/--home-erfi-foo--/2026-05-28T10-18-22-095Z_019e6e17.jsonl";
+
+  test("first fire keeps the session-jsonl hint and reports it as newly fired", () => {
+    const matches = matchHintsDetailed(jsonlOut);
+    const { kept, newlyFired } = applyOncePerSession(matches, new Set());
+    expect(kept.length).toBe(matches.length);
+    expect(newlyFired.length).toBe(1);
+    expect(kept.some((m) => m.rendered.includes("session_search"))).toBe(true);
+  });
+
+  test("second fire with the pattern source recorded suppresses the hint", () => {
+    const matches = matchHintsDetailed(jsonlOut);
+    const first = applyOncePerSession(matches, new Set());
+    const fired = new Set(first.newlyFired);
+    const second = applyOncePerSession(matchHintsDetailed(jsonlOut), fired);
+    expect(second.kept.length).toBe(0);
+    expect(second.newlyFired.length).toBe(0);
+  });
+
+  test("repeatable (error) hints are never suppressed by the once filter", () => {
+    // dig TSIG leak is an error hint - no oncePerSession flag.
+    const matches = matchHintsDetailed("; TSIG: hmac-sha256:axfr-out:abcdefXYZ");
+    const fired = new Set(matches.map((m) => m.hint.pattern.source));
+    const { kept } = applyOncePerSession(matches, fired);
+    expect(kept.length).toBe(matches.length);
+  });
+
+  test("mixed output: once-hint suppressed, repeatable hint still fires", () => {
+    const out = `${jsonlOut}\n; TSIG: hmac-sha256:axfr-out:abcdefXYZ`;
+    const matches = matchHintsDetailed(out);
+    const jsonlKey = matches.find((m) => m.hint.oncePerSession)!.hint.pattern.source;
+    const { kept } = applyOncePerSession(matches, new Set([jsonlKey]));
+    expect(kept.some((m) => m.rendered.includes("session_search"))).toBe(false);
+    expect(kept.some((m) => /rotate/i.test(m.rendered))).toBe(true);
   });
 });
 

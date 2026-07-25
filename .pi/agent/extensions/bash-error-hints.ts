@@ -36,6 +36,13 @@ export interface Hint {
    * Keep to one line; the model only needs the next-probe pointer.
    */
   hint: string;
+  /**
+   * If true, this hint fires at most once per session. Use for tool-ROUTING
+   * hints (as opposed to error-recovery hints): the first fire teaches the
+   * routing rule, every repeat is pure noise. Error hints stay repeatable -
+   * a second TSIG leak deserves a second rotation reminder.
+   */
+  oncePerSession?: boolean;
 }
 
 export const HINTS: Hint[] = [
@@ -142,6 +149,14 @@ export const HINTS: Hint[] = [
     // up in bash output (either the command echo or the listing). Gated to
     // bash tool only (see hook below) so session_search's own output, which
     // also contains these paths, never self-triggers.
+    //
+    // oncePerSession: this is a routing hint, not an error. It used to fire
+    // on EVERY bash output mentioning a session .jsonl - including the
+    // legitimate forensics the hint text itself carves out (block-event
+    // grep, tool-call sequencing), so a forensics-heavy session collected a
+    // ~60-token nag on every single command. First fire teaches the rule;
+    // repeats in the same session add nothing.
+    oncePerSession: true,
     pattern: /\/\.pi\/agent\/sessions\/[^\s'"]+\.jsonl/,
     hint:
       "Path under ~/.pi/agent/sessions/ is a pi session log — use the `session_search` tool, not jq/cat/grep on the .jsonl. " +
@@ -173,18 +188,53 @@ export function renderHint(template: string, match: RegExpMatchArray): string {
   return template.replace(/\$([1-9])/g, (_, idx) => match[Number(idx)] ?? "");
 }
 
+export interface HintMatch {
+  hint: Hint;
+  rendered: string;
+}
+
 /**
- * Run all HINT patterns against `text` and return the rendered hint strings
- * (in HINTS-array order). Pure function exposed for unit testing — the live
- * `tool_result` hook below uses the same logic inline.
+ * Structured variant of matchHints - returns each hit paired with its Hint
+ * so the hook can apply per-hint policy (oncePerSession) without losing the
+ * association. Pure, exported for unit tests.
  */
-export function matchHints(text: string): string[] {
-  const out: string[] = [];
-  for (const { pattern, hint } of HINTS) {
-    const m = text.match(pattern);
-    if (m) out.push(renderHint(hint, m));
+export function matchHintsDetailed(text: string): HintMatch[] {
+  const out: HintMatch[] = [];
+  for (const hint of HINTS) {
+    const m = text.match(hint.pattern);
+    if (m) out.push({ hint, rendered: renderHint(hint.hint, m) });
   }
   return out;
+}
+
+/**
+ * Run all HINT patterns against `text` and return the rendered hint strings
+ * (in HINTS-array order). Pure function exposed for unit testing.
+ */
+export function matchHints(text: string): string[] {
+  return matchHintsDetailed(text).map((m) => m.rendered);
+}
+
+/**
+ * Split matches into (kept, newly-fired-once-hints) given the set of
+ * once-hint pattern sources already fired this session. Pure - the hook
+ * owns the state; this just makes the filtering unit-testable.
+ */
+export function applyOncePerSession(
+  matches: HintMatch[],
+  alreadyFired: ReadonlySet<string>,
+): { kept: HintMatch[]; newlyFired: string[] } {
+  const kept: HintMatch[] = [];
+  const newlyFired: string[] = [];
+  for (const m of matches) {
+    if (m.hint.oncePerSession) {
+      const key = m.hint.pattern.source;
+      if (alreadyFired.has(key)) continue;
+      newlyFired.push(key);
+    }
+    kept.push(m);
+  }
+  return { kept, newlyFired };
 }
 
 /**
@@ -211,19 +261,41 @@ interface ToolResultContent {
 }
 
 export default function (pi: ExtensionAPI) {
-  pi.on("tool_result", async (event) => {
+  // Session-keyed set of oncePerSession hints already fired. Keyed by
+  // session file (same pattern as tool-guard) because pi keeps the
+  // extension module loaded across /new, /resume, /fork.
+  const firedOnceHints = new Map<string, Set<string>>();
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    try {
+      const key = ctx.sessionManager.getSessionFile?.() ?? "default";
+      firedOnceHints.delete(key);
+    } catch { /* ignore */ }
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
 
     const text = extractText(event.content);
     if (!text) return undefined;
 
-    // Idempotency — never stack hints if we somehow run twice.
+    // Idempotency - never stack hints if we somehow run twice.
     if (text.includes(HINT_MARKER)) return undefined;
 
-    const hits = matchHints(text);
-    if (hits.length === 0) return undefined;
+    const sessionKey = (() => {
+      try { return ctx.sessionManager.getSessionFile?.() ?? "default"; } catch { return "default"; }
+    })();
+    let fired = firedOnceHints.get(sessionKey);
+    if (!fired) {
+      fired = new Set();
+      firedOnceHints.set(sessionKey, fired);
+    }
 
-    const decorated = `${text.trimEnd()}\n\n${HINT_MARKER}\n${hits.map((h) => `• ${h}`).join("\n")}`;
+    const { kept, newlyFired } = applyOncePerSession(matchHintsDetailed(text), fired);
+    for (const key of newlyFired) fired.add(key);
+    if (kept.length === 0) return undefined;
+
+    const decorated = `${text.trimEnd()}\n\n${HINT_MARKER}\n${kept.map((m) => `• ${m.rendered}`).join("\n")}`;
 
     const newContent: ToolResultContent[] = [{ type: "text", text: decorated }];
     return { content: newContent };
