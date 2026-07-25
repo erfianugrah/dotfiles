@@ -273,7 +273,8 @@ const applyPatchTool = defineTool({
     patchText: Type.String({
       description: "Full patch text within the *** Begin Patch / *** End Patch envelope",
     }),
-  }),
+  }, { additionalProperties: false }),
+  constrainedSampling: { type: "grammar", variants: { openai_lark: "start: /.+/s" } },
   async execute(_id, params, _signal, _onUpdate, ctx) {
     let ops: FileOp[];
     try {
