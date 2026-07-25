@@ -139,6 +139,10 @@ loop run --allow-dirty                        # skip the clean-tree guard
 
 Without `bun link`, invoke directly: `bun ~/.pi/agent/skills/self-correcting-loop/loop.ts run`.
 
+Env hooks (mainly for tests): `LOOP_PI_CMD` (agent command, default `pi` -
+integration tests substitute a scripted fake), `LOOP_SANDBOX` (override the
+manifest's `sandbox` mode), `LOOP_BWRAP` (path to a specific bwrap binary).
+
 The loop refuses a **dirty working tree** by default; commit/stash first, or
 pass `--allow-dirty`. (`--dry` is exempt: it runs no git ops.) With
 `--allow-dirty` your uncommitted work is safe: the first checkpoint

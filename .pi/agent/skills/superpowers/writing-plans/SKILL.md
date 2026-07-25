@@ -118,6 +118,11 @@ Every step must contain the actual content an engineer needs. These are **plan f
 - Complete code in every step — if a step changes code, show the code
 - Exact commands with expected output
 - DRY, YAGNI, TDD, frequent commits
+- **If the plan will be executed by the self-correcting loop** (`.pi/harness.json`
+  in the target repo), OMIT the per-task commit steps. The loop owns git state
+  (index checkpoints + ref-guard); a committing agent fights the governor and
+  pollutes its own attempt history. Per-task commits are for human/executing-plans
+  execution only.
 
 ## Self-Review
 

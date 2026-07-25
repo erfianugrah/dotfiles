@@ -122,4 +122,7 @@ Repo `~/eaves`, stdlib-only Go (go.mod zero requires - keep it that way;
 sources go through the runner allowlist (`internal/runner/runner.go`) -
 add the binary + a fixture capture line + parser + golden test. Build via
 the self-correcting loop (`.pi/harness.json` is ready: 10 sensors incl.
-LLM judge) - see the `self-correcting-loop` skill.
+LLM judge) - see the `self-correcting-loop` skill. NOTE: loop agents run
+in a bwrap jail (ro filesystem, ~/.ssh masked) - they CANNOT ssh to the
+router, so fixture re-capture must happen OUTSIDE the loop (run
+`scripts/capture-fixtures.sh` yourself, commit, then start the loop).

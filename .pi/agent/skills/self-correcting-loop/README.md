@@ -46,6 +46,15 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   the loop never degrades the tree.
 - **write-scope** - out-of-scope edits are reverted each turn (kills the
   test-weakening cheat).
+- **ref-guard + index-guard** - agent-run `git commit`/`reset` is undone
+  (HEAD restored), and the checkpoint index is re-imposed every iteration,
+  so `reset --hard`, `stash`, and `update-index --skip-worktree` can't
+  destroy or evade the checkpoint.
+- **agent sandbox (bwrap)** - the agent runs jailed: read-only `/`, writable
+  repo + /tmp, `~/.pi/agent` under an overlayfs copy-on-write (pi works, but
+  extension/skill/auth edits land in a discarded tmpfs), secret dirs
+  (~/.ssh, ~/.aws, ...) masked. `sandbox: "auto"|"require"|"off"` in the
+  manifest.
 - **negative-knowledge history** - each iteration's touched files are recorded
   (pre-revert), and rolled-back attempts are injected into later prompts
   ("Previous approaches that were rolled back - do not repeat them"), so a
@@ -81,7 +90,7 @@ gate** (`judge` - correctness against the spec).
 ## Test
 
 ```bash
-bun test    # 120: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope integration; CDP; browser flow/screenshot/hardening; judge code + visual gate; pixel-diff decode/diff/baseline
+bun test    # 129: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope/head-reset/index-guard/sandbox integration; CDP; browser flow/screenshot/hardening; judge code + visual gate; pixel-diff decode/diff/baseline
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability
