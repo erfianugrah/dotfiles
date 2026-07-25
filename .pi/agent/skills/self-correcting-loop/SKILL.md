@@ -24,6 +24,7 @@ checkpoint = git index (best known good)
 repeat until every sensor exits 0, OR maxIterations spent:
     pi -p  <task + previous iteration's failing sensor output + loop notes
             + rolled-back attempt history (negative knowledge)>
+    undo any agent-run git commit/reset (HEAD back + checkpoint restored)
     revert any edits outside writeScope
     run sensors (build / vet / test / tsc / clippy / astro check ...)
     all pass?       -> STOP, success                 (deterministic gate)
@@ -42,6 +43,13 @@ The governor around the bare loop (all deterministic, no extra model calls):
   touch; out-of-scope edits are reverted each iteration. This structurally
   kills the test-weakening cheat (keep tests outside the scope) and replaces
   hand-written "integrity" guard sensors.
+- **ref-guard** - if the agent runs `git commit`/`git reset` mid-iteration
+  (plan docs often instruct per-task commits), the move is undone before the
+  footprint capture: HEAD back to the checkpoint, checkpoint index restored
+  from a `write-tree` snapshot. Without this a commit made the fence blind
+  (worktree == index = "nothing changed") and baked out-of-scope edits into
+  history - observed live on 2026-07-25 in the eaves loop run. The iteration
+  prompt also forbids git ref mutations outright.
 - **model escalation ladder** - start on the cheapest model; climb a rung after
   `stallPatience` consecutive no-progress iterations. Strength on demand.
 - **negative-knowledge history** - each iteration's touched files are recorded

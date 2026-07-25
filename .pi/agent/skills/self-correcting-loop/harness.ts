@@ -334,6 +334,7 @@ export function buildPrompt(
 		"- Do NOT modify code, config, or tests unrelated to these failures.\n" +
 		"- Do NOT delete, skip, or weaken tests to force them green.\n" +
 		"- Do NOT change the sensor commands or the manifest.\n" +
+		"- Do NOT run git commit/reset/stash/tag - the loop owns git state; checkpoints are automatic and ref changes are undone.\n" +
 		"- Make the smallest change that addresses the reported errors.\n" +
 		noteBlock +
 		historyBlock +

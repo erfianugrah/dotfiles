@@ -12,6 +12,9 @@
  *   - git checkpoint: the index is "best known good". A regressing or stalled
  *     iteration is rolled back to it, so the loop can never degrade.
  *   - write-scope: edits outside manifest.writeScope are reverted each turn.
+ *   - ref-guard: if the agent moves HEAD (git commit/reset), the move is
+ *     undone and the checkpoint restored (HEAD + write-tree snapshot), so a
+ *     commit can never sneak changes past the scope fence or the rollback.
  *   - escalation ladder: start on the cheapest model, climb a rung after
  *     `stallPatience` consecutive no-progress iterations.
  *   - report: per-iteration record written to .pi/harness-report.json.
@@ -134,6 +137,17 @@ async function checkpoint(): Promise<void> {
 	await git("add", "-A");
 }
 
+/** HEAD sha, or null when the repo has no commits yet. */
+async function headSha(): Promise<string | null> {
+	const r = await git("rev-parse", "HEAD");
+	return r.code === 0 ? r.out.trim() : null;
+}
+
+/** Snapshot the checkpoint index as a tree object, for exact restore. */
+async function writeTree(): Promise<string> {
+	return (await git("write-tree")).out.trim();
+}
+
 /** Restore the working tree to the last checkpoint. */
 async function rollback(): Promise<void> {
 	await git("checkout", "--", ".");
@@ -195,6 +209,8 @@ interface IterationRecord {
 	scopeViolations: string[];
 	/** files the agent touched this iteration (pre-revert); negative knowledge. */
 	changedFiles: string[];
+	/** loop-level signals for the next prompt (scope reverts, rollback, ref-guard). */
+	notes: string[];
 	sensors: { name: string; ok: boolean; exitCode: number }[];
 }
 
@@ -288,6 +304,11 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 	} else {
 		await checkpoint(); // index := current working tree (best known good).
 	}
+	// Ref-guard state: HEAD + the checkpoint index as a tree object. HEAD never
+	// moves via checkpoint() (git add), so checkpointHead is recorded once;
+	// checkpointTree is refreshed after every kept iteration.
+	const checkpointHead: string | null = gitOn ? await headSha() : null;
+	let checkpointTree = gitOn ? await writeTree() : "";
 
 	let ladder: LadderState = { rung: 0, noProgress: 0 };
 	let prevFailing = countFailing(prev);
@@ -318,6 +339,29 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 		const agentExit = await runAgent(prompt, model, m.tools);
 		if (agentExit !== 0) console.warn(`  (agent exited ${agentExit}; continuing)`);
 
+		// Ref-guard: the agent may run `git commit` (plan docs often instruct
+		// per-task commits). A commit leaves worktree == index, which would make
+		// changedPaths() blind AND bake out-of-scope edits into history, and a
+		// rollback would leave the commit behind. Undo it BEFORE the footprint
+		// capture: HEAD back to the checkpoint, then restore the checkpoint
+		// index exactly from its tree snapshot (a bare `reset --mixed` would
+		// destroy keeper state that was staged but never committed). Afterwards
+		// the world is exactly as if the agent never committed: its changes are
+		// worktree-vs-checkpoint deltas and flow through the normal scope fence.
+		if (gitOn && checkpointHead) {
+			const head = await headSha();
+			if (head && head !== checkpointHead) {
+				await git("reset", "--soft", checkpointHead);
+				await git("read-tree", checkpointTree);
+				notes.push(
+					"You moved HEAD (git commit/reset). The loop owns git state: your commit was undone and its changes returned to the worktree for scope review. Do NOT commit - checkpoints are automatic.",
+				);
+				console.log(
+					`  ! agent moved HEAD (${head.slice(0, 8)} != checkpoint ${checkpointHead.slice(0, 8)}); commit undone, checkpoint restored`,
+				);
+			}
+		}
+
 		// Capture the attempt's footprint BEFORE any revert: this is the
 		// negative knowledge fed to later iterations via formatAttemptHistory.
 		const changed = gitOn ? await changedPaths() : [];
@@ -346,8 +390,10 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 			`  -> failing ${prevFailing} -> ${curFailing}  (${d.done ? "DONE" : d.progressed ? "progress" : "no progress"})`,
 		);
 
-		if (d.keep && gitOn) await checkpoint();
-		else if (gitOn) {
+		if (d.keep && gitOn) {
+			await checkpoint();
+			checkpointTree = await writeTree();
+		} else if (gitOn) {
 			await rollback();
 			notes.push("Your last change did not help and was rolled back. Try a different approach.");
 			console.log("  ! rolled back to last good checkpoint");
@@ -371,6 +417,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 			escalated: adv.escalated,
 			scopeViolations,
 			changedFiles: changed,
+			notes,
 			sensors: cur.map((s) => ({ name: s.name, ok: s.ok, exitCode: s.exitCode })),
 		});
 
@@ -401,7 +448,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 function iterationNotes(report: RunReport): string[] {
 	const last = report.iterations.at(-1);
 	if (!last) return [];
-	const notes: string[] = [];
+	const notes: string[] = [...last.notes];
 	if (!last.kept) notes.push("The previous attempt was rolled back (no progress); try a different approach.");
 	if (last.escalated) notes.push("A stronger model is now handling this - reconsider the problem from scratch.");
 	return notes;
