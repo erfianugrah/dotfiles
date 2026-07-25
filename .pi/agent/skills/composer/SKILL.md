@@ -1,6 +1,6 @@
 ---
 name: composer
-description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/composer/`, instance at `composer.erfi.io`). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~109 endpoints under /api/v1, auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
+description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/composer/`, instance at `composer.servarr.erfi.io`). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~109 endpoints under /api/v1, auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
 ---
 
 # composer skill
@@ -40,7 +40,7 @@ curl -s $COMPOSER/openapi.json | jq '.paths | keys'   # endpoint list
 curl -s $COMPOSER/openapi.json | jq '.paths."/api/v1/stacks/{name}".put'
 curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 # interactive: open $COMPOSER/docs in browser
-# Set COMPOSER=https://composer.erfi.io first.
+# Set COMPOSER=https://composer.servarr.erfi.io first.
 ```
 
 ## API basics
@@ -60,7 +60,7 @@ curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 
 ## Auth quick-start (agent driving the API)
 
-The production instance is `composer.erfi.io`. **`COMPOSER_API_KEY` is normally already exported in the user's shell** (sourced from Vaultwarden by the user's zsh init). Check `env | grep COMPOSER` first — only fall back to `bw get` if the env is empty.
+The production instance is `composer.servarr.erfi.io`. **`COMPOSER_API_KEY` is normally already exported in the user's shell** (sourced from Vaultwarden by the user's zsh init). Check `env | grep COMPOSER` first — only fall back to `bw get` if the env is empty.
 
 ```bash
 # 1. is the key already in pi's inherited env?
@@ -72,7 +72,7 @@ bw unlock                        # if locked; pi cannot consume BW_SESSION expor
                                  # interactive shell after pi started — see "env propagation" below
 export COMPOSER_API_KEY=$(bw get password composer-api-key)
 
-export BASE=https://composer.erfi.io/api/v1
+export BASE=https://composer.servarr.erfi.io/api/v1
 
 # 3. verify (response is {stacks: [...]} — NOT a bare array)
 curl -sf -H "X-API-Key: $COMPOSER_API_KEY" "$BASE/stacks" | jq -r '.stacks[].name' | head
@@ -93,14 +93,14 @@ Pi's `bash` tool spawns a fresh subshell from pi's parent process — it does NO
 ### Failure modes
 
 - Empty `$COMPOSER_API_KEY` — curl sends `X-API-Key:` (no value), server returns 401. The 401 body is JSON, downstream `jq '.[]'` blows up. Use `curl -sf` and inspect before piping.
-- Wrong host — `composer.erfi.dev` does not exist; correct host is `composer.erfi.io`.
+- Wrong host — `composer.erfi.dev` does not exist; correct host is `composer.servarr.erfi.io`.
 - Vault locked — `bw get` returns nothing, key stays empty.
 
 For async ops, poll `GET /api/v1/jobs/{id}`. Jobs auto-cleanup after 1h. Max 100 listed. **`bg_wait` does NOT work on composer job_ids** — bg_wait is for pi-spawned tmux sessions only. Poll `/jobs/{id}` directly.
 
-## WAF on composer.erfi.io — mutating requests with credential-shaped bodies are blocked
+## WAF on composer.servarr.erfi.io — mutating requests with credential-shaped bodies are blocked
 
-Caddy WAF in front of composer.erfi.io has a credential-detection rule that returns 403 (HTML page) on PUT/POST bodies containing token-like or password-like strings. **The request never reaches composerd.** This bites on:
+Caddy WAF in front of composer.servarr.erfi.io has a credential-detection rule that returns 403 (HTML page) on PUT/POST bodies containing token-like or password-like strings. **The request never reaches composerd.** This bites on:
 
 - `PUT /api/v1/stacks/{name}/env` with any `.env` containing real tokens (Discord bot token, Spotify client secret, anything matching the rule's heuristics)
 - `POST /api/v1/stacks/git` with credentialed `repo_url`
@@ -120,7 +120,7 @@ ssh servarr "curl -sf -X PUT \
   http://$COMPOSER_IP:8080/api/v1/stacks/<name>/env" <<< "$PAYLOAD"
 ```
 
-GETs work fine through the public WAF. Only PUT/POST/DELETE with credential-like bodies trip it. There's a separate, looser WAF rule that adding `User-Agent: Mozilla/5.0` + `Origin: https://composer.erfi.io` headers bypasses — use that first; only fall through to the internal-network workaround when the credential-detection rule fires.
+GETs work fine through the public WAF. Only PUT/POST/DELETE with credential-like bodies trip it. There's a separate, looser WAF rule that adding `User-Agent: Mozilla/5.0` + `Origin: https://composer.servarr.erfi.io` headers bypasses — use that first; only fall through to the internal-network workaround when the credential-detection rule fires.
 
 **Incoming webhook deliveries hit the WAF too.** GitHub push/ping deliveries to `POST /api/v1/hooks/{id}` are subject to the same Caddy WAF (ddos-mitigator rate rule). Under a burst (e.g. registering + test-pinging many hooks at once) some return `403` and **never reach composerd** - the tell is `GET /webhooks/{id}/deliveries` showing `deliveries: []` while GitHub's `last_response.code` is `403`. It is NOT per-repo config and NOT payload content (the same payload flips 403->200 on retry). Real single pushes usually land (GitHub retries with backoff), but the durable fix is a Caddy path exemption for `/api/v1/hooks/*` (see caddy skill's `@public path /api/* /webhooks/*` pattern). GitHub can't send the `Mozilla`+`Origin` bypass headers, so path-exemption is the only option for inbound hooks.
 

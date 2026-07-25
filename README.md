@@ -731,7 +731,7 @@ rationale.
 | Skill | Purpose |
 |---|---|
 | `infrastructure-stack` | Self-hosted Docker Compose stacks — bridge networks + static IPs, expose-not-ports, host-mode Caddy, PUID/PGID, cross-stack shared networks |
-| `composer` | Self-hosted Docker Compose mgmt platform at composer.erfi.io - ~109-endpoint REST API, auth, pipeline footguns, release workflow |
+| `composer` | Self-hosted Docker Compose mgmt platform at composer.servarr.erfi.io - ~109-endpoint REST API, auth, pipeline footguns, release workflow |
 | `docker` | Dockerfile authoring, buildx multi-arch + cache, image inspection, registry workflows, BuildKit cache mounts / secrets / SSH |
 | `fly` | Fly.io app lifecycle — deploy, secrets, certs, machines, volumes, scale + auto-stop, .internal DNS |
 | `terraform` | OpenTofu (preferred) / Terraform — module structure, state backends, SOPS+age secrets, `terraform import` + `cf-terraforming` for adopting existing resources |

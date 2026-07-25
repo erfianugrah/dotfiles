@@ -60,7 +60,7 @@ For decluttarr / recyclarr, `SONARR_API_KEY` / `RADARR_API_KEY` come from the st
 ## Sibling skills
 
 - **`jellyfin`** — consumer-side (jellyfin/jellyseerr/navidrome). Jellyseerr requests upstream into Sonarr/Radarr via API integration.
-- **`composer`** — GitOps deploy mechanism. `sync` ≠ `up` ≠ `restart`. WAF on composer.erfi.io blocks bare-curl mutations — internal-network workaround documented.
+- **`composer`** — GitOps deploy mechanism. `sync` ≠ `up` ≠ `restart`. WAF on composer.servarr.erfi.io blocks bare-curl mutations — internal-network workaround documented.
 - **`caddy`** — `*.erfi.io` reverse proxy + TSIG ACME path against Knot.
 - **`tailscale-homelab`** — `ssh servarr` access; the `docker exec / docker logs / docker restart` triple that runs everything else.
 - **`infrastructure-stack`** — bridge-net + static-IP + expose-only-no-ports conventions this stack exemplifies.
