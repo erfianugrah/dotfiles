@@ -9,7 +9,8 @@
       "compat": {
         "$comment": "llama.cpp's OpenAI server does not implement developer role or reasoning_effort. Disable both at provider level so Pi sends sane requests.",
         "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
+        "supportsReasoningEffort": false,
+        "supportsStrictMode": false
       },
       "models": [
         {
