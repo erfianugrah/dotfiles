@@ -13,8 +13,12 @@
  *     iteration is rolled back to it, so the loop can never degrade.
  *   - write-scope: edits outside manifest.writeScope are reverted each turn.
  *   - ref-guard: if the agent moves HEAD (git commit/reset), the move is
- *     undone and the checkpoint restored (HEAD + write-tree snapshot), so a
- *     commit can never sneak changes past the scope fence or the rollback.
+ *     undone (reset --soft to the checkpoint HEAD), so a commit can never
+ *     sneak changes past the scope fence or the rollback.
+ *   - index-guard: the checkpoint index is re-imposed from its write-tree
+ *     snapshot after EVERY iteration, neutralizing HEAD-preserving attacks:
+ *     reset --hard / checkout -- . (checkpoint destruction), update-index
+ *     --skip-worktree (fence evasion), and stash (detected via refs/stash).
  *   - escalation ladder: start on the cheapest model, climb a rung after
  *     `stallPatience` consecutive no-progress iterations.
  *   - report: per-iteration record written to .pi/harness-report.json.
@@ -309,6 +313,10 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 	// checkpointTree is refreshed after every kept iteration.
 	const checkpointHead: string | null = gitOn ? await headSha() : null;
 	let checkpointTree = gitOn ? await writeTree() : "";
+	// Stash baseline: only entries created DURING the run are flagged.
+	let baselineStash = gitOn
+		? (await git("rev-parse", "--verify", "refs/stash")).out.trim()
+		: "";
 
 	let ladder: LadderState = { rung: 0, noProgress: 0 };
 	let prevFailing = countFailing(prev);
@@ -343,22 +351,44 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 		// per-task commits). A commit leaves worktree == index, which would make
 		// changedPaths() blind AND bake out-of-scope edits into history, and a
 		// rollback would leave the commit behind. Undo it BEFORE the footprint
-		// capture: HEAD back to the checkpoint, then restore the checkpoint
-		// index exactly from its tree snapshot (a bare `reset --mixed` would
-		// destroy keeper state that was staged but never committed). Afterwards
-		// the world is exactly as if the agent never committed: its changes are
-		// worktree-vs-checkpoint deltas and flow through the normal scope fence.
+		// capture: HEAD back to the checkpoint. Index restoration happens
+		// unconditionally below.
 		if (gitOn && checkpointHead) {
 			const head = await headSha();
 			if (head && head !== checkpointHead) {
 				await git("reset", "--soft", checkpointHead);
-				await git("read-tree", checkpointTree);
 				notes.push(
 					"You moved HEAD (git commit/reset). The loop owns git state: your commit was undone and its changes returned to the worktree for scope review. Do NOT commit - checkpoints are automatic.",
 				);
 				console.log(
-					`  ! agent moved HEAD (${head.slice(0, 8)} != checkpoint ${checkpointHead.slice(0, 8)}); commit undone, checkpoint restored`,
+					`  ! agent moved HEAD (${head.slice(0, 8)} != checkpoint ${checkpointHead.slice(0, 8)}); commit undone`,
 				);
+			}
+		}
+
+		// Index-guard: the git index is exclusively governor-owned. Re-impose
+		// the checkpoint snapshot after EVERY iteration, not just on HEAD moves.
+		// This neutralizes index/worktree attacks that leave HEAD alone:
+		//   - `git reset --hard` / `git checkout -- .` / `git stash` (destroy or
+		//     hide the staged checkpoint state - a bare reset --hard would
+		//     otherwise wipe keeper work that was never committed)
+		//   - `git update-index --skip-worktree` / `--assume-unchanged` (hides a
+		//     tracked file from `git diff` = a scope-fence evasion; read-tree
+		//     rebuilds the index wholesale and drops those flags)
+		// For an honest agent the index already IS checkpointTree, so this is a
+		// no-op; for anything else the checkpoint is exactly restored.
+		if (gitOn) await git("read-tree", checkpointTree);
+
+		// Stash detection: stashed work is invisible to sensors AND the fence.
+		// Warn once per NEW entry (a pre-existing user stash is left alone).
+		if (gitOn) {
+			const stash = (await git("rev-parse", "--verify", "refs/stash")).out.trim();
+			if (stash && stash !== baselineStash) {
+				baselineStash = stash;
+				notes.push(
+					"A new git stash entry appeared during your iteration. Stashed work is invisible to the sensors and the scope fence. Never stash - keep your changes in the worktree.",
+				);
+				console.log("  ! new git stash entry detected (work hidden from sensors/fence)");
 			}
 		}
 

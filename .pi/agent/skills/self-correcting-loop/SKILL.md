@@ -45,11 +45,18 @@ The governor around the bare loop (all deterministic, no extra model calls):
   hand-written "integrity" guard sensors.
 - **ref-guard** - if the agent runs `git commit`/`git reset` mid-iteration
   (plan docs often instruct per-task commits), the move is undone before the
-  footprint capture: HEAD back to the checkpoint, checkpoint index restored
-  from a `write-tree` snapshot. Without this a commit made the fence blind
-  (worktree == index = "nothing changed") and baked out-of-scope edits into
-  history - observed live on 2026-07-25 in the eaves loop run. The iteration
-  prompt also forbids git ref mutations outright.
+  footprint capture: HEAD back to the checkpoint. Without this a commit made
+  the fence blind (worktree == index = "nothing changed") and baked
+  out-of-scope edits into history - observed live on 2026-07-25 in the eaves
+  loop run. The iteration prompt also forbids git ref mutations outright.
+- **index-guard** - the checkpoint index is re-imposed from its `write-tree`
+  snapshot after EVERY iteration (no-op for honest agents). Neutralizes the
+  HEAD-preserving attacks: `git reset --hard` / `git checkout -- .` (destroy
+  the staged-but-uncommitted checkpoint), `git update-index --skip-worktree`
+  (hides a tracked file from `git diff` = fence evasion), and `git stash`
+  (hides work from sensors; detected via refs/stash and surfaced as a loop
+  note). Tests A/B in loop-index-guard.integration.test.ts are proven to
+  fail with the guard disabled.
 - **model escalation ladder** - start on the cheapest model; climb a rung after
   `stallPatience` consecutive no-progress iterations. Strength on demand.
 - **negative-knowledge history** - each iteration's touched files are recorded
