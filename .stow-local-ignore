@@ -16,3 +16,4 @@ tests
 package.json
 bun.lock
 node_modules
+.pi/harness.json

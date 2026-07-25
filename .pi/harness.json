@@ -1,0 +1,14 @@
+{
+  "task": "Make exactly two small edits for pi 0.82.0 constrained sampling. Do not change anything else.\n\nEDIT 1 - .pi/agent/extensions/apply-patch.ts (two sub-edits, both inside the defineTool call):\n(a) Find the parameters block:\n    parameters: Type.Object({\n      patchText: Type.String({\n        description: \"Full patch text within the *** Begin Patch / *** End Patch envelope\",\n      }),\n    }),\n    Add a second argument to Type.Object so it ends with:\n      }, { additionalProperties: false }),\n    (i.e. Type.Object({ patchText: ... }, { additionalProperties: false }))\n(b) Immediately AFTER that parameters property (same object level as parameters), add this sibling property:\n      constrainedSampling: { type: \"grammar\", variants: { openai_lark: \"start: /.+/s\" } },\n    Do NOT modify execute(), parsePatch, renderApplyDiffs, or any test file. Do NOT add imports.\n\nEDIT 2 - .pi/agent/models.json:\nIn .providers[\"llama-server\"].compat, add one new key: \"supportsStrictMode\": false\nKeep the existing $comment, supportsDeveloperRole, supportsReasoningEffort keys untouched. The file must stay valid JSON.\n\nVERIFY before finishing: jq empty .pi/agent/models.json && ./.pi/agent/tests/run.sh - both must pass.",
+  "maxIterations": 6,
+  "models": ["opencode/glm-5.2", "opencode/deepseek-v4-pro"],
+  "stallPatience": 2,
+  "tools": ["read", "edit", "write", "bash"],
+  "writeScope": [".pi/agent/extensions/apply-patch.ts", ".pi/agent/models.json"],
+  "sensors": [
+    { "name": "models-json", "cmd": "jq empty .pi/agent/models.json", "hint": "models.json must be valid JSON - check commas around the new supportsStrictMode key" },
+    { "name": "grammar-applied", "cmd": "rg -q \"constrainedSampling\" .pi/agent/extensions/apply-patch.ts && rg -q \"additionalProperties: false\" .pi/agent/extensions/apply-patch.ts", "hint": "apply-patch.ts must carry the constrainedSampling grammar property AND additionalProperties: false on its Type.Object - see the task EDIT 1" },
+    { "name": "strictmode-flag", "cmd": "jq -e '.providers[\"llama-server\"].compat.supportsStrictMode == false' .pi/agent/models.json", "hint": "models.json llama-server compat must contain \"supportsStrictMode\": false - see the task EDIT 2" },
+    { "name": "tests", "cmd": "./.pi/agent/tests/run.sh", "hint": "extension unit+integration suites must pass; do not edit tests, fix the extension source" }
+  ]
+}
