@@ -57,6 +57,13 @@ export interface Manifest {
 	writeScope: string[];
 	/** ordered sensors; ALL must pass for the loop to succeed. */
 	sensors: Sensor[];
+	/**
+	 * Agent filesystem sandbox (bwrap). "auto" (default) jails when bwrap is
+	 * present, warns + runs bare otherwise; "require" aborts without bwrap;
+	 * "off" disables. The writeScope fence is repo-scoped - the jail is what
+	 * stops writes OUTSIDE the repo and masks secret dirs (~/.ssh et al).
+	 */
+	sandbox: "auto" | "off" | "require";
 }
 
 export interface SensorResult {
@@ -140,6 +147,14 @@ export function parseManifest(raw: unknown): Manifest {
 		writeScope = r.writeScope as string[];
 	}
 
+	let sandbox: Manifest["sandbox"] = "auto";
+	if (r.sandbox !== undefined) {
+		if (r.sandbox !== "auto" && r.sandbox !== "off" && r.sandbox !== "require") {
+			throw new Error('manifest.sandbox must be "auto" | "off" | "require"');
+		}
+		sandbox = r.sandbox;
+	}
+
 	if (!Array.isArray(r.sensors) || r.sensors.length === 0) {
 		throw new Error("manifest.sensors must be a non-empty array");
 	}
@@ -176,6 +191,7 @@ export function parseManifest(raw: unknown): Manifest {
 		baseline,
 		tools,
 		writeScope,
+		sandbox,
 		sensors,
 	};
 }

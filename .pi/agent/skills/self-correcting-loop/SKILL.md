@@ -24,7 +24,10 @@ checkpoint = git index (best known good)
 repeat until every sensor exits 0, OR maxIterations spent:
     pi -p  <task + previous iteration's failing sensor output + loop notes
             + rolled-back attempt history (negative knowledge)>
+    jail the agent (bwrap: ro /, rw repo+tmp, overlayfs on ~/.pi/agent,
+        masked ~/.ssh et al) - unless sandbox: "off"
     undo any agent-run git commit/reset (HEAD back + checkpoint restored)
+    re-impose the checkpoint index (index-guard)
     revert any edits outside writeScope
     run sensors (build / vet / test / tsc / clippy / astro check ...)
     all pass?       -> STOP, success                 (deterministic gate)
@@ -59,6 +62,17 @@ The governor around the bare loop (all deterministic, no extra model calls):
   fail with the guard disabled.
 - **model escalation ladder** - start on the cheapest model; climb a rung after
   `stallPatience` consecutive no-progress iterations. Strength on demand.
+- **agent sandbox (bwrap)** - the writeScope fence is repo-scoped; the jail
+  covers the rest of the filesystem. `/` is read-only, only the repo cwd and
+  /tmp are writable, and `~/.pi/agent` sits under an overlayfs copy-on-write
+  mount: pi can write its locks/session files (discarded at exit - loop agent
+  sessions never pollute the FTS index), but extensions/skills/auth/settings
+  are untouchable, including the stow symlink chain (plain rw-bind + per-file
+  ro-binds can't do this - bwrap can't mount over absolute symlink chains, and
+  per-file binds don't stop symlink REPLACEMENT). Secret dirs (~/.ssh,
+  ~/.gnupg, ~/.aws, ~/.kube, ~/.config/gh) are masked with tmpfs (resolved
+  through symlinks). Network stays up - pi needs the model gateway. Sensors
+  and the judge run OUTSIDE the jail (operator-configured, trusted).
 - **negative-knowledge history** - each iteration's touched files are recorded
   BEFORE any revert, and rolled-back attempts are injected into later prompts
   ("Previous approaches that were rolled back - do not repeat them"). A fresh
@@ -200,6 +214,10 @@ manifest/usage error.
   a repo subdir with `writeScope: ["bin/migrate.sh"]` matches correctly even
   though git reports repo-root-relative paths internally.
   Empty = unrestricted. Requires the target to be a git repo.
+- `sandbox` - `"auto"` (default: jail the agent with bwrap when available,
+  warn + run bare otherwise), `"require"` (abort without bwrap), `"off"`.
+  `LOOP_SANDBOX` env overrides; `LOOP_BWRAP` points at a specific bwrap
+  binary. See the governor bullet above for the jail semantics.
 
 > The governor (checkpoint/rollback/scope/escalation) needs a **git repo** with
 > a committed baseline. Without git it degrades to feed-forward-only and warns.

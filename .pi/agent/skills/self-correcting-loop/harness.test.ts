@@ -80,6 +80,13 @@ describe("parseManifest", () => {
 		expect(() => parseManifest({ ...base, writeScope: "x" })).toThrow("writeScope");
 	});
 
+	test("accepts sandbox mode; rejects bogus values", () => {
+		expect(parseManifest(base).sandbox).toBe("auto");
+		expect(parseManifest({ ...base, sandbox: "require" }).sandbox).toBe("require");
+		expect(parseManifest({ ...base, sandbox: "off" }).sandbox).toBe("off");
+		expect(() => parseManifest({ ...base, sandbox: "bogus" })).toThrow("sandbox");
+	});
+
 	test("accepts baseline flag; rejects non-boolean", () => {
 		expect(parseManifest({ ...base, baseline: true }).baseline).toBe(true);
 		expect(() => parseManifest({ ...base, baseline: "yes" })).toThrow("baseline");

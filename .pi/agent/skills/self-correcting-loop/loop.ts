@@ -29,7 +29,8 @@
  * integration test can substitute a scripted fake agent.
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import * as os from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import {
 	type LadderState,
@@ -188,11 +189,94 @@ async function runAllSensors(m: Manifest): Promise<SensorResult[]> {
 	return results;
 }
 
+// --- agent sandbox (bwrap) ---------------------------------------------------
+// The writeScope fence is repo-scoped; without a jail the agent can write
+// anywhere else on the filesystem (other repos, dotfiles) or read secret
+// dirs (~/.ssh). When bwrap is available the agent runs with:
+//   - / read-only; only cwd (the repo) and /tmp writable
+//   - ~/.pi/agent under an OVERLAYFS copy-on-write mount (--overlay-src +
+//     --tmp-overlay): pi can write its locks/tmp/session files (they land
+//     in an invisible tmpfs and are discarded at exit), but the real
+//     config - extensions, skills, prompts, auth.json, settings, and every
+//     symlink in the stow chain - is untouchable. This also means loop
+//     agent sessions never pollute ~/.pi/agent/sessions or the FTS index.
+//     (A plain rw-bind + ro-bind overrides does NOT work: bwrap cannot
+//     create file-bind mountpoints over absolute symlink chains like
+//     AGENTS.md -> ~/.config/opencode/AGENTS.md, and per-file ro-binds
+//     can't stop symlink REPLACEMENT. Verified empirically 2026-07-25.)
+//   - secret dirs masked with tmpfs (~/.ssh, ~/.gnupg, ~/.aws, ~/.kube,
+//     ~/.config/gh)
+//   - network left alone: pi must reach the model gateway; per-port
+//     filtering is out of bwrap's scope. Sensors and the judge run
+//     OUTSIDE the jail (operator-configured, trusted).
+// manifest.sandbox: "auto" (default: jail when bwrap is present, warn +
+// run bare otherwise), "require" (abort without bwrap), "off".
+// LOOP_SANDBOX env overrides for tests.
+
+const AGENT_DIR = join(os.homedir(), ".pi", "agent");
+
+/** Secret dirs masked with a tmpfs inside the jail (only if they exist). */
+const MASKED_DIRS = [".ssh", ".gnupg", ".aws", ".kube", join(".config", "gh")];
+
+let bwrapPath: string | null | undefined; // undefined = not probed yet
+function bwrap(): string | null {
+	if (bwrapPath === undefined) {
+		const override = process.env.LOOP_BWRAP; // test hook, mirrors LOOP_PI_CMD
+		bwrapPath = override ? (existsSync(override) ? override : null) : Bun.which("bwrap");
+	}
+	return bwrapPath;
+}
+
+/** bwrap arg vector for the agent jail (everything before the `--`). */
+function sandboxArgs(cwd: string): string[] {
+	const args = [
+		"--die-with-parent",
+		"--new-session",
+		"--ro-bind",
+		"/",
+		"/",
+		"--dev",
+		"/dev",
+		"--proc",
+		"/proc",
+		"--bind",
+		cwd,
+		cwd,
+		"--bind",
+		os.tmpdir(),
+		os.tmpdir(),
+		"--overlay-src",
+		AGENT_DIR,
+		"--tmp-overlay",
+		AGENT_DIR,
+	];
+	for (const rel of MASKED_DIRS) {
+		const p = join(os.homedir(), rel);
+		// bwrap can't mount over a symlink (same limitation as file binds),
+		// so mask the RESOLVED target; the symlink then points at an empty
+		// tmpfs inside the jail, which is exactly the masking intent.
+		try {
+			const real = realpathSync(p);
+			if (statSync(real).isDirectory()) args.push("--tmpfs", real);
+		} catch {
+			// doesn't exist on this box - nothing to mask
+		}
+	}
+	args.push("--chdir", cwd, "--");
+	return args;
+}
+
 /** Spawn one agent iteration (pi -p, or $LOOP_PI_CMD in tests). */
-async function runAgent(prompt: string, model: string, tools: string[]): Promise<number> {
+async function runAgent(
+	prompt: string,
+	model: string,
+	tools: string[],
+	sandboxed: boolean,
+): Promise<number> {
 	const args = ["-p", prompt, "--tools", tools.join(","), "-a"];
 	if (model) args.push("--model", model);
-	const proc = Bun.spawn([PI_CMD, ...args], {
+	const cmd = sandboxed ? [bwrap()!, ...sandboxArgs(process.cwd())] : [];
+	const proc = Bun.spawn([...cmd, PI_CMD, ...args], {
 		stdout: "inherit",
 		stderr: "inherit",
 		stdin: "inherit",
@@ -262,6 +346,25 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 	console.log(`  scope:   ${m.writeScope.length ? m.writeScope.join(", ") : "(unrestricted)"}`);
 	console.log(`  sensors: ${m.sensors.map((s) => s.name).join(", ")}`);
 	if (freeze) console.log("  freeze:  on (pre-existing failures tolerated)");
+
+	// Agent filesystem sandbox. Sensors + judge stay outside the jail.
+	const sbMode = (process.env.LOOP_SANDBOX ?? m.sandbox ?? "auto") as Manifest["sandbox"];
+	let sandboxed = false;
+	if (sbMode !== "off") {
+		if (bwrap()) {
+			sandboxed = true;
+			console.log("  sandbox: bwrap (ro /, rw repo+pi-state, masked secret dirs)");
+		} else if (sbMode === "require") {
+			console.error("sandbox: \"require\" but bwrap is not installed - aborting.");
+			return 2;
+		} else {
+			console.warn(
+				"  ! bwrap not found: agent runs UNSANDBOXED (writeScope fence is repo-scoped only). Install bubblewrap or set sandbox: \"off\" to silence.",
+			);
+		}
+	} else {
+		console.log("  sandbox: off");
+	}
 
 	// Refuse to run on a dirty tree by default. With --allow-dirty the loop
 	// snapshots the uncommitted state into its first checkpoint (`git add -A`)
@@ -344,7 +447,7 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 			iterationNotes(report),
 			formatAttemptHistory(report.iterations),
 		);
-		const agentExit = await runAgent(prompt, model, m.tools);
+		const agentExit = await runAgent(prompt, model, m.tools, sandboxed);
 		if (agentExit !== 0) console.warn(`  (agent exited ${agentExit}; continuing)`);
 
 		// Ref-guard: the agent may run `git commit` (plan docs often instruct

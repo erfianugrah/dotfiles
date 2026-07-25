@@ -53,7 +53,7 @@ case "$n" in
     echo done > src/ok.txt          # IN scope
     echo poison > forbidden.txt     # OUT of scope
     git add -A
-    git commit -q -m "wip: agent commit"
+    git -c commit.gpgsign=false commit -q -m "wip: agent commit"
     ;;
   *) : ;;
 esac
