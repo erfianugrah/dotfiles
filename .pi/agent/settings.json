@@ -1,7 +1,7 @@
 {
-  "lastChangelogVersion": "0.81.1",
-  "defaultProvider": "opencode",
-  "defaultModel": "claude-opus-4-8",
+  "lastChangelogVersion": "0.82.0",
+  "defaultProvider": "openrouter",
+  "defaultModel": "moonshotai/kimi-k3",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
   "externalEditor": "nvim",
@@ -21,6 +21,6 @@
       "maxRetryDelayMs": 60000
     }
   },
-  "hideThinkingBlock": true,
+  "hideThinkingBlock": false,
   "packages": []
 }
