@@ -110,10 +110,22 @@ loop run --allow-dirty                        # skip the clean-tree guard
 
 Without `bun link`, invoke directly: `bun ~/.pi/agent/skills/self-correcting-loop/loop.ts run`.
 
-The loop refuses a **dirty working tree** by default - its `git add -A`
-checkpoint / `git checkout`+`clean` rollback would otherwise fold your
-uncommitted work into its snapshots. Commit/stash first, or pass
-`--allow-dirty`. (`--dry` is exempt: it runs no git ops.)
+The loop refuses a **dirty working tree** by default; commit/stash first, or
+pass `--allow-dirty`. (`--dry` is exempt: it runs no git ops.) With
+`--allow-dirty` your uncommitted work is safe: the first checkpoint
+(`git add -A`) snapshots it into the index and every revert/rollback restores
+from that checkpoint index, never from HEAD - so pre-existing uncommitted
+changes round-trip intact, and only files the agent actually touched since
+the last checkpoint are scope-checked or rolled back. (Pre-2026-07-24 the
+scope guard restored violations from HEAD and diffed against HEAD, which
+destroyed uncommitted out-of-scope work; regression-tested in
+loop.integration.test.ts.)
+
+A second 2026-07-24 lesson: on an ADDITIVE-feature task every sensor passes
+at baseline, so the loop exits "nothing to do" without iterating. Encode the
+desired end state as a feature-present sensor that FAILS pre-change (e.g.
+`rg -q <new-symbol> <file>`, `jq -e '.x == false' <cfg>`) - that is what
+gives the loop something to converge on.
 
 `run` exit codes: `0` all sensors green, `1` still red after budget, `2`
 manifest/usage error.

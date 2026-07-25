@@ -102,9 +102,13 @@ async function isDirty(): Promise<boolean> {
 }
 
 /**
- * Paths that differ from the baseline commit (HEAD), plus untracked files.
- * Uses name-only plumbing (no status-column prefix) so parsing is robust -
- * porcelain's leading space on unstaged lines is a slicing trap.
+ * Paths whose WORKTREE content differs from the checkpoint (the index), plus
+ * files not in the index at all. Because checkpoint() is `git add -A`, the
+ * index IS the last-known-good snapshot, so `git diff --name-only` (no ref)
+ * is exactly "what the agent changed since the last checkpoint" - crucially,
+ * pre-existing dirty/untracked work staged by the checkpoint is INDEX-content
+ * and therefore does NOT show up here (the old HEAD-based diff flagged it,
+ * which is how user work got reverted away on 2026-07-24).
  *
  * git reports paths relative to the REPO ROOT, but writeScope globs are
  * cwd-relative. When the loop runs in a subdir of the repo, strip the
@@ -113,7 +117,7 @@ async function isDirty(): Promise<boolean> {
  * flags them (they can never match a cwd-relative glob).
  */
 async function changedPaths(): Promise<string[]> {
-	const tracked = (await git("diff", "--name-only", "HEAD")).out;
+	const tracked = (await git("diff", "--name-only")).out;
 	const untracked = (await git("ls-files", "--others", "--exclude-standard")).out;
 	const prefix = (await git("rev-parse", "--show-prefix")).out.trim();
 	const set = new Set<string>();
@@ -136,11 +140,17 @@ async function rollback(): Promise<void> {
 	await git("clean", "-fdq");
 }
 
-/** Revert the given paths to the baseline commit (used for scope violations). */
+/**
+ * Revert the given paths to the CHECKPOINT (the index), used for scope
+ * violations. Restoring from the index - not HEAD - is what makes
+ * --allow-dirty safe: uncommitted work staged by checkpoint() comes back
+ * verbatim instead of being reset to the last commit. Paths the agent
+ * created are absent from the index, so `git clean` removes them.
+ */
 async function revertPaths(paths: string[]): Promise<void> {
 	for (const p of paths) {
-		await git("checkout", "HEAD", "--", p); // tracked -> baseline
-		await git("clean", "-fdq", "--", p); // untracked -> removed
+		await git("checkout", "--", p); // tracked -> checkpoint (index)
+		await git("clean", "-fdq", "--", p); // not in checkpoint -> removed
 	}
 }
 
@@ -233,13 +243,16 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 	console.log(`  sensors: ${m.sensors.map((s) => s.name).join(", ")}`);
 	if (freeze) console.log("  freeze:  on (pre-existing failures tolerated)");
 
-	// Refuse to run on a dirty tree: the loop checkpoints with `git add -A` and
-	// rolls back with checkout/clean, which would fold uncommitted work into its
-	// snapshots. --dry does no git ops, so it is exempt.
+	// Refuse to run on a dirty tree by default. With --allow-dirty the loop
+	// snapshots the uncommitted state into its first checkpoint (`git add -A`)
+	// and every revert/rollback restores from that checkpoint, so pre-existing
+	// uncommitted work round-trips intact. It still pollutes the sensor
+	// baseline and the loop's notion of "changed", hence the opt-in flag.
+	// --dry does no git ops, so it is exempt.
 	const gitOn = await isGitRepo();
 	if (!dry && gitOn && flags["allow-dirty"] !== true && (await isDirty())) {
 		console.error(
-			"working tree is dirty; the loop's checkpoint/rollback (git add -A / checkout / clean) would fold your uncommitted work into its snapshots.\ncommit or stash first, or re-run with --allow-dirty.",
+			"working tree is dirty. --allow-dirty is safe for uncommitted work (it is captured in the first checkpoint and restored on revert), but the sensor baseline will include it.\nprefer committing first, or re-run with --allow-dirty.",
 		);
 		return 2;
 	}

@@ -145,3 +145,82 @@ test("governor: rollback, stall+escalate, scope-revert, then pass", async () => 
 	expect(prompts[2]).toContain("Previous approaches that were rolled back");
 	expect(prompts[2]).toContain("fileC.txt");
 }, 30000);
+
+/**
+ * Dirty-tree regression (2026-07-24 incident): with --allow-dirty, pre-existing
+ * UNCOMMITTED work in out-of-scope files must survive the loop. The old
+ * revertPaths restored scope violations from HEAD (destroying dirty content)
+ * and changedPaths diffed against HEAD (flagging - and `git clean`-deleting -
+ * pre-existing untracked files the agent never touched).
+ *
+ * The fake agent, keyed off an out-of-repo counter, does:
+ *   iter 1: clobber notes.txt (out-of-scope) + create OUTSIDE.txt, no sensor fix
+ *           -> scope-revert + rollback; notes.txt must return to the DIRTY
+ *           (checkpoint) content, not HEAD; scratch.txt must survive.
+ *   iter 2: fix fileA.txt -> all green -> PASS
+ */
+test("dirty tree: uncommitted out-of-scope work survives scope-revert + rollback", async () => {
+	const repo2 = mkdtempSync(join(tmpdir(), "loop-it-dirty-repo-"));
+	const box2 = mkdtempSync(join(tmpdir(), "loop-it-dirty-box-"));
+	const counter2 = join(box2, "counter");
+	const fake2 = join(box2, "fake-agent.sh");
+
+	writeFileSync(
+		fake2,
+		`#!/usr/bin/env bash
+n=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$COUNTER_FILE"
+case "$n" in
+  1) echo agent-junk > notes.txt; echo junk > OUTSIDE.txt ;;
+  2) echo A-ok > fileA.txt ;;
+  *) : ;;
+esac
+exit 0
+`,
+	);
+	chmodSync(fake2, 0o755);
+
+	// Baseline commit: fileA (in scope, sensor fails) + notes.txt (out of scope).
+	writeFileSync(join(repo2, "fileA.txt"), "");
+	writeFileSync(join(repo2, "notes.txt"), "committed-notes\n");
+	await Bun.write(
+		join(repo2, ".pi/harness.json"),
+		JSON.stringify({
+			task: "make the sensors pass",
+			maxIterations: 4,
+			models: ["weak"],
+			stallPatience: 2,
+			tools: ["read", "edit", "write", "bash"],
+			writeScope: ["file*.txt"],
+			sensors: [{ name: "A", cmd: "grep -q A-ok fileA.txt" }],
+		}),
+	);
+	await sh(["git", "init", "-q"], repo2);
+	await sh(["git", "config", "user.email", "t@t.t"], repo2);
+	await sh(["git", "config", "user.name", "t"], repo2);
+	await sh(["git", "add", "-A"], repo2);
+	await sh(["git", "commit", "-q", "-m", "baseline"], repo2);
+
+	// Pre-existing UNCOMMITTED work the loop must not destroy: a dirty edit to
+	// the out-of-scope tracked file, and an untracked out-of-scope file.
+	writeFileSync(join(repo2, "notes.txt"), "user-precious-uncommitted\n");
+	writeFileSync(join(repo2, "scratch.txt"), "user-scratch-untracked\n");
+
+	const proc = Bun.spawn(["bun", LOOP, "run", "--allow-dirty"], {
+		cwd: repo2,
+		env: { ...process.env, LOOP_PI_CMD: fake2, COUNTER_FILE: counter2 },
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+
+	expect(code).toBe(0);
+	// The dirty content survived (not HEAD's "committed-notes", not "agent-junk").
+	expect(readFileSync(join(repo2, "notes.txt"), "utf8")).toBe("user-precious-uncommitted\n");
+	// The pre-existing untracked file survived (old code `git clean`ed it away).
+	expect(readFileSync(join(repo2, "scratch.txt"), "utf8")).toBe("user-scratch-untracked\n");
+	// The agent's out-of-scope creation was removed, the sensor fix landed.
+	expect(existsSync(join(repo2, "OUTSIDE.txt"))).toBe(false);
+	expect(readFileSync(join(repo2, "fileA.txt"), "utf8")).toContain("A-ok");
+
+	rmSync(repo2, { recursive: true, force: true });
+}, 30000);
