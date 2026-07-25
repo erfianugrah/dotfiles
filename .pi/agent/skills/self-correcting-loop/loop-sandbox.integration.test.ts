@@ -33,6 +33,14 @@ const LOOP = join(import.meta.dir, "loop.ts");
 const AGENT_DIR = join(process.env.HOME!, ".pi", "agent");
 const cleanup: string[] = [];
 
+// The extension-plant escape target must EXIST for the discrimination in
+// test B to be meaningful: on a dev box ~/.pi/agent/extensions/ is the real
+// pi config dir, but a bare CI runner has no pi install and the redirect
+// fails with ENOENT - masquerading as EXT_WRITE_BLOCKED with the sandbox
+// off. Create it up front (no-op where pi is installed) so the plant's
+// success depends only on the jail, never on host state.
+mkdirSync(join(AGENT_DIR, "extensions"), { recursive: true });
+
 interface Ctx {
 	repo: string;
 	outside: string;
