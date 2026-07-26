@@ -11,7 +11,7 @@ Repo: `~/ergo/caddy-compose/`. Deployed to `servarr` under `/mnt/user/composer/s
 
 ## What's in the repo — three things at once
 
-1. **Custom Caddy build** — Dockerfile uses `caddy:${VERSION}-builder` + `xcaddy build`. Compiled-in modules: `caddy-dns/cloudflare`, `caddy-dns/rfc2136`, `caddy-dynamicdns`, `caddy-l4`, plus first-party `caddy-body-matcher`, `caddy-policy-engine`, `caddy-ddos-mitigator`. Two intentionally unpinned (`caddy-dynamicdns`, `caddy-l4`) — see gotcha "unpinned xcaddy modules".
+1. **Custom Caddy build** - Dockerfile uses `caddy:${VERSION}-builder` + `xcaddy build` (base now Caddy 2.11.4). Ten compiled-in `--with` plugins: `caddy-dns/cloudflare`, `caddy-dns/rfc2136`, `caddy-dynamicdns` (pinned by commit), `caddy-l4`, first-party `caddy-body-matcher` / `caddy-policy-engine` / `caddy-ddos-mitigator`, and the edge HTTP cache pair `caddyserver/cache-handler` + `darkweak/storages/nuts`. ALL are pinned since 2026-07-25. Two non-plugin build lines: the Souin cache core is OUR FORK (`--with github.com/darkweak/souin=github.com/erfianugrah/souin@v1.7.7-erfi.1`, two patches - see gotcha "edge HTTP cache") and `--replace google.golang.org/grpc@...@v1.82.1` (transitive-dep bump for a HIGH vuln).
 2. **Compose stack** — `caddy` (host network), `authelia` on its own bridge, `wafctl` on its own bridge. Each container `read_only` where possible, `cap_drop ALL`, run-as `1000:1000`.
 3. **WAF management plane** — `wafctl/` (Go HTTP API + CLI, stdlib only) + `waf-dashboard/` (Astro + React + shadcn), bundled into the wafctl image and proxied at a dedicated subdomain. CRS rules converted from upstream `coreruleset` `.conf` to JSON at build time by `tools/crs-converter/`.
 
@@ -149,11 +149,12 @@ For a **stuck cert state** (deleted on disk but Caddy still serves cached), use 
 5. **`caddy reload` is sticky** — `"config is unchanged"` short-circuits and does NOT re-evaluate cert state, even if cert files were deleted. Force re-issue: `docker restart caddy`.
 6. **TSIG rotation order**: Knot first, then here. ACME renewals in the gap return `BADSIG`.
 7. **Zone migration**: when a zone moves CF DNS → Knot, every site block under it MUST swap `import tls_config` → `import tls_config_rfc2136`. Otherwise Caddy writes ACME TXT to CF while validators ask Knot → silent failure once recursive caches expire.
-8. **Unpinned xcaddy modules float on `--no-cache` rebuilds.** New `caddy-l4` releases have raised the `caddy/v2` minimum and broken older base versions. When bumping any module, bump them all and verify with `docker run --rm <image> /usr/bin/caddy list-modules`.
-9. **Version-tag drift** — see above.
-10. **wafctl ↔ Caddy admin routing**: `extra_hosts: caddy:<bridge-gateway>` required (Docker inter-network isolation blocks docker0). Talk to the proxy port, not `:2019`.
-11. **Pre-commit hook** blocks unencrypted `.env` / `.tfvars` / `.tfstate` (looks for `ENC[AES256_GCM,` or `sops_*` markers). Override per-path via `.allow-unencrypted-paths`.
-12. **wafctl event-store retention** — bounded by `WAF_EVENT_MAX_AGE` / `WAF_GENERAL_LOG_MAX_AGE`. Size on disk scales with traffic; check AGENTS.md for current envelopes before sizing a new deploy.
+8. **Pin every xcaddy module.** Unpinned modules float on `--no-cache` rebuilds - new `caddy-l4` releases raised the `caddy/v2` minimum twice and broke older bases (now all pinned since 2026-07-25). When bumping any module OR the Caddy base, bump them all to latest known-good and verify with `docker run --rm <image> /usr/bin/caddy list-modules`. For a non-plugin transitive dep bump (e.g. a HIGH-vuln gRPC), use xcaddy `--replace module=module@version` (go.mod replace, no blank import), not `--with`.
+9. **Edge HTTP cache (edge variant only).** Souin core is OUR FORK (`github.com/erfianugrah/souin@v1.7.7-erfi.1`) with two patches (born-stale Store() fix; revalidation double-store fix). `order cache after policy_engine` so WAF blocks never enter the cache. Enabled on docs.erfi.io (whole-site, `disable_query`) + jellyfin (`/Items/*/Images/*` only). `stale-if-error` in the site `default_cache_control` is REQUIRED for origin-down insurance (else origin-down past TTL = 502). **No working purge**: the souin admin API permanently returns `[]` and admin PURGE is a no-op; emergency reclaim = delete `/data/cache/nuts` + `docker restart caddy`. Storage is unbounded + RAM-indexed - watch container RAM if more sites are added. Full quirks + evidence: `test/cache/README.md`; harness `make test-cache`.
+10. **Version-tag drift** - see above.
+11. **wafctl <-> Caddy admin routing**: `extra_hosts: caddy:<bridge-gateway>` required (Docker inter-network isolation blocks docker0). Talk to the proxy port, not `:2019`.
+12. **Pre-commit hook** blocks unencrypted `.env` / `.tfvars` / `.tfstate` (looks for `ENC[AES256_GCM,` or `sops_*` markers). Override per-path via `.allow-unencrypted-paths`.
+13. **wafctl event-store retention** - bounded by `WAF_EVENT_MAX_AGE` / `WAF_GENERAL_LOG_MAX_AGE`. Size on disk scales with traffic; check AGENTS.md for current envelopes before sizing a new deploy.
 
 ## Subdirectory map
 
@@ -163,6 +164,7 @@ For a **stuck cert state** (deleted on disk but Caddy still serves cached), use 
 | `errors/` | `error.html` — template-driven 4xx/5xx with WAF-specific 403/429 |
 | `scripts/` | `entrypoint.sh`, `setup-cors.sh`, `update-geoip.sh` |
 | `test/` | `Caddyfile.e2e/.test`, Go e2e tests, CRS official YAML test cases |
+| `test/cache/` | Edge HTTP cache harness (`run-tests.sh`, `origin.py`, `Caddyfile.test`) + `README.md` (7 verified Souin quirks). `make test-cache` runs it against the binary from `CADDY_IMAGE` |
 | `tools/crs-converter/` | Standalone Go binary — CRS SecRule `.conf` → JSON. Invoked at build + `make generate-rules` |
 | `waf/` | Committed crs-converter outputs (`custom-rules.json`, `default-rules.json`, `crs-metadata.json`) |
 | `waf-dashboard/` | Astro + React + shadcn frontend. Embedded into wafctl image. |
