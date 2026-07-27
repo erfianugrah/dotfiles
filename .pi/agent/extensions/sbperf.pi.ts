@@ -61,11 +61,15 @@ const sbperfTool = defineTool({
   name: "sbperf",
   label: "sbperf",
   description:
-    "Run the sbperf Supabase performance auditor. Actions: analyze/full (collect + render a project - PAT, or no-PAT via db_url/profile), snapshot (append to the trend history store), report/pdf/summary (re-render a dir), import_trends/export_prometheus/scrape_init (trend plumbing), narrate_prompt (get the grounded executive-summary prompt so YOU can write it in-session), narrate_import (embed a summary you wrote back). Then report with narrative=true.",
+    "Run the sbperf Supabase performance auditor. Actions: analyze/full (collect + render a project - PAT, or no-PAT via db_url/profile), snapshot (append to the trend history store), report/pdf/summary (re-render a dir), import_trends/export_prometheus/scrape_init (trend plumbing), narrate_prompt (get the grounded executive-summary prompt so YOU can write it in-session), narrate_import (embed a summary you wrote back). Then report with narrative=true. bench (pgbench with methodology guardrails against one db_url -> run history), bench_list/bench_show/bench_compare (read the stored runs; compare shows the perf delta + pg_settings diff).",
   parameters: Type.Object({
     action: Type.Union(
       [
         Type.Literal("analyze"),
+        Type.Literal("bench"),
+        Type.Literal("bench_list"),
+        Type.Literal("bench_show"),
+        Type.Literal("bench_compare"),
         Type.Literal("full"),
         Type.Literal("snapshot"),
         Type.Literal("report"),
@@ -104,7 +108,7 @@ const sbperfTool = defineTool({
     profile: Type.Optional(
       Type.String({
         description:
-          "full: path to a --profile JSON (forces no-PAT + region-mapped Grafana + customer DBs -> per-DB sweep).",
+          "full: path to a --profile JSON (forces no-PAT + region-mapped Grafana + target DBs -> per-DB sweep).",
       }),
     ),
     noPat: Type.Optional(
@@ -145,6 +149,44 @@ const sbperfTool = defineTool({
     summary: Type.Optional(
       Type.String({ description: "narrate_import: the executive-summary markdown to embed" }),
     ),
+    scripts: Type.Optional(
+      Type.Array(Type.String(), {
+        description: "bench: custom pgbench script file(s) (-f). Omit for the builtin.",
+      }),
+    ),
+    builtin: Type.Optional(
+      Type.String({ description: "bench: builtin script: tpcb-like|simple-update|select-only" }),
+    ),
+    scale: Type.Optional(Type.Number({ description: "bench: scale factor (default 1)" })),
+    init: Type.Optional(
+      Type.Boolean({
+        description: "bench: run pgbench -i first (DROPS pgbench_* tables; needs yes:true)",
+      }),
+    ),
+    clients: Type.Optional(Type.Number({ description: "bench: connections (default 4)" })),
+    threads: Type.Optional(
+      Type.Number({ description: "bench: worker threads (default min(cores, clients))" }),
+    ),
+    timeS: Type.Optional(Type.Number({ description: "bench: seconds per run (default 60)" })),
+    warmup: Type.Optional(Type.Number({ description: "bench: warmup seconds (default 10)" })),
+    runs: Type.Optional(Type.Number({ description: "bench: measured repetitions (default 3)" })),
+    protocol: Type.Optional(
+      Type.String({ description: "bench: simple|extended|prepared (default extended)" }),
+    ),
+    rate: Type.Optional(
+      Type.Number({ description: "bench: target TPS instead of max speed (pgbench -R)" }),
+    ),
+    resetStats: Type.Optional(
+      Type.Boolean({ description: "bench: pg_stat_statements_reset() first (superuser)" }),
+    ),
+    name: Type.Optional(Type.String({ description: "bench: label stored with the run" })),
+    yes: Type.Optional(
+      Type.Boolean({ description: "bench: skip confirmations (init drop warning, busy client)" }),
+    ),
+    showId: Type.Optional(Type.Number({ description: "bench_show: stored run id" })),
+    compareIds: Type.Optional(
+      Type.Array(Type.Number(), { description: "bench_compare: [idA, idB]" }),
+    ),
   }),
 
   async execute(_id, p) {
@@ -170,6 +212,13 @@ const sbperfTool = defineTool({
     if (a === "import_trends" && (!p.dir || !p.files?.length))
       return err("import_trends needs dir + files");
     if (a === "scrape_init" && !p.ref) return err("scrape_init needs ref");
+    if (a === "bench" && !p.dbUrl)
+      return err("bench needs dbUrl (pgbench speaks the wire protocol)");
+    if (a === "bench" && p.init && !p.yes)
+      return err("bench init DROPS pgbench_* tables - pass yes:true to confirm");
+    if (a === "bench_show" && p.showId == null) return err("bench_show needs showId");
+    if (a === "bench_compare" && (p.compareIds?.length ?? 0) !== 2)
+      return err("bench_compare needs compareIds: [idA, idB]");
 
     // Flags shared by the collect paths (analyze/full/snapshot).
     const collectFlags = (): string[] => {
@@ -202,7 +251,7 @@ const sbperfTool = defineTool({
         const args = [
           a,
           ...collectFlags(),
-          ...(p.all ? ["--all"] : []),
+          ...(p.all && a === "full" ? ["--all"] : []),
           ...(p.out ? ["--out", p.out] : []),
           ...(a === "full" ? renderFlags() : []),
         ];
@@ -240,6 +289,43 @@ const sbperfTool = defineTool({
         const args = ["scrape-init", "--ref", p.ref!, ...(p.out ? ["--dir", p.out] : [])];
         const { stderr } = await run(args);
         return { content: [{ type: "text", text: stderr.trim() || "done" }] };
+      }
+      if (a === "bench") {
+        const args = [
+          a,
+          "--db-url",
+          p.dbUrl!,
+          ...(p.ref ? ["--ref", p.ref] : []),
+          ...(p.scripts ?? []).flatMap((s) => ["-f", s]),
+          ...(p.builtin ? ["-b", p.builtin] : []),
+          ...(p.scale != null ? ["--scale", String(p.scale)] : []),
+          ...(p.init ? ["--init"] : []),
+          ...(p.clients != null ? ["-c", String(p.clients)] : []),
+          ...(p.threads != null ? ["-j", String(p.threads)] : []),
+          ...(p.timeS != null ? ["-T", String(p.timeS)] : []),
+          ...(p.warmup != null ? ["--warmup", String(p.warmup)] : []),
+          ...(p.runs != null ? ["--runs", String(p.runs)] : []),
+          ...(p.protocol ? ["--protocol", p.protocol] : []),
+          ...(p.rate != null ? ["--rate", String(p.rate)] : []),
+          ...(p.resetStats ? ["--reset-stats"] : []),
+          ...(p.name ? ["--name", p.name] : []),
+          ...(p.yes ? ["--yes"] : []),
+          ...(p.store ? ["--store", p.store] : []),
+        ];
+        const { stdout, stderr } = await run(args);
+        return { content: [{ type: "text", text: `${stderr.trim()}\n${stdout.trim()}`.trim() }] };
+      }
+      if (a === "bench_list" || a === "bench_show" || a === "bench_compare") {
+        const args = [
+          "bench",
+          ...(a === "bench_list" ? ["--list"] : []),
+          ...(a === "bench_show" ? ["--show", String(p.showId)] : []),
+          ...(a === "bench_compare" ? ["--compare", ...p.compareIds!.map(String)] : []),
+          ...(p.ref && a === "bench_list" ? ["--ref", p.ref] : []),
+          ...(p.store ? ["--store", p.store] : []),
+        ];
+        const { stdout, stderr } = await run(args);
+        return { content: [{ type: "text", text: `${stderr.trim()}\n${stdout.trim()}`.trim() }] };
       }
       if (a === "narrate_prompt") {
         await run(["narrate", p.dir!, "--print-prompt"]);
