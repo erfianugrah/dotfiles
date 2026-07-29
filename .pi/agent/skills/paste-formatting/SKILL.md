@@ -37,7 +37,13 @@ mdclip --discord  reply.md  # Discord markdown  (plain text)
 mdclip --telegram reply.md  # Telegram markdown (plain text)
 mdclip --whatsapp reply.md  # WhatsApp markup   (plain text)
 # short flags: -s -d -t -w
+
+# auto-split for per-app message caps (chat flavours only):
+mdclip --discord --split reply.md      # split into <=2000-char messages
+mdclip --discord --split=4000 reply.md # custom cap (e.g. Discord Nitro)
 ```
+
+`--split` does a CLEAN split: breaks only at blank-line block boundaries, never inside a fenced code block - a fence that alone exceeds the cap is closed at the break and reopened (with the language hint) on the next part, so Discord still syntax-highlights every chunk. Each part gets an `(N/M)` header that counts toward the cap. Default caps: discord 2000, telegram 4096, slack 40000, whatsapp 65536; `--split=N` overrides. Interactive TTY: part 1 goes on the clipboard, then each Enter loads the next part. Non-TTY (agent/pipe): part 1 on the clipboard, the rest written to `/tmp/mdclip-split-*/part-N.txt` with the paths printed - hand those to the user or copy them in sequence yourself. Without `--split` an over-cap message is copied whole and the app rejects it on send, so for Discord always pass `--split` unless the draft is known-short.
 
 ## Chat apps: Slack / Discord / Telegram / WhatsApp
 

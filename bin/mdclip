@@ -40,6 +40,17 @@
 #   mdclip --whatsapp  reply.md  # WhatsApp markup
 #   mdclip -s < reply.md         # short flags: -s -d -t -w
 #
+# Auto-split (chat flavours only):
+#   mdclip --discord --split reply.md    # split into <=2000-char messages
+#   mdclip --discord --split=4000 r.md   # custom cap (e.g. Discord Nitro)
+#   Splitting is CLEAN: breaks at blank-line block boundaries, never inside a
+#   fenced code block (a fence that alone exceeds the cap is closed and
+#   reopened across the break). Each part gets an (N/M) header. Interactive
+#   TTY: copies part 1, then 'press Enter' loads each next part onto the
+#   clipboard. Non-TTY: copies part 1, writes the rest to a /tmp dir and
+#   prints the paths. Default caps: discord 2000, telegram 4096, slack 40000,
+#   whatsapp 65536.
+#
 # Notes:
 #   - Input is treated as GitHub-Flavoured Markdown (gfm). In every chat flavour
 #     a single *word* is markdown ITALIC; use **word** for bold. (Don't feed
@@ -170,6 +181,7 @@ paste_hint() {
 # Arg parse.
 # ---------------------------------------------------------------------------
 flavor=""
+split=""
 args=()
 for a in "$@"; do
   case "$a" in
@@ -177,9 +189,16 @@ for a in "$@"; do
     -d|--discord)  flavor=discord ;;
     -t|--telegram) flavor=telegram ;;
     -w|--whatsapp) flavor=whatsapp ;;
+    --split)       split=auto ;;
+    --split=*)     split="${a#--split=}" ;;
     *) args+=("$a") ;;
   esac
 done
+
+if [ -n "$split" ] && [ -z "$flavor" ]; then
+  echo "mdclip: --split only makes sense with a chat flavour (rich mode has no char cap)" >&2
+  exit 1
+fi
 set -- "${args[@]:-}"
 
 if [ -z "$flavor" ]; then
@@ -253,6 +272,117 @@ if [ -n "$flavor" ]; then
       print "$line\n";
     }
   ')"
+
+  # -------------------------------------------------------------------------
+  # Optional clean split into per-message parts. Caps: discord 2000,
+  # telegram 4096, slack 40000, whatsapp 65536 (override with --split=N).
+  # -------------------------------------------------------------------------
+  if [ -n "$split" ]; then
+    cap="$split"
+    if [ "$split" = auto ]; then
+      case "$flavor" in
+        discord)  cap=2000 ;;
+        telegram) cap=4096 ;;
+        slack)    cap=40000 ;;
+        whatsapp) cap=65536 ;;
+      esac
+    fi
+    case "$cap" in (*[!0-9]*|"") echo "mdclip: bad --split cap: $cap" >&2; exit 1 ;; esac
+
+    splitdir="$(mktemp -d /tmp/mdclip-split-XXXXXX)"
+    mapfile -t partinfo < <(printf '%s' "$chattext" | CAP="$cap" OUTDIR="$splitdir" perl -CSD -Mstrict -Mwarnings -e '
+      my $cap = $ENV{CAP} - 8;  # reserve room for a "(NN/NN)\n" header
+      my $dir = $ENV{OUTDIR};
+      # 1. group lines into blocks (blank line outside a fence separates)
+      my @blocks; my $cur = ""; my $in_code = 0;
+      while (my $line = <STDIN>) {
+        if ($line =~ /^\s*```/) { $in_code = !$in_code; $cur .= $line; next; }
+        if (!$in_code && $line =~ /^\s*$/) { push @blocks, $cur if length $cur; $cur = ""; next; }
+        $cur .= $line;
+      }
+      push @blocks, $cur if length $cur;
+      # 2. hard-split any single block that exceeds the cap. Code fences are
+      #    closed at the break and reopened (with the lang hint) on the next
+      #    chunk; overlong lines are broken at the last space.
+      my @chunks;
+      for my $b (@blocks) {
+        if (length($b) <= $cap) { push @chunks, $b; next; }
+        my @lines = split /(?<=\n)/, $b;
+        my ($fence) = $lines[0] =~ /^\s*(```\S*)/;
+        my $c = "";
+        for my $l (@lines) {
+          while (length($l) > $cap) {  # single overlong line: break at space
+            my $i = rindex($l, " ", $cap);
+            $i = $cap if $i <= 0;
+            my $head = substr($l, 0, $i + 1); $l = substr($l, $i + 1);
+            if (length $c) { $c .= $head; push @chunks, $c; $c = ""; }
+            else { push @chunks, $head; }
+          }
+          if (length($c) && length($c) + length($l) > $cap) {
+            $c .= "```\n" if $fence && $c !~ /```\s*\z/;
+            push @chunks, $c;
+            $c = $fence ? "$fence\n" : "";
+          }
+          $c .= $l;
+        }
+        push @chunks, $c if length $c;
+      }
+      # 3. greedily pack chunks into parts
+      my @parts; my $p = "";
+      for my $c (@chunks) {
+        if (!length $p) { $p = $c; next; }
+        if (length($p) + 1 + length($c) <= $cap) { $p .= "\n$c"; }
+        else { push @parts, $p; $p = $c; }
+      }
+      push @parts, $p if length $p;
+      my $n = scalar @parts;
+      for my $i (0 .. $#parts) {
+        my $body = $n > 1 ? sprintf("(%d/%d)\n", $i + 1, $n) . $parts[$i] : $parts[$i];
+        my $f = "$dir/part-" . ($i + 1) . ".txt";
+        open my $fh, ">:encoding(UTF-8)", $f or die "mdclip: $f: $!\n";
+        print $fh $body; close $fh;
+        print "$f\t", length($body), "\n";
+      }
+    ')
+
+    nparts=${#partinfo[@]}
+    if [ "$nparts" -le 1 ]; then
+      rm -rf "$splitdir"
+      tmptxt="$(mktemp --suffix=.txt)"
+      trap 'rm -f "$tmptxt"' EXIT
+      printf '%s' "$chattext" > "$tmptxt"
+      set_clip_plain "$tmptxt"
+      echo "$flavor markup is on the clipboard (plain text). Paste with $(paste_hint)." >&2
+      exit 0
+    fi
+
+    if { true < /dev/tty; } 2>/dev/null; then
+      # interactive: clipboard relay - Enter loads the next part
+      trap 'rm -rf "$splitdir"' EXIT
+      for i in "${!partinfo[@]}"; do
+        f="${partinfo[$i]%%$'\t'*}"; n="${partinfo[$i]##*$'\t'}"
+        set_clip_plain "$f"
+        if [ "$i" -lt $((nparts - 1)) ]; then
+          printf 'part %d/%d (%s chars) on the clipboard - paste with %s, then press Enter ' \
+            $((i + 1)) "$nparts" "$n" "$(paste_hint)" >&2
+          read -r _ < /dev/tty
+        else
+          echo "part $((i + 1))/$nparts ($n chars) on the clipboard - last one. Paste with $(paste_hint)." >&2
+        fi
+      done
+    else
+      # non-TTY (agent/pipe): part 1 on clipboard, rest stay as files
+      f="${partinfo[0]%%$'\t'*}"; n="${partinfo[0]##*$'\t'}"
+      set_clip_plain "$f"
+      echo "split into $nparts parts (cap $cap). part 1/$nparts ($n chars) is on the clipboard - paste with $(paste_hint)." >&2
+      echo "remaining parts:" >&2
+      for i in "${!partinfo[@]}"; do
+        [ "$i" -eq 0 ] && continue
+        echo "  ${partinfo[$i]%%$'\t'*}" >&2
+      done
+    fi
+    exit 0
+  fi
 
   tmptxt="$(mktemp --suffix=.txt)"
   trap 'rm -f "$tmptxt"' EXIT
