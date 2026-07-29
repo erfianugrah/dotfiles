@@ -114,7 +114,7 @@ When a task will take >30s OR you want pi to keep working in parallel, use the b
 
 ## Documentation
 
-Docs server at `docs.erfi.io` — 158 sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
+Docs server at `docs.erfi.io` — 260+ sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
 
 **Always use custom `docs_search`, `docs_read`, `docs_grep`, `docs_find`, `docs_summary`, `docs_sources` tools.** No raw `ssh` or `Bash` for docs access.
 
@@ -122,7 +122,7 @@ docs.erfi.io also exposes these same six tools over a remote MCP endpoint at `ht
 
 ### Sources
 
-Full list of 158 docs.erfi.io sources is at `~/.pi/agent/prompts/docs-reference.md`.
+Full list of docs.erfi.io sources is at `~/.pi/agent/prompts/docs-reference.md`.
 For runtime lookup with current file counts use `docs_sources <filter>`.
 
 
@@ -130,7 +130,7 @@ For runtime lookup with current file counts use `docs_sources <filter>`.
 
 OpenAPI specs converted to per-endpoint-group markdown. Each has `api/overview.md` (endpoint index) + `api/{tag}.md` files.
 
-authentik-api, aws-api, cloudflare-api, docker-api, flyio-api, gitea-api, keycloak-api, kubernetes-api, supabase-api, supabase-auth-api
+authentik-api, aws-api, cloudflare-api, docker-api, flyio-api, gcp-api, gitea-api, keycloak-api, kubernetes-api, stripe-api, supabase-api, supabase-auth-api
 
 **API lookup pattern:**
 1. `docs_search(query="dns record", source="cloudflare-api")` — find endpoint group
