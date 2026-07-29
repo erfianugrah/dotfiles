@@ -1,6 +1,6 @@
 ---
 name: composer
-description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/composer/`, instance at `composer.servarr.erfi.io`). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~109 endpoints under /api/v1, auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
+description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/composer/`, instance at `composer.erfi.io` on the MS-01 router, moved off servarr 2026-07). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~109 endpoints under /api/v1, auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
 ---
 
 # composer skill
@@ -9,7 +9,7 @@ Self-hosted compose-mgmt platform. Go + Astro. REST API only — no end-user CLI
 
 ## When this skill does NOT apply
 
-Composer manages a single set of stacks on the **servarr** host. It does NOT see:
+Composer manages a single set of stacks on the **MS-01 NixOS router** (ssh alias `nixos`, public URL `https://composer.erfi.io`; moved off servarr 2026-07). It does NOT see:
 - Local dev compose stacks (`~/llm-compose/`, `~/composer/deploy/`, `~/knot-fly/`, any compose file the user is editing on the dev box).
 - Stacks on other servers the user hasn't onboarded.
 - Anything reached via plain `docker ...` on the dev machine.
@@ -40,7 +40,7 @@ curl -s $COMPOSER/openapi.json | jq '.paths | keys'   # endpoint list
 curl -s $COMPOSER/openapi.json | jq '.paths."/api/v1/stacks/{name}".put'
 curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 # interactive: open $COMPOSER/docs in browser
-# Set COMPOSER=https://composer.servarr.erfi.io first.
+# Set COMPOSER=https://composer.erfi.io first.
 ```
 
 ## API basics
@@ -58,27 +58,25 @@ curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 - Errors: RFC 9457 Problem Details, content-type `application/problem+json`. 500s include `request_id`. Hand-written client extractor at `web/src/lib/api/errors.ts`.
 - Hard limits: Huma 1 MB request body cap. Compose YAML 512 KB. .env 256 KB.
 
-## Two instances - servarr AND the MS-01 edge router
+## Instance - on the MS-01 edge router (moved off servarr 2026-07)
 
-There are TWO independent composer instances with SEPARATE user/key DBs:
+The production composer instance now runs on the MS-01 NixOS router (ssh alias `nixos`): `https://composer.erfi.io`, key in `COMPOSER_API_KEY` (shell-init exported, works there). Stacks: `knotea`, `caddy`, `edge-services`, `vaultwarden`, `atuin`, `joplin`, `docs-ssh`, `httpbin-bun`.
 
-- **servarr** (Unraid): `https://composer.servarr.erfi.io`, key in `COMPOSER_API_KEY` (shell-init exported). Most stacks live here.
-- **edge** (MS-01 NixOS router, ssh alias `nixos`): API at `localhost:8080` on the router (also public via `composer.edge.erfi.io` through edge caddy). Stacks there: `knotea`, `caddy`, `edge-services`, `vaultwarden`, `atuin`, `joplin`, `docs-ssh`. The servarr key returns **401** here.
+The old servarr instance (`composer.servarr.erfi.io`) is legacy - it may still answer TLS + return composerd JSON 401s, but no current key works against it. Do NOT treat a 401 from composer.erfi.io as "wrong instance": a 401 there means the key itself is stale. (The pre-move `COMPOSER_EDGE_API_KEY` / `composer.edge.erfi.io` edge-instance setup is superseded - that key 401s on the current instance.)
 
-**Edge auth**: the edge API key is exported by the user's shell init as `COMPOSER_EDGE_API_KEY` (same pattern as `COMPOSER_API_KEY`) - pi normally inherits it at launch, so check `env | grep COMPOSER` FIRST. Fallback: `~/.composer-edge-api-key` on the dev box (mode 600; may be stale after a rotation). Usage over ssh:
+**Router-local access**: API also at `localhost:8080` on the router:
 
 ```bash
-KEY="${COMPOSER_EDGE_API_KEY:-$(cat ~/.composer-edge-api-key)}"
-ssh nixos "curl -s -H \"X-API-Key: $KEY\" localhost:8080/api/v1/stacks" | jq -r '.stacks[].name'
+ssh nixos "curl -s -H \"X-API-Key: $COMPOSER_API_KEY\" localhost:8080/api/v1/stacks" | jq -r '.stacks[].name'
 # deploy the knotea stack (edge builds from the monorepo checkout):
-ssh nixos "curl -s -X POST -H \"X-API-Key: $KEY\" 'localhost:8080/api/v1/stacks/knotea/up?async=true'"
+ssh nixos "curl -s -X POST -H \"X-API-Key: $COMPOSER_API_KEY\" 'localhost:8080/api/v1/stacks/knotea/up?async=true'"
 ```
 
 If the key 401s, it was rotated - ASK the user for the current key; do NOT improvise manual git surgery as a first resort. Known-good manual fallback when no key is available (used for the v1.1.5/v1.1.6 edge deploys before the key was at hand): generate a throwaway ed25519 keypair inside the stack checkout, `gh repo deploy-key add` it read-only, `git -c core.sshCommand="ssh -i <key> -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" pull --ff-only`, `docker compose up -d --build` from the checkout, then delete the GH deploy key + `shred -u` the keypair. Why this is needed at all: composerd's startup hook **AES-encrypts every key under its ssh dir at rest** (`/var/lib/composer/ssh/id_github*`), so interactive git/ssh with those keys fails with "invalid format" - only composerd can decrypt and use them. The API is the intended path.
 
 ## Auth quick-start (agent driving the API)
 
-The production instance is `composer.servarr.erfi.io`. **`COMPOSER_API_KEY` is normally already exported in the user's shell** (sourced from Vaultwarden by the user's zsh init). Check `env | grep COMPOSER` first — only fall back to `bw get` if the env is empty.
+The production instance is `https://composer.erfi.io` (on the router). **`COMPOSER_API_KEY` is normally already exported in the user's shell** (sourced from Vaultwarden by the user's zsh init). Check `env | grep COMPOSER` first — only fall back to `bw get` if the env is empty.
 
 ```bash
 # 1. is the key already in pi's inherited env?
@@ -90,7 +88,7 @@ bw unlock                        # if locked; pi cannot consume BW_SESSION expor
                                  # interactive shell after pi started — see "env propagation" below
 export COMPOSER_API_KEY=$(bw get password composer-api-key)
 
-export BASE=https://composer.servarr.erfi.io/api/v1
+export BASE=https://composer.erfi.io/api/v1
 
 # 3. verify (response is {stacks: [...]} — NOT a bare array)
 curl -sf -H "X-API-Key: $COMPOSER_API_KEY" "$BASE/stacks" | jq -r '.stacks[].name' | head
@@ -111,14 +109,16 @@ Pi's `bash` tool spawns a fresh subshell from pi's parent process — it does NO
 ### Failure modes
 
 - Empty `$COMPOSER_API_KEY` — curl sends `X-API-Key:` (no value), server returns 401. The 401 body is JSON, downstream `jq '.[]'` blows up. Use `curl -sf` and inspect before piping.
-- Wrong host — `composer.erfi.dev` does not exist; correct host is `composer.servarr.erfi.io`.
+- Wrong host - `composer.erfi.dev` does not exist; correct host is `composer.erfi.io`. `composer.servarr.erfi.io` is the legacy pre-move instance (answers but 401s all current keys).
 - Vault locked — `bw get` returns nothing, key stays empty.
 
 For async ops, poll `GET /api/v1/jobs/{id}`. Jobs auto-cleanup after 1h. Max 100 listed. **`bg_wait` does NOT work on composer job_ids** — bg_wait is for pi-spawned tmux sessions only. Poll `/jobs/{id}` directly.
 
-## WAF on composer.servarr.erfi.io — mutating requests with credential-shaped bodies are blocked
+## WAF in front of composer - mutating requests with credential-shaped bodies are blocked
 
-Caddy WAF in front of composer.servarr.erfi.io has a credential-detection rule that returns 403 (HTML page) on PUT/POST bodies containing token-like or password-like strings. **The request never reaches composerd.** This bites on:
+(This section was written for the pre-move servarr deployment at composer.servarr.erfi.io. The same edge Caddy/WAF now fronts composer.erfi.io on the router, so the behavior likely still applies - but the internal-network bypass is now simply `ssh nixos` + `localhost:8080`.)
+
+Caddy WAF in front of composer has a credential-detection rule that returns 403 (HTML page) on PUT/POST bodies containing token-like or password-like strings. **The request never reaches composerd.** This bites on:
 
 - `PUT /api/v1/stacks/{name}/env` with any `.env` containing real tokens (Discord bot token, Spotify client secret, anything matching the rule's heuristics)
 - `POST /api/v1/stacks/git` with credentialed `repo_url`
@@ -205,11 +205,11 @@ Two paths, easy to confuse:
 
 | Path | What it is |
 |---|---|
-| `/mnt/user/composer/stacks/<name>/` | **Host source-of-truth** on servarr (Unraid user share). Where composer clones git repos, writes the materialized `.env`, and where you `rsync` runtime data. SSH'd file ops use this path. |
+| `/mnt/user/composer/stacks/<name>/` | **PRE-MOVE (servarr) layout** - host source-of-truth on the old servarr instance. Post-move the stacks dir lives on the router; verify with `ssh nixos 'docker inspect composer ...'` before assuming any host path. |
 | `/opt/stacks/<name>/` | **In-container view** — composer's container bind-mounts `/mnt/user/composer/stacks` to `/opt/stacks` (`COMPOSER_STACKS_DIR=/opt/stacks` inside). The API's stack-object `path` field reports this in-container path. |
 | `/mnt/user/appdata/<name>/` | **NOT used.** That's a generic Unraid template-app convention; composer doesn't write here. Don't go looking. |
 
-Verify the bind-mount on a given deployment: `ssh servarr 'docker inspect composer --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}"'`.
+Verify the bind-mount on the current (router) deployment: `ssh nixos 'docker inspect composer --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}"'`.
 
 ### Creating a git-backed stack
 
