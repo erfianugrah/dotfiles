@@ -156,6 +156,11 @@ curl -sX PUT :7860/api/vocabulary -H 'content-type: application/json' \
 
 ## Diarization quality
 
+- **Gender prefixes are OFF by default**: labels are plain `SPEAKER_00` (not
+  `M-SPEAKER_00`). The old F0-pitch prefix mislabeled often enough over
+  compressed mics (a male voice landed as F-SPEAKER) that it misled readers;
+  voice prints are the identity mechanism. Opt back in with
+  `SPEAKER_GENDER_LABELS=1`.
 - **Micro-turn cleanup**: a < 1s diarized turn sandwiched between two turns of
   the SAME speaker (A -> B -> A flicker) is reassigned to the flanking speaker
   before word-speaker assignment. Fixes single sentences split across two
@@ -237,7 +242,10 @@ video-to-docs / call-review pipeline. Five tools:
   (self-answered vs assent vs elaboration after each question).
 - **`video_doc`** - markdown-ready evidence bundle (metadata + speaking-time
   + diarized transcript + visual timeline + overlap summary). Transcript can
-  be filtered with `speaker=`, `start=`, `end=` to keep context small.
+  be filtered with `speaker=`, `start=`, `end=` to keep context small. Pass
+  **`output_path`** to write the markdown straight to disk and get back only
+  stats (path, bytes, section sizes) - the default for long calls so a
+  900+-segment transcript never enters model context.
 - **`video_enroll` / `video_name`** - voice-print management + client-side
   relabel. `video_name` with `enroll:true` relabels AND enrolls in one step.
   Bundles keep embeddings keyed by the ORIGINAL diarized label (stable ID);
@@ -247,6 +255,35 @@ Depends on the `GET /api/artifact?path=...` endpoint (serves the word-level
 JSON the job writes server-side; path-guarded to the temp dir). `video_extract`
 passes `refresh:true` because the transcript cache stores text only and nulls
 `subtitle_file` on a hit.
+
+### Call-review workflow (the improved loop)
+
+1. **`video_extract`** on the recording. Read the summary carefully - it now
+   reports three advisories beyond the basics:
+   - *active speech vs wall time* - a call that is 30%+ silence is dead air;
+     note it, don't analyse it as talk.
+   - *owner-presence warning* - if the enrolled owner (`VIDEO_REVIEW_OWNER`,
+     default "Erfi") speaks <60s in a >10min recording, the mic was probably
+     not routed into the recording. Flag it to the user the same day instead
+     of discovering a dead recording a week later.
+   - *format suggestion* - heuristic from speaker count / identification /
+     dominance (`suggestFormat`): 2 named speakers -> "1:1", dominant speaker
+     >=60% + guests -> "customer", 3+ mostly-named -> "review".
+2. **Tag the format** via `video_metrics format=<suggestion>` (confirms the
+   guess and persists it on the bundle). Untagged calls do not accumulate
+   longitudinal baselines - the deltas-vs-prior-calls output only works when
+   calls are tagged consistently.
+3. **`video_doc` with `output_path`** for the transcript + evidence file;
+   write the notes doc from that file plus `video_metrics` output. Never let
+   a long transcript ride through model context.
+4. **Name speakers** from the extract's name suggestions / transcript cues
+   (`video_name`), enrol your recurring counterparts (`enroll:true`).
+
+**Vocabulary discipline** (`/api/vocabulary`, 60-term cap): public product /
+project / company names ONLY. No customer or account names, no colleague
+names (voice-print enrollment covers people), no internal program names, no
+unreleased roadmap terms. The file is readable over the API and its terms
+flow into every job's prompt - treat it as publishable.
 
 ### Automatic speaker names (voice prints)
 

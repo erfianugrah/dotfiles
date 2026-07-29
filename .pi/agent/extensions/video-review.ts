@@ -43,7 +43,7 @@ import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const WHISPER_URL = process.env.WHISPER_URL ?? "http://localhost:7860";
 // Persistent store (survives reboots - /tmp does not; a lost bundle costs a
@@ -211,6 +211,29 @@ export function suggestNames(bundle: Bundle): NameSuggestion[] {
     });
   }
   return out.sort((a, b) => a.at - b.at);
+}
+
+// ── call-format heuristic (pure) ──────────────────────────────────────────
+
+/**
+ * Heuristic call-format suggestion for untagged bundles, so longitudinal
+ * baselines (video_metrics history) actually accumulate. Rules:
+ *  - 2 identified speakers              -> "1:1"
+ *  - dominant speaker >=60% + guests    -> "customer" (presentation format)
+ *  - 3+ speakers, at least half named   -> "review" (team call)
+ * "Identified" = label is not a diarized SPEAKER_XX placeholder. Suggestion
+ * only - the human confirms by passing format= to video_metrics.
+ */
+export function suggestFormat(per: Map<string, number>, activeSec: number): string | null {
+  const speakersList = [...per.keys()];
+  if (!speakersList.length) return null;
+  const unidentified = speakersList.filter((s) => /speaker/i.test(s));
+  const top = Math.max(...per.values());
+  const topShare = activeSec > 0 ? top / activeSec : 0;
+  if (speakersList.length === 2 && unidentified.length === 0) return "1:1";
+  if (topShare >= 0.6 && unidentified.length >= 1) return "customer";
+  if (speakersList.length >= 3 && unidentified.length <= speakersList.length / 2) return "review";
+  return null;
 }
 
 // ── longitudinal metrics history (side-effectful, advisory) ───────────────
@@ -1296,6 +1319,7 @@ const videoExtract = defineTool({
     "`file` accepts a /media or /tmp server path, 'latest'/'newest', or a filename substring (resolved via /api/media).",
     "Set frames:true only when the visual track matters (screen-shares, slides, whiteboard) - it adds a VLM pass.",
     "Diarization is on by default and is REQUIRED for video_overlap.",
+    "The summary reports active speech vs wall time, warns when the enrolled owner is near-silent (possible mic-routing failure), and suggests a format tag for untagged calls - pass the suggestion to video_metrics format= to start a longitudinal baseline.",
   ],
   label: "Video Extract",
   description:
@@ -1320,9 +1344,15 @@ const videoExtract = defineTool({
     const { bundle, path, fromCache } = await ensureBundle(params.file, opts, emit, signal);
 
     const utts = bundle.hasWordSpeakers ? mergeUtterances(bundle.segments) : [];
+    const per = new Map<string, number>();
+    for (const u of utts) per.set(u.speaker, (per.get(u.speaker) ?? 0) + (u.end - u.start));
+    const activeSec = utts.reduce((a, u) => a + (u.end - u.start), 0);
     const lines: string[] = [];
     lines.push(`file: ${bundle.file}`);
     lines.push(`duration: ${hhmmss(bundle.duration)}  |  segments: ${bundle.segments.length}  |  speakers: ${bundle.speakers.length ? bundle.speakers.join(", ") : "(none / diarize off)"}`);
+    if (utts.length && bundle.duration > 0) {
+      lines.push(`active speech: ${hhmmss(activeSec)} (${Math.round((activeSec / bundle.duration) * 100)}% of wall time)`);
+    }
     if (bundle.frames) lines.push(`frames described: ${bundle.frames.length}`);
     if (bundle.names && Object.keys(bundle.names).length) {
       lines.push(`auto-identified: ${Object.values(bundle.names).join(", ")} (server voice prints)`);
@@ -1340,13 +1370,31 @@ const videoExtract = defineTool({
     lines.push(`bundle: ${path}`);
     lines.push("Next: video_overlap for conversation review, video_doc for meeting-notes source.");
     if (utts.length) {
-      const total = utts.reduce((a, u) => a + (u.end - u.start), 0) || 1;
+      const total = activeSec || 1;
       lines.push("");
       lines.push("speaking time:");
-      const per = new Map<string, number>();
-      for (const u of utts) per.set(u.speaker, (per.get(u.speaker) ?? 0) + (u.end - u.start));
       for (const [sp, sec] of [...per.entries()].sort((a, b) => b[1] - a[1])) {
         lines.push(`  ${sp}: ${hhmmss(sec)} (${Math.round((sec / total) * 100)}%)`);
+      }
+
+      // ── advisory checks ──
+      // Owner presence: if the enrolled owner is near-silent in a long
+      // recording, the mic was probably not routed into the recording (or
+      // they genuinely never spoke - the human decides which).
+      const enrolled = new Set((await listVoiceprints(signal).catch(() => [] as { name: string; count: number }[])).map((v) => v.name));
+      const owner = process.env.VIDEO_REVIEW_OWNER ?? "Erfi";
+      if (enrolled.has(owner) && bundle.duration >= 600) {
+        const ownerSec = per.get(owner) ?? 0;
+        if (ownerSec < 60) {
+          lines.push("");
+          lines.push(`WARNING: ${owner} speaks ${Math.round(ownerSec)}s in a ${hhmmss(bundle.duration)} recording - check mic routing (or genuinely silent).`);
+        }
+      }
+      // Format heuristic: untagged calls don't accumulate longitudinal
+      // baselines, so nudge towards the most likely tag.
+      if (!bundle.params?.format) {
+        const guess = suggestFormat(per, activeSec);
+        if (guess) lines.push(`format: untagged - heuristic suggests "${guess}" (tag via video_metrics format=${guess} to build a baseline)`);
       }
     }
     return { content: [{ type: "text", text: lines.join("\n") }], details: { bundle: path, speakers: bundle.speakers, duration: bundle.duration, fromCache } };
@@ -1580,6 +1628,7 @@ const videoDoc = defineTool({
     "Pass `bundle` (from video_extract) OR `file`.",
     "Returns SECTIONS for you to synthesise the final doc - it does not write prose itself.",
     "`include_transcript` can be large; it is timestamp+speaker prefixed. Use include_frames when frames were extracted.",
+    "Pass `output_path` to write the markdown straight to disk and get back only stats - the default for long calls so the transcript never enters context.",
     "After this, YOU write the meeting-notes / review / summary in the user's voice.",
   ],
   label: "Video Doc",
@@ -1594,6 +1643,7 @@ const videoDoc = defineTool({
     speaker: Type.Optional(Type.String({ description: "Filter transcript to these speakers (comma-separated, e.g. 'Erfi,Max')." })),
     start: Type.Optional(Type.Number({ description: "Only include transcript segments ending after this time (seconds)." })),
     end: Type.Optional(Type.Number({ description: "Only include transcript segments starting before this time (seconds)." })),
+    output_path: Type.Optional(Type.String({ description: "Write the assembled markdown to this file instead of returning it; returns only stats (path, bytes, section sizes). Parent dirs are created." })),
   }),
   async execute(_id, params, signal, onUpdate) {
     const emit = (m: string) => onUpdate?.({ content: [{ type: "text", text: m }] });
@@ -1654,7 +1704,20 @@ const videoDoc = defineTool({
       md.push("");
     }
 
-    return { content: [{ type: "text", text: md.join("\n") }], details: { file: bundle.file, duration: bundle.duration, speakers: bundle.speakers } };
+    const text = md.join("\n");
+    if (params.output_path) {
+      mkdirSync(dirname(params.output_path), { recursive: true });
+      writeFileSync(params.output_path, text);
+      const stats = [
+        `wrote ${params.output_path} (${Buffer.byteLength(text)} bytes)`,
+        `- source: ${bundle.file} (${hhmmss(bundle.duration)}), speakers: ${bundle.speakers.join(", ") || "(none)"}`,
+        wantOverlap ? "- sections: source, speaking time, overlaps" + (wantFrames ? ", visual timeline" : "") + (wantTranscript ? ", transcript" : "") : "- sections: source" + (wantTranscript ? ", transcript" : ""),
+        wantTranscript ? `- transcript segments: ${bundle.segments.length}` : "- transcript omitted",
+      ];
+      return { content: [{ type: "text", text: stats.join("\n") }], details: { file: bundle.file, duration: bundle.duration, speakers: bundle.speakers, output_path: params.output_path } };
+    }
+
+    return { content: [{ type: "text", text }], details: { file: bundle.file, duration: bundle.duration, speakers: bundle.speakers } };
   },
 });
 

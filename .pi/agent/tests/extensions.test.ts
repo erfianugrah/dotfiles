@@ -34,6 +34,7 @@ import {
 import { parseImage, versionCompare } from "../extensions/oci-tags.ts";
 import {
   resolveMediaPath,
+  suggestFormat,
   bundleCacheKey,
   mergeUtterances,
   computeOverlap,
@@ -3385,6 +3386,25 @@ describe("ascii-punctuation-guard / WRITE_BASH", () => {
 });
 
 // ── video-review ────────────────────────────────────────────────────────────
+
+describe("video-review / suggestFormat", () => {
+  const per = (entries: [string, number][]) => new Map(entries);
+  test("two identified speakers -> 1:1", () => {
+    expect(suggestFormat(per([["Erfi", 300], ["Dan", 280]]), 580)).toBe("1:1");
+  });
+  test("dominant speaker + unidentified guests -> customer", () => {
+    expect(suggestFormat(per([["Erfi", 3500], ["SPEAKER_01", 400], ["SPEAKER_02", 200]]), 4100)).toBe("customer");
+  });
+  test("3+ speakers, at least half identified -> review", () => {
+    expect(suggestFormat(per([["Erfi", 500], ["Dan", 600], ["Gerardo", 300], ["SPEAKER_00", 100]]), 1500)).toBe("review");
+  });
+  test("mostly unidentified group call -> null (no confident guess)", () => {
+    expect(suggestFormat(per([["SPEAKER_00", 400], ["SPEAKER_01", 400], ["SPEAKER_02", 400]]), 1200)).toBeNull();
+  });
+  test("empty map -> null", () => {
+    expect(suggestFormat(per([]), 0)).toBeNull();
+  });
+});
 
 describe("video-review / resolveMediaPath", () => {
   const files = [
