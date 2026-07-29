@@ -40,11 +40,12 @@ beforeAll(async () => {
 	fake = join(repo, "fake-judge.sh");
 
 	// Fake judge: emits a verdict controlled by $FAKE_VERDICT, and echoes a
-	// marker proving the diff was passed in the -p prompt (arg $2).
+	// marker proving the diff was passed via STDIN (judge.ts pipes the prompt
+	// to `pi -p` - argv is capped at 128 KiB per argument, big diffs hit E2BIG).
 	writeFileSync(
 		fake,
 		`#!/usr/bin/env bash
-prompt="$2"
+prompt="$(cat)"
 case "$prompt" in *DIFF_MARKER_XYZ*) echo "saw the diff" ;; esac
 case "$prompt" in *.png*) echo "saw a screenshot" ;; esac
 case "\${FAKE_VERDICT:-PASS}" in

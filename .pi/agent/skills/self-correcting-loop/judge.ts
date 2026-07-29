@@ -205,8 +205,12 @@ export function buildVisualPrompt(spec: string, screenshotAbsPath: string, rubri
 
 // --- impure shell (only runs as a script) -----------------------------------
 
-async function sh(cmd: string[]): Promise<{ code: number; out: string }> {
-	const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+async function sh(cmd: string[], stdin?: string): Promise<{ code: number; out: string }> {
+	const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: stdin !== undefined ? "pipe" : "ignore" });
+	if (stdin !== undefined && proc.stdin) {
+		proc.stdin.write(stdin);
+		proc.stdin.end();
+	}
 	const [stdout, stderr, code] = await Promise.all([
 		new Response(proc.stdout).text(),
 		new Response(proc.stderr).text(),
@@ -276,9 +280,11 @@ async function main(): Promise<number> {
 		prompt = buildJudgePrompt(args.spec, await collectDiff(args.base), args.rubric);
 	}
 
-	const cmd = [JUDGE_CMD, "-p", prompt, "--tools", args.tools.join(","), "-a"];
+	// Prompt goes via STDIN, not argv: a single argument is capped at
+	// MAX_ARG_STRLEN (128 KiB on Linux) and a big diff blows past it (E2BIG).
+	const cmd = [JUDGE_CMD, "-p", "--tools", args.tools.join(","), "-a"];
 	if (args.model) cmd.push("--model", args.model);
-	const { code, out } = await sh(cmd);
+	const { code, out } = await sh(cmd, prompt);
 	if (code !== 0) {
 		console.error(`judge: agent exited ${code}`);
 		// fall through - still try to parse a verdict from partial output.
