@@ -17,6 +17,17 @@
  *      it this session, block the bash call with the file head as the
  *      reason. The agent re-runs the bash after acknowledging the rules.
  *
+ * Two refinements (2026-07-07, see guard-commit-shared.ts for the incident):
+ *   - The block reason includes RERUN_FULL_NOTICE: the ENTIRE command was
+ *     blocked (no segment executed - heredocs, `git add`, tmp files), so the
+ *     agent must re-run the FULL original command verbatim, not a suffix.
+ *   - If the blocked command is ALSO a commit/PR/issue persist, this guard
+ *     absorbs the confidential-write guard's once-per-repo vet nudge
+ *     (appends its text, marks the repo nudged) - pi short-circuits
+ *     tool_call handlers on the first block, so without this the verbatim
+ *     re-run gets blocked a SECOND time by that guard, swallowing the
+ *     compound command's side effects twice.
+ *
  * Disable: `PI_NO_CD_AGENTS_RELOAD=1` in env, or comment-out the registration.
  */
 
@@ -24,6 +35,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  commitNudgeForBlockedCmd,
+  isCommitNudged,
+  markCommitNudged,
+  RERUN_FULL_NOTICE,
+} from "./guard-commit-shared";
 
 const MAX_HEAD_LINES = 80;
 const MAX_HEAD_CHARS = 4000;
@@ -140,21 +157,34 @@ export default function (pi: ExtensionAPI) {
       const head = readHead(agentsPath);
       if (!head) continue;
 
-      return {
-        block: true,
-        reason: [
-          `tool-guard[cd-agents-reload]: you cd'd into ${target}, which has its own ${agentsPath.split("/").pop()} that pi did NOT load at session start.`,
-          ``,
-          `Session started in ${startupCwd}, so the rules below are NOT in your current context. They may include canonical build/deploy commands (e.g. Makefile targets that supersede direct \`docker compose\`/\`npm\` calls), test commands, or project-specific gotchas.`,
-          ``,
-          `── ${agentsPath} ──`,
-          head,
-          `── end ──`,
-          ``,
-          `Re-run your bash if it's still correct given the rules above. If a project-canonical command exists for what you were about to do, use that instead.`,
-          `This guard fires once per target dir per session.`,
-        ].join("\n"),
-      };
+      const lines = [
+        `tool-guard[cd-agents-reload]: you cd'd into ${target}, which has its own ${agentsPath.split("/").pop()} that pi did NOT load at session start.`,
+        ``,
+        `Session started in ${startupCwd}, so the rules below are NOT in your current context. They may include canonical build/deploy commands (e.g. Makefile targets that supersede direct \`docker compose\`/\`npm\` calls), test commands, or project-specific gotchas.`,
+        ``,
+        `── ${agentsPath} ──`,
+        head,
+        `── end ──`,
+        ``,
+        RERUN_FULL_NOTICE,
+        ``,
+        `Re-run your FULL bash command if it's still correct given the rules above. If a project-canonical command exists for what you were about to do, use that instead.`,
+        `This guard fires once per target dir per session.`,
+      ];
+
+      // Commit-nudge absorption: if the command we're blocking is ALSO a
+      // commit/PR/issue persist into this repo, the confidential-write
+      // guard's once-per-repo vet nudge would otherwise block the verbatim
+      // re-run a SECOND time (pi short-circuits tool_call handlers on the
+      // first block, so that guard never saw this call). Deliver its message
+      // here and mark the repo nudged - one block, both messages, one re-run.
+      const nudge = commitNudgeForBlockedCmd(cmd, target);
+      if (nudge && !isCommitNudged(nudge.root)) {
+        markCommitNudged(nudge.root);
+        lines.push(``, nudge.text);
+      }
+
+      return { block: true, reason: lines.join("\n") };
     }
     return undefined;
   });

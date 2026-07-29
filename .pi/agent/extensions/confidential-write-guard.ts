@@ -61,6 +61,21 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { extractCdTargets, expandTilde } from "./cd-agents-reload";
+import {
+  COMMIT_NUDGE,
+  findRepoRoot,
+  isCommitNudged,
+  isCommitPersist,
+  markCommitNudged,
+  repoHasRemote,
+  RERUN_FULL_NOTICE,
+} from "./guard-commit-shared";
+
+// Re-exported so existing imports (tests) keep working; the canonical home is
+// guard-commit-shared.ts, where cd-agents-reload can absorb the nudge when IT
+// blocks the same compound commit command first (pi short-circuits tool_call
+// handlers on the first block).
+export { isCommitPersist };
 
 // ── store ───────────────────────────────────────────────────────────────────
 
@@ -75,23 +90,6 @@ function emptyStore(): Store {
 
 function globalStorePath(): string {
   return path.join(getAgentDir(), "confidential-terms.local.json");
-}
-
-/** Walk up from a path for a .git entry; return repo root or null. */
-function findRepoRoot(start: string): string | null {
-  let dir = start;
-  try {
-    if (fs.statSync(start).isFile()) dir = path.dirname(start);
-  } catch {
-    dir = path.dirname(start);
-  }
-  for (let i = 0; i < 64; i++) {
-    if (fs.existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
 }
 
 function repoStorePath(forPath: string): string | null {
@@ -194,34 +192,17 @@ export function scanForBlocked(text: string, blocked: string[]): Hit | null {
 
 // prose-file writes and commit/PR persists nudge independently: a commit is the
 // last gate before push, so it earns its own reminder even after a prose nudge.
+// The COMMIT tracker lives in guard-commit-shared.ts (isCommitNudged /
+// markCommitNudged) so cd-agents-reload can mark it delivered when IT blocks
+// the same compound commit command first - avoids a double-block cascade that
+// swallows the command's side effects (heredoc message file, git add) twice.
 const nudgedRepos = new Set<string>();
-const commitNudgedRepos = new Set<string>();
 
 const PROSE_EXT = new Set([".md", ".mdx", ".txt", ".rst", ".adoc", ".org", ".markdown"]);
 
 function isProsePath(p: string): boolean {
   return PROSE_EXT.has(path.extname(p).toLowerCase()) || /(^|\/)docs?\//i.test(p);
 }
-
-function repoHasRemote(repoRoot: string): boolean {
-  try {
-    return /\n\[remote "/.test("\n" + fs.readFileSync(path.join(repoRoot, ".git", "config"), "utf8"));
-  } catch {
-    return true; // can't tell → assume yes (fail safe toward nudging)
-  }
-}
-
-const COMMIT_NUDGE = (repoRoot: string, remote: boolean): string =>
-  `tool-guard[confidential-write]: first commit / PR / issue write into ${repoRoot}` +
-  `${remote ? " (has a remote - may be public/shared)" : ""}.\n` +
-  `A commit message + staged diff are about to be persisted. Before this lands, vet BOTH the ` +
-  `message and the staged changes for confidential third-party identifiers - not just named ` +
-  `customers/partners/individuals and internal codenames, but internal-vs-public framing itself ` +
-  `("internal <X>", "the public counterpart to our internal ...", internal label/naming schemes, ` +
-  `unreleased roadmap). You are the classifier - there is no denylist. For ANY term or phrasing you ` +
-  `are not certain is safe to publish, rephrase or use a placeholder, and record confirmed-confidential ` +
-  `terms with the \`confidential_terms\` tool so they're enforced. If you have already vetted this ` +
-  `content, retry - this fires once per repo. Kill switch: PI_CONFIDENTIAL_GUARD_OFF=1.`;
 
 const NUDGE = (repoRoot: string, remote: boolean): string =>
   `tool-guard[confidential-write]: first prose/commit write into ${repoRoot}` +
@@ -309,27 +290,14 @@ const confidentialTermsTool = defineTool({
   },
 });
 
-// bash commands that PERSIST PROSE TO A (possibly shared/public) REMOTE - commit
-// messages, tags, PR/issue/release bodies. This is BOTH the vet-nudge trigger
-// AND the enforcement trigger: the guard scans the *payload* of these commands
-// (message text + staged diff + message-file contents), never arbitrary bash.
-//
-// Deliberately narrow. The old WRITE_BASH also matched `>>?`, `\btee\b`,
-// `\bsd\b`, `\bsed -i\b`, `\bdd\b` - which meant a READ/SEARCH command that
-// merely contained a redirect or a coincidental word (`grep x 2>/dev/null`,
-// `rg term | tee log`, even the `git filter-repo` that REMOVES a term) tripped
-// the scan and got blocked because the search *pattern* was a blocked term.
-// Reading/searching is the safest possible op; it must never be blocked. Normal
-// file writes are already covered by the write/edit/apply_patch payload scan
-// above, and a `>`-redirect into a tracked prose file is caught by the pre-push
-// hook backstop - so dropping those tokens here is a net safety gain.
-const COMMIT_PERSIST =
-  /\bgit\s+commit\b|\bgit\s+(?:tag|notes)\b|\bgh\s+(?:pr|issue|release)\s+(?:create|edit|comment)\b/;
-
-/** True when a bash command persists a commit message / PR / issue body. */
-export function isCommitPersist(cmd: string): boolean {
-  return COMMIT_PERSIST.test(cmd);
-}
+// The COMMIT_PERSIST trigger regex lives in guard-commit-shared.ts (imported
+// above as isCommitPersist) - cd-agents-reload needs the same predicate to
+// know when a command it's blocking is also a commit-persist whose vet nudge
+// it should absorb. It is BOTH the vet-nudge trigger AND the enforcement
+// trigger here: the guard scans the *payload* of these commands (message text
+// + staged diff + message-file contents), never arbitrary bash, so a
+// READ/SEARCH command containing a blocked term as a search pattern can't
+// false-positive.
 
 // Message-file flags whose *contents* are part of the persisted payload:
 //   git commit -F <file> / --file=<file>
@@ -483,14 +451,21 @@ export default function (pi: ExtensionAPI) {
       if (blocked.length > 0) {
         for (const blob of collectCommitPayload(cmd, bashCwd)) {
           const hit = scanForBlocked(blob, blocked);
-          if (hit) return { block: true, reason: blockMsg(hit.masked, "bash (commit/PR payload)") };
+          // The block swallowed the WHOLE command (heredoc message file,
+          // git add) - say so, or the agent retries only the commit suffix.
+          if (hit) {
+            return {
+              block: true,
+              reason: blockMsg(hit.masked, "bash (commit/PR payload)") + "\n\n" + RERUN_FULL_NOTICE,
+            };
+          }
         }
       }
 
       // once-per-repo commit/PR/issue vet nudge (independent of the prose nudge)
       const root = findRepoRoot(bashCwd);
-      if (root && !commitNudgedRepos.has(root)) {
-        commitNudgedRepos.add(root);
+      if (root && !isCommitNudged(root)) {
+        markCommitNudged(root);
         return { block: true, reason: COMMIT_NUDGE(root, repoHasRemote(root)) };
       }
       return undefined;

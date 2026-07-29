@@ -8,6 +8,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   splitSegments,
@@ -98,6 +101,15 @@ import {
   extractMessageFilePaths,
   collectCommitPayload,
 } from "../extensions/confidential-write-guard.ts";
+import {
+  COMMIT_NUDGE,
+  RERUN_FULL_NOTICE,
+  commitNudgeForBlockedCmd,
+  findRepoRoot,
+  isCommitNudged,
+  markCommitNudged,
+  _resetCommitNudges,
+} from "../extensions/guard-commit-shared.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 
@@ -3808,5 +3820,76 @@ describe("skill-guard.message builders", () => {
     expect(r).toContain("skill-guard[compose_infra]");
     expect(r).toContain("infrastructure-stack");
     expect(r).toContain("once per session");
+  });
+});
+
+// ── guard-commit-shared (the double-block cascade fix, 2026-07-07) ──────────
+//
+// Incident: cd-agents-reload blocked a compound `heredoc && git add && git
+// commit -F` command; the agent retried only the commit suffix (message file
+// never written), then re-ran the compound and got blocked AGAIN by the
+// confidential guard's still-pending once-per-repo nudge. The shared module
+// fixes both: RERUN_FULL_NOTICE tells the agent nothing executed, and
+// commitNudgeForBlockedCmd lets cd-agents-reload absorb the commit nudge.
+
+describe("guard-commit-shared.RERUN_FULL_NOTICE", () => {
+  test("states the whole command was blocked + re-run verbatim", () => {
+    expect(RERUN_FULL_NOTICE).toContain("ENTIRE bash command was blocked");
+    expect(RERUN_FULL_NOTICE).toContain("re-run the FULL original command verbatim");
+    expect(RERUN_FULL_NOTICE).toContain("did NOT happen");
+  });
+  test("COMMIT_NUDGE ends with the notice", () => {
+    expect(COMMIT_NUDGE("/some/repo", false)).toContain(RERUN_FULL_NOTICE);
+    expect(COMMIT_NUDGE("/some/repo", true)).toContain("has a remote");
+  });
+});
+
+describe("guard-commit-shared nudge registry", () => {
+  test("mark -> isCommitNudged; reset clears", () => {
+    _resetCommitNudges();
+    expect(isCommitNudged("/r")).toBe(false);
+    markCommitNudged("/r");
+    expect(isCommitNudged("/r")).toBe(true);
+    expect(isCommitNudged("/other")).toBe(false);
+    _resetCommitNudges();
+    expect(isCommitNudged("/r")).toBe(false);
+  });
+});
+
+describe("guard-commit-shared.findRepoRoot + commitNudgeForBlockedCmd", () => {
+  // Real temp dirs: findRepoRoot treats a nonexistent start path as a FILE
+  // (strips the last component), so fake paths skew the walk. A real
+  // .git dir on disk exercises the production path.
+  const base = mkdtempSync(join(tmpdir(), "grs-"));
+  const repo = join(base, "repo");
+  mkdirSync(join(repo, ".git"), { recursive: true });
+  mkdirSync(join(repo, "sub", "dir"), { recursive: true });
+
+  test("findRepoRoot finds .git walking up; null when none", () => {
+    expect(findRepoRoot(join(repo, "sub", "dir"))).toBe(repo);
+    expect(findRepoRoot(repo)).toBe(repo);
+    expect(findRepoRoot(base)).toBeNull();
+  });
+
+  test("commitNudgeForBlockedCmd: null for non-commit commands", () => {
+    expect(commitNudgeForBlockedCmd("cd ~/repo && ls -la", repo)).toBeNull();
+    expect(commitNudgeForBlockedCmd("git status", repo)).toBeNull();
+  });
+  test("commitNudgeForBlockedCmd: null when the target is not inside a repo", () => {
+    expect(commitNudgeForBlockedCmd("git commit -m x", base)).toBeNull();
+  });
+  test("commitNudgeForBlockedCmd: root + full nudge text for a commit command in a repo", () => {
+    const cmd =
+      "cat > /tmp/msg <<'X'\nfeat: x\nX\ncd ~/repo && git add a.ts && git commit -F /tmp/msg";
+    const n = commitNudgeForBlockedCmd(cmd, repo);
+    expect(n).not.toBeNull();
+    expect(n!.root).toBe(repo);
+    expect(n!.text).toContain("vet BOTH");
+    expect(n!.text).toContain(repo);
+    expect(n!.text).toContain(RERUN_FULL_NOTICE);
+  });
+  test("commitNudgeForBlockedCmd: matches gh PR/issue/release persists too", () => {
+    expect(commitNudgeForBlockedCmd("gh pr create -t x -b y", repo)).not.toBeNull();
+    expect(commitNudgeForBlockedCmd("gh issue comment 5 -b z", repo)).not.toBeNull();
   });
 });
