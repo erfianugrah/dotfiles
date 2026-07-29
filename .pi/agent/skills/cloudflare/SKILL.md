@@ -626,6 +626,7 @@ curl -sI "https://<host>/path" | rg -i 'cf-|server-timing'
 6. **D1 is SQLite** — single-writer. Bursty writes need queuing.
 7. **KV eventually-consistent** to ~60s. Don't read-after-write inside the same request if correctness matters.
 8. **Compatibility date drives Workers runtime version.** Bumping it can break old workers. Keep `compatibility_flags` in mind for incremental Node compat.
+9. **Worker subrequests to a same-zone hostname resolve against the CF zone's DNS records, never public DNS.** If the zone is active on Cloudflare (e.g. kept for a Workers custom domain while authoritative NS lives elsewhere, like the erfi.io -> Knot delegation), a `fetch()` to any hostname on that zone needs a DNS record *in the CF zone* - DNS-only (grey) is fine and preferred for direct-to-origin. No record => error 1016 => HTTP 530 "Origin DNS error" surfaced to the Worker. The zone's authoritative DNS serving the name correctly is irrelevant; CF never consults it for subrequests. (Distinct from the inbound-routes rule, which needs a *proxied* placeholder like `AAAA 100::`.) Bit minio-cache 2026-07-29: `cdn.erfi.io` had only its auto HTTPS/ECH record in the CF zone after the Knot cutover - adding a grey A record fixed it. Docs: `/docs/cloudflare/error-1016.md`.
 
 ## Docs
 
