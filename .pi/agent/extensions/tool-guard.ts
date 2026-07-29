@@ -271,7 +271,7 @@ const BASH_RULES: BlockRule[] = [
     // but explicit '-c commit.gpgsign=false' or '--no-gpg-sign' is a hard error.
     pattern: /^\s*git\s+(-c\s+commit\.gpg[sS]ign=false\b|.*--no-gpg-sign\b)/,
     reason:
-      "This user REQUIRES GPG-signed commits (commit.gpgsign=true is set globally, key B9D283E8AE4E56B4). NEVER bypass signing. If gpg-agent times out, retry with `timeout 15 git commit -S` — the agent state usually recovers.",
+      "This user REQUIRES GPG-signed commits (commit.gpgsign=true is set globally, key B9D283E8AE4E56B4). NEVER bypass signing. If the commit failed with 'gpg failed to sign the data', the agent cache is cold - warm it with `zsh -ic 'gpg_unlock'` (bw-seeded, no TTY needed) and retry the SAME command.",
     segment: true,
   },
   {

@@ -218,3 +218,67 @@ decrypt_tf() {
     fi
     echo "Decrypted $count file(s)."
 }
+
+# ---------------------------------------------------------------------------
+# GPG git-signing cache (key B9D283E8AE4E56B4)
+# ---------------------------------------------------------------------------
+# gpg-agent caches the passphrase (7d sliding / 30d hard, see
+# ~/.gnupg/gpg-agent.conf). Headless shells - tmux loops, pi -p subagents -
+# have no TTY for pinentry, so a cold cache kills `git commit` with
+# "gpg failed to sign the data". gpg_unlock warms the cache WITHOUT a TTY
+# when bw serve is unlocked (item GPG_KEY_PASSPHRASE, passphrase in notes);
+# otherwise it prompts once via pinentry.
+
+_GPG_SIGNING_KEY="B9D283E8AE4E56B4"
+# Keygrip is a public identifier (like the key fingerprint), NOT key material.
+_GPG_SIGNING_KEYGRIP="17BB7DE98DD50550DE2641A694060FE9311D2BB4" # gitleaks:allow
+
+# _gpg_cache_warm - returns 0 if the agent can sign with no passphrase prompt
+_gpg_cache_warm() {
+    echo cache-probe | gpg --batch --no-tty --pinentry-mode error \
+        --clearsign -u "$_GPG_SIGNING_KEY" >/dev/null 2>&1
+}
+
+# gpg_unlock - warm the gpg-agent cache for the git signing key.
+# (1) no-op if already warm; (2) seed from Vaultwarden via bw serve
+#     (headless-safe); (3) one pinentry prompt (interactive fallback).
+gpg_unlock() {
+    emulate -L zsh
+
+    if _gpg_cache_warm; then
+        echo "[gpg] cache already warm for $_GPG_SIGNING_KEY"
+        return 0
+    fi
+
+    # Headless path: preset from Vaultwarden (bw serve must be unlocked).
+    if (( $+functions[_bw_serve_ok] )) && _bw_serve_ok; then
+        local pw
+        pw=$(_bw_api_get_note GPG_KEY_PASSPHRASE 2>/dev/null)
+        if [[ -n "$pw" ]]; then
+            print -rn -- "$pw" | gpg-preset-passphrase --preset "$_GPG_SIGNING_KEYGRIP" 2>/dev/null
+            unset pw
+            if _gpg_cache_warm; then
+                echo "[gpg] cache seeded from Vaultwarden (GPG_KEY_PASSPHRASE)"
+                return 0
+            fi
+            print -u2 "[gpg] bw preset failed - wrong passphrase in GPG_KEY_PASSPHRASE?"
+        fi
+    fi
+
+    # Interactive fallback: force exactly one pinentry prompt.
+    if [[ -t 0 ]]; then
+        export GPG_TTY="${GPG_TTY:-$(tty)}"
+        echo "[gpg] prompting once via pinentry..."
+        if echo cache-warm | gpg --clearsign -u "$_GPG_SIGNING_KEY" >/dev/null && _gpg_cache_warm; then
+            echo "[gpg] cache warm until TTL expiry (7d idle / 30d max)"
+            return 0
+        fi
+        print -u2 "[gpg] signing failed after prompt"
+        return 1
+    fi
+
+    print -u2 "[gpg] no TTY and no bw seed available - cannot warm the cache here."
+    print -u2 "      Run 'gpg_unlock' in an interactive shell, or store the passphrase as"
+    print -u2 "      the notes of a Vaultwarden item named GPG_KEY_PASSPHRASE."
+    return 1
+}

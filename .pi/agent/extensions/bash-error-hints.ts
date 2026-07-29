@@ -63,6 +63,14 @@ export const HINTS: Hint[] = [
       "Probe with `git check-ignore -v $1; git ls-files | rg -F $1; pwd`.",
   },
   {
+    // `error: gpg failed to sign the data` / `signing failed: No pinentry`
+    pattern: /gpg failed to sign the data|signing failed: No pinentry/,
+    hint:
+      "GPG signing is REQUIRED here - NEVER bypass with `--no-gpg-sign` or `-c commit.gpgsign=false`. " +
+      "The gpg-agent cache is cold and this shell has no TTY for pinentry. " +
+      "Warm it with `zsh -ic 'gpg_unlock'` (seeds from Vaultwarden via bw serve, no TTY needed), then retry the SAME command unchanged.",
+  },
+  {
     // `fatal: refusing to lose untracked file at 'X'`
     pattern: /fatal:\s*refusing to lose untracked file at '([^']+)'/,
     hint:

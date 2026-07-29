@@ -60,6 +60,7 @@ Use a HEREDOC if the body has nested formatting. After commit, run `git status` 
 
 ## Failure modes
 
+- If commit fails with `gpg failed to sign the data`: the gpg-agent cache is cold (no TTY for pinentry in this shell). NEVER bypass with `--no-gpg-sign` or `-c commit.gpgsign=false`. Warm the cache with `zsh -ic 'gpg_unlock'` (seeds from Vaultwarden via bw serve; prompts once only if a TTY exists), then retry the SAME commit unchanged.
 - If pre-commit hook **fails** or **rejects** the commit: fix the actual issue and create a NEW commit. NEVER `--amend` a failed commit.
 - If pre-commit hook **auto-modifies** files (formatter, linter): verify with `git log -1` that HEAD is your commit, then `git add -A && git commit --amend --no-edit` is OK.
 - If hook stages unrelated files: stop, show the user what got added, ask before proceeding.
