@@ -263,7 +263,8 @@ gpg_unlock() {
                 echo "[gpg] cache seeded from Vaultwarden (GPG_KEY_PASSPHRASE)"
                 return 0
             fi
-            print -u2 "[gpg] bw preset failed - wrong passphrase in GPG_KEY_PASSPHRASE?"
+            print -u2 "[gpg] bw preset failed - wrong passphrase in GPG_KEY_PASSPHRASE,"
+            print -u2 "      or a stale bw serve session (run bw_serve_start and retry)."
         fi
     fi
 

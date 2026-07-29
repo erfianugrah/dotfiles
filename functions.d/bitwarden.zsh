@@ -49,9 +49,39 @@ _BW_EXTRA_UNSET=(
     SOPS_AGE_KEYS
 )
 
-# Check if bw serve is reachable
+# Check if bw serve is reachable AND reports an unlocked vault.
+# Reachability alone is not enough: a daemon with an expired session still
+# answers /status and /sync (with success!) while serving stale data.
 _bw_serve_ok() {
-    curl -sf "${BW_SERVE_ADDR}/status" >/dev/null 2>&1
+    local response
+    response=$(curl -sf "${BW_SERVE_ADDR}/status" 2>/dev/null) || return 1
+    [[ $(print -r -- "$response" | jq -r '.data.template.status // empty' 2>/dev/null) == "unlocked" ]]
+}
+
+# Session older than this is suspect: the serve daemon's access token
+# expires silently (observed 2026-07-29: /status "unlocked", /sync
+# "success", data days stale). Restart with bw_serve_start when this fires.
+_BW_SESSION_MAX_AGE="${_BW_SESSION_MAX_AGE:-43200}"  # 12h
+
+# _bw_session_age - seconds since bw_serve_start wrote the session file, -1 if unknown
+_bw_session_age() {
+    local f="${_BW_SESSION_DIR}/bw-session.env" started
+    [[ -f $f ]] || { echo -1; return; }
+    started=$(zsh -c 'source "$1" >/dev/null 2>&1; echo $BW_SESSION_STARTED' _ "$f" 2>/dev/null)
+    [[ "$started" == <-> ]] || { echo -1; return; }
+    echo $(( $(date +%s) - started ))
+}
+
+# _bw_warn_if_stale - loud nudge on stderr when the serve session is suspect.
+# Called by the accessors; never blocks, just converts silent staleness into
+# a visible, actionable message.
+_bw_warn_if_stale() {
+    local age=$(_bw_session_age)
+    if (( age < 0 )); then
+        print -u2 "[bw] no session timestamp - if data looks stale, run bw_serve_start."
+    elif (( age > _BW_SESSION_MAX_AGE )); then
+        print -u2 "[bw] session is $(( age / 3600 ))h old - the serve daemon can silently go stale. Run bw_serve_start."
+    fi
 }
 
 # Fetch a single item's .notes field from bw serve by exact name
@@ -63,6 +93,7 @@ _bw_api_get_note() {
         print -u2 "bw serve not reachable on ${BW_SERVE_ADDR}. Run bw_serve_start first."
         return 1
     }
+    _bw_warn_if_stale
     print -r -- "$response" | jq -r \
         --arg name "$item_name" \
         '.data.data[] | select(.name == $name) | .notes // empty' | head -1
@@ -128,6 +159,7 @@ bw_serve_start() {
     local session_file="${_BW_SESSION_DIR}/bw-session.env"
     install -m 600 /dev/null "$session_file"
     print -r -- "BW_SESSION=$session" > "$session_file"
+    print -r -- "BW_SESSION_STARTED=$(date +%s)" >> "$session_file"
     echo "[bw-serve] Session written to $session_file"
 
     # (Re)start bw serve via platform service manager
@@ -177,7 +209,11 @@ bw_serve_stop() {
 
 bw_serve_status() {
     if _bw_serve_ok; then
-        echo "[bw-serve] Running on ${BW_SERVE_ADDR}"
+        echo "[bw-serve] Running on ${BW_SERVE_ADDR} (unlocked)"
+        local age=$(_bw_session_age)
+        if (( age >= 0 )); then
+            echo "[bw-serve] session age: $(( age / 3600 ))h (warn at $(( _BW_SESSION_MAX_AGE / 3600 ))h)"
+        fi
         if [[ "$_SYS_OS" == "macos" ]]; then
             pgrep -fl "bw serve" 2>/dev/null
         else

@@ -310,6 +310,21 @@ gpg --import <your-key>
 export GPG_TTY=$(tty)   # already in .zshrc
 ```
 
+`gpg-agent.conf` (tracked at `.gnupg/gpg-agent.conf`, stow-linked) caches the
+passphrase for 7 days idle / 30 days max, so headless shells (tmux loops,
+`pi -p` subagents) can sign without a TTY for pinentry. If a commit dies
+with `gpg failed to sign the data`, the cache is cold - NEVER bypass with
+`--no-gpg-sign`; warm it instead:
+
+```sh
+gpg_unlock   # seeds from Vaultwarden item GPG_KEY_PASSPHRASE via bw serve
+             # (no TTY needed), or prompts once via pinentry interactively
+```
+
+The bw item holds the passphrase in its `notes` field. Signing must never be
+bypassed; pi's tool-guard hard-blocks `--no-gpg-sign` /
+`-c commit.gpgsign=false`.
+
 ### bw-serve (Bitwarden CLI REST API)
 
 Secrets are served via `bw serve` on `127.0.0.1:8087`. On Linux, runs as a
@@ -339,6 +354,13 @@ unset_bw_vars         # wipe all exported secrets from current shell
 
 `load_bw` auto-starts the service if not running. The session survives
 terminal/tmux restarts. After a reboot, run `bw_serve_start` again.
+
+**Staleness gotcha:** a long-running serve daemon's access token can expire
+silently - `/status` still says "unlocked" and `/sync` still returns
+success, but the data goes stale (observed 2026-07-29). The accessors warn
+on stderr once the session is >12h old, and `bw_serve_status` shows the
+session age. If served secrets ever look stale, the fix is `bw_serve_start`
+(fresh unlock + restart), not `bw_serve_sync`.
 
 ## Configurations
 

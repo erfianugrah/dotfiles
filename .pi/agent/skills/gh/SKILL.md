@@ -202,7 +202,7 @@ Notable extensions worth knowing:
 
 ## Foot-guns (real ones)
 
-- **GPG signing**: you require `-S`. `gh pr merge --squash` honours `commit.gpgsign=true` from global config. If gpg-agent times out during merge: cancel, unlock manually, retry — same recipe as direct git.
+- **GPG signing**: you require `-S`. `gh pr merge --squash` honours `commit.gpgsign=true` from global config. If it fails with `gpg failed to sign the data` (cold agent cache, no TTY): warm the cache with `zsh -ic 'gpg_unlock'` (seeds from Vaultwarden, no TTY needed) and retry - NEVER bypass with `--no-gpg-sign`.
 - **Scope drift**: `gh auth status` will look green but a specific operation 403s. Look at the operation's required scope (visible in API error) and `gh auth refresh -s <scope>`.
 - **Default branch confusion**: `gh pr create` without `--base` assumes `main`. If you renamed to `master` / `develop`, pass explicitly.
 - **Cache delete needs --repo when not in a checkout**: `gh cache delete --all` alone fails confusingly. Always pair with `--repo owner/name` when running outside the repo dir.
