@@ -69,7 +69,7 @@ import {
   markCommitNudged,
   repoHasRemote,
   RERUN_FULL_NOTICE,
-} from "./guard-commit-shared";
+} from "./lib/guard-commit-shared";
 
 // Re-exported so existing imports (tests) keep working; the canonical home is
 // guard-commit-shared.ts, where cd-agents-reload can absorb the nudge when IT

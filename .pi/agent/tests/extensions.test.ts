@@ -109,7 +109,7 @@ import {
   isCommitNudged,
   markCommitNudged,
   _resetCommitNudges,
-} from "../extensions/guard-commit-shared.ts";
+} from "../extensions/lib/guard-commit-shared.ts";
 
 // ── tool-guard: bash segment splitting ────────────────────────────────────
 

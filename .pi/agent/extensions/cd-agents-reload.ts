@@ -40,7 +40,7 @@ import {
   isCommitNudged,
   markCommitNudged,
   RERUN_FULL_NOTICE,
-} from "./guard-commit-shared";
+} from "./lib/guard-commit-shared";
 
 const MAX_HEAD_LINES = 80;
 const MAX_HEAD_CHARS = 4000;

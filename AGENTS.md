@@ -133,6 +133,15 @@ installed Cloudflare skill set a whole-dir link would clobber):
 
 - Source: `.pi/agent/extensions/*.ts` — one file per extension, auto-loaded
   by pi at startup. `.disabled` suffix opts a file out without deleting it.
+- **Shared helper modules** (imported by 2+ extensions, not extensions
+  themselves) live in `.pi/agent/extensions/lib/`. Pi auto-loads top-level
+  `*.ts` and `*/index.ts` only (docs/extensions.md), so a subdir without an
+  `index.ts` is ignored by the loader but importable. NEVER put a helper as a
+  loose top-level `.ts`: pi demands a default factory from every top-level
+  file and a bare helper breaks ALL extension loading at startup
+  ("does not export a valid factory function"). The pi-package manifest globs
+  also exclude `lib/`, which is correct - git-package installs clone the
+  whole repo, so the helper is still on disk for importers.
 - Live at: `~/.pi/agent/extensions/` — each file individually symlinked.
 - **Adding a new extension:**
   1. Write `.pi/agent/extensions/<name>.ts` in the repo.
