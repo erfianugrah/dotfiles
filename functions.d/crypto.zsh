@@ -255,7 +255,9 @@ gpg_unlock() {
         local pw
         pw=$(_bw_api_get_note GPG_KEY_PASSPHRASE 2>/dev/null)
         if [[ -n "$pw" ]]; then
-            print -rn -- "$pw" | gpg-preset-passphrase --preset "$_GPG_SIGNING_KEYGRIP" 2>/dev/null
+            # Arch ships the helper off-PATH at /usr/lib/gnupg/.
+            local preset="${commands[gpg-preset-passphrase]:-/usr/lib/gnupg/gpg-preset-passphrase}"
+            print -rn -- "$pw" | "$preset" --preset "$_GPG_SIGNING_KEYGRIP" 2>/dev/null
             unset pw
             if _gpg_cache_warm; then
                 echo "[gpg] cache seeded from Vaultwarden (GPG_KEY_PASSPHRASE)"
