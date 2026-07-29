@@ -58,6 +58,24 @@ curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 - Errors: RFC 9457 Problem Details, content-type `application/problem+json`. 500s include `request_id`. Hand-written client extractor at `web/src/lib/api/errors.ts`.
 - Hard limits: Huma 1 MB request body cap. Compose YAML 512 KB. .env 256 KB.
 
+## Two instances - servarr AND the MS-01 edge router
+
+There are TWO independent composer instances with SEPARATE user/key DBs:
+
+- **servarr** (Unraid): `https://composer.servarr.erfi.io`, key in `COMPOSER_API_KEY` (shell-init exported). Most stacks live here.
+- **edge** (MS-01 NixOS router, ssh alias `nixos`): API at `localhost:8080` on the router (also public via `composer.edge.erfi.io` through edge caddy). Stacks there: `knotea`, `caddy`, `edge-services`, `vaultwarden`, `atuin`, `joplin`, `docs-ssh`. The servarr key returns **401** here.
+
+**Edge auth**: the edge API key is exported by the user's shell init as `COMPOSER_EDGE_API_KEY` (same pattern as `COMPOSER_API_KEY`) - pi normally inherits it at launch, so check `env | grep COMPOSER` FIRST. Fallback: `~/.composer-edge-api-key` on the dev box (mode 600; may be stale after a rotation). Usage over ssh:
+
+```bash
+KEY="${COMPOSER_EDGE_API_KEY:-$(cat ~/.composer-edge-api-key)}"
+ssh nixos "curl -s -H \"X-API-Key: $KEY\" localhost:8080/api/v1/stacks" | jq -r '.stacks[].name'
+# deploy the knotea stack (edge builds from the monorepo checkout):
+ssh nixos "curl -s -X POST -H \"X-API-Key: $KEY\" 'localhost:8080/api/v1/stacks/knotea/up?async=true'"
+```
+
+If the key 401s, it was rotated - ASK the user for the current key; do NOT improvise manual git surgery as a first resort. Known-good manual fallback when no key is available (used for the v1.1.5/v1.1.6 edge deploys before the key was at hand): generate a throwaway ed25519 keypair inside the stack checkout, `gh repo deploy-key add` it read-only, `git -c core.sshCommand="ssh -i <key> -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" pull --ff-only`, `docker compose up -d --build` from the checkout, then delete the GH deploy key + `shred -u` the keypair. Why this is needed at all: composerd's startup hook **AES-encrypts every key under its ssh dir at rest** (`/var/lib/composer/ssh/id_github*`), so interactive git/ssh with those keys fails with "invalid format" - only composerd can decrypt and use them. The API is the intended path.
+
 ## Auth quick-start (agent driving the API)
 
 The production instance is `composer.servarr.erfi.io`. **`COMPOSER_API_KEY` is normally already exported in the user's shell** (sourced from Vaultwarden by the user's zsh init). Check `env | grep COMPOSER` first — only fall back to `bw get` if the env is empty.
