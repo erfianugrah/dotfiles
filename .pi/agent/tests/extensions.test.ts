@@ -2817,6 +2817,18 @@ describe("bash-error-hints.matchHints — existing patterns still wired", () => 
     expect(matchHints(out).some((h) => /rotate/i.test(h))).toBe(true);
   });
 
+  test("gpg signing failure fires the gpg_unlock hint (both error forms)", () => {
+    const forms = [
+      "error: gpg failed to sign the data\nfatal: failed to write commit object",
+      "gpg: signing failed: No pinentry\nerror: gpg failed to sign the data",
+    ];
+    for (const out of forms) {
+      const hits = matchHints(out);
+      expect(hits.some((h) => h.includes("gpg_unlock"))).toBe(true);
+      expect(hits.some((h) => h.includes("NEVER bypass"))).toBe(true);
+    }
+  });
+
   test("clean output → no hits", () => {
     expect(matchHints("HEAD is now at abcd123 commit message")).toEqual([]);
   });
