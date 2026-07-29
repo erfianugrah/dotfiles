@@ -86,6 +86,7 @@ never touching `analysis.json` (precedence `--overlay` > `SBPERF_OVERLAY` >
 | Just the data, no render | `analyze --ref <ref>` -> `analysis.json` |
 | Re-render HTML from existing `analysis.json` | `report <dir>` |
 | Did a migration/index/tuning change help? | `diff <oldDir> <newDir>` or `diff --ref <ref>` (last 2 store snapshots) |
+| Prove it under concurrency (benchmark) | `bench --db-url <c> -f q.sql --name before` -> change one GUC -> same run `--name after` -> `bench --compare <idA> <idB>` (perf delta + pg_settings diff). Guardrails: client-saturation check, warmup + N runs, exact p50/p95/p99. Guide: `~/sbperf/docs/pgbench.md` |
 | Gate CI on findings | `check <dir> --fail-on high\|med\|low` (+ `--category`, `--new-since <baselineDir>`); exits 1 on breach |
 | Optional plain-language one-pager | `summary <dir>` (standalone; NOT emitted by `full`/`report`/`pdf`) |
 | Merge external CSV/JSON trend series | `import-trends <dir> <file...>` |
@@ -133,6 +134,8 @@ sbperf snapshot --ref <ref> [--store <db>]   collect + append to the history sto
 sbperf diff     <oldDir> <newDir>            findings delta + per-query (queryid) regressions
 sbperf diff     --ref <ref> [--store <db>]   same, over the last 2 history-store snapshots
 sbperf check    <dir> --fail-on high|med|low CI gate; exit 1 on breach (+ --category, --new-since <dir>)
+sbperf bench    --db-url <c> [-f x.sql|-b tpcb-like]  pgbench with methodology guardrails -> run history
+sbperf bench    --list / --show <id> / --compare <a> <b>  read stored runs (--compare = perf + GUC diff)
 sbperf import-trends <dir> <file...>         merge external CSV/JSON series into analysis.trends
 sbperf export-prometheus <dir> [--ref <ref>] history store -> OpenMetrics for promtool backfill
 sbperf scrape-init --ref <ref>               write the (alternate) Prometheus+Grafana stack
