@@ -387,3 +387,95 @@ unset_bw_vars() {
     clear_bw_cache
     echo "All Bitwarden-loaded environment variables have been unset."
 }
+
+# ---------------------------------------------------------------------------
+# bw_set - write path companion to load_bw
+#
+# Updating a secret used to be: edit the item in the web vault, hope the
+# serve daemon notices (it silently lies about being synced), then re-export
+# by hand in every shell. bw_set collapses that into one command:
+#   1. rewrite the vault item's notes field via the bw CLI
+#   2. POST /sync on the live serve daemon
+#   3. VERIFY the daemon's read-back (never trust the sync's success flag -
+#      a stale daemon answers /sync with success while serving old data)
+#   4. re-export the env var in the current shell
+# Other shells and long-running processes (pi) still hold the old value -
+# that is fundamental to env vars; run load_bw there or restart them.
+#
+# Usage: bw_set <bw_item_or_env_name> [new_value]
+#   Name resolves against _BW_SECRETS / _BW_WRANGLER_SECRETS (either side).
+#   Omit the value to be prompted (hidden, stays out of shell history).
+# ---------------------------------------------------------------------------
+bw_set() {
+    emulate -L zsh
+    setopt typeset_silent
+    local name=$1 value=$2
+
+    if [[ -z $name ]]; then
+        print -u2 "usage: bw_set <bw_item_or_env_name> [new_value]"
+        return 1
+    fi
+
+    # Resolve against the secret mappings (accept either side of the pair)
+    local bw_name= env_name= item
+    for item in "${_BW_SECRETS[@]}" "${_BW_WRANGLER_SECRETS[@]}"; do
+        if [[ ${item%|*} == "$name" || ${item#*|} == "$name" ]]; then
+            bw_name=${item%|*}
+            env_name=${item#*|}
+            break
+        fi
+    done
+    if [[ -z $bw_name ]]; then
+        print -u2 "[bw] '$name' is not in _BW_SECRETS / _BW_WRANGLER_SECRETS - add the mapping first."
+        return 1
+    fi
+
+    # Read the new value (hidden prompt if not given, keeps it out of history)
+    if [[ -z $value ]]; then
+        read -rs "value?New value for $bw_name: " || return 1
+        print
+    fi
+    [[ -n $value ]] || { print -u2 "[bw] empty value, aborting."; return 1 }
+
+    # CLI session (written by bw_serve_start)
+    local session_file="${_BW_SESSION_DIR}/bw-session.env"
+    if [[ ! -f $session_file ]]; then
+        print -u2 "[bw] no CLI session file - run bw_serve_start first."
+        return 1
+    fi
+    local BW_SESSION
+    source "$session_file"
+
+    # Fetch the item, rewrite its notes, push back to the server
+    local item_json id
+    if ! item_json=$(BW_SESSION="$BW_SESSION" bw get item "$bw_name" 2>/dev/null); then
+        print -u2 "[bw] 'bw get item $bw_name' failed - item missing or CLI session stale (run bw_serve_start)."
+        return 1
+    fi
+    id=$(print -r -- "$item_json" | jq -r '.id // empty')
+    [[ -n $id ]] || { print -u2 "[bw] could not parse item id."; return 1 }
+
+    if ! print -r -- "$item_json" | jq -c --arg v "$value" '.notes = $v' | bw encode | BW_SESSION="$BW_SESSION" bw edit item "$id" >/dev/null 2>&1; then
+        print -u2 "[bw] 'bw edit item $id' failed."
+        return 1
+    fi
+    print "[bw] vault item '$bw_name' updated."
+
+    # Refresh the serve daemon's in-memory vault, then VERIFY read-back.
+    # The 2026-07-29 lesson: a stale daemon answers /sync with success while
+    # serving days-old data, so the sync's exit status proves nothing.
+    bw_serve_sync >/dev/null 2>&1
+    unset "_BW_CACHE[$bw_name]" "_BW_CACHE_TS[$bw_name]"
+    local readback
+    readback=$(_bw_api_get_note "$bw_name" 2>/dev/null)
+    if [[ $readback == "$value" ]]; then
+        print "[bw] serve daemon read-back verified."
+    else
+        print -u2 "[bw] WARNING: daemon read-back mismatch - serve session likely stale. Run bw_serve_start, then retry bw_serve_sync."
+    fi
+
+    # Re-export in this shell
+    export "$env_name=$value"
+    print "[bw] $env_name refreshed in this shell ($(_bw_mask "$value"))."
+    print "[bw] other shells + running agents keep the old value - run load_bw there / restart them."
+}
