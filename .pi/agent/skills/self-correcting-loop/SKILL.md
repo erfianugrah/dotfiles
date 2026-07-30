@@ -263,6 +263,47 @@ sensors are **specific and deterministic**. Raise sensor quality by:
   --no-banner -v" }`. Pair each with a `hint` telling the model to bump/remove
   the offending dep or move the secret to env, not to delete the scanner.
 
+### Sensors that cannot fail (vacuous sensors - the silent killer)
+
+A green loop proves nothing if a sensor passes *vacuously* - the gate reports
+success because the check could never fire, not because the repo is good. Both
+real cases below shipped in a "green" hand-written verification harness
+(2026-07-30, `~/.local/share/harness/HARNESS-NOTES.md` items 19-23):
+
+- **`grep -v` inverts wrong.** `cmd | grep -qv 'error TS'` exits 0 if ANY line
+  does not match - and any real command prints at least one non-error line, so
+  the sensor passes with errors on screen. The correct negative form is
+  `! cmd | grep -q 'error TS'` (fails when the pattern appears; add a separate
+  guard if empty output should also fail).
+- **Suppressed-stderr + `!` wrapper passes for the wrong reason.**
+  `! git -C $REPO ls-files | xargs grep -l <secret> 2>/dev/null | grep -q .`
+  looks like "secret nowhere in tracked files" - but `ls-files` emits
+  repo-relative paths while `xargs grep` resolves them against the *caller's*
+  cwd, so from any other directory every grep errors into the suppressed
+  stderr, stdout stays empty, and the `!` wrapper reports PASS. The sensor
+  cannot distinguish "absent" from "unverifiable". Fix: `cd "$REPO"` inside
+  the check, and add a substrate guard (`test -n "$(git ls-files)"`) so a
+  missing/empty substrate FAILS instead of passing.
+- **Evidence patterns weaker than their description.** A sensor labelled
+  "insert returned id 301" that greps `INSERT 0 1` proves an insert happened,
+  not the id. Match the most distinctive form of the real output (an aligned
+  psql block, a marker string you echoed), never a generic success line - and
+  never a bare value like `0` from `psql -t`, which matches half the terminal.
+- **Existential sensor described as universal.** "all step logs in the time
+  window" implemented as `ls ... | grep -q <window>` passes if ONE log matches.
+  If the claim is universal, loop over every expected item and require each.
+
+**Mutation-test every negative sensor once, by hand, before trusting it:**
+plant the trigger (commit the secret to a temp repo, inject `error TS` into
+the stream, touch the forbidden file), run the sensor, watch it FAIL, revert.
+If you cannot make it fail it is decoration, and the loop will green over the
+very thing it was meant to gate. For a whole sensor set, keep a canary
+pattern: run the set once against a known-bad fixture (a scratch checkout with
+the trigger planted) and require at least the canary to go red - that is the
+harness-level proof the gates discriminate. (Do not leave a permanently-failing
+canary in `.pi/harness.json` itself; it would keep the loop red forever. The
+canary lives in a selftest script / scratch fixture, not the real manifest.)
+
 ## Behaviour harness for web targets
 
 Build/typecheck/unit sensors do not prove a page actually renders and works.
