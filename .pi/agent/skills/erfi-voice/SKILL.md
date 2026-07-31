@@ -207,6 +207,13 @@ Erfi writes British English. Use it in every drafted surface:
 - "spoke" not "talked", British idiom over American ("reckon", not "figure"; "straight away" not "right away").
 - Technical identifiers are exempt - keep code/API names verbatim (`broadcast_changes`, `realtime.send`, `authorization`, `color` in CSS).
 
+**Scope: this rule is for reply/email/Slack/review surfaces.** Long-form docs
+authored inside a repo follow THAT repo's own style contract when one exists
+(its AGENTS.md) - e.g. the lexicanum docs corpus is American -ize
+(normalize/organize) and carries its own voice + skeleton rules; do not
+"correct" doc prose to British spellings there. When no repo contract exists,
+default to this skill.
+
 ## ASCII punctuation (hard rule)
 
 Output ASCII in anything that gets pasted/committed: `--` or `-` for dashes, straight quotes, `...` for ellipsis. A guard hard-blocks smart punctuation in written files; matching it here avoids the block-resubmit loop. (Real em-dashes are fine in throwaway chat, but default to ASCII for anything destined for Slack/email/a file.)
