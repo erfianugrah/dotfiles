@@ -1,18 +1,18 @@
 ---
 name: caddy
-description: Drive the user's custom Caddy build + WAF management stack at `~/ergo/caddy-compose/` — the host-mode reverse proxy that fronts the user's `*.<your-zone>` services on `servarr`. Covers the xcaddy plugin set (cloudflare, rfc2136, dynamicdns, l4, body-matcher, policy-engine, ddos-mitigator), the Caddyfile snippet idiom (`(waf)`, `(forward_auth)`, `(tls_config)` vs `(tls_config_rfc2136)`, `(site_log)`, `(proxy_headers)`), the TSIG/rfc2136 secret chain to Knot, the wafctl Go service + Astro/React dashboard, Authelia forward-auth integration, the `make restart` vs `make restart-caddy` SOPS footgun, and the zone-migration pattern. Use when working in `~/ergo/caddy-compose/`, adding a new site block, debugging an ACME failure, bumping a plugin version, or touching anything wafctl. Sibling to `knot-dns` (TSIG upstream), `composer` (deployment platform), `infrastructure-stack` (SOPS + compose patterns).
+description: Drive the user's custom Caddy build + WAF management stack at `~/ergo/caddy-compose/` — the host-mode EDGE reverse proxy on the MS-01 NixOS router (ssh alias `nixos`) that fronts the user's `*.<your-zone>` services; backends live on servarr and are reached over the LAN. Covers the xcaddy plugin set (cloudflare, rfc2136, dynamicdns, l4, body-matcher, policy-engine, ddos-mitigator), the Caddyfile snippet idiom (`(waf)`, `(forward_auth)`, `(tls_config)` vs `(tls_config_rfc2136)`, `(site_log)`, `(proxy_headers)`), the TSIG/rfc2136 secret chain to Knot, the wafctl Go service + Astro/React dashboard, the bearer/LAN gate idiom (Authelia retired 2026-07), the `make restart` vs `make restart-caddy` SOPS footgun, and the zone-migration pattern. Use when working in `~/ergo/caddy-compose/`, adding a new site block, debugging an ACME failure, bumping a plugin version, or touching anything wafctl. Sibling to `knot-dns` (TSIG upstream), `composer` (deployment platform), `infrastructure-stack` (SOPS + compose patterns).
 ---
 
 # caddy — custom build + WAF management stack
 
-Repo: `~/ergo/caddy-compose/`. Deployed to `servarr` under `/mnt/user/composer/stacks/caddy/`, data on cache SSD at `/mnt/cache/caddy/{site,data,config,log,waf,wafctl/...}`. Caddy itself runs `network_mode: host`; Authelia and wafctl sit on dedicated bridges.
+Repo: `~/ergo/caddy-compose/`. Deployed to the **MS-01 NixOS router** (ssh alias `nixos`) as the `edge-services` composer stack since 2026-07-30 - the servarr host-mode caddy AND the servarr composer are RETIRED (containers, `/mnt/user/composer`, `/mnt/cache/caddy`, `/mnt/user/data/authelia` all deleted). The deployed file is **`deploy/edge/Caddyfile`**; the repo-root `Caddyfile` is the legacy servarr config - never edit it for prod changes. Checkout on the router at `/var/lib/composer/stacks/edge-services`, data at `/var/lib/caddy/{data,config,log,waf}` (certs under `data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<host>/`). Caddy runs `network_mode: host`; wafctl on its own bridge. **No deploy webhook on edge-services** - after pushing, sync+up manually (`POST /api/v1/stacks/edge-services/{sync,up}`) and `docker restart caddy` on the router for Caddyfile changes: the single-file bind mount goes stale-inode on git sync, so `caddy reload` would adapt the OLD inode (restart re-resolves it).
 
 **Project-truth: `~/ergo/caddy-compose/AGENTS.md`** — read first for current versions, counts, and the full gotcha list. This skill is the pattern layer.
 
 ## What's in the repo — three things at once
 
 1. **Custom Caddy build** - Dockerfile uses `caddy:${VERSION}-builder` + `xcaddy build` (base now Caddy 2.11.4). Ten compiled-in `--with` plugins: `caddy-dns/cloudflare`, `caddy-dns/rfc2136`, `caddy-dynamicdns` (pinned by commit), `caddy-l4`, first-party `caddy-body-matcher` / `caddy-policy-engine` / `caddy-ddos-mitigator`, and the edge HTTP cache pair `caddyserver/cache-handler` + `darkweak/storages/nuts`. ALL are pinned since 2026-07-25. Two non-plugin build lines: the Souin cache core is OUR FORK (`--with github.com/darkweak/souin=github.com/erfianugrah/souin@v1.7.7-erfi.1`, two patches - see gotcha "edge HTTP cache") and `--replace google.golang.org/grpc@...@v1.82.1` (transitive-dep bump for a HIGH vuln).
-2. **Compose stack** — `caddy` (host network), `authelia` on its own bridge, `wafctl` on its own bridge. Each container `read_only` where possible, `cap_drop ALL`, run-as `1000:1000`.
+2. **Compose stack** — `caddy` (host network), `wafctl` on its own bridge. (Authelia retired 2026-07 - no IdP in the stack anymore.) Each container `read_only` where possible, `cap_drop ALL`, run-as `1000:1000`.
 3. **WAF management plane** — `wafctl/` (Go HTTP API + CLI, stdlib only) + `waf-dashboard/` (Astro + React + shadcn), bundled into the wafctl image and proxied at a dedicated subdomain. CRS rules converted from upstream `coreruleset` `.conf` to JSON at build time by `tools/crs-converter/`.
 
 ## Caddyfile patterns — the snippet idiom
@@ -26,8 +26,8 @@ All snippets are defined inline at the top of the same Caddyfile (no external fi
 | `(waf_off)` | empty placeholder — metrics/respond-only sites |
 | `(tls_config)` | ACME via `dns cloudflare {$CF_API_TOKEN}` — for zones still on Cloudflare DNS |
 | `(tls_config_rfc2136)` | ACME via TSIG nsupdate to user's Knot — for zones served by the user's Knot DNS app |
-| `(forward_auth)` | Authelia at the auth bridge IP, `uri /api/authz/forward-auth`, copies `Remote-User Remote-Groups Remote-Email Remote-Name` |
-| `(research_auth)` | Bearer-token bypass for MCP clients; falls back to forward_auth |
+| `(forward_auth)` | RETIRED with Authelia - do not use; legacy configs only |
+| `(research_auth)` | bearer-or-LAN gate: deny = NOT remote_ip in (10/8, 100.64/10, 172.16/12, 192.168/16) AND NOT `Authorization: Bearer {$RESEARCH_TOKEN}` - LAN/tailnet pass open, WAN needs the bearer |
 | `(proxy_headers)` | `trusted_proxies private_ranges` + `X-Forwarded-For {client_ip}` — used inside reverse_proxy |
 | `(error_pages)` | `handle_errors` → template at `/etc/caddy/errors/error.html` |
 | `(site_log)` | combined JSON log to `/var/log/combined-access.log`. ~25 `log_append` lines pull `policy_*`, `ddos_*`, `challenge_*` fields lazily. Single source of truth tailed by wafctl. |
@@ -38,7 +38,7 @@ Global block uses explicit handler ordering: `order log_append first` → `order
 ```caddyfile
 example.com {
     import waf
-    import forward_auth          # optional
+    import research_auth         # only for bearer-gated API surfaces
     import tls_config_rfc2136    # or tls_config for CF-DNS zones
     encode zstd gzip
     reverse_proxy <bridge-ip>:<port> {
@@ -81,7 +81,7 @@ Internal admin proxy on a high port IP-restricts to the wafctl bridge subnet and
 Verify post-restart that the plaintext actually loaded (not the ciphertext):
 
 ```bash
-ssh servarr 'docker inspect caddy --format "{{range .Config.Env}}{{println .}}{{end}}" | grep TSIG_'
+ssh nixos 'docker inspect caddy --format "{{range .Config.Env}}{{println .}}{{end}}" | grep TSIG_'
 ```
 
 Rotation order (see `knot-dns` skill for the full procedure): rotate on Knot first, then here, else any ACME renewal in the gap returns `BADSIG`.
@@ -99,16 +99,20 @@ CLI shape (top-level subcommands): `serve` (default), `version`, `health`, `conf
 
 For exact command surface + endpoint list run `wafctl --help` inside the container; spec changes per release.
 
-## Authelia integration — four patterns
+## Auth patterns (post-Authelia)
 
-Authelia runs on its own bridge with file-based secrets in `/secrets/{jwt_secret,session_secret,storage_encryption_key,smtp_password}` (NOT env vars — they'd show up in `docker inspect`). Config + users_database SOPS-encrypted.
+Authelia was retired 2026-07 (edge-SSO plan abandoned; its data dir deleted).
+No forward-auth IdP remains in the stack. Current shapes:
 
 | Pattern | Site shape |
 |---|---|
-| A — no auth | `import waf` + `reverse_proxy` |
-| B — full Authelia | `import waf` + `import forward_auth` + `reverse_proxy` |
-| C — mixed | `route { @public path /api/* /webhooks/*; reverse_proxy @public ...; forward_auth ...; reverse_proxy ... }` — first match wins, auth applies to the fallback |
-| D — research bearer | `(research_auth)` accepts `Authorization: Bearer {$RESEARCH_TOKEN}`, falls back to forward_auth |
+| A - no auth | `import waf` + `reverse_proxy` |
+| B - bearer-or-LAN | `import research_auth` + `reverse_proxy` - used for the private API surface (searxng/crawler/osint/llama.erfi.io): LAN + tailnet pass open, WAN needs `Authorization: Bearer $RESEARCH_TOKEN` |
+| C - mixed public/API | `route { @public path /api/* /webhooks/*; reverse_proxy @public ...; ... }` - first match wins |
+
+`RESEARCH_TOKEN` must be in the caddy container's `environment:` in
+deploy/edge/compose.yaml (it is), not just `.env` - else the matcher compares
+against an empty string and nothing authenticates.
 
 ## Build / release — make targets
 
@@ -124,8 +128,7 @@ Authelia runs on its own bridge with file-based secrets in `/secrets/{jwt_secret
 
 ### `make restart` vs `make restart-caddy` — the single biggest footgun
 
-- **`make restart`** — calls Composer API. Composer decrypts SOPS `.env` first. **Only safe path for changes touching `.env` or env-var passthrough.**
-- **`make restart-caddy` / `restart-wafctl` / `restart-authelia`** — raw `docker compose up -d --force-recreate <svc>`. **Bypasses Composer's SOPS layer.** Containers come up with `ENC[AES256_GCM,...]` ciphertext and crash-loop. Only safe when config hasn't changed.
+- **`make restart`** — calls the Composer API (edge-services stack on the router). Composer decrypts SOPS `.env` first. **Only safe path for changes touching `.env` or env-var passthrough.** There is NO deploy webhook on edge-services, so every deploy is this manual step.
 
 `restart` depends on `prep-composer-tree` which `docker exec -u composer composer git ... reset --hard HEAD` to wipe the dirty tree left by SOPS re-encrypt. The `-u composer` flag is mandatory — root-owned files break the next decrypt.
 
@@ -160,7 +163,7 @@ For a **stuck cert state** (deleted on disk but Caddy still serves cached), use 
 
 | Dir | What |
 |---|---|
-| `authelia/` | `configuration.yml`, `users_database.yml` (SOPS), 2FA enrollment artefacts |
+| `deploy/edge/` | the LIVE deploy: `Caddyfile` + `compose.yaml` (+ retired `authelia/` - historical) |
 | `errors/` | `error.html` — template-driven 4xx/5xx with WAF-specific 403/429 |
 | `scripts/` | `entrypoint.sh`, `setup-cors.sh`, `update-geoip.sh` |
 | `test/` | `Caddyfile.e2e/.test`, Go e2e tests, CRS official YAML test cases |
@@ -183,28 +186,28 @@ Check status checkboxes in each PLAN before claiming anything beyond "in design"
 - **`knot-dns` skill** + `~/knot-fly/AGENTS.md` — upstream of rfc2136; owner of TSIG rotation procedure and force-renewal recipe.
 - **`composer` skill** — composer API endpoints (`stacks/<name>/{sync,up}`, `stacks/<name>/env`), the WAF UA gotcha for PUT/POST, SOPS-decrypt-on-deploy contract.
 - **`infrastructure-stack` skill** — SOPS+age, compose conventions, Unraid+cache patterns, healthchecks, read-only rootfs, cap_drop.
-- **`tailscale-homelab` skill** — every `ssh servarr` invocation below assumes this works.
+- **`tailscale-homelab` skill** — every `ssh nixos` invocation below assumes this works.
 - **NOT Fly** — this stack doesn't deploy to Fly. Only Knot does.
 
-## Operator recipes — `ssh servarr` snippets
+## Operator recipes — `ssh nixos` snippets
 
 ```bash
 # Inspect a live cert (substitute your hostname)
 HOST=caddy.example.com
-CERT_DIR=/mnt/cache/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/$HOST
-ssh servarr "openssl x509 -in $CERT_DIR/$HOST.crt -noout -dates -issuer"
+CERT_DIR=/var/lib/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/$HOST
+ssh nixos "openssl x509 -in $CERT_DIR/$HOST.crt -noout -dates -issuer"
 
 # Force-renew a single site (delete + restart, NOT reload)
-ssh servarr "rm $CERT_DIR/$HOST.{crt,key,json}"
-ssh servarr "docker restart caddy"
-ssh servarr "docker logs --since 1m caddy 2>&1 | grep -iE '$HOST|acme'"
+ssh nixos "rm $CERT_DIR/$HOST.{crt,key,json}"
+ssh nixos "docker restart caddy"
+ssh nixos "docker logs --since 1m caddy 2>&1 | grep -iE '$HOST|acme'"
 
 # Watch ACME activity live
-ssh servarr 'docker logs -f caddy 2>&1 | grep -E "tls.obtain|authorization|finalize|obtained|BADSIG|BADKEY"'
+ssh nixos 'docker logs -f caddy 2>&1 | grep -E "tls.obtain|authorization|finalize|obtained|BADSIG|BADKEY"'
 
 # Verify TSIG plaintext actually loaded
-ssh servarr 'docker inspect caddy --format "{{range .Config.Env}}{{println .}}{{end}}" | grep TSIG_'
+ssh nixos 'docker inspect caddy --format "{{range .Config.Env}}{{println .}}{{end}}" | grep TSIG_'
 
 # wafctl health (replace with current bridge IP from compose.yaml)
-ssh servarr 'curl -sf http://<wafctl-bridge-ip>:8080/api/v1/health | jq'
+ssh nixos 'curl -sf http://<wafctl-bridge-ip>:8080/api/v1/health | jq'
 ```

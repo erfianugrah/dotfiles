@@ -22,8 +22,11 @@ URLs configurable: `SEARXNG_URL`, `CRAWLER_URL`, `OSINT_URL`.
 
 ### Public endpoints (default for off-box callers)
 
-Production stack runs on `servarr` and is fronted by Caddy at three
-subdomains, gated by `Authorization: Bearer $RESEARCH_TOKEN`:
+Production stack runs on `servarr` and is fronted by the edge Caddy
+(MS-01) at three subdomains, gated by the `(research_auth)` snippet:
+LAN + tailnet clients pass open, WAN clients need
+`Authorization: Bearer $RESEARCH_TOKEN` (re-added 2026-08-01 after a
+no-auth interval; llama.erfi.io is gated the same way):
 
 | Service | Public URL                |
 |---------|---------------------------|
@@ -31,14 +34,16 @@ subdomains, gated by `Authorization: Bearer $RESEARCH_TOKEN`:
 | Crawler | `https://crawler.erfi.io` |
 | OSINT   | `https://osint.erfi.io`   |
 
-`RESEARCH_TOKEN` is loaded into the user's shell from Bitwarden
-(`~/dotfiles/functions.d/bitwarden.zsh`), so pi / opencode inherit it.
-From any dev box (incl. WSL) prefer the public URL + bearer over
-`ssh servarr 'curl localhost:888x ...'`. Local dev against the dockerised
-stack still works — override `*_URL` to `http://localhost:888x` and unset
-`RESEARCH_TOKEN`. The pi `web_research` / `webfetch` extensions and the
-opencode `research` MCP server already default to the public URLs and
-attach the bearer when `RESEARCH_TOKEN` is set.
+From any dev box (incl. WSL) prefer the public URLs over
+`ssh servarr 'curl localhost:888x ...'` - the stack does NOT run on the
+dev box, so `localhost:888x` from WSL always fails. The pi
+`web_research` / `webfetch` / `osint_*` extensions and the opencode
+`research` MCP server already default to the public URLs; they still
+attach `Authorization: Bearer $RESEARCH_TOKEN` when that env var is set -
+required from off-LAN, harmless on-LAN. Keep `RESEARCH_TOKEN` exported.
+Do NOT override `*_URL` to
+`http://localhost:888x` unless you are actually running the dockerised
+stack locally.
 
 ## Search (SearXNG)
 
