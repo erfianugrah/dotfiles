@@ -53,7 +53,7 @@ cannot enter config mode.
 - `enable` has no password; `login-acl` allows 0.0.0.0/0 - hardening
   items pending (`user change-privilege-pwd`, restrict login-acl).
 - Legacy SSH only: ssh-rsa + hmac-sha1, shell-only (no exec channels),
-  pager + fast-expiring confirms - always go through `swcli.Client`,
+  pager + fast-expiring confirms - always go through `xikectl.Client`,
   never a stock ssh client. Failed-auth lockout exists (failMax).
 - 9014B jumbo frames count as "Giants" in port stats - benign.
 
@@ -61,7 +61,7 @@ cannot enter config mode.
 
 - Read-only by default. `save` manual-only, `reboot` NEVER fired
   (maintenance window). Never `save` from a loop/test.
-- `cfg` IS a live write path (built 2026-07-31 on `swcli.RunConfig`):
+- `cfg` IS a live write path (built 2026-07-31 on `xikectl.RunConfig`):
   config-mode `display`/`?` are safe; state-changing commands are
   one-at-a-time, manual, with readback - never from a loop/test.
 - `set`/`apply`/`restore` (the reconciler above `cfg`) is designed,
