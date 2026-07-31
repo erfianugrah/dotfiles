@@ -37,8 +37,8 @@ Switch>      user-exec       xikectl lands HERE
 
 A command "not existing" usually means WRONG MODE, not missing feature -
 older sessions wrongly concluded "no config/user commands exist" from
-user-exec probing. To walk modes use `cmd/cfgprobe` (multi-command
-interactive probe); `xikectl run` completes at the first prompt and
+user-exec probing. To walk modes use `xikectl probe` (multi-line, one shell,
+no error abort); `xikectl run` completes at the first prompt and
 cannot enter config mode.
 
 ## Top gotchas (all live-verified)
