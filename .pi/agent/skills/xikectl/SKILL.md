@@ -18,22 +18,25 @@ cd ~/servarr-compose/tools/xikectl && go build -o xikectl ./cmd/xikectl
 export XIKE_USER=admin XIKE_PASS=admin          # XIKE_HOST defaults to 10.0.69.4
 
 ./xikectl show vlan|interfaces|mac|mtu|...      # 24 resources, --json available
-./xikectl smoke                                  # live e2e: all 24 resources, ~2min
+./xikectl smoke                                  # live e2e: all 24 resources, ~15s
 ./xikectl verify                                 # drift vs fixture.yaml
 ./xikectl save                                   # persist to flash + readback (manual only)
 ./xikectl backup --running -o backup.cfg         # CLI scrape (web exporter is a lie)
 ./xikectl cfg "display vlan"                   # config-mode sequence (enable->system-view->cmds->end)
                                                # THE WRITE PATH - state changes go here, manual + readback
+                                               # needs XIKE_ENABLE_PASS since 2026-07-31 (vaultwarden)
 ./xikectl set "interface eth0/0/5" "description foo"   # full write pattern:
                                                # apply + before/after config diff + save + proof
-go test ./...                                    # 78 fixture-driven unit tests
+./xikectl interact 'send:X' 'wait:Y' 'prompt'  # interactive dialogs (sub-prompts, e.g.
+                                               # user change-privilege-pwd re-auth)
+go test ./...                                    # 98 fixture-driven unit tests
 ```
 
 ## The three CLI modes (the #1 trap)
 
 ```
 Switch>      user-exec       xikectl lands HERE
-<Switch>     privilege-exec  enable - NO password
+<Switch>     privilege-exec  enable - password-gated since 2026-07-31 (XIKE_ENABLE_PASS)
 [Switch]     global config   system-view  (aaa -> [Switch-aaa]: local-user, ...)
 ```
 
@@ -52,8 +55,15 @@ cannot enter config mode.
 - User management broken on ALL four paths (web no-op, config-import
   drop, no exec password cmd, CLI local-user stores-but-never-
   authenticates) - box is permanently admin/admin; vendor ticket sent.
-- `enable` has no password; `login-acl` allows 0.0.0.0/0 - hardening
-  items pending (`user change-privilege-pwd`, restrict login-acl).
+- `enable` is password-gated (needs `user privilege-auth always`, not
+  the bare command) and `login-acl` is restricted to 10.0.69.0/24
+  (snmp/web/telnet) - both fired 2026-07-31; enable password in
+  vaultwarden, pass via XIKE_ENABLE_PASS. Neither shows in
+  `display current-config` (invisible to set/verify/backup); telnet
+  ACL changes DROP the current SSH session (kick, not lockout).
+  `?` help on an already-valid command EXECUTES it (help redraws the
+  line, trailing newline submits) - probe `?` only on incomplete
+  prefixes.
 - Legacy SSH only: ssh-rsa + hmac-sha1, shell-only (no exec channels),
   ONE shell per TCP connection (a 2nd channel can't elevate: "locked
   by other users") - the client holds one shell for its whole life.
