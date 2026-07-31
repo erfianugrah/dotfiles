@@ -1,6 +1,6 @@
 ---
 name: composer
-description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/composer/`, instance at `composer.erfi.io` on the MS-01 router, moved off servarr 2026-07). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~109 endpoints under /api/v1, auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
+description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/composer/`, instance at `composer.erfi.io` on the MS-01 router, moved off servarr 2026-07). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~119 endpoints under /api/v1 (incl. multi-host docker-hosts registry + self-upgrade), auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
 ---
 
 # composer skill
@@ -9,10 +9,11 @@ Self-hosted compose-mgmt platform. Go + Astro. REST API only — no end-user CLI
 
 ## When this skill does NOT apply
 
-Composer manages a single set of stacks on the **MS-01 NixOS router** (ssh alias `nixos`, public URL `https://composer.erfi.io`; moved off servarr 2026-07). It does NOT see:
+Composer (on the **MS-01 NixOS router**, ssh alias `nixos`, public URL `https://composer.erfi.io`; moved off servarr 2026-07) manages stacks across TWO docker daemons: the MS-01 local socket AND servarr's daemon via the drawbridge mTLS proxy (see the multi-host section). It does NOT see:
 - Local dev compose stacks (`~/llm-compose/`, `~/composer/deploy/`, `~/knot-fly/`, any compose file the user is editing on the dev box).
-- Stacks on other servers the user hasn't onboarded.
+- Stacks on other servers not registered in the docker-hosts registry.
 - Anything reached via plain `docker ...` on the dev machine.
+- drawbridge itself - deliberately NOT composer-managed (composer reaches servarr's docker THROUGH drawbridge; composer managing it would be a self-dependency loop). See the drawbridge skill.
 
 For local stacks, use `docker compose -f <path> {logs,ps,restart}` directly. Don't reach for the composer API just because the word "compose" appears — verify the target host first (`docker context show`, or check whether the container name appears in `curl $COMPOSER/api/v1/services | jq -r '.[].name'`).
 
@@ -46,9 +47,9 @@ curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 ## API basics
 
 - Base: `$COMPOSER/api/v1` (prod, your deployed instance). Local dev: `localhost:8080/api/v1`.
-- Version constant: `0.14.0` (`version.go`).
+- Version constant: `0.20.2` (`version.go`).
 - Spec: OpenAPI **3.1.0**. Served at `GET /openapi.json` AND `GET /openapi.yaml`. Interactive docs at `/docs` (Stoplight Elements). All public — no auth.
-- Surface: **106 Huma-registered endpoints** under 19 tags + a few raw chi routes (WebSocket terminal/compose, OAuth begin/callback, webhook receiver). Tags: system, auth, users, keys, registries, stacks, git, containers, networks, volumes, images, docker, pipelines, webhooks, jobs, audit, templates, sse, oauth.
+- Surface: **119 Huma-registered endpoints** under 20 tags + a few raw chi routes (WebSocket terminal/compose, OAuth begin/callback, webhook receiver). Tags: system, auth, users, keys, registries, hosts, stacks, git, containers, networks, volumes, images, docker, pipelines, webhooks, jobs, audit, templates, sse, oauth.
 - Auth (any of three, all defined in `internal/api/openapi.go`):
   - `cookieAuth` — session cookie `composer_session` via `POST /api/v1/auth/login` (UI flow).
   - `apiKeyAuth` — `X-API-Key: ck_…`. **Preferred for agents.**
@@ -58,11 +59,38 @@ curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 - Errors: RFC 9457 Problem Details, content-type `application/problem+json`. 500s include `request_id`. Hand-written client extractor at `web/src/lib/api/errors.ts`.
 - Hard limits: Huma 1 MB request body cap. Compose YAML 512 KB. .env 256 KB.
 
+## Multi-host docker daemons (v0.17.0+/v0.18.0+)
+
+One composerd now manages stacks across MULTIPLE docker daemons. Live registry (verified 2026-07-31): ONE remote host, `{"id":1,"name":"servarr","endpoint":"tcp://100.69.69.7:2376","cert_dir":"/certs/servarr"}` - that endpoint is **drawbridge**, the mTLS+allowlist+audit proxy in front of servarr's `/var/run/docker.sock` (see the drawbridge skill). 19 stacks registered: 7 local (atuin, docs-ssh, edge-services, httpbin-bun, joplin, knotea, vaultwarden) + 12 pinned to servarr (bonkled, copyparty, discord-wipe, draw, gitea, gumshoe, immich, keycloak, minio, research, revista, servarr).
+
+TLS plumbing internals (do not regress):
+- Per-host SDK clients use `TLSConfig{CertDir}` -> `dockerclient.WithTLSClientConfig(ca, cert, key)` with docker-CLI file naming. `FromEnv` BEFORE `WithHost(host)` in `internal/infra/docker/client.go` is load-bearing (the moby SDK does not apply env TLS implicitly; explicit host still wins).
+- `docker compose` CLI children get explicit per-host env via `NewComposeTLS` (`internal/infra/docker/compose.go`): DOCKER_TLS_VERIFY=1 + DOCKER_CERT_PATH=<cert_dir>. Relying on composerd's process env is wrong for non-default hosts.
+- The container MUST mount `/var/lib/composer/certs:/certs:ro` (drawbridge mTLS material) or every remote-host operation hard-fails with `TLS material: stat /certs/servarr/ca.pem`. Both router.nix copies have it (see upgrade policy below).
+
+Key model:
+
+- `GET/POST /api/v1/hosts`, `GET/PUT/DELETE /api/v1/hosts/{id}` - docker hosts registry. Body: `{name, endpoint, cert_dir}`. Endpoint schemes: `tcp://host:2376` (mTLS), `tcp://host:2375` (plain), `unix:///path.sock`. `cert_dir` holds `ca.pem`/`cert.pem`/`key.pem` (docker CLI convention); empty = no TLS.
+- The DEFAULT host (composerd's own `COMPOSER_DOCKER_HOST`/socket) is IMPLICIT - no row, API name `"local"`, `stacks.host_id NULL`. `"local"` is a reserved name.
+- API references hosts by NAME; DB stores id. Create-stack payloads accept `host: "<name>"`; unknown name = 422. Stack detail responses carry a `host` field.
+- ~30 resource endpoints (containers, networks, volumes, images, docker prune/events/builder, SSE logs/stats) take a `?host=<name>` query param; absent = default host.
+- Webhook redeploys route to the stack's host. Event listeners fan in one per host (domain events gain `HostName`, empty = default).
+- Self-upgrade stays pinned to the default host (helper hardcodes `/var/run/docker.sock`).
+- UI: host badge on stack list/detail, host management is a Settings card, docker-host selector on networks/images/volumes pages.
+
+## Self-upgrade (v0.16.0+)
+
+Composer can upgrade ITSELF: a `_system` sentinel stack + release webhook trigger pulls the new `ghcr.io/erfianugrah/composer` image and restarts via a helper container (lazy reconciliation - never kills a running helper). Settings-page card in the UI. Web UI also streams all stack actions through a PTY terminal now.
+
 ## Instance - on the MS-01 edge router (moved off servarr 2026-07)
 
-The production composer instance now runs on the MS-01 NixOS router (ssh alias `nixos`): `https://composer.erfi.io`, key in `COMPOSER_API_KEY` (shell-init exported, works there). Stacks: `knotea`, `caddy`, `edge-services`, `vaultwarden`, `atuin`, `joplin`, `docs-ssh`, `httpbin-bun`.
+The production composer instance runs on the MS-01 NixOS router (ssh alias `nixos`): `https://composer.erfi.io`, key in `COMPOSER_API_KEY` (shell-init exported, works there). Stacks: 7 local + 12 on the servarr docker host (exact list in the multi-host section).
 
-The old servarr instance (`composer.servarr.erfi.io`) is legacy - it may still answer TLS + return composerd JSON 401s, but no current key works against it. Do NOT treat a 401 from composer.erfi.io as "wrong instance": a 401 there means the key itself is stale. (The pre-move `COMPOSER_EDGE_API_KEY` / `composer.edge.erfi.io` edge-instance setup is superseded - that key 401s on the current instance.)
+The old servarr instance is RETIRED (phase 3c, 2026-07-30): container removed, `composer.servarr.erfi.io` deleted from the edge Caddyfile + DNS. Any reference to it in older notes is historical. (The pre-move `COMPOSER_EDGE_API_KEY` / `composer.edge.erfi.io` edge-instance setup is likewise superseded.)
+
+### Upgrade policy (NixOS-pinned, NOT self-upgrade)
+
+The image tag lives in router.nix in TWO places that must BOTH be bumped: (1) `/home/erfi/router.nix` ON THE BOX (the file cp'd to `/etc/nixos/configuration.nix` before rebuild), and (2) the tracked copy at `~/servarr-compose/incident-2026-05/edge-nixos/router.nix`. Then `cp` source -> `/etc/nixos/configuration.nix` + `sudo nixos-rebuild switch` (sudo -n works for erfi). NEVER sed only `/etc/nixos/configuration.nix` - a later cp+rebuild silently reverts to the source-pinned tag (real 2026-07-30 incident: reverted 0.20.0 -> 0.16.4, dropped the /certs mount, re-armed the pre-0.18.1 local-daemon webhook bug). Also `sed -i` with no match is a silent no-op - grep-verify after every sed. Self-upgrade via the `_system` stack does NOT apply here (oci-containers unit races the helper; rebuilds revert to the pinned tag).
 
 **Router-local access**: API also at `localhost:8080` on the router:
 
@@ -124,19 +152,18 @@ Caddy WAF in front of composer has a credential-detection rule that returns 403 
 - `POST /api/v1/stacks/git` with credentialed `repo_url`
 - `POST /api/v1/keys` rotation
 
-**Reliable workaround**: bypass the public WAF by reaching composer over the internal docker network from servarr itself.
+**Reliable workaround**: bypass the public WAF by hitting composerd directly on the router:
 
 ```bash
-# composer's internal IP on its bridge network
-COMPOSER_IP=$(ssh servarr 'docker inspect composer --format "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"')
-
-# proxy the mutating request through ssh
-ssh servarr "curl -sf -X PUT \
+# router-local access, no WAF in the path
+ssh nixos "curl -sf -X PUT \
   -H 'X-API-Key: $COMPOSER_API_KEY' \
   -H 'Content-Type: application/json' \
   --data-binary @- \
-  http://$COMPOSER_IP:8080/api/v1/stacks/<name>/env" <<< "$PAYLOAD"
+  http://localhost:8080/api/v1/stacks/<name>/env" <<< "$PAYLOAD"
 ```
+
+(The pre-move variant of this trick reached the servarr container's bridge IP via `ssh servarr`; that instance is retired. The servarr STACKS are still managed fine - through the public API or `ssh nixos` - because composerd talks to servarr's daemon over drawbridge, not through any on-servarr composer.)
 
 GETs work fine through the public WAF. Only PUT/POST/DELETE with credential-like bodies trip it. There's a separate, looser WAF rule that adding `User-Agent: Mozilla/5.0` + `Origin: https://composer.servarr.erfi.io` headers bypasses — use that first; only fall through to the internal-network workaround when the credential-detection rule fires.
 
@@ -341,7 +368,7 @@ web/                  Astro 6 + React 19 frontend
 e2e/                  Go E2E smoke tests (-tags=e2e)
 deploy/               Dockerfile, compose.yaml, entrypoint.sh (PUID/PGID + DOCKER_GID magic)
 docs/                 Canonical user/agent documentation
-version.go            const Version — currently 0.14.0; bump first on release
+version.go            const Version — currently 0.20.2; bump first on release
 ```
 
 ## Key env vars (subset — full list in docs/configuration.md)
