@@ -193,6 +193,11 @@ bw_serve_start() {
     done
     printf "\r%*s\r" 50 "" >&2
     echo "[bw-serve] API running on ${BW_SERVE_ADDR}"
+
+    # Warm the gpg-agent cache from the freshly unlocked vault (best effort,
+    # silent, never prompts). This is what makes one bw unlock per boot cover
+    # GPG signing too.
+    (( $+functions[gpg_seed_bw] )) && gpg_seed_bw
 }
 
 bw_serve_stop() {

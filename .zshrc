@@ -157,6 +157,29 @@ export LC_ALL=C.UTF-8
 source ~/dotfiles/functions.zsh
 source ~/dotfiles/wezterm.sh
 
+# ---------------------------------------------------------------------------
+# Bitwarden secrets at shell start
+# ---------------------------------------------------------------------------
+# First interactive shell after login unlocks the vault (ONE master-password
+# prompt per boot). bw_serve_start also seeds the gpg-agent cache, so GPG
+# signing never needs its own prompt either. Later shells just re-export the
+# env vars from the already-running daemon - silent unless something failed.
+# If the first-shell unlock is declined, later shells stay quiet until the
+# next login; run bw_serve_start / load_bw manually whenever.
+if [[ -o interactive ]] && (( $+functions[load_bw] )); then
+  if _bw_serve_ok; then
+    local _bw_out
+    _bw_out=$(load_bw 2>&1)
+    if (( $? != 0 )) || [[ "$_bw_out" == *FAILED* || "$_bw_out" == *stale* ]]; then
+      print -u2 -- "$_bw_out"
+    fi
+    unset _bw_out
+  elif [[ ! -e "${XDG_RUNTIME_DIR:-/tmp}/bw-load-attempted" ]]; then
+    touch "${XDG_RUNTIME_DIR:-/tmp}/bw-load-attempted"
+    load_bw
+  fi
+fi
+
 # Editor (first available)
 if command -v nvim &> /dev/null; then
   export EDITOR='nvim'

@@ -239,6 +239,24 @@ _gpg_cache_warm() {
         --clearsign -u "$_GPG_SIGNING_KEY" >/dev/null 2>&1
 }
 
+# gpg_seed_bw - silently warm the agent from Vaultwarden. NEVER prompts:
+# no-op when warm, exit 1 when bw serve is unreachable/locked or the item
+# is missing. Silent on the warm path so it is safe for hooks (preexec)
+# and for bw_serve_start to call on every unlock.
+gpg_seed_bw() {
+    emulate -L zsh
+    _gpg_cache_warm && return 0
+    (( $+functions[_bw_serve_ok] )) && _bw_serve_ok || return 1
+    local pw
+    pw=$(_bw_api_get_note GPG_KEY_PASSPHRASE 2>/dev/null) || return 1
+    [[ -n "$pw" ]] || return 1
+    # Arch ships the helper off-PATH at /usr/lib/gnupg/.
+    local preset="${commands[gpg-preset-passphrase]:-/usr/lib/gnupg/gpg-preset-passphrase}"
+    print -rn -- "$pw" | "$preset" --preset "$_GPG_SIGNING_KEYGRIP" 2>/dev/null
+    unset pw
+    _gpg_cache_warm
+}
+
 # gpg_unlock - warm the gpg-agent cache for the git signing key.
 # (1) no-op if already warm; (2) seed from Vaultwarden via bw serve
 #     (headless-safe); (3) one pinentry prompt (interactive fallback).
@@ -251,21 +269,13 @@ gpg_unlock() {
     fi
 
     # Headless path: preset from Vaultwarden (bw serve must be unlocked).
+    if gpg_seed_bw; then
+        echo "[gpg] cache seeded from Vaultwarden (GPG_KEY_PASSPHRASE)"
+        return 0
+    fi
     if (( $+functions[_bw_serve_ok] )) && _bw_serve_ok; then
-        local pw
-        pw=$(_bw_api_get_note GPG_KEY_PASSPHRASE 2>/dev/null)
-        if [[ -n "$pw" ]]; then
-            # Arch ships the helper off-PATH at /usr/lib/gnupg/.
-            local preset="${commands[gpg-preset-passphrase]:-/usr/lib/gnupg/gpg-preset-passphrase}"
-            print -rn -- "$pw" | "$preset" --preset "$_GPG_SIGNING_KEYGRIP" 2>/dev/null
-            unset pw
-            if _gpg_cache_warm; then
-                echo "[gpg] cache seeded from Vaultwarden (GPG_KEY_PASSPHRASE)"
-                return 0
-            fi
-            print -u2 "[gpg] bw preset failed - wrong passphrase in GPG_KEY_PASSPHRASE,"
-            print -u2 "      or a stale bw serve session (run bw_serve_start and retry)."
-        fi
+        print -u2 "[gpg] bw preset failed - wrong passphrase in GPG_KEY_PASSPHRASE,"
+        print -u2 "      or a stale bw serve session (run bw_serve_start and retry)."
     fi
 
     # Interactive fallback: force exactly one pinentry prompt.
@@ -285,3 +295,18 @@ gpg_unlock() {
     print -u2 "      the notes of a Vaultwarden item named GPG_KEY_PASSPHRASE."
     return 1
 }
+
+# Auto-seed from bw before any signing git op, so pinentry never fires in an
+# interactive shell while bw serve is unlocked. Silent + cheap: no-ops on the
+# warm path, exits 1 without output when bw is unavailable (git then behaves
+# as before - pinentry only when bw genuinely cannot seed).
+if [[ -o interactive ]]; then
+    autoload -Uz add-zsh-hook
+    _gpg_preseed() {
+        case "$1" in
+            git\ commit*|git\ tag*|git\ merge*|git\ rebase*|git\ cherry-pick*|git\ revert*|git\ am*)
+                gpg_seed_bw ;;
+        esac
+    }
+    add-zsh-hook preexec _gpg_preseed
+fi

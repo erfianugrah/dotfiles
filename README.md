@@ -321,6 +321,12 @@ gpg_unlock   # seeds from Vaultwarden item GPG_KEY_PASSPHRASE via bw serve
              # (no TTY needed), or prompts once via pinentry interactively
 ```
 
+In practice you should never need to run it: `bw_serve_start` seeds the
+agent automatically after unlocking, and a zsh `preexec` hook re-seeds
+silently before any `git commit`/`tag`/`merge`/`rebase`/`cherry-pick`/
+`revert`/`am` when the TTL has lapsed. Pinentry only appears when bw serve
+is locked or the item is missing.
+
 The bw item holds the passphrase in its `notes` field. Signing must never be
 bypassed; pi's tool-guard hard-blocks `--no-gpg-sign` /
 `-c commit.gpgsign=false`.
@@ -353,7 +359,11 @@ unset_bw_vars         # wipe all exported secrets from current shell
 ```
 
 `load_bw` auto-starts the service if not running. The session survives
-terminal/tmux restarts. After a reboot, run `bw_serve_start` again.
+terminal/tmux restarts. `.zshrc` runs it automatically: the first
+interactive shell after login prompts for the master password once (which
+also seeds the gpg-agent signing cache), later shells re-export silently
+from the running daemon. If you skip that first prompt, run `bw_serve_start`
+manually.
 
 **Staleness gotcha:** a long-running serve daemon's access token can expire
 silently - `/status` still says "unlocked" and `/sync` still returns
