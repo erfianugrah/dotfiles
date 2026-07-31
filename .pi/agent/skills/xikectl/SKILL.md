@@ -27,9 +27,11 @@ export XIKE_USER=admin XIKE_PASS=admin          # XIKE_HOST defaults to 10.0.69.
                                                # needs XIKE_ENABLE_PASS since 2026-07-31 (vaultwarden)
 ./xikectl set "interface eth0/0/5" "description foo"   # full write pattern:
                                                # apply + before/after config diff + save + proof
+./xikectl apply [--prune] [--dry-run] [--i-know]       # declarative reconcile live->fixture.yaml
+                                               # (additive default; guards: mgmt/session-port)
 ./xikectl interact 'send:X' 'wait:Y' 'prompt'  # interactive dialogs (sub-prompts, e.g.
                                                # user change-privilege-pwd re-auth)
-go test ./...                                    # 98 fixture-driven unit tests
+go test ./...                                    # 126 unit tests
 ```
 
 ## The three CLI modes (the #1 trap)
@@ -58,12 +60,18 @@ cannot enter config mode.
 - `enable` is password-gated (needs `user privilege-auth always`, not
   the bare command) and `login-acl` is restricted to 10.0.69.0/24
   (snmp/web/telnet) - both fired 2026-07-31; enable password in
-  vaultwarden, pass via XIKE_ENABLE_PASS. Neither shows in
-  `display current-config` (invisible to set/verify/backup); telnet
-  ACL changes DROP the current SSH session (kick, not lockout).
+  vaultwarden, pass via XIKE_ENABLE_PASS. Both DO show in
+  `display current-config` (!!!OAM); the enable password sits there in
+  CLEARTEXT - treat every config scrape as a secret (backup warns).
   `?` help on an already-valid command EXECUTES it (help redraws the
   line, trailing newline submits) - probe `?` only on incomplete
-  prefixes.
+  prefixes. Telnet login-acl changes DROP the current SSH session
+  (kick, not lockout) - fire them last in a sequence.
+- `save current-config` exists ONLY at privilege-exec (user-exec AND
+  config mode reject it); saves before 2026-07-31-evening were silent
+  no-ops (lowercase "unrecognized" check + vacuous readback diff).
+  Save rides RunPrivileged now; first real persist confirmed flash
+  holds the hardening.
 - Legacy SSH only: ssh-rsa + hmac-sha1, shell-only (no exec channels),
   ONE shell per TCP connection (a 2nd channel can't elevate: "locked
   by other users") - the client holds one shell for its whole life.
