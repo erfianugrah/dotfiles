@@ -22,6 +22,8 @@ export XIKE_USER=admin XIKE_PASS=admin          # XIKE_HOST defaults to 10.0.69.
 ./xikectl verify                                 # drift vs fixture.yaml
 ./xikectl save                                   # persist to flash + readback (manual only)
 ./xikectl backup --running -o backup.cfg         # CLI scrape (web exporter is a lie)
+./xikectl cfg "display vlan"                   # config-mode sequence (enable->system-view->cmds->end)
+                                               # THE WRITE PATH - state changes go here, manual + readback
 go test ./...                                    # 78 fixture-driven unit tests
 ```
 
@@ -59,6 +61,8 @@ cannot enter config mode.
 
 - Read-only by default. `save` manual-only, `reboot` NEVER fired
   (maintenance window). Never `save` from a loop/test.
-- Write lane (`set`/`apply`/`restore`) is designed, NOT built - needs a
-  sequence-capable transport (enable -> system-view -> cmds -> end);
-  cfgprobe is the proof of concept. That's the next major work item.
+- `cfg` IS a live write path (built 2026-07-31 on `swcli.RunConfig`):
+  config-mode `display`/`?` are safe; state-changing commands are
+  one-at-a-time, manual, with readback - never from a loop/test.
+- `set`/`apply`/`restore` (the reconciler above `cfg`) is designed,
+  NOT built - that's the next major work item.
