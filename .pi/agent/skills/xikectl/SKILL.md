@@ -29,9 +29,12 @@ export XIKE_USER=admin XIKE_PASS=admin          # XIKE_HOST defaults to 10.0.69.
                                                # apply + before/after config diff + save + proof
 ./xikectl apply [--prune] [--dry-run] [--i-know]       # declarative reconcile live->fixture.yaml
                                                # (additive default; guards: mgmt/session-port)
+./xikectl restore <file> [--dry-run]           # validate config file (strict section grammar),
+                                               # upload as BOOT config via web, exporter byte-proof.
+                                               # Takes effect at NEXT REBOOT.
 ./xikectl interact 'send:X' 'wait:Y' 'prompt'  # interactive dialogs (sub-prompts, e.g.
                                                # user change-privilege-pwd re-auth)
-go test ./...                                    # 126 unit tests
+go test ./...                                    # 141 unit tests
 ```
 
 ## The three CLI modes (the #1 trap)
