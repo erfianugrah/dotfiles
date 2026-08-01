@@ -66,13 +66,18 @@ insurance (RFC 5861): on the error path Souin only serves stale when the
 cached response carries it; on the non-error path only when the request
 sends `max-stale` (browsers never do).
 
-## Ops tool - scripts/cachectl.sh (in caddy-compose)
+## Ops tool - tools/cachectl (Go CLI in caddy-compose, stdlib only)
 
 ```bash
-scripts/cachectl.sh status           # per-site DB sizes, fallback count, tmpfs check, RAM
-scripts/cachectl.sh verify           # hard asserts: 0 fallbacks, DBs at configured Dirs, no /tmp/souin-nuts
-scripts/cachectl.sh probe <url>      # request twice via edge IP, print Cache-Status both times
-scripts/cachectl.sh purge <site|all> # rm /data/cache/nuts/<site> + docker restart caddy
+cd ~/ergo/caddy-compose/tools/cachectl
+go run . status           # per-site DB sizes, fallback count, tmpfs check, RAM
+go run . verify           # hard asserts: 0 fallbacks, DBs at configured Dirs, no /tmp/souin-nuts
+go run . probe <url>      # request twice via edge IP, print Cache-Status both times
+go run . purge <site|all> # rm /data/cache/nuts/<site> + docker restart caddy
+# or: make build-cachectl -> tools/cachectl/cachectl <cmd>; make edge-verify runs verify
+# probe sends browser-ish headers + HTTP/2 on purpose: h1 requests with
+# default Go headers trip the edge WAF detect rules, and block pages are
+# never cached (response has no Cache-Status -> looks like a cache bug).
 ```
 
 - `purge` is the ONLY working purge: the souin admin API permanently
