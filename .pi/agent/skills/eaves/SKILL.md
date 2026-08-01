@@ -8,15 +8,17 @@ description: Drive the user's `eaves` CLI - a read-only Juniper/VyOS-style opera
 `eaves` is the observational half of a VyOS CLI for the NixOS edge router:
 `show` / `monitor` / `doctor`, Juniper-style unique-prefix matching
 (`eaves sh int`), `--json` on everything, exit 0/1/2. Zero mutation
-capability - no `configure` mode exists by design (config = router.nix +
-nixos-rebuild; the seam is un-typeable, not just documented).
-**CRITICAL file-mapping gotcha**: `nixos-rebuild` evaluates
-`/etc/nixos/configuration.nix`, NOT `router.nix` - the two are kept as
-byte-identical mirrors MANUALLY (configuration.nix imports only
-hardware-configuration.nix; the whole router config body is duplicated
-in both). An edit to router.nix alone silently does nothing through a
-successful rebuild (verified 2026-08-01: rebuilt green, kea conf
-unchanged). Edit one, then `cp` it over the other before rebuilding.
+capability - no `configure` mode exists by design.
+
+**Config control plane (since 2026-08-01): `~/router`** - private
+GitHub `erfianugrah/router`, flake-based, SINGLE configuration.nix (the
+old configuration.nix/router.nix manual-mirror workflow is dead).
+`/etc/nixos` on the router is a read-only checkout; NEVER edit files
+on the router. All changes: edit in `~/router`, commit, `make deploy`
+(push -> router fast-forwards -> `nixos-rebuild switch --flake
+.#nixos` -> `eaves doctor` gate). `make diff` = dry-build. nixpkgs
+and eaves are rev-pinned in flake.nix; bump deliberately. The router
+authenticates with read-only deploy keys (see ~/router/README.md).
 
 Full command reference + doctor check table: `~/eaves/README.md`.
 Implementation plan + fixture contract: `~/eaves/docs/plans/2026-07-24-eaves-cli.md`.
@@ -26,26 +28,20 @@ Implementation plan + fixture contract: `~/eaves/docs/plans/2026-07-24-eaves-cli
 | Want to ... | Reach for |
 |---|---|
 | Answer a router question WITHOUT touching the router | `cd ~/eaves && EAVES_FIXTURE_DIR=testdata/fixtures go run . <cmd>` (fixtures are a sanitized snapshot) |
-| Live answer (leases, conntrack, NAT, ruleset) | `ssh nixos 'sudo -n eaves <cmd>'` once adopted; until then the /tmp nix-build pattern below |
+| Live answer (leases, conntrack, NAT, ruleset) | `ssh nixos 'sudo -n eaves <cmd>'` (eaves is on PATH) |
 | Post-rebuild regression gate ("did I break the router?") | `eaves doctor` - 12 assertions encoding GOTCHAS.md |
 | Verify the flake / test a change end-to-end | `go test ./...` + `bash scripts/smoke-fixtures.sh` (offline) |
-| Change firewall/DHCP/VLAN config | router.nix + `nixos-rebuild` - NEVER eaves (it can't) |
+| Change firewall/DHCP/VLAN config | `~/router` + `make deploy` - NEVER eaves (it can't), NEVER edit /etc/nixos on the router |
 | Raw packet forensics eaves doesn't cover | `ssh nixos` + tcpdump/conntrack by hand (`tailscale-homelab` skill) |
 
-## Binary availability (not yet adopted system-wide)
+## Binary availability (ADOPTED 2026-08-01)
 
-Until `router.nix` adds the flake input, eaves is not on the router's PATH.
-The verified read-only pattern (used 2026-07-25):
-
-```bash
-rsync -a --delete ~/eaves/ nixos:/tmp/eaves/
-ssh nixos 'cd /tmp/eaves && nix build . && sudo -n result/bin/eaves doctor'
-# cleanup: ssh nixos 'rm -rf /tmp/eaves'  (store paths are harmless, leave them)
-```
-
-Adoption (changes the router - user approval first): add
-`inputs.eaves.url = "github:erfianugrah/eaves";` + the
-`nixosModules.default` import (one line each), `nixos-rebuild switch`.
+eaves IS on the router's PATH (`/run/current-system/sw/bin/eaves`),
+installed via the `~/router` flake input (`eaves.nixosModules.default`
+= systemPackages). The old rsync + /tmp/nix-build pattern is RETIRED.
+Run: `ssh nixos 'sudo -n eaves doctor'`. Rolling out a NEW eaves rev:
+bump the `?rev=` pin in `~/router/flake.nix`, `make deploy` - the pin
+means a broken eaves main never reaches the router by accident.
 Most commands need root (conntrack/nft) - run via `sudo -n`
 (passwordless sudo is already configured for the `nixos` ssh user, so
 `sudo -n` never goes interactive).
