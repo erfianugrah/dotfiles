@@ -1,6 +1,6 @@
 ---
 name: eaves
-description: Drive the user's `eaves` CLI - a read-only Juniper/VyOS-style operational shell for the NixOS edge router (ssh alias `nixos`). Use when answering operational questions about the edge router (DHCP leases/pools, NAT translations, conntrack count, nftables ruleset, interfaces/routes/neighbors, vnstat bandwidth, kea journal), running the 12-check `doctor` health/regression suite after a router.nix rebuild, answering router questions OFFLINE via the committed fixtures (EAVES_FIXTURE_DIR, no ssh needed), re-capturing/sanitizing fixtures, or extending the CLI itself. Fires on "eaves", "show dhcp leases", "who is 10.0.x.x", "router health", "edge router status", "is NAT working". NOT for config changes - eaves has no configure mode by design; config is router.nix + nixos-rebuild. Sibling to `tailscale-homelab` (ssh), `knotctl`, `caddy`. Repo `~/eaves` (private GitHub erfianugrah/eaves), stdlib-only Go, CI green.
+description: Drive the user's `eaves` CLI - a read-only Juniper/VyOS-style operational shell for the NixOS edge router (ssh alias `nixos`). Use when answering operational questions about the edge router (DHCP leases/pools, NAT translations, conntrack count, nftables ruleset, interfaces/routes/neighbors, vnstat bandwidth, kea journal), running the 13-check `doctor` health/regression suite after a router.nix rebuild, answering router questions OFFLINE via the committed fixtures (EAVES_FIXTURE_DIR, no ssh needed), re-capturing/sanitizing fixtures, or extending the CLI itself. Fires on "eaves", "show dhcp leases", "who is 10.0.x.x", "router health", "edge router status", "is NAT working". NOT for config changes - eaves has no configure mode by design; config is router.nix + nixos-rebuild. Sibling to `tailscale-homelab` (ssh), `knotctl`, `caddy`. Repo `~/eaves` (private GitHub erfianugrah/eaves), stdlib-only Go, CI green.
 ---
 
 # eaves - read-only operational CLI for the edge router
@@ -29,7 +29,7 @@ Implementation plan + fixture contract: `~/eaves/docs/plans/2026-07-24-eaves-cli
 |---|---|
 | Answer a router question WITHOUT touching the router | `cd ~/eaves && EAVES_FIXTURE_DIR=testdata/fixtures go run . <cmd>` (fixtures are a sanitized snapshot) |
 | Live answer (leases, conntrack, NAT, ruleset) | `ssh nixos 'sudo -n eaves <cmd>'` (eaves is on PATH) |
-| Post-rebuild regression gate ("did I break the router?") | `eaves doctor` - 12 assertions encoding GOTCHAS.md |
+| Post-rebuild regression gate ("did I break the router?") | `eaves doctor` - 13 assertions (12 GOTCHAS.md + nixos-checkout drift) |
 | Verify the flake / test a change end-to-end | `go test ./...` + `bash scripts/smoke-fixtures.sh` (offline) |
 | Change firewall/DHCP/VLAN config | `~/router` + `make deploy` - NEVER eaves (it can't), NEVER edit /etc/nixos on the router |
 | Raw packet forensics eaves doesn't cover | `ssh nixos` + tcpdump/conntrack by hand (`tailscale-homelab` skill) |
@@ -49,7 +49,7 @@ Most commands need root (conntrack/nft) - run via `sudo -n`
 ## Command patterns
 
 ```bash
-eaves doctor                              # 12 checks, exit 1 on any FAIL
+eaves doctor                              # 13 checks, exit 1 on any FAIL
 eaves show dhcp server leases pool 69     # filters are POSITIONAL key/value pairs:
 eaves show dhcp server leases ip 10.0.69.6   #   pool|ip|mac|host <value>, combinable, no dashes
 eaves show dhcp server pools              # per-subnet pool utilization %
