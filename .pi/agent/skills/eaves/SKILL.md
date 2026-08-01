@@ -10,6 +10,13 @@ description: Drive the user's `eaves` CLI - a read-only Juniper/VyOS-style opera
 (`eaves sh int`), `--json` on everything, exit 0/1/2. Zero mutation
 capability - no `configure` mode exists by design (config = router.nix +
 nixos-rebuild; the seam is un-typeable, not just documented).
+**CRITICAL file-mapping gotcha**: `nixos-rebuild` evaluates
+`/etc/nixos/configuration.nix`, NOT `router.nix` - the two are kept as
+byte-identical mirrors MANUALLY (configuration.nix imports only
+hardware-configuration.nix; the whole router config body is duplicated
+in both). An edit to router.nix alone silently does nothing through a
+successful rebuild (verified 2026-08-01: rebuilt green, kea conf
+unchanged). Edit one, then `cp` it over the other before rebuilding.
 
 Full command reference + doctor check table: `~/eaves/README.md`.
 Implementation plan + fixture contract: `~/eaves/docs/plans/2026-07-24-eaves-cli.md`.
