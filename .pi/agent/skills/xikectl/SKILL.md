@@ -1,6 +1,6 @@
 ---
 name: xikectl
-description: Drive the user's `xikectl` CLI - the operator tool for the XikeStor SKS8300-12E2T2X switch at 10.0.69.4 (edge switch between the MS-01 router and the servarr box). Use when reading switch state (VLANs, interfaces, MAC table, MTU/jumbo, port stats, STP, LLDP, ARP, CPU/memory/fan), running the live smoke or verify suites, adding a show resource, probing switch CLI commands, saving/backing up switch config, or planning the switch write lane (set/apply/restore) or reboot. Fires on "xikectl", "XikeStor", "SKS8300", "the switch", "switch VLANs/ports", "jumbo MTU on the switch", "display vlan", "trunk port". NOT for router/DHCP/NAT/firewall (that's `eaves` on the NixOS router), DNS (`knotctl`/`gloryhole`), or the arr media stack (`arr-stack`). Sibling to `eaves`, `tailscale-homelab`, `caddy`. Repo `~/servarr-compose/tools/xikectl`, Go, 78 unit tests + live smoke green.
+description: Drive the user's `xikectl` CLI - the operator tool for the XikeStor SKS8300-12E2T2X switch at 10.0.69.4 (edge switch between the MS-01 router and the servarr box). Use when reading switch state (VLANs, interfaces, MAC table, MTU/jumbo, port stats, STP, LLDP, ARP, CPU/memory/fan), running the live smoke or verify suites, adding a show resource, probing switch CLI commands, saving/backing up switch config, or planning the switch write lane (set/apply/restore) or reboot. Fires on "xikectl", "XikeStor", "SKS8300", "the switch", "switch VLANs/ports", "jumbo MTU on the switch", "display vlan", "trunk port". NOT for router/DHCP/NAT/firewall (that's `eaves` on the NixOS router), DNS (`knotctl`/`gloryhole`), or the arr media stack (`arr-stack`). Sibling to `eaves`, `tailscale-homelab`, `caddy`. Repo `~/servarr-compose/tools/xikectl`, Go, 162 unit tests + live smoke green.
 ---
 
 # xikectl - operator CLI for the XikeStor switch
@@ -17,9 +17,11 @@ in the repo** - it has the full gotcha list. Design + live facts:
 cd ~/servarr-compose/tools/xikectl && go build -o xikectl ./cmd/xikectl
 export XIKE_USER=admin XIKE_PASS=admin          # XIKE_HOST defaults to 10.0.69.4
 
-./xikectl show vlan|interfaces|mac|mtu|...      # 24 resources, --json available
-./xikectl smoke                                  # live e2e: all 24 resources, ~15s
-./xikectl verify                                 # drift vs fixture.yaml
+./xikectl show vlan|interfaces|mac|mtu|...      # 27 resources, --json available
+                                               # [--via cli|web]; transceiver + processes are
+                                               # WEB-ONLY (ASP pages, no CLI path exists)
+./xikectl smoke                                  # live e2e: 25 cli + 3 web-backed rows, ~15s
+./xikectl verify                                 # drift vs fixture.yaml + version cli==web A/B
 ./xikectl save                                   # persist to flash + readback (manual only)
 ./xikectl backup --running -o backup.cfg         # CLI scrape (web exporter is a lie)
 ./xikectl cfg "display vlan"                   # config-mode sequence (enable->system-view->cmds->end)
@@ -34,7 +36,9 @@ export XIKE_USER=admin XIKE_PASS=admin          # XIKE_HOST defaults to 10.0.69.
                                                # Takes effect at NEXT REBOOT.
 ./xikectl interact 'send:X' 'wait:Y' 'prompt'  # interactive dialogs (sub-prompts, e.g.
                                                # user change-privilege-pwd re-auth)
-go test ./...                                    # 141 unit tests
+./xikectl reboot [--timeout 5m]                  # web SetReset=2, waits for SSH return.
+                                               # Live-fired 2026-08-01 (54s); maintenance-window only
+go test ./...                                    # 162 unit tests
 ```
 
 ## The three CLI modes (the #1 trap)
@@ -55,8 +59,14 @@ cannot enter config mode.
 
 - `display utilization interface` / `display ddm` / `display pmp` HANG
   the SSH session - use `display utilization channel-group`.
-- Syslog entries are web-only (no CLI path; use a remote syslog
-  destination instead). Optical DDM absent on this hardware.
+- Syslog entries are web-only (no CLI path; LIVE since 2026-07-31:
+  info-center 10.0.69.1 -> router vector -> minio). Optical DDM absent
+  on this hardware, but basic SFP inventory + process list ARE
+  readable via the ASP web backend (show transceiver / show processes).
+- The ASP content pages (/configchn/*.asp) are a second read surface
+  (2026-08-01): server-rendered management-DB views, stable id anchors;
+  WebLogin (source-IP session) precedes every WebGet. version is
+  dual-backed; uptime formats differ between transports by design.
 - User management broken on ALL four paths (web no-op, config-import
   drop, no exec password cmd, CLI local-user stores-but-never-
   authenticates) - box is permanently admin/admin; vendor ticket sent.
@@ -78,18 +88,24 @@ cannot enter config mode.
 - Legacy SSH only: ssh-rsa + hmac-sha1, shell-only (no exec channels),
   ONE shell per TCP connection (a 2nd channel can't elevate: "locked
   by other users") - the client holds one shell for its whole life.
-  Never `set sysname` (prompt regex hardcodes "Switch").
-  Failed-auth lockout exists (failMax).
+  sysname renames the prompt mid-session - the client re-anchors on a
+  successful sysname and re-learns non-default names at login (the box
+  IS renamed to xikeswitch since 2026-07-31); still never set it
+  casually. Failed-auth lockout exists (failMax).
 - 9014B jumbo frames count as "Giants" in port stats - benign.
 
 ## Boundaries
 
-- Read-only by default. `save` manual-only, `reboot` NEVER fired
-  (maintenance window). Never `save` from a loop/test.
+- Read-only by default. `save` manual-only. `reboot` first live-fired
+  2026-08-01 (54s to SSH+CLI; hardening + sysname verified persisted) -
+  still maintenance-window-only. Never `save` from a loop/test.
 - `cfg` and `set` are live write paths. `set` (2026-07-31) is the full
   pattern: apply + before/after raw config diff + save with persistence
   proof; no-diff after accepted commands = error (firmware accept-but-
   drop class). State changes are one-at-a-time, manual, with readback -
   never from a loop/test.
-- `restore`/`apply --prune` (the reconciler above `set`) is designed,
-  NOT built - that's the next major work item.
+- The write lane is COMPLETE: `set`, `apply --prune`, and `restore`
+  (validate + web upload, BOOT config) all live-fired 2026-07-31.
+- Ops runbooks in the repo: FACTORY-RESET.md (systemReset=3 wipe +
+  rebuild), PASSWORD-RESET.md (enable password rotation via interact;
+  login password immutable - broken user mgmt).
