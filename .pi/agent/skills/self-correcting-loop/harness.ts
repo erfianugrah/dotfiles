@@ -26,6 +26,14 @@ export interface Sensor {
 	 * class of failure, not just that it failed. (OpenAI custom-lint pattern.)
 	 */
 	hint?: string;
+	/**
+	 * Baseline expectation. "fail" declares a FEATURE sensor: it must FAIL on
+	 * the unchanged tree, because it encodes behaviour that does not exist yet.
+	 * A feature sensor that passes at baseline gates nothing - the loop can
+	 * green out having built nothing - so the run is refused up front instead.
+	 * Default "pass" is the guard/regression case (build, lint, tests).
+	 */
+	expect?: "pass" | "fail";
 }
 
 export interface Manifest {
@@ -176,7 +184,14 @@ export function parseManifest(raw: unknown): Manifest {
 			}
 			hint = so.hint;
 		}
-		return { name: so.name, cmd: so.cmd, hint };
+		let expect: "pass" | "fail" | undefined;
+		if (so.expect !== undefined) {
+			if (so.expect !== "pass" && so.expect !== "fail") {
+				throw new Error(`manifest.sensors[${i}].expect must be "pass" or "fail"`);
+			}
+			expect = so.expect;
+		}
+		return { name: so.name, cmd: so.cmd, hint, expect };
 	});
 
 	const names = sensors.map((s) => s.name);
@@ -463,4 +478,23 @@ export function advanceLadder(
 
 export function modelAt(models: string[], rung: number): string {
 	return models[Math.min(rung, models.length - 1)];
+}
+
+/**
+ * Feature sensors (expect: "fail") that PASSED at baseline.
+ *
+ * Such a sensor gates nothing: the behaviour it claims to require already
+ * "works" on the unchanged tree, so the loop can converge having built
+ * nothing and still report green. Observed for real - four sensors written
+ * against a CLI whose handlers silently ignored unknown trailing args all
+ * passed before a line was written.
+ */
+export function nonDiscriminating(
+	sensors: Sensor[],
+	baseline: SensorResult[],
+): string[] {
+	const byName = new Map(baseline.map((r) => [r.name, r]));
+	return sensors
+		.filter((s) => s.expect === "fail" && byName.get(s.name)?.ok === true)
+		.map((s) => s.name);
 }

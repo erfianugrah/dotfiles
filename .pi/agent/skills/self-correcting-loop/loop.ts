@@ -41,6 +41,7 @@ import {
 	allPass,
 	applyFreeze,
 	failingNames,
+	nonDiscriminating,
 	buildPrompt,
 	countFailing,
 	decide,
@@ -383,6 +384,20 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 	// Baseline sensor run (also the --dry output).
 	console.log("\n  baseline sensors:");
 	const rawBaseline = await runAllSensors(m);
+	// A feature sensor (expect: "fail") that passes on the unchanged tree gates
+	// nothing - the loop could green out having built nothing. Refuse the run
+	// rather than hand back false confidence.
+	const dud = nonDiscriminating(m.sensors, rawBaseline);
+	if (dud.length) {
+		console.error(
+			`\nnon-discriminating sensor(s): ${dud.join(", ")}\n` +
+				`these declare expect: "fail" but PASS on the unchanged tree, so they gate nothing.\n` +
+				`assert the DIFFERENCE the change should make (new column present, old one absent,\n` +
+				`filtered output != unfiltered), not something already true. common cause: a CLI that\n` +
+				`silently ignores unknown trailing args, so \`cmd newsubcommand\` already exits 0.`,
+		);
+		return 2;
+	}
 	// Freeze: sensors already failing at baseline are tolerated (debt), so only
 	// NEW failures gate. applyFreeze marks them ok for gating purposes.
 	const frozen = freeze ? failingNames(rawBaseline) : new Set<string>();

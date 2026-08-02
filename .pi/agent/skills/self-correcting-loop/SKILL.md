@@ -160,6 +160,35 @@ desired end state as a feature-present sensor that FAILS pre-change (e.g.
 `rg -q <new-symbol> <file>`, `jq -e '.x == false' <cfg>`) - that is what
 gives the loop something to converge on.
 
+Mark those `"expect": "fail"`. The run is REFUSED (exit 2) if such a sensor
+passes at baseline, because a feature sensor that is already green gates
+nothing - the loop can converge having built nothing and still report PASS.
+Guards (build/lint/test) default to `"expect": "pass"` and are never flagged.
+
+Two failure modes this encodes, both observed on a real run (2026-08-02,
+eaves roadmap Tier 1):
+
+- **Non-discriminating.** Four sensors passed before a line was written,
+  because the CLI's handlers silently ignored unknown trailing args - so
+  `show interfaces terse` already exited 0 printing the default table.
+  Assert the DIFFERENCE: terse must NOT carry the MAC column, the resolved
+  log must NOT contain kea lines, the chain view must NOT be the tables
+  summary.
+- **Over-specified, therefore unsatisfiable.** Two sensors asserted
+  IMPLEMENTATION LOCATION (`rg 'destination' internal/show/show.go`) and
+  exact doc PHRASING (`rg 'ruleset table' README.md`). The model put the
+  filter in the pure parse layer (better) and wrote `ruleset [table <t>]`
+  (standard usage syntax) - both correct, both red. Five iterations and
+  ~30 minutes burned before the sensors were diagnosed as the bug. Assert
+  BEHAVIOUR (`--json ... | jq -e 'length == 3'`), not where code lives or
+  how prose is worded. If a sensor stays red across 3+ iterations while the
+  feature demonstrably works by hand, suspect the sensor first.
+
+A doc sensor should also grep NEGATIVELY for statements the change
+falsifies ("no X yet", a stale count, "duplicates the const"). Presence-only
+doc checks pass while the rest of the file still contradicts the feature -
+that exact gap shipped a doc asserting the opposite of five shipped items.
+
 `run` exit codes: `0` all sensors green, `1` still red after budget, `2`
 manifest/usage error.
 
@@ -176,12 +205,18 @@ manifest/usage error.
   "sensors": [
     { "name": "build", "cmd": "go build ./..." },
     { "name": "vet",   "cmd": "go vet ./..." },
-    { "name": "test",  "cmd": "go test ./..." }
+    { "name": "test",  "cmd": "go test ./..." },
+    { "name": "feature-wechat-provider", "expect": "fail",
+      "cmd": "go test ./providers/wechat -run TestWeChat -count=1",
+      "hint": "the provider must round-trip an auth code; see the module spec" }
   ]
 }
 ```
 
 - `task` - the feed-forward instruction. Keep it scoped; one module/feature.
+- `expect` - `"fail"` marks a FEATURE sensor that must be red on the unchanged
+  tree; the run is refused if it is green (see the discrimination lesson
+  above). Omit it for guards.
 - `sensors` - the feedback controls. Each `cmd` runs under `bash -lc`; exit 0 =
   pass. Order them cheap-to-expensive (build before test) - all must pass. Each
   sensor may carry an optional `hint` string, appended to the feedback when it

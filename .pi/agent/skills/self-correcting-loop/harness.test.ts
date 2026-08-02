@@ -17,6 +17,7 @@ import {
 	globToRegExp,
 	matchGlob,
 	modelAt,
+	nonDiscriminating,
 	normalizeModels,
 	outOfScope,
 	parseManifest,
@@ -338,5 +339,65 @@ describe("advanceLadder / modelAt", () => {
 	test("modelAt clamps to the last rung", () => {
 		expect(modelAt(["a", "b"], 0)).toBe("a");
 		expect(modelAt(["a", "b"], 5)).toBe("b");
+	});
+});
+
+describe("nonDiscriminating", () => {
+	const res = (name: string, ok: boolean) => ({
+		name, cmd: "x", ok, exitCode: ok ? 0 : 1, output: "",
+	});
+
+	test("flags a feature sensor that passes at baseline", () => {
+		const sensors = [
+			{ name: "build", cmd: "b" },
+			{ name: "feature-x", cmd: "f", expect: "fail" as const },
+		];
+		expect(nonDiscriminating(sensors, [res("build", true), res("feature-x", true)]))
+			.toEqual(["feature-x"]);
+	});
+
+	test("a feature sensor that fails at baseline is correct", () => {
+		const sensors = [{ name: "feature-x", cmd: "f", expect: "fail" as const }];
+		expect(nonDiscriminating(sensors, [res("feature-x", false)])).toEqual([]);
+	});
+
+	test("guards default to expect pass and are never flagged", () => {
+		const sensors = [{ name: "build", cmd: "b" }, { name: "vet", cmd: "v", expect: "pass" as const }];
+		expect(nonDiscriminating(sensors, [res("build", true), res("vet", true)])).toEqual([]);
+	});
+
+	test("reports every offender, not just the first", () => {
+		const sensors = [
+			{ name: "a", cmd: "a", expect: "fail" as const },
+			{ name: "b", cmd: "b", expect: "fail" as const },
+			{ name: "c", cmd: "c", expect: "fail" as const },
+		];
+		const baseline = [res("a", true), res("b", false), res("c", true)];
+		expect(nonDiscriminating(sensors, baseline)).toEqual(["a", "c"]);
+	});
+
+	test("a missing baseline result is not flagged", () => {
+		const sensors = [{ name: "ghost", cmd: "g", expect: "fail" as const }];
+		expect(nonDiscriminating(sensors, [])).toEqual([]);
+	});
+});
+
+describe("manifest expect field", () => {
+	test("parses pass/fail and defaults to undefined", () => {
+		const m = parseManifest({
+			task: "t",
+			sensors: [
+				{ name: "a", cmd: "a" },
+				{ name: "b", cmd: "b", expect: "fail" },
+				{ name: "c", cmd: "c", expect: "pass" },
+			],
+		});
+		expect(m.sensors.map((s) => s.expect)).toEqual([undefined, "fail", "pass"]);
+	});
+
+	test("rejects a bogus expect value", () => {
+		expect(() =>
+			parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a", expect: "maybe" }] }),
+		).toThrow(/expect must be/);
 	});
 });
