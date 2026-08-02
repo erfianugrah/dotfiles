@@ -1,6 +1,6 @@
 ---
 name: eaves
-description: Drive the user's `eaves` CLI - a read-only Juniper/VyOS-style operational shell for the NixOS edge router (ssh alias `nixos`). Use when answering operational questions about the edge router (DHCP leases/pools, NAT translations, conntrack count, nftables ruleset, interfaces/routes/neighbors, vnstat bandwidth, kea journal), running the 13-check `doctor` health/regression suite after a router.nix rebuild, answering router questions OFFLINE via the committed fixtures (EAVES_FIXTURE_DIR, no ssh needed), re-capturing/sanitizing fixtures, or extending the CLI itself. Fires on "eaves", "show dhcp leases", "who is 10.0.x.x", "router health", "edge router status", "is NAT working". NOT for config changes - eaves has no configure mode by design; config is router.nix + nixos-rebuild. Sibling to `tailscale-homelab` (ssh), `knotctl`, `caddy`. Repo `~/eaves` (private GitHub erfianugrah/eaves), stdlib-only Go, CI green.
+description: Drive the user's `eaves` CLI - a read-only Juniper/VyOS-style operational shell for the NixOS edge router (ssh alias `nixos`). Use when answering operational questions about the edge router (DHCP leases/pools, NAT translations, conntrack count, nftables ruleset, interfaces/routes/neighbors, vnstat bandwidth, kea journal), running the 13-check `doctor` health/regression suite, checking config drift with `show system drift` after a router.nix rebuild, answering router questions OFFLINE via the committed fixtures (EAVES_FIXTURE_DIR, no ssh needed), re-capturing/sanitizing fixtures, or extending the CLI itself. Fires on "eaves", "show dhcp leases", "who is 10.0.x.x", "router health", "edge router status", "is NAT working". NOT for config changes - eaves has no configure mode by design; config is router.nix + nixos-rebuild. Sibling to `tailscale-homelab` (ssh), `knotctl`, `caddy`. Repo `~/eaves` (private GitHub erfianugrah/eaves), stdlib-only Go, CI green.
 ---
 
 # eaves - read-only operational CLI for the edge router
@@ -57,7 +57,7 @@ eaves show nat translations               # orig vs reply tuples (NAT'd only)
 eaves show conntrack count                # N / max (pct)
 eaves show firewall ruleset               # tables/chains/policies/rule counts
 eaves show log [unit X] [lines N]         # journal, default kea-dhcp4-server
-eaves show system bandwidth|storage|version
+eaves show system bandwidth|storage|version|drift
 eaves monitor interface <name> [top]      # vnstat -l / iftop - LIVE ONLY
 eaves --json show ...                     # machine-readable, pipe to jq
 ```

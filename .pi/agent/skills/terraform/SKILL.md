@@ -213,6 +213,14 @@ shred -u /tmp/decrypted.tfvars
 
 **`.gitignore`** must include `*.tfvars` with `!secrets.enc.tfvars` exception (so the encrypted file IS committed).
 
+**Three details that bite (validated in supabase-lab, 2026-07):**
+
+- **`.tfvars` needs binary mode.** `sops --input-type binary --output-type binary -d secrets.enc.tfvars` - HCL is not a format sops parses structurally, so without it you get parse errors or a mangled round-trip. Put it in a Makefile var: `SOPS := sops --input-type binary --output-type binary`.
+- **`sops` finds the key at `~/.config/sops/age/keys.txt` with no env var set**, so `make` / CI / any non-interactive shell works without exporting `SOPS_AGE_KEY_FILE` or sourcing a shell wrapper. On a fresh clone the only bootstrap step is restoring that keyfile (mode 600) - say so in the README, since `.sops.yaml` carries only the public recipient and a missing key just fails the decrypt.
+- **Never commit plan files.** `tfplan` is a zip archive embedding tfstate, which includes every variable value - i.e. every secret, encrypted-at-rest or not. Gitignore `tfplan`, `*.tfplan`, `tfplan-*`. Same reasoning applies to any test-evidence directory that captures connection details.
+
+If the repo has a pre-commit hook blocking unencrypted `*tfvars*`, keep an allowlist file (e.g. `.allow-unencrypted-paths`) for the legitimately-plaintext ones - the `secrets.example.tfvars` template and per-environment non-secret config - and document it, or the first commit on a fresh clone hits a confusing block.
+
 ### Environment variables (for tokens)
 
 ```sh
