@@ -7,7 +7,12 @@ description: Fly.io app lifecycle via the `flyctl` CLI — deploy, secrets (Vaul
 
 This skill captures the workflows you'll actually do — lifecycle, secrets, certs, machines, debug. Skips generic "Hello World" tutorial content.
 
-List all apps in your org with `flyctl apps list`. Examples below use `<app>` as the app-name placeholder — substitute the real name.
+List all apps in your org with `flyctl apps list`. Examples below use `<app>` as the app-name placeholder - substitute the real name.
+
+Command and flag existence was checked against **flyctl v0.4.77** (2026-08-03)
+by running `--help` on every invocation in this file. Re-check before trusting
+a flag in a script: `flyctl <cmd> --help | rg <flag>`. Dollar figures below are
+order-of-magnitude only - the pricing page is authoritative.
 
 ## Auth + setup
 
@@ -85,15 +90,84 @@ flyctl deploy --image ghcr.io/<org>/<app>:v1.2.3
 # deploy + watch
 flyctl deploy --strategy=rolling --wait-timeout=600
 
-# deploy without a redeploy (only update config)
-flyctl deploy --strategy=immediate --skip-image-refresh
-
-# remote build (no local Docker — Fly builds for you)
+# remote build is the DEFAULT (no local Docker needed); opt out with --local-only
 flyctl deploy --remote-only
+flyctl deploy --local-only
 
-# inspect what would deploy without doing it
-flyctl deploy --dry-run --build-only
+# build the image but stop before deploying it
+flyctl deploy --build-only
 ```
+
+Flags that do NOT exist on `flyctl deploy` (v0.4.77), despite being widely
+cited: `--dry-run`, `--skip-image-refresh`. Verify with
+`flyctl deploy --help | rg <flag>` before putting one in a script.
+
+### Pushing images to Fly's own registry (`registry.fly.io`)
+
+Fly machines pull images **server-side**. That means a private ghcr.io /
+DockerHub image is not reachable by default - the machine has no credentials.
+Two ways out; the mirror is usually the better one.
+
+**Mirror pattern - the only supported route for a private image.** Retag the
+already-built image into Fly's registry and push it there. Every app gets
+`registry.fly.io/<app>` for free, and machines can always pull from it.
+
+```bash
+flyctl auth docker                              # writes a Fly token into ~/.docker/config.json
+
+docker pull ghcr.io/<org>/<image>:<ver>
+docker tag  ghcr.io/<org>/<image>:<ver> registry.fly.io/<app>:<ver>
+docker push registry.fly.io/<app>:<ver>
+flyctl deploy -a <app> --image registry.fly.io/<app>:<ver>
+```
+
+Canonical worked example: `~/knotea/resolver/Makefile` targets `fly-image` +
+`fly-deploy`. Note that despite the name, `fly-deploy` builds **nothing**
+locally - it mirrors the CI-built image. Mirror the same step in the release
+workflow so tagged versions are pushable without a local Docker at all.
+
+**Pushing a locally built image** (iterating on a throwaway / bench app) is the
+same minus the pull:
+
+```bash
+flyctl auth docker
+docker build -t registry.fly.io/<app>:<tag> -f Dockerfile .
+docker push registry.fly.io/<app>:<tag>
+flyctl deploy -a <app> --image registry.fly.io/<app>:<tag>
+```
+
+**There is no credentials-on-the-machine alternative.** Fly does not accept
+third-party registry credentials for image pulls - no `flyctl deploy` flag, no
+magic secret name, nothing in the docs. (An earlier version of this skill
+claimed `DOCKER_REGISTRY_USERNAME` / `DOCKER_REGISTRY_PASSWORD` secrets did
+this. They do not exist: zero hits across the flyio doc corpus, no flag in
+flyctl v0.4.77, and Fly's own answer on the request is "push to your app
+registry instead".) Mirror, or make the upstream image public.
+
+Useful adjacent commands:
+
+```bash
+docker manifest inspect registry.fly.io/<app>:<tag>   # exists? exit 1 if not (needs auth docker)
+flyctl releases -a <app> --image                      # image refs actually deployed
+```
+
+There is no API to list tags in the Fly registry - a tag only becomes visible
+to Fly once it is part of a release.
+
+Gotchas:
+- **`flyctl auth docker` tokens expire after 5 minutes.** Re-auth immediately
+  before the push, not at the top of a long script; a slow push of a large
+  image can die partway. A `denied: authentication required` means re-run it,
+  not that the tag is wrong.
+- Registry paths are per-app but **access is org-scoped**: you can push to
+  `registry.fly.io/app-1` and deploy that same image on `app-2` in the same
+  org (`flyctl deploy --app app-2 --image registry.fly.io/app-1:tag`). Useful
+  for build-once-deploy-many.
+- `[build] image = "..."` in `fly.toml` is fine and is the documented way to
+  pin a public image. The footgun is `[build] dockerfile = ...` (or just a
+  Dockerfile in the working directory): a bare `flyctl deploy` then builds
+  instead of shipping the mirrored image you meant. If you deploy by
+  `--image`, keep the build keys out.
 
 `strategy` options worth knowing:
 - **rolling** (default) — one machine at a time, safest for stateful apps. Slowest.
@@ -224,15 +298,19 @@ flyctl volumes create app_data --size 1 --region fra --app <app>    # 1 GB
 flyctl volumes show <vol-id> --app <app>
 flyctl volumes destroy <vol-id> --app <app>
 flyctl volumes fork <vol-id> --app <app>                            # clone (useful for migrations)
+flyctl volumes extend <vol-id> --size 5 --app <app>                 # grow in place, usually no restart
 flyctl volumes snapshots list <vol-id> --app <app>
 flyctl volumes snapshots create <vol-id> --app <app>
-flyctl volumes restore <snapshot-id> --app <app>
+
+# restore = create a NEW volume from a snapshot. There is no `volumes restore`
+# subcommand (it silently prints group help, which reads like success).
+flyctl volumes create app_data --snapshot-id <snap-id> --size 5 --region fra --app <app>
 ```
 
 Volume gotchas:
 - Volumes are **regional**, not global. A volume in `fra` can only attach to machines in `fra`. If you scale to multiple regions, each needs its own volume — they don't auto-replicate.
 - Snapshots are taken automatically every 24h (5 retained). Force one before risky upgrades.
-- Volumes can't shrink. Plan size up-front; resizing requires destroy + restore from snapshot.
+- Volumes grow in place with `flyctl volumes extend` but **cannot shrink**. To go smaller: snapshot, `volumes create --snapshot-id` at the smaller size, move the machine over, destroy the old one.
 
 ## Private networking + .internal DNS
 
@@ -242,28 +320,50 @@ Inside a Fly org, apps can talk to each other on a WireGuard mesh via `.internal
 # from inside one app, reach another
 curl http://other-app.internal:8080/health
 
-# multi-instance (any healthy machine)
-curl http://_app.internal/health
+# closest N machines (AAAA)
+curl http://top1.nearest.of.other-app.internal:8080/health
 
 # specific machine
 curl http://<machine-id>.vm.<app>.internal:8080/health
+
+# process group / region subsets
+curl http://<group>.process.<app>.internal:8080/health
+curl http://fra.<app>.internal:8080/health
 ```
+
+`<app>.internal` already returns the 6PN addresses of **all started** machines
+(stopped/autostopped ones are excluded), so it is the "any instance" form.
+The underscore names are TXT discovery records, not HTTP endpoints:
+`_apps.internal` lists app names in the org, `_instances.internal` lists
+machine/app/address/region. Query them with `dig`, don't curl them.
+
+Your service must bind `fly-local-6pn` (aliased in `/etc/hosts`) or the 6PN
+address itself - binding only to `127.0.0.1` makes it unreachable over 6PN.
 
 Tailscale integration: Fly orgs can be added to a Tailscale tailnet via Tailscale's `flyctl` integration. Useful for letting your Unraid box reach Fly internal services without going public.
 
-## Postgres (managed cluster)
+## Postgres - two products, don't mix them up
 
-If you use `flyctl postgres create`:
+`flyctl postgres` is the **unmanaged legacy** offering. flyctl itself now warns
+on every invocation: "Unmanaged Fly Postgres is not supported by Fly.io Support
+and users are responsible for operations, management, and disaster recovery."
+The managed product is `flyctl mpg` (create / attach / connect / proxy /
+backup / restore / status / users).
 
 ```bash
+# legacy / unmanaged
 flyctl postgres list
-flyctl postgres connect --app <pg-app-name>        # opens psql
+flyctl postgres connect --app <pg-app-name>              # opens psql
 flyctl postgres attach <pg-app-name> --app <client-app>  # injects DATABASE_URL secret
-
-# backups
-flyctl postgres list-backups --app <pg-app-name>
+flyctl postgres backup list --app <pg-app-name>          # NOT `list-backups`
 flyctl postgres backup create --app <pg-app-name>
-flyctl postgres backup restore <backup-id> --app <pg-app-name>
+flyctl postgres backup restore <backup-id>               # WAL-restore into a NEW cluster, not in place
+
+# managed
+flyctl mpg list
+flyctl mpg status
+flyctl mpg attach <cluster> --app <client-app>
+flyctl mpg proxy                                         # local port -> managed cluster
 ```
 
 For most workloads, **NOT using Fly Postgres is cheaper** — connect to your own self-hosted PG via the `.internal` mesh (if your PG is on Fly too) or via Tailscale (to your Unraid PG).
@@ -303,18 +403,20 @@ Three knobs:
 2. **`auto_stop_machines` + `min_machines_running=0`**: idle apps pay $0 except for storage. For push / batch / notification apps with infrequent traffic, no-brainer.
 3. **Region count**: each region replicates VMs + volumes. Most personal apps need 1 region. Multi-region only for global anycast performance.
 
-Check bills + usage:
+Check usage:
 
 ```bash
-flyctl billing show
 flyctl orgs show <your-org>
 ```
+
+There is no `flyctl billing` command (v0.4.77) - invoices and usage are
+dashboard-only.
 
 ## Foot-guns (real ones)
 
 - **Secrets `set` triggers redeploy unless `--stage`**. Always `--stage` + batch + `deploy` for multi-secret updates.
 - **`flyctl certs check` polls slowly**. The status `Awaiting configuration` means DNS records aren't found yet; `DNS Validated` means cert is being issued; `Ready` means done. Issuance can take 5-15 min for Let's Encrypt rate limits. Use `bg_bash` for the polling loop (see "Certs" section above).
-- **Image pulls from private registries** need `flyctl secrets set DOCKER_REGISTRY_PASSWORD=...` first. Public ghcr.io images work without auth.
+- **Private third-party registries are not supported at all.** Machines pull server-side with no credentials; public ghcr.io / Docker Hub images work, private ones do not, and there is no secret or flag that changes this. Mirror into `registry.fly.io/<app>` (see "Pushing images to Fly's own registry").
 - **`.fly` vs `.fly.dev` confusion**: your app gets a free `<app>.fly.dev` hostname AND can have custom domains. Both work; don't disable the .fly.dev URL — it's useful for testing routing.
 - **Machine ID vs app name**: a lot of `flyctl` commands work with either, but the `--machine` flag specifically wants the ID (looks like `1234ab567c89def`).
 - **`flyctl deploy` cancels prior in-flight deploys** automatically. Useful but surprising; if you pushed a typo + immediately re-pushed, the first push will be killed mid-rollout.
