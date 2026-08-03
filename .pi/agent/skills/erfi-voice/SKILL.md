@@ -51,6 +51,35 @@ These are the patterns AI-writing guides (Wikipedia's "Signs of AI writing" name
 
 Two guards against overcorrection. First, the generic "humanize" prompts go much further -- banning semicolons, dashes, "however / while / although / because", and mandating 10-20-word sentences. Do NOT import those: connectors, subordination, and the `;`-flow ARE the voice (disposition #2, characteristic 12), and a sentence-length metronome reads as more machine-made, not less. Second, the goal is sounding like Erfi, not fooling a detector -- a lone flagged word is not a crime. Kill clusters of tells; never flatten the voice to dodge a wordlist.
 
+### Importance-announcing - long-form docs are in scope too
+
+Corpo tell #7 (rating your own points) fires hardest in long-form technical
+docs, because the register legitimately allows headings, tables and TL;DRs and
+the corpo guard reads as off-duty. It is not off-duty. Struck verbatim from the
+lexicanum corpus (2026-08-03, the Supabase migration guides):
+
+- "The most important thing to understand before starting: **X**" -> state X and move on.
+- "Three of these deserve their own sections because they surprise everyone." -> delete the bridge; the three headings follow it anyway.
+- "past the watchdog threshold (the #1 logical-replication outage mode)" -> give the mechanism instead: "an unconsumed slot retains WAL until the source disk fills".
+- "The replication is the easy part; the repointing is the move." -> structural tell #1 (negative parallelism) in slogan costume. Say what to do and why: "Enumerate the repointing surface before the window - none of it is touched by the replication."
+- Softer frames of the same move: "Note the <X> consequence:", "One <X> worth pre-checking:", "worth noting", "the one item that can ...". Drop the frame, keep the fact.
+
+Two replacements for the instinct: **order** sections and bullets so the one
+that matters comes first rather than announcing which matters, and when
+tempted to grade a risk, give the mechanism and the number that make it
+dangerous. A measured delta plus the command that reproduces it IS the
+persuasion.
+
+Sweep before shipping any doc-length draft:
+
+```bash
+rg -in 'most important|deserve|surprise|the #1|the big |easy part|the trap|nasty|crucially|importantly|worth noting|the key (thing|insight)|it turns out|note the'
+```
+
+Where a repo has its own style contract (lexicanum's AGENTS.md encodes this
+same rule), it governs the doc's skeleton and spelling - but these subtractive
+rules hold regardless of which contract is in force.
+
 ### Openers depend on audience: cold for customer-facing, warm-ok for internal peers
 
 The cold-open rule below is the CUSTOMER-FACING rule (relay to an AE, review reply, anything that reaches a customer). It does NOT generalise to an internal peer conversation. When the reader is a colleague on your own team - not a customer - a short warm/rapport opener IS Erfi's voice: "Agreed, we're on the same page for the most part, and no worries, I prefer you be blunt hahah" (verbatim, real internal Slack reply, 2026-07-09). Peer chat gets the rapport line and the `hahah`; the cold-open discipline is reserved for the customer-facing surface. Before applying the strike-outs below, ask: customer-facing, or internal? If internal, keep the warmth.
