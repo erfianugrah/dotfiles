@@ -65,7 +65,7 @@ bin/
 .claude/                       # Claude Code wiring (user-level, stow-linked to ~/.claude/)
   CLAUDE.md                    # universal agent rules (harness-agnostic subset of APPEND_SYSTEM.md)
   skills/                      # per-skill relative symlinks -> ../../.pi/agent/skills/<name>
-                               # (15 domain skills; coexists with the local Cloudflare skill set.
+                               # (17 domain skills; coexists with the local Cloudflare skill set.
                                #  settings.json deliberately NOT tracked - Claude mutates it live)
 
 .pi/agent/                     # pi AI coding agent (PRIMARY harness; canonical skills + resources)
@@ -867,7 +867,7 @@ DB access, session lifecycle hooks).
 | `git-gh-gate.ts` | Confirmation modal before mutating git/gh commands (truncates display body to avoid long-session scroll cascade) |
 | `ascii-punctuation-guard.ts` | Blocks mojibake-prone smart punctuation (em/en dash, smart quotes, ellipsis) in write / edit / apply_patch / commit payloads - keeps committed + pasted text ASCII |
 | `confidential-write-guard.ts` | Nudges once per repo before persisting prose to a remote-backed repo; hard-blocks user-confirmed confidential third-party identifiers |
-| `epistemic-guard.ts` | Provenance gate for the specifics the model emits. Builds a corpus of every literal seen in tool results / user messages / system prompt, then blocks writes, commits and PR bodies carrying a version, flag, system path, deep URL, CVE or perf number with NO provenance this session (once per specific - verifying it silences it for good). Annotates interactive answers with a `recalled, not verified` footer; no footer and a block budget under `pi -p` so subagent payloads and loop iterations are not corrupted or taxed. `/epistemics` reports state |
+| `epistemic-guard.ts` | Provenance gate for the specifics the model emits. Builds a corpus of every literal seen in tool results / user messages / system prompt, then blocks writes, commits and PR bodies carrying a version, flag, system path, deep URL, CVE or perf number with NO provenance this session (once per specific - verifying it silences it for good). Annotates interactive answers with a `recalled, not verified` footer; no footer and a block budget under `pi -p` so subagent payloads and loop iterations are not corrupted or taxed. `/epistemics` reports state. Kill switches: `PI_EPISTEMIC_GUARD_OFF=1`, `PI_EPISTEMIC_FOOTER_OFF=1`, `PI_EPISTEMIC_MAX_BLOCKS=0` |
 | `skill-guard.ts` | Actively routes to a matching skill the model would otherwise skip: intent nudge on the prompt (`before_agent_start`) + block-once on skill-relevant file edits / commands (`tool_call`). Companion to the passive skill-description layer |
 | `slash-typo-guard.ts` | Catches typo'd slash commands before they reach the LLM |
 | `cd-agents-reload.ts` | Warns when you `cd` into a repo whose `AGENTS.md` was not loaded at session start |

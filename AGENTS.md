@@ -119,7 +119,7 @@ symlinks, NOT a whole-dir link (`~/.claude/skills/` already holds a locally
 installed Cloudflare skill set a whole-dir link would clobber):
 
 - `.claude/skills/<name>` -> `../../.pi/agent/skills/<name>` - one relative
-  symlink per shared skill (15 domain skills today). Add another the same
+  symlink per shared skill (17 domain skills today). Add another the same
   way + stow; stow nests it alongside the local skills, no folding.
 - `.claude/CLAUDE.md` - universal agent rules (authorship, safety,
   confidential IDs, ASCII output, calibration). A handwritten
