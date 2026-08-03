@@ -70,7 +70,7 @@ bin/
 
 .pi/agent/                     # pi AI coding agent (PRIMARY harness; canonical skills + resources)
   APPEND_SYSTEM.md             # appended: Commit/PR, Safety, Epistemic calibration, Confidential-IDs, Output
-  skills/                      # 39 skills + 6 superpowers subskills (canonical since 2026-05-27)
+  skills/                      # 46 skills + 6 superpowers subskills (canonical since 2026-05-27)
   prompts/                     # markdown sources loaded by extensions
     tool-routing.md            #   prepended via before_agent_start with CRITICAL framing
     local-model-rules.md       #   prepended only for gemma/qwen/llama-server models
@@ -738,6 +738,7 @@ rationale.
 | `superpowers` (residual) | obra/superpowers - only `verification-before-completion` (always-on), `writing-plans`, `subagent-driven-development`, `systematic-debugging`, `requesting-code-review`, `writing-skills` survive as 6 opt-in subskills. Conditional injection extension defaults to OFF; opt back in per-session via `SUPERPOWERS_ON=1` |
 | `sa-pov` | Solutions-Architect PoV / PoC methodology - scope + negotiate success criteria, validate each live (not from docs), solution runbook with real evidence, package for the customer |
 | `self-correcting-loop` | Unattended sensor-gated agent loop - runs a fresh `pi -p` per iteration until computational + inferential sensors (build / test / judge / visual) pass |
+| `epistemics` | Answering-from-memory discipline - the provenance test, cheapest-verifier routing table per claim type, the four claim labels, calibrate-do-not-hedge, and the hold-ground-under-pushback protocol. Third leg beside `verification-before-completion` (own work) and `validating-empirically` (external runtime behaviour); companion to the `epistemic-guard` extension |
 | `abuse-operations` | Anti-abuse / fraud-detection system design - risk scoring, indicator design, actor / campaign tracking, false-positive handling |
 
 **Frontend + UI**:
@@ -866,6 +867,7 @@ DB access, session lifecycle hooks).
 | `git-gh-gate.ts` | Confirmation modal before mutating git/gh commands (truncates display body to avoid long-session scroll cascade) |
 | `ascii-punctuation-guard.ts` | Blocks mojibake-prone smart punctuation (em/en dash, smart quotes, ellipsis) in write / edit / apply_patch / commit payloads - keeps committed + pasted text ASCII |
 | `confidential-write-guard.ts` | Nudges once per repo before persisting prose to a remote-backed repo; hard-blocks user-confirmed confidential third-party identifiers |
+| `epistemic-guard.ts` | Provenance gate for the specifics the model emits. Builds a corpus of every literal seen in tool results / user messages / system prompt, then blocks writes, commits and PR bodies carrying a version, flag, system path, deep URL, CVE or perf number with NO provenance this session (once per specific - verifying it silences it for good). Annotates interactive answers with a `recalled, not verified` footer; no footer and a block budget under `pi -p` so subagent payloads and loop iterations are not corrupted or taxed. `/epistemics` reports state |
 | `skill-guard.ts` | Actively routes to a matching skill the model would otherwise skip: intent nudge on the prompt (`before_agent_start`) + block-once on skill-relevant file edits / commands (`tool_call`). Companion to the passive skill-description layer |
 | `slash-typo-guard.ts` | Catches typo'd slash commands before they reach the LLM |
 | `cd-agents-reload.ts` | Warns when you `cd` into a repo whose `AGENTS.md` was not loaded at session start |

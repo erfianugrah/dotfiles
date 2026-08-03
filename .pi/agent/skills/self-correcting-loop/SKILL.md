@@ -515,6 +515,24 @@ change is intended and you want a judgment not a byte-compare).
 - **Not for unfenced blast radius.** Great for greenfield modules and
   test-fenced changes; not for "loop on the payments service unattended".
 
+## Interaction with `epistemic-guard`
+
+Each iteration is a fresh `pi -p`, so the guard's provenance corpus starts
+EMPTY every pass. Consequences:
+
+- The answer footer is disabled under `pi -p` (it would corrupt captured
+  stdout / a subagent's return payload), so it cannot affect a sensor.
+- Write blocks still apply, but capped at `PI_EPISTEMIC_MAX_BLOCKS` (default 3)
+  per iteration; after that the guard degrades to observe-only. Worst case is a
+  few extra turns, not a wedged loop.
+- If a loop keeps tripping it, the corpus is the problem, not the guard: have
+  the `task` prompt read the source of truth (lockfile, `--help`, the doc)
+  before writing docs about it. That is the behaviour you wanted anyway - a
+  loop that writes version numbers from memory produces green-but-wrong docs.
+- Escape hatches: `PI_EPISTEMIC_MAX_BLOCKS=0` (observe-only),
+  `PI_EPISTEMIC_GUARD_OFF=1` (off). Set them in the loop's environment, not
+  globally.
+
 ## Testing this skill
 
 ```bash

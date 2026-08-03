@@ -95,6 +95,19 @@ import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
 import { matchHints, matchHintsDetailed, applyOncePerSession, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
 import { findLastUserEntryId } from "../extensions/session-undo.ts";
 import {
+  extractClaims,
+  unprovenanced,
+  provenanceText,
+  assistantAnswerText,
+  hedgedNear,
+  isMessagePersist,
+  commitMessageText,
+  patchAddedText,
+  payloadMode as egPayloadMode,
+  newCorpus as egNewCorpus,
+  absorb as egAbsorb,
+} from "../extensions/epistemic-guard.ts";
+import {
   isCommitPersist,
   scanForBlocked,
   resolveBashCwd,
@@ -3903,5 +3916,204 @@ describe("guard-commit-shared.findRepoRoot + commitNudgeForBlockedCmd", () => {
   test("commitNudgeForBlockedCmd: matches gh PR/issue/release persists too", () => {
     expect(commitNudgeForBlockedCmd("gh pr create -t x -b y", repo)).not.toBeNull();
     expect(commitNudgeForBlockedCmd("gh issue comment 5 -b z", repo)).not.toBeNull();
+  });
+});
+
+// ── epistemic-guard: claim extraction + provenance ────────────────────────
+
+describe("epistemic-guard.payloadMode", () => {
+  test("prose for markdown and docs/ trees", () => {
+    expect(egPayloadMode("README.md")).toBe("prose");
+    expect(egPayloadMode("docs/design/notes.txt")).toBe("prose");
+    expect(egPayloadMode("a/docs/x.yaml")).toBe("prose");
+  });
+  test("code for everything else in the tree", () => {
+    expect(egPayloadMode("src/index.ts")).toBe("code");
+    expect(egPayloadMode("compose.yaml")).toBe("code");
+  });
+  test("skip for scratch, vendored, generated, lockfiles", () => {
+    expect(egPayloadMode("/tmp/x.md")).toBe("skip");
+    expect(egPayloadMode("node_modules/p/readme.md")).toBe("skip");
+    expect(egPayloadMode("dist/app.min.js")).toBe("skip");
+    expect(egPayloadMode("bun.lock")).toBe("skip");
+    expect(egPayloadMode("go.sum")).toBe("skip");
+  });
+});
+
+describe("epistemic-guard.extractClaims / versions", () => {
+  const keys = (t: string, m: "prose" | "code" = "prose") =>
+    extractClaims(t, m)
+      .filter((c) => c.cls === "version")
+      .map((c) => c.key);
+
+  test("semver triple, worded, and pinned forms", () => {
+    expect(keys("we ship 1.2.3 today")).toContain("1.2.3");
+    expect(keys("running Caddy 2.11 in host mode")).toContain("2.11");
+    expect(keys("deps: zod@^4.0.1 and image caddy:2.8.4")).toEqual(
+      expect.arrayContaining(["4.0.1", "2.8.4"]),
+    );
+  });
+
+  test("sentence-final version is still a claim", () => {
+    expect(keys("we run knot 3.5.")).toContain("3.5");
+  });
+
+  test("IPv4 is an address, not a release", () => {
+    expect(keys("the router is 10.0.69.4 and the switch 10.0.69.2")).toEqual([]);
+  });
+
+  test("ordinal references are not versions", () => {
+    expect(keys("see section 3.2 and step 1.4")).toEqual([]);
+  });
+
+  test("an embedded dotted token is not a version", () => {
+    expect(keys("under /usr/lib/python3.11/site-packages")).toEqual([]);
+  });
+
+  test("changelog headings and version fields are bookkeeping, not claims", () => {
+    expect(keys("## [3.12.0] - 2026-07-15\nchanges here")).toEqual([]);
+    expect(keys('{\n  "version": "0.1.1"\n}', "code")).toEqual([]);
+  });
+
+  test("code mode takes pins only, not bare triples", () => {
+    expect(keys('const v = "2.8.4";', "code")).toEqual([]);
+    expect(keys('import "zod@^4.0.1";', "code")).toEqual(["4.0.1"]);
+  });
+});
+
+describe("epistemic-guard.extractClaims / other classes", () => {
+  const of = (t: string, cls: string, m: "prose" | "code" = "prose") =>
+    extractClaims(t, m)
+      .filter((c) => c.cls === cls)
+      .map((c) => c.key);
+
+  test("deep URLs are citations; bare hosts and placeholders are not", () => {
+    expect(of("see https://caddyserver.com/docs/caddyfile/directives/tls now", "url")).toEqual([
+      "https://caddyserver.com/docs/caddyfile/directives/tls",
+    ]);
+    expect(of("visit https://erfi.io and http://localhost:3000/x", "url")).toEqual([]);
+  });
+
+  test("trailing sentence punctuation is not part of the URL", () => {
+    expect(of("see https://a.dev/b/c.", "url")).toEqual(["https://a.dev/b/c"]);
+  });
+
+  test("perf numbers: latency, throughput, speedup factors", () => {
+    expect(of("p99 fell to 12ms at 4200 rps, 3x faster", "perf")).toEqual(
+      expect.arrayContaining(["12ms", "4200rps", "3x"]),
+    );
+  });
+
+  test("CVE ids, uppercased", () => {
+    expect(of("patched cve-2021-44228 last year", "cve")).toEqual(["CVE-2021-44228"]);
+  });
+
+  test("flags: specific ones count, ubiquitous ones do not", () => {
+    expect(of("pass --dns-01 to enable it", "flag")).toEqual(["--dns-01"]);
+    expect(of("pass --help or --json", "flag")).toEqual([]);
+  });
+
+  test("system paths count; project-relative paths do not", () => {
+    expect(of("config at /etc/caddy/Caddyfile and ~/.config/knot", "syspath")).toEqual(
+      expect.arrayContaining(["/etc/caddy/Caddyfile", "~/.config/knot"]),
+    );
+    expect(of("edit src/index.ts", "syspath")).toEqual([]);
+  });
+
+  test("fenced blocks are instructions: only pins/CVEs survive", () => {
+    const md = "Run it:\n\n```bash\ncaddy run --weird-flag /etc/nowhere\n```\n";
+    expect(extractClaims(md, "prose")).toEqual([]);
+  });
+
+  test("an unfenced flag in the same doc is still an assertion", () => {
+    const md = "Pass --weird-flag.\n\n```bash\nls\n```\n";
+    expect(of(md, "flag")).toEqual(["--weird-flag"]);
+  });
+});
+
+describe("epistemic-guard.provenance", () => {
+  test("a tool result silences the matching claim", () => {
+    const c = egNewCorpus();
+    egAbsorb(c, "caddy version v2.11.4");
+    const claims = extractClaims("we run Caddy 2.11.4 and Knot 3.5.9", "prose");
+    expect(unprovenanced(c, claims, new Set()).map((x) => x.key)).toEqual(["3.5.9"]);
+  });
+
+  test("paths and URLs match prefix-wise in both directions", () => {
+    const c = egNewCorpus();
+    egAbsorb(c, "/etc/caddy/Caddyfile\nhttps://a.dev/docs/x/y");
+    const claims = extractClaims("see /etc/caddy and https://a.dev/docs/x/y/z", "prose");
+    expect(unprovenanced(c, claims, new Set())).toEqual([]);
+  });
+
+  test("a specific is surfaced once per session, then passes", () => {
+    const c = egNewCorpus();
+    const flagged = new Set<string>();
+    const claims = extractClaims("Knot 3.5.9", "prose");
+    expect(unprovenanced(c, claims, flagged)).toHaveLength(1);
+    expect(unprovenanced(c, claims, flagged)).toHaveLength(0);
+  });
+
+  test("assistant output is never provenance; tool results and user text are", () => {
+    expect(
+      provenanceText({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "2.9.9" }] } }),
+    ).toBe("");
+    expect(
+      provenanceText({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "2.9.9" }] } }),
+    ).toContain("2.9.9");
+    expect(provenanceText({ type: "message", message: { role: "user", content: "2.9.9" } })).toContain("2.9.9");
+    expect(
+      provenanceText({ type: "message", message: { role: "bashExecution", command: "x", output: "2.9.9" } }),
+    ).toContain("2.9.9");
+  });
+
+  test("a message that calls tools is a working step, not an answer", () => {
+    expect(assistantAnswerText({ role: "assistant", content: [{ type: "text", text: "hi" }] })).toBe("hi");
+    expect(
+      assistantAnswerText({
+        role: "assistant",
+        content: [{ type: "text", text: "hi" }, { type: "toolCall", id: "1", name: "bash" }],
+      }),
+    ).toBe("");
+  });
+
+  test("a claim labelled NEXT TO the number is already calibrated", () => {
+    expect(extractClaims("Caddy 2.11.4 (unverified - recalled).", "prose")).toEqual([]);
+    expect(extractClaims("I cannot confirm this, but Caddy 2.11.4 is current.", "prose")).toEqual([]);
+  });
+
+  test("a distant hedge does NOT exempt the whole payload", () => {
+    const doc = "Some numbers below are unverified.\n\n" + "filler. ".repeat(60) + "Caddy 2.11.4 is current.";
+    expect(extractClaims(doc, "prose").map((c) => c.key)).toEqual(["2.11.4"]);
+  });
+
+  test("hedgedNear is proximity-scoped", () => {
+    const t = "unverified" + " ".repeat(400) + "2.11.4";
+    expect(hedgedNear(t, 0)).toBe(true);
+    expect(hedgedNear(t, t.length - 1)).toBe(false);
+  });
+});
+
+describe("epistemic-guard.commit surface", () => {
+  test("isMessagePersist covers commits, tags, PR/issue writes", () => {
+    expect(isMessagePersist("git commit -m x")).toBe(true);
+    expect(isMessagePersist("gh pr create -t a -b b")).toBe(true);
+    expect(isMessagePersist("git log --oneline")).toBe(false);
+  });
+
+  test("commitMessageText takes the message, never the staged diff", () => {
+    expect(commitMessageText(`git commit -m "fix: bump to 2.8.4"`)).toContain("2.8.4");
+    expect(commitMessageText("git commit -m 'a' && rg 9.9.9 src")).not.toContain("9.9.9");
+  });
+
+  test("heredoc message bodies are included", () => {
+    const cmd = "git commit -F - <<'EOF'\nfeat: ship 4.5.6\nEOF";
+    expect(commitMessageText(cmd)).toContain("4.5.6");
+  });
+
+  test("patchAddedText takes added lines only", () => {
+    const p = "*** Update File: a.md\n@@ c\n-old 1.1.1\n+new 2.2.2\n";
+    expect(patchAddedText(p)).toContain("2.2.2");
+    expect(patchAddedText(p)).not.toContain("1.1.1");
   });
 });
