@@ -194,8 +194,19 @@ describe("formatFailures / buildPrompt", () => {
 		expect(out).toContain("how to fix: run biome check --write");
 		expect(formatFailures([fail("lint", "E1")])).not.toContain("how to fix");
 	});
-	test("buildPrompt first iteration is just the task", () => {
-		expect(buildPrompt("my task")).toBe("my task");
+	test("buildPrompt iteration 1 carries the task AND the standing guardrails", () => {
+		// Regression: these used to appear only in the failure-feedback block,
+		// so a one-shot task got NO guardrails. An A/B of the anti-stub rule
+		// came back null purely because every run converged in one iteration
+		// and the rule was never in the prompt.
+		const p = buildPrompt("my task");
+		expect(p).toContain("my task");
+		expect(p).toContain("Do NOT stub");
+		expect(p).toContain("weaken tests");
+		expect(p).toContain("Do NOT run git commit");
+		// ...but NOT the feedback-scoped ones, which need failures to make sense
+		expect(p).not.toContain("smallest change");
+		expect(p).not.toContain("Automated checks failed");
 	});
 	test("buildPrompt appends guardrails, notes and feedback", () => {
 		const p = buildPrompt("my task", 'sensor "test" failed', [
@@ -521,9 +532,14 @@ describe("guide + standing rules", () => {
 		expect(p).toContain("Automated checks failed");
 	});
 
-	test("absent guide/rules add nothing", () => {
-		expect(buildPrompt("t")).toBe("t");
-		expect(buildPrompt("t", undefined, undefined, undefined, [], [])).toBe("t");
+	test("absent guide/rules add no guide/rules blocks (guardrails still stand)", () => {
+		const bare = buildPrompt("t");
+		const empty = buildPrompt("t", undefined, undefined, undefined, [], []);
+		expect(bare).toBe(empty);
+		expect(bare).not.toContain("READ THESE FILES FIRST");
+		expect(bare).not.toContain("Standing rules");
+		expect(bare.startsWith("t")).toBe(true);
+		expect(bare).toContain("Ground rules"); // guardrails are unconditional
 	});
 });
 

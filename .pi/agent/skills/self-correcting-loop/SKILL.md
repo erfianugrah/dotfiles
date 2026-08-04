@@ -158,6 +158,33 @@ Two properties make this work on weak models:
      as a reviewer rejection rule; long explanatory comments turned out to be a
      reliable tell for a bad workaround.
 
+   **These guardrails are STANDING - they render on every iteration including
+   the first.** They used to live only inside the failure-feedback block, so a
+   task the model one-shot received *no guardrails at all*: the iteration-1
+   prompt was literally the task string. Found 2026-08-04 by an A/B that
+   returned a null because every run converged in one iteration and the rule
+   under test was never in the prompt. "Don't weaken tests" is a property of
+   how the loop works, not advice about a particular failure. Only the two
+   genuinely failure-scoped lines ("don't touch code unrelated to these
+   failures", "make the smallest change") stay in the feedback block.
+
+   **Measured effect of the anti-stub rule: none, at this difficulty.** A/B on
+   a build-only gate (8 specified functions, `go build` fully satisfiable by
+   stubs, hidden acceptance suite scoring the result), 3 runs per arm on
+   claude-haiku-4-5: *identical* 8/8 hidden pass, 0 stub markers, 1 iteration,
+   in both arms. Controls were sound - a correct implementation scores 8/8,
+   pure stubs score 0/8 and still pass the gate. So the rule is unfalsified
+   but unproven as a behaviour-changer: the model simply did not want to stub
+   8 well-specified textbook functions. The Bun case that motivated it was a
+   16,000-error Rust port where implementing correctly was genuinely hard, and
+   that difficulty is the variable this experiment could not reproduce.
+
+   Practical consequence: **treat the prompt rule as free but unproven, and
+   rely on the `no-stubs` counter sensor for the actual guarantee.** A prompt
+   rule is unenforceable by construction; a counter is a gate. If you only
+   have budget for one, take the sensor. Harness for re-running the A/B at
+   higher difficulty: `~/.local/share/loop-validation/build-gate/`.
+
 ## Files
 
 | File | Role |

@@ -521,6 +521,25 @@ export function formatAttemptHistory(attempts: AttemptRecord[], max = 5): string
  * read as "stub out the functions with compilation errors", and workarounds
  * arrived wrapped in long justifying comments. One prompt edit stopped both.
  */
+/**
+ * Guardrails that hold on EVERY iteration, not just after something fails.
+ *
+ * These used to live only in the failure-feedback block, which meant a task
+ * the model one-shot got NO guardrails at all - the iteration-1 prompt was
+ * literally just the task string. Measured 2026-08-04: an A/B of the
+ * anti-stub rule returned a null result because all four runs converged in
+ * one iteration, so the rule under test was never in the prompt. "Don't
+ * weaken tests", "don't stub" and "don't git commit" are properties of how
+ * this loop works, not advice about a specific failure.
+ */
+const STANDING_GUARDRAILS = [
+	"Do NOT delete, skip, or weaken tests to make a check pass.",
+	"Do NOT stub, no-op, or TODO/unimplemented a function to make a check pass. A check satisfied by a stub is a FAILED iteration, not a green one - implement the behaviour or leave the check red.",
+	"If you need a paragraph-long comment to justify why a workaround is OK, the code is wrong - fix the code.",
+	"Do NOT change the sensor commands or the manifest.",
+	"Do NOT run git commit/reset/stash/tag - the loop owns git state; checkpoints are automatic and ref changes are undone.",
+];
+
 export function buildPrompt(
 	task: string,
 	feedback?: string,
@@ -539,7 +558,8 @@ export function buildPrompt(
 		rules && rules.length
 			? `\n\n## Standing rules\n${rules.map((x) => `- ${x}`).join("\n")}`
 			: "";
-	if (!feedback) return task + guideBlock + ruleBlock;
+	const guardrails = `\n\n## Ground rules\n${STANDING_GUARDRAILS.map((r) => `- ${r}`).join("\n")}`;
+	if (!feedback) return task + guideBlock + ruleBlock + guardrails;
 	const noteBlock =
 		notes && notes.length
 			? `\n\n## Loop notes\n${notes.map((n) => `- ${n}`).join("\n")}`
@@ -548,15 +568,10 @@ export function buildPrompt(
 		? `\n\n## Previous approaches that were rolled back - do not repeat them\n${history}`
 		: "";
 	return (
-		`${task}${guideBlock}${ruleBlock}\n\n` +
+		`${task}${guideBlock}${ruleBlock}${guardrails}\n\n` +
 		"## Automated checks failed on the previous attempt\n" +
-		"Fix ONLY what is needed to make these checks pass. Rules:\n" +
+		"Fix ONLY what is needed to make these checks pass. In addition to the ground rules above:\n" +
 		"- Do NOT modify code, config, or tests unrelated to these failures.\n" +
-		"- Do NOT delete, skip, or weaken tests to force them green.\n" +
-		"- Do NOT stub, no-op, or TODO/unimplemented a function to make a check pass. A check satisfied by a stub is a FAILED iteration, not a green one - implement the behaviour or leave the check red.\n" +
-		"- If you need a paragraph-long comment to justify why a workaround is OK, the code is wrong - fix the code.\n" +
-		"- Do NOT change the sensor commands or the manifest.\n" +
-		"- Do NOT run git commit/reset/stash/tag - the loop owns git state; checkpoints are automatic and ref changes are undone.\n" +
 		"- Make the smallest change that addresses the reported errors.\n" +
 		noteBlock +
 		historyBlock +
