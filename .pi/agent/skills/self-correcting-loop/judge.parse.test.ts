@@ -28,7 +28,17 @@ describe("judge parseArgs", () => {
 			wait: "",
 			viewport: "",
 			fullPage: false,
+			adversarial: 1,
 		} satisfies Args);
+	});
+
+	test("--adversarial sets the reviewer count", () => {
+		expect(parseArgs(["--spec", "x", "--adversarial", "3"]).adversarial).toBe(3);
+	});
+
+	test("--adversarial rejects non-positive / non-numeric values", () => {
+		expect(() => parseArgs(["--spec", "x", "--adversarial", "0"])).toThrow("positive integer");
+		expect(() => parseArgs(["--spec", "x", "--adversarial", "two"])).toThrow("positive integer");
 	});
 
 	test("parses visual-mode flags", () => {

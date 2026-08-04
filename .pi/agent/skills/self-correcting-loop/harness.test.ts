@@ -5,6 +5,8 @@ import {
 	advanceLadder,
 	allPass,
 	applyFreeze,
+	DEFAULT_AGENT_TIMEOUT_MS,
+	DEFAULT_SENSOR_TIMEOUT_MS,
 	buildPrompt,
 	failingNames,
 	countFailing,
@@ -15,11 +17,13 @@ import {
 	formatAttemptHistory,
 	formatFailures,
 	globToRegExp,
+	limitsArgs,
 	matchGlob,
 	modelAt,
 	nonDiscriminating,
 	normalizeModels,
 	outOfScope,
+	parseLimits,
 	parseManifest,
 	truncate,
 } from "./harness.ts";
@@ -399,5 +403,134 @@ describe("manifest expect field", () => {
 		expect(() =>
 			parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a", expect: "maybe" }] }),
 		).toThrow(/expect must be/);
+	});
+});
+
+describe("timeout budgets", () => {
+	test("manifest defaults sensor + agent budgets", () => {
+		const m = parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a" }] });
+		expect(m.timeoutMs).toBe(DEFAULT_SENSOR_TIMEOUT_MS);
+		expect(m.agentTimeoutMs).toBe(DEFAULT_AGENT_TIMEOUT_MS);
+		expect(m.sensors[0].timeoutMs).toBeUndefined();
+	});
+
+	test("per-sensor timeoutMs overrides the manifest default", () => {
+		const m = parseManifest({
+			task: "t",
+			timeoutMs: 5000,
+			agentTimeoutMs: 9000,
+			sensors: [
+				{ name: "fast", cmd: "a" },
+				{ name: "slow", cmd: "b", timeoutMs: 60000 },
+			],
+		});
+		expect(m.timeoutMs).toBe(5000);
+		expect(m.agentTimeoutMs).toBe(9000);
+		expect(m.sensors[1].timeoutMs).toBe(60000);
+	});
+
+	test("rejects non-positive / non-integer budgets", () => {
+		const bad = (patch: Record<string, unknown>) =>
+			parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a" }], ...patch });
+		expect(() => bad({ timeoutMs: 0 })).toThrow(/positive integer/);
+		expect(() => bad({ agentTimeoutMs: -1 })).toThrow(/positive integer/);
+		expect(() => bad({ timeoutMs: 1.5 })).toThrow(/positive integer/);
+		expect(() =>
+			parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a", timeoutMs: 0 }] }),
+		).toThrow(/sensors\[0\].timeoutMs/);
+	});
+
+	test("a timed-out sensor renders as a HANG, not a logic failure", () => {
+		const r: SensorResult[] = [
+			{ name: "test", cmd: "go test ./...", ok: false, exitCode: 137, output: "ok pkg/a", timedOut: true, durationMs: 600_000 },
+		];
+		const out = formatFailures(r);
+		expect(out).toContain("TIMED OUT after 600s");
+		expect(out).toContain("did not fail, it HUNG");
+	});
+});
+
+describe("resource limits", () => {
+	test("builds a systemd-run scope prefix", () => {
+		expect(limitsArgs({ memoryMax: "8G", cpuQuota: "400%", tasksMax: 512 })).toEqual([
+			"systemd-run", "-q", "--user", "--scope",
+			"-p", "MemoryMax=8G",
+			"-p", "CPUQuota=400%",
+			"-p", "TasksMax=512",
+			"--",
+		]);
+	});
+
+	test("no limits => no prefix (never wrap when nothing is capped)", () => {
+		expect(limitsArgs(undefined)).toEqual([]);
+		expect(limitsArgs({})).toEqual([]);
+	});
+
+	test("partial limits only emit the configured properties", () => {
+		expect(limitsArgs({ memoryMax: "1G" })).toEqual([
+			"systemd-run", "-q", "--user", "--scope", "-p", "MemoryMax=1G", "--",
+		]);
+	});
+
+	test("manifest.limits validates types", () => {
+		expect(parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a" }] }).limits).toBeUndefined();
+		expect(
+			parseManifest({ task: "t", limits: { memoryMax: "4G" }, sensors: [{ name: "a", cmd: "a" }] }).limits,
+		).toEqual({ memoryMax: "4G" });
+		expect(() => parseLimits({ tasksMax: "many" })).toThrow(/tasksMax/);
+		expect(() => parseLimits({ memoryMax: "" })).toThrow(/memoryMax/);
+		expect(() => parseLimits([])).toThrow(/must be an object/);
+	});
+});
+
+describe("guide + standing rules", () => {
+	test("manifest parses and defaults them to empty", () => {
+		const m = parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a" }] });
+		expect(m.rules).toEqual([]);
+		expect(m.guide).toEqual([]);
+		const m2 = parseManifest({
+			task: "t",
+			rules: ["no new deps"],
+			guide: ["PORTING.md", "LIFETIMES.tsv"],
+			sensors: [{ name: "a", cmd: "a" }],
+		});
+		expect(m2.rules).toEqual(["no new deps"]);
+		expect(m2.guide).toEqual(["PORTING.md", "LIFETIMES.tsv"]);
+		expect(() =>
+			parseManifest({ task: "t", rules: [1], sensors: [{ name: "a", cmd: "a" }] }),
+		).toThrow(/manifest.rules/);
+	});
+
+	test("guide + rules appear on the FIRST iteration (no feedback yet)", () => {
+		const p = buildPrompt("do the thing", undefined, undefined, undefined, ["no new deps"], ["PORTING.md"]);
+		expect(p).toContain("do the thing");
+		expect(p).toContain("READ THESE FILES FIRST");
+		expect(p).toContain("PORTING.md");
+		expect(p).toContain("no new deps");
+		// still no feedback machinery on iteration 1
+		expect(p).not.toContain("Automated checks failed");
+	});
+
+	test("guide + rules also ride along with feedback", () => {
+		const p = buildPrompt("t", "### sensor \"build\" failed", [], "", ["rule one"], ["GUIDE.md"]);
+		expect(p).toContain("GUIDE.md");
+		expect(p).toContain("rule one");
+		expect(p).toContain("Automated checks failed");
+	});
+
+	test("absent guide/rules add nothing", () => {
+		expect(buildPrompt("t")).toBe("t");
+		expect(buildPrompt("t", undefined, undefined, undefined, [], [])).toBe("t");
+	});
+});
+
+describe("anti-cheat guardrails", () => {
+	test("forbids stubbing and paragraph-long workaround justifications", () => {
+		const p = buildPrompt("t", "### sensor \"build\" failed");
+		expect(p).toContain("Do NOT stub, no-op, or TODO/unimplemented");
+		expect(p).toContain("paragraph-long comment");
+		// pre-existing guardrails still present
+		expect(p).toContain("Do NOT delete, skip, or weaken tests");
+		expect(p).toContain("Do NOT run git commit/reset/stash/tag");
 	});
 });

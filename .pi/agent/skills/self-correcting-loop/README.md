@@ -40,6 +40,12 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
 
 - **Sensors are the gate** - each iteration runs the manifest's sensor commands;
   green exit codes are the only success signal.
+- **Wall-clock budgets** - every sensor (`timeoutMs`, default 600s) and every
+  agent iteration (`agentTimeoutMs`, default 1800s) is bounded. A process past
+  its budget is killed via GNU `timeout` (process-GROUP kill, so grandchildren
+  don't survive holding pipes/ports) and reported as a failure, never a hang.
+- **Resource limits** - optional `limits` (`memoryMax`/`cpuQuota`/`tasksMax`)
+  runs each sensor in a transient `systemd-run --user --scope` cgroup.
 - **Model escalation ladder** - start on the cheapest model, climb a rung after
   N no-progress iterations.
 - **git checkpoint + rollback** - a regressing/stalled iteration is reverted, so
@@ -55,6 +61,13 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   extension/skill/auth edits land in a discarded tmpfs), secret dirs
   (~/.ssh, ~/.aws, ...) masked. `sandbox: "auto"|"require"|"off"` in the
   manifest.
+- **standing rules + binding guide, hot-reloaded** - `rules` (verbatim prompt
+  instructions) and `guide` (paths the agent must read first) are re-read from
+  the manifest between iterations, so you can steer a running loop instead of
+  killing it.
+- **`--trial [N]`** - cap the run at N iterations and get a verdict about the
+  HARNESS: sensors moved (re-run for real) vs `TRIAL STALLED` (the sensors are
+  the bug, here's the checklist).
 - **negative-knowledge history** - each iteration's touched files are recorded
   (pre-revert), and rolled-back attempts are injected into later prompts
   ("Previous approaches that were rolled back - do not repeat them"), so a
@@ -90,7 +103,7 @@ gate** (`judge` - correctness against the spec).
 ## Test
 
 ```bash
-bun test    # 129: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope/head-reset/index-guard/sandbox integration; CDP; browser flow/screenshot/hardening; judge code + visual gate; pixel-diff decode/diff/baseline
+bun test    # 156: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope/head-reset/index-guard/sandbox/timeout integration; CDP; browser flow/screenshot/hardening; judge code + visual gate; pixel-diff decode/diff/baseline
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability

@@ -68,6 +68,15 @@ export interface Args {
 	viewport: string;
 	/** VISUAL capture: full-page screenshot (passed to browser-assert). */
 	fullPage: boolean;
+	/**
+	 * Number of INDEPENDENT reviewer passes. Each runs in its own context; the
+	 * gate fails if ANY of them fails. Bun's Rust rewrite used 1 implementer to
+	 * 2+ adversarial reviewers on the stated grounds that the model which wrote
+	 * the code wants it accepted, so review must come from a context with no
+	 * stake in the diff. Plurality also blunts the single biggest weakness of
+	 * an inferential gate: one sampled judgment is noisy, unanimity is not.
+	 */
+	adversarial: number;
 }
 
 const DEFAULT_TOOLS = ["read"];
@@ -89,6 +98,7 @@ export function parseArgs(argv: string[]): Args {
 		wait: "",
 		viewport: "",
 		fullPage: false,
+		adversarial: 1,
 	};
 	const need = (i: number, flag: string): string => {
 		const v = argv[i + 1];
@@ -109,11 +119,18 @@ export function parseArgs(argv: string[]): Args {
 			case "--wait": a.wait = need(i, "--wait"); i++; break;
 			case "--viewport": a.viewport = need(i, "--viewport"); i++; break;
 			case "--full-page": a.fullPage = true; break;
+			case "--adversarial": {
+				const n = Number.parseInt(need(i, "--adversarial"), 10);
+				if (!Number.isInteger(n) || n < 1) throw new Error("--adversarial wants a positive integer");
+				a.adversarial = n;
+				i++;
+				break;
+			}
 			default:
 				throw new Error(`unknown arg: ${arg}`);
 		}
 	}
-	if (!a.spec.trim()) throw new Error("usage: judge.ts --spec <spec> [--base ref] [--url URL | --screenshot PNG] [--wait sel] [--viewport WxH] [--full-page] [--model M] [--rubric ...] [--tools ...] [--lenient]");
+	if (!a.spec.trim()) throw new Error("usage: judge.ts --spec <spec> [--base ref] [--url URL | --screenshot PNG] [--wait sel] [--viewport WxH] [--full-page] [--model M] [--rubric ...] [--tools ...] [--adversarial N] [--lenient]");
 	return a;
 }
 
@@ -284,28 +301,48 @@ async function main(): Promise<number> {
 	// MAX_ARG_STRLEN (128 KiB on Linux) and a big diff blows past it (E2BIG).
 	const cmd = [JUDGE_CMD, "-p", "--tools", args.tools.join(","), "-a"];
 	if (args.model) cmd.push("--model", args.model);
-	const { code, out } = await sh(cmd, prompt);
-	if (code !== 0) {
-		console.error(`judge: agent exited ${code}`);
-		// fall through - still try to parse a verdict from partial output.
-	}
 
-	const { verdict, reasons } = parseVerdict(out);
-	if (verdict === "pass") {
-		console.log("judge: PASS");
-		return 0;
-	}
-	if (verdict === "fail") {
-		console.log(`judge: FAIL\n${reasons}`);
+	// N independent reviewers, run concurrently (they share nothing but the
+	// prompt). ANY failure fails the gate - the point of adversarial review is
+	// that a single reviewer finding a real bug outranks N-1 that missed it, so
+	// this is deliberately not a majority vote.
+	const passes = await Promise.all(
+		Array.from({ length: args.adversarial }, () => sh(cmd, prompt)),
+	);
+
+	const verdicts = passes.map((p, i) => {
+		if (p.code !== 0) console.error(`judge: reviewer ${i + 1} exited ${p.code}`);
+		return { i: i + 1, ...parseVerdict(p.out), raw: p.out };
+	});
+	const label = (v: (typeof verdicts)[number]) =>
+		args.adversarial > 1 ? `reviewer ${v.i}: ` : "";
+
+	const failed = verdicts.filter((v) => v.verdict === "fail");
+	if (failed.length) {
+		console.log(
+			`judge: FAIL (${failed.length}/${args.adversarial} reviewer(s) rejected)\n` +
+				failed.map((v) => `${label(v)}${v.reasons}`).join("\n\n---\n\n"),
+		);
 		return 1;
 	}
-	// unknown
-	if (args.lenient) {
-		console.log("judge: no parseable verdict; --lenient => PASS");
-		return 0;
+
+	const unknown = verdicts.filter((v) => v.verdict === "unknown");
+	if (unknown.length) {
+		if (args.lenient) {
+			console.log(
+				`judge: ${unknown.length} reviewer(s) gave no parseable verdict; --lenient => PASS`,
+			);
+			return 0;
+		}
+		console.error(
+			`judge: no parseable verdict from ${unknown.length}/${args.adversarial} reviewer(s) (fail-closed => FAIL)\n` +
+				unknown.map((v) => `${label(v)}${v.raw.trim().slice(0, 2000)}`).join("\n\n---\n\n"),
+		);
+		return 1;
 	}
-	console.error(`judge: no parseable verdict (fail-closed => FAIL)\n${out.trim().slice(0, 2000)}`);
-	return 1;
+
+	console.log(`judge: PASS (${args.adversarial}/${args.adversarial} reviewer(s))`);
+	return 0;
 }
 
 if (import.meta.main) process.exit(await main());

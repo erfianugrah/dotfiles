@@ -17,6 +17,14 @@ output as its next prompt.
 [^harness]: <https://martinfowler.com/articles/harness-engineering.html>
     (Thoughtworks cross-post: <https://www.thoughtworks.com/en-us/insights/blog/generative-ai/harness-engineering-agent-feedback-exploring-ai-coding-sensors>).
 
+The second source is the published write-up of the Bun Zig-to-Rust
+rewrite[^bun] - the largest public run of this pattern (1,448 files,
+6,778 commits, 11 days, ~64 concurrent agents, 0 tests skipped or deleted).
+Everything below marked *(Bun)* is imported from that post's hard-won
+mechanics rather than invented here.
+
+[^bun]: <https://bun.com/blog/bun-in-rust>
+
 ## The mechanism
 
 ```
@@ -30,6 +38,7 @@ repeat until every sensor exits 0, OR maxIterations spent:
     re-impose the checkpoint index (index-guard)
     revert any edits outside writeScope
     run sensors (build / vet / test / tsc / clippy / astro check ...)
+        each under a wall-clock budget + optional cgroup caps
     all pass?       -> STOP, success                 (deterministic gate)
     fewer failures? -> checkpoint (keep), continue
     stalled/worse?  -> ROLL BACK to checkpoint; on repeated stalls, escalate
@@ -60,6 +69,23 @@ The governor around the bare loop (all deterministic, no extra model calls):
   (hides work from sensors; detected via refs/stash and surfaced as a loop
   note). Tests A/B in loop-index-guard.integration.test.ts are proven to
   fail with the guard disabled.
+- **wall-clock budgets** - every sensor gets `timeoutMs` (default 600s,
+  per-sensor override) and every agent iteration gets `agentTimeoutMs`
+  (default 1800s). A process that exceeds its budget is KILLED and reported as
+  a failure, never as a hang. Both spawn sites were previously unbounded, so a
+  wedged suite or a stuck `pi -p` stalled the run with no rollback, no
+  escalation and no report entry. The kill goes through GNU `timeout`, which
+  signals the process GROUP - Bun's native spawn timeout reaps only the direct
+  child, leaving grandchildren alive holding the inherited stdout pipe (so
+  nothing reading the loop's output ever sees EOF), plus ports and disk.
+  Verified in `loop-timeout.integration.test.ts`; the orphan count on a wedged
+  agent went 1 -> 0 with the group kill.
+- **resource limits** *(Bun)* - optional `limits` (`memoryMax` / `cpuQuota` /
+  `tasksMax`) wraps each sensor in a transient `systemd-run --user --scope`
+  cgroup. Sensors run OUTSIDE the bwrap jail, so nothing else bounds them; the
+  Bun run crashed its machine repeatedly on tests that exhausted memory,
+  sockets and disk before they reached for cgroups. The scope also makes the
+  timeout kill tree-wide by construction.
 - **model escalation ladder** - start on the cheapest model; climb a rung after
   `stallPatience` consecutive no-progress iterations. Strength on demand.
 - **agent sandbox (bwrap)** - the writeScope fence is repo-scoped; the jail
@@ -80,9 +106,27 @@ The governor around the bare loop (all deterministic, no extra model calls):
   re-attempt the exact approach iteration N-3 already proved wrong.
   `formatAttemptHistory` caps the block at the 5 most recent rolled-back
   attempts and truncates long file lists, so the prompt stays sharp.
+- **standing rules, hot-reloaded** *(Bun)* - `rules` is appended verbatim to
+  every prompt and RE-READ from the manifest between iterations, so a human
+  watching a run can correct the loop without killing it. This is the article's
+  central operating discipline made mechanical: when the output is wrong, fix
+  the process that generates the code, not the code. ("Claude interpreted 'get
+  all the crates to compile' as 'stub out the functions'... one prompt edit and
+  a few hours later, these things stopped happening.") Only `rules` and `guide`
+  are hot - changing sensors or scope mid-run would invalidate the checkpoint
+  and progress accounting.
+- **binding conventions** *(Bun)* - `guide` lists paths the agent must read
+  first (a porting guide, a lifetimes table, an interface spec). Because each
+  iteration is a fresh `pi -p`, an on-disk guide is the ONLY channel that
+  carries conventions across iterations. The Bun run spent ~3h producing
+  `PORTING.md` and a per-struct-field `LIFETIMES.tsv`, adversarially reviewed
+  *the documents* before writing any code, and checked every implementer
+  against them. Paths are injected, not contents, so a large guide does not
+  bloat every prompt.
 - **run report** - `.pi/harness-report.json` records model, failing-count
-  trend, kept/rolled-back, escalations, scope violations, and changed files
-  per iteration.
+  trend, kept/rolled-back, escalations, scope violations, changed files,
+  per-sensor durations, and timeout flags (`timedOut`, `agentTimedOut`) per
+  iteration.
 
 Two properties make this work on weak models:
 
@@ -92,8 +136,17 @@ Two properties make this work on weak models:
    a small, sharp prompt beats a strong model with a polluted 200-turn context.
 2. **The sensor is the judge.** `go test` exit code is not negotiable. The
    model cannot hallucinate green. `buildPrompt` also injects anti-cheat
-   guardrails ("do not delete/skip/weaken tests to force them green") because
-   gaming the sensor is the #1 weak-model failure mode.
+   guardrails because gaming the sensor is the #1 weak-model failure mode.
+   The list is empirical, not imagined - test-weakening and git-ref mutation
+   came from this loop's own runs, and two more come from the Bun rewrite:
+   - *no stubbing*: "let's get all the crates to compile" was read as "stub out
+     the functions with compilation errors". A build sensor is trivially
+     satisfied by `unimplemented!()` / `throw new Error("not implemented")`, so
+     the prompt states that a check satisfied by a stub is a FAILED iteration.
+   - *no justifying essays*: "If you need a paragraph-long comment to justify
+     why the workaround is OK, the code is wrong - fix the code." Used verbatim
+     as a reviewer rejection rule; long explanatory comments turned out to be a
+     reliable tell for a bad workaround.
 
 ## Files
 
@@ -104,6 +157,8 @@ Two properties make this work on weak models:
 | `presets/*.json` | Starter manifests per stack (go/node/rust/astro/python). |
 | `harness.test.ts` | Unit tests for the pure helpers. |
 | `loop.integration.test.ts` | End-to-end governor test with a scripted fake agent (rollback / stall+escalate / scope-revert / pass) - no real model needed. |
+| `loop-timeout.integration.test.ts` | Wall-clock budgets: hung sensor killed + rendered as a HANG, per-sensor override, fast sensor untouched, hung agent reaped, `--trial` stall verdict. Each case would hang forever without the deadline. |
+| `loop-steering.integration.test.ts` | `guide`/`rules` reach the real prompt, a rule appended DURING iteration 1 is in force for iteration 2, and a half-saved manifest is ignored rather than fatal. |
 | `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright). Ordered flow steps (wait/click/type/press/assert/screenshot) + viewport/full-page. The behaviour-harness layer for web targets; also a UI live-smoke tool. |
 | `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
 | `judge.ts` | Inferential (LLM-as-judge) sensor with two modes: CODE (feeds the git diff + spec to a second `pi -p`) and VISUAL (screenshots a live URL via browser-assert and has a vision model assess the rendered UI/UX). Both gate on `VERDICT: PASS/FAIL`. The computational sensors check the code compiles/passes; this checks it did the *right thing* / *looks right*. Fail-closed by default. |
@@ -131,11 +186,40 @@ loop init                   # or: init go | node | rust | astro | python
 # 3. see what the sensors say right now, without spawning pi
 loop run --dry
 
-# 4. run the loop
+# 4. de-risk the harness before spending the budget (see below)
+loop run --trial            # or --trial 3
+
+# 5. run the loop
 loop run
 loop run --model claude-sonnet-5 --max 15    # weak-model test
 loop run --allow-dirty                        # skip the clean-tree guard
 ```
+
+### `--trial`: prove the harness converges before paying for it *(Bun)*
+
+The Bun rewrite ported **3 files** through the full implementer/reviewer/fixer
+pipeline before turning it loose on all 1,448. `--trial [N]` (default 2) is
+that step: cap the run at N iterations and print a verdict about the HARNESS
+rather than the code.
+
+- sensors moved -> "the harness converges, re-run without `--trial`" (exit 1)
+- sensors did not move at all -> `TRIAL STALLED` (exit 1, `result:
+  "trial-stalled"` in the report) with the diagnostic checklist: over-specified
+  sensor, sensor asserting something the task never asked for, task too vague
+  or too large, agent timing out.
+
+A failing set that does not move is almost never "needs more iterations" - it
+is a harness bug. The 2026-08-02 run below burned five iterations and ~30
+minutes before the sensors were diagnosed as the problem; a trial would have
+said so in one.
+
+### Steering a run without killing it *(Bun)*
+
+`rules` and `guide` are re-read from the manifest **between iterations**. When
+you are watching a run and see the agent do something dumb, append a rule to
+`.pi/harness.json` and save - the next iteration obeys it. Fix the process
+that generates the code, not the code. An invalid/half-saved manifest is
+ignored (last good values are kept), so editing mid-run cannot crash the loop.
 
 Without `bun link`, invoke directly: `bun ~/.pi/agent/skills/self-correcting-loop/loop.ts run`.
 
@@ -202,10 +286,18 @@ manifest/usage error.
   "stallPatience": 3,
   "tools": ["read", "edit", "write", "bash"],
   "writeScope": ["providers/wechat/**"],
+  "timeoutMs": 600000,
+  "agentTimeoutMs": 1800000,
+  "limits": { "memoryMax": "8G", "cpuQuota": "400%", "tasksMax": 4096 },
+  "guide": ["docs/provider-contract.md"],
+  "rules": ["never add a dependency; the stdlib covers this"],
   "sensors": [
     { "name": "build", "cmd": "go build ./..." },
     { "name": "vet",   "cmd": "go vet ./..." },
-    { "name": "test",  "cmd": "go test ./..." },
+    { "name": "test",  "cmd": "go test ./...", "timeoutMs": 1200000 },
+    { "name": "test-count-floor",
+      "cmd": "test $(go test ./... -list '.*' | grep -c '^Test') -ge 42",
+      "hint": "tests were removed or stopped being collected - restore them" },
     { "name": "feature-wechat-provider", "expect": "fail",
       "cmd": "go test ./providers/wechat -run TestWeChat -count=1",
       "hint": "the provider must round-trip an auth code; see the module spec" }
@@ -244,6 +336,21 @@ manifest/usage error.
     before relying on them - gateway catalogs drift, and exact prices rot faster
     than the ladder strategy does.
 - `stallPatience` - consecutive no-progress iterations before climbing a rung.
+- `timeoutMs` / `agentTimeoutMs` - wall-clock budgets in ms (defaults 600000 /
+  1800000). A sensor may override with its own `timeoutMs`; give the slow tier
+  (e2e, mutation testing) a bigger one rather than raising the global default.
+  A timed-out sensor is rendered to the model as a HANG with a distinct hint
+  ("look for a command that never exits") - diagnosing a hang as a logic bug is
+  a guaranteed wasted iteration.
+- `limits` - `{ memoryMax, cpuQuota, tasksMax }`, applied to each sensor via
+  `systemd-run --user --scope`. Values pass through verbatim as systemd
+  properties. Skipped with a warning when `systemd-run` is absent.
+- `rules` - standing instructions appended verbatim to every prompt.
+  **Hot-reloaded between iterations** - this is the mid-run steering lever.
+- `guide` - paths to binding convention documents, injected into every prompt
+  as "read these first". Also hot-reloaded. Write the guide BEFORE the loop
+  runs, and review it as carefully as code - every iteration is judged against
+  it.
 - `baseline` (or CLI `--freeze`) - freeze mode: sensors already failing at the
   baseline run are tolerated as pre-existing debt; only NEW failures gate. Lets
   the loop adopt a legacy repo without a green-the-world sprint first (ArchUnit
@@ -327,6 +434,40 @@ real cases below shipped in a "green" hand-written verification harness
 - **Existential sensor described as universal.** "all step logs in the time
   window" implemented as `ls ... | grep -q <window>` passes if ONE log matches.
   If the claim is universal, loop over every expected item and require each.
+- **A suite that passes because it ran nothing.** *(Bun)* This is the terminal
+  vacuous sensor: `go test ./...` exits 0 over zero tests, and every skip
+  mechanism (`t.Skip`, `test.skip`, `@pytest.mark.skip`, a deleted file, a
+  build tag, a narrowed `-run` pattern) is green by construction. The Bun
+  rewrite's headline stat is "0 tests skipped or deleted", and before merging
+  the author *manually verified the tests were in fact running and not being
+  skipped*. Make that a gate instead of a manual check - a **test-count floor**
+  pinned just under the current count (all three verified in both directions,
+  2026-08-09):
+  - Go: `test $(go test ./... -list '.*' | grep -c '^Test') -ge N`
+  - Bun/Jest: `test "$(bun test 2>&1 | rg -o '([0-9]+) pass' -r '$1' | tail -1)" -ge N`
+  - pytest: `test $(pytest --collect-only -q | grep -c '::') -ge N`
+    (**not** `| wc -l` - `-q` adds a blank line and a "N tests collected"
+    summary, so wc overcounts by 2 and the floor silently loosens)
+  Pair it with a skip-count ceiling if your runner reports one. `writeScope`
+  fencing tests out is necessary but not sufficient: it stops the agent
+  *editing* tests, not the build config or a `-run` filter quietly excluding
+  them.
+- **A build sensor satisfied by stubs.** *(Bun)* "Get it to compile" is
+  trivially achieved with `unimplemented!()` / `panic("TODO")` /
+  `throw new Error("not implemented")`, and that is exactly what happened at
+  scale on the Bun port. The prompt now forbids it, but a prompt is not a
+  gate - add a counter sensor so the fence is computational:
+
+  ```bash
+  test "$(rg -o 'todo!\(|unimplemented!\(|not implemented' src/ | wc -l)" -le 0
+  ```
+
+  Count with `rg -o ... | wc -l`, **not** `rg -c --no-filename ... | paste -sd+ | bc`:
+  on a clean tree ripgrep matches nothing and prints nothing, `bc` then
+  produces empty output, and `test "" -le 0` errors out - so the tidiest
+  possible repo FAILS the sensor while a stubbed one passes the syntax check.
+  A negative sensor that inverts on the happy path is worse than no sensor.
+  (Caught by mutation-testing this very recipe before documenting it.)
 
 **Mutation-test every negative sensor once, by hand, before trusting it:**
 plant the trigger (commit the secret to a temp repo, inject `error TS` into
@@ -424,6 +565,26 @@ SECOND `pi -p`, and exits on the model's `VERDICT: PASS/FAIL`. Use it well:
 - **Use a DIFFERENT / stronger model** than the one writing the code (`--model`).
   A judge that is the same model that wrote the diff is a closed loop, same as
   self-graded tests.
+- **Run 2+ reviewers with `--adversarial N`** *(Bun)*. The Bun rewrite's unit
+  of work was `1 implementer -> 2 adversarial reviewers -> 1 fixer`, with the
+  roles kept strictly apart: "The Claude that wrote the code wants the code to
+  get accepted. The Claude that reviews wants to find issues... The implementer
+  doesn't review. The reviewer doesn't implement." `--adversarial N` runs N
+  independent reviewer contexts concurrently and fails if **any** rejects -
+  deliberately not a majority vote, because one reviewer finding a real bug
+  outranks N-1 that missed it. It also blunts the biggest weakness of an
+  inferential gate: one sampled judgment is noisy, unanimity is not. Costs N
+  model calls per iteration, so reserve it for runs that matter.
+- **Reviewer rejection rules worth stealing.** Give `--rubric` the ones that
+  run had to add after watching the failure modes: reject a change whose
+  workaround needs a paragraph-long comment to justify it; reject stubbed or
+  no-op'd functions presented as an implementation; reject behaviour that
+  differs from the stated reference even when the code compiles and passes.
+- **Role separation is only half-implemented here.** `judge.ts` gives you the
+  reviewer half (separate context, separate model, read-only tools). There is
+  no distinct *fixer* role yet - a judge FAIL restarts the implementer with the
+  findings as feedback rather than handing them to an agent that only fixes.
+  Worth knowing when comparing this loop against the article.
 - **Fail-closed by default**: an unparseable / errored verdict counts as FAIL,
   so the loop keeps trying rather than declaring victory on an unclear answer.
   `--lenient` flips to fail-open for noisy judges.
@@ -514,6 +675,20 @@ change is intended and you want a judgment not a byte-compare).
   misunderstood instruction converges on green-but-wrong. Scope tightly.
 - **Not for unfenced blast radius.** Great for greenfield modules and
   test-fenced changes; not for "loop on the payments service unattended".
+- **Serial, single-agent.** The Bun run peaked at ~64 agents across 4
+  worktrees, sharding a 16,000-item compiler-error queue by crate. That is
+  worth it when failures are numerous AND independent; for a single scoped
+  feature it is pure coordination cost, and their own false start (agents
+  running `git stash` / `git reset --hard` on each other) is precisely what
+  this loop's ref-guard and index-guard already solve for the serial case.
+  The transferable half without parallelism: when one sensor emits many
+  independent failures, feed the model one GROUP at a time instead of the
+  whole wall of errors.
+- **No separate fixer role.** See the judge section - reviewer/implementer are
+  split, implementer/fixer are not.
+- **Timeouts bound the loop, not the spend.** A budget stops a hang; it does
+  not stop N iterations of expensive-but-productive work. `maxIterations` and
+  the model ladder are the cost controls.
 
 ## Interaction with `epistemic-guard`
 
@@ -536,5 +711,14 @@ EMPTY every pass. Consequences:
 ## Testing this skill
 
 ```bash
-cd ~/.pi/agent/skills/self-correcting-loop && bun test harness.test.ts
+cd ~/.pi/agent/skills/self-correcting-loop && bun test harness.test.ts   # pure helpers
+cd ~/.pi/agent/skills/self-correcting-loop && bun test                   # all 158
+```
+
+The `limits` path is A/B-verifiable by hand - with `limits` set, a sensor
+reading its own cgroup sees the cap; without it, the same check fails:
+
+```bash
+# sensor cmd, passes only when MemoryMax=512M is actually applied
+cat /sys/fs/cgroup/$(cat /proc/self/cgroup | tail -1 | cut -d: -f3 | sed 's|^/||')/memory.max | grep -q 536870912
 ```

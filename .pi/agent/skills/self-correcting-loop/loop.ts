@@ -49,6 +49,7 @@ import {
 	fingerprint,
 	formatAttemptHistory,
 	formatFailures,
+	limitsArgs,
 	modelAt,
 	outOfScope,
 	parseManifest,
@@ -90,14 +91,66 @@ function parseArgs(argv: string[]): {
 
 // --- shelling out -----------------------------------------------------------
 
-async function sh(cmd: string[]): Promise<{ code: number; out: string }> {
-	const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+/**
+ * argv prefix that bounds a command with GNU `timeout`.
+ *
+ * Why not Bun's native spawn `timeout`: it signals only the DIRECT child, so
+ * a wedged `bash script.sh` dies while the `sleep`/server/test-runner it
+ * forked lives on - holding the inherited stdout pipe open (the loop's own
+ * output then never reaches EOF for anything reading it), plus ports and
+ * disk. GNU `timeout` runs the command in its own process group and signals
+ * the GROUP, which reaps the tree. Verified 2026-08-09: an orphaned
+ * grandchild survived the Bun-native kill and was reaped under GNU timeout.
+ *
+ * `-k 5s` escalates to SIGKILL if the command ignores the initial SIGTERM.
+ * Exit status is 124 on timeout, 137 when the KILL escalation was needed.
+ */
+const KILL_GRACE = "5s";
+function timeoutPrefix(timeoutMs?: number): string[] {
+	if (!timeoutMs) return [];
+	const bin = Bun.which("timeout");
+	if (!bin) return []; // fall back to Bun's native (direct-child) timeout
+	return [bin, "-k", KILL_GRACE, `${Math.ceil(timeoutMs / 1000)}s`];
+}
+
+/** GNU timeout's timed-out exit statuses (124 = TERM fired, 137 = KILL did). */
+function isTimeoutExit(code: number): boolean {
+	return code === 124 || code === 137;
+}
+
+/**
+ * Run a command to completion, optionally under a wall-clock deadline.
+ *
+ * Belt and braces: GNU `timeout` bounds the process GROUP, and Bun's native
+ * spawn timeout is kept as a longer backstop in case `timeout` itself is
+ * missing or wedged. Classification uses elapsed time as well as the exit
+ * status, because 124/137 can legitimately come from the command itself; a
+ * fast 137 is an OOM kill and should read as a plain failure, not a hang.
+ * Partial output of a killed process is still returned - it is usually the
+ * most diagnostic part.
+ */
+const BACKSTOP_MARGIN_MS = 15_000;
+async function sh(
+	cmd: string[],
+	timeoutMs?: number,
+): Promise<{ code: number; out: string; timedOut: boolean; durationMs: number }> {
+	const started = Date.now();
+	const proc = Bun.spawn([...timeoutPrefix(timeoutMs), ...cmd], {
+		stdout: "pipe",
+		stderr: "pipe",
+		...(timeoutMs
+			? { timeout: timeoutMs + BACKSTOP_MARGIN_MS, killSignal: "SIGKILL" as const }
+			: {}),
+	});
 	const [stdout, stderr, code] = await Promise.all([
 		new Response(proc.stdout).text(),
 		new Response(proc.stderr).text(),
 		proc.exited,
 	]);
-	return { code, out: `${stdout}${stderr}`.trim() };
+	const durationMs = Date.now() - started;
+	const lateEnough = timeoutMs !== undefined && durationMs >= timeoutMs * 0.95;
+	const timedOut = lateEnough && (proc.killed || isTimeoutExit(code));
+	return { code, out: `${stdout}${stderr}`.trim(), timedOut, durationMs };
 }
 
 const git = (...args: string[]) => sh(["git", ...args]);
@@ -174,17 +227,62 @@ async function revertPaths(paths: string[]): Promise<void> {
 	}
 }
 
-async function runSensor(s: Sensor): Promise<SensorResult> {
-	const { code, out } = await sh(["bash", "-lc", s.cmd]);
-	return { name: s.name, cmd: s.cmd, ok: code === 0, exitCode: code, output: out, hint: s.hint };
+/**
+ * Run one sensor under its wall-clock budget and (when configured) inside a
+ * transient systemd scope carrying the cgroup caps. The scope matters beyond
+ * the caps themselves: it is a cgroup, so a timeout kill reaps the whole
+ * process tree instead of orphaning grandchildren a bare SIGKILL would leave
+ * holding ports and disk.
+ *
+ * A timed-out sensor is a FAILURE, never a hang. Before this the loop would
+ * block forever on a wedged suite with no rollback, no escalation and no
+ * report entry.
+ */
+async function runSensor(s: Sensor, m: Manifest): Promise<SensorResult> {
+	const budget = s.timeoutMs ?? m.timeoutMs;
+	const { code, out, timedOut, durationMs } = await sh(
+		[...limitsPrefix(m), "bash", "-lc", s.cmd],
+		budget,
+	);
+	return {
+		name: s.name,
+		cmd: s.cmd,
+		ok: code === 0 && !timedOut,
+		exitCode: code,
+		output: out,
+		hint: s.hint,
+		timedOut,
+		durationMs,
+	};
+}
+
+/** systemd-run prefix for sensors, or [] when unconfigured/unavailable. */
+let limitsWarned = false;
+function limitsPrefix(m: Manifest): string[] {
+	const args = limitsArgs(m.limits);
+	if (args.length === 0) return [];
+	if (!Bun.which("systemd-run")) {
+		if (!limitsWarned) {
+			limitsWarned = true;
+			console.warn("  ! limits configured but systemd-run not found; sensors run uncapped.");
+		}
+		return [];
+	}
+	return args;
 }
 
 async function runAllSensors(m: Manifest): Promise<SensorResult[]> {
 	const results: SensorResult[] = [];
 	for (const s of m.sensors) {
 		process.stdout.write(`    - ${s.name} ... `);
-		const r = await runSensor(s);
-		console.log(r.ok ? "pass" : `FAIL (exit ${r.exitCode})`);
+		const r = await runSensor(s, m);
+		console.log(
+			r.ok
+				? "pass"
+				: r.timedOut
+					? `TIMEOUT (killed after ${Math.round((r.durationMs ?? 0) / 1000)}s)`
+					: `FAIL (exit ${r.exitCode})`,
+		);
 		results.push(r);
 	}
 	return results;
@@ -267,22 +365,40 @@ function sandboxArgs(cwd: string): string[] {
 	return args;
 }
 
-/** Spawn one agent iteration (pi -p, or $LOOP_PI_CMD in tests). */
+/**
+ * Spawn one agent iteration (pi -p, or $LOOP_PI_CMD in tests) under a
+ * wall-clock budget. A wedged agent (stuck tool call, hung gateway read) is
+ * worse than a wedged sensor: there is no partial sensor output to diagnose
+ * from, the run simply stops. On timeout the agent is killed and the
+ * iteration proceeds to sensors + rollback like any other failed attempt.
+ */
 async function runAgent(
 	prompt: string,
 	model: string,
 	tools: string[],
 	sandboxed: boolean,
-): Promise<number> {
+	timeoutMs: number,
+): Promise<{ code: number; timedOut: boolean }> {
 	const args = ["-p", prompt, "--tools", tools.join(","), "-a"];
 	if (model) args.push("--model", model);
 	const cmd = sandboxed ? [bwrap()!, ...sandboxArgs(process.cwd())] : [];
-	const proc = Bun.spawn([...cmd, PI_CMD, ...args], {
+	const started = Date.now();
+	// GNU timeout first so the whole agent process GROUP is reaped: `pi -p`
+	// spawns tool subprocesses (bash, servers), and orphaning those leaves the
+	// loop's inherited stdout pipe open plus ports bound.
+	const proc = Bun.spawn([...timeoutPrefix(timeoutMs), ...cmd, PI_CMD, ...args], {
 		stdout: "inherit",
 		stderr: "inherit",
 		stdin: "inherit",
+		timeout: timeoutMs + BACKSTOP_MARGIN_MS,
+		killSignal: "SIGKILL",
 	});
-	return await proc.exited;
+	const code = await proc.exited;
+	const durationMs = Date.now() - started;
+	return {
+		code,
+		timedOut: durationMs >= timeoutMs * 0.95 && (proc.killed || isTimeoutExit(code)),
+	};
 }
 
 // --- report -----------------------------------------------------------------
@@ -300,7 +416,9 @@ interface IterationRecord {
 	changedFiles: string[];
 	/** loop-level signals for the next prompt (scope reverts, rollback, ref-guard). */
 	notes: string[];
-	sensors: { name: string; ok: boolean; exitCode: number }[];
+	/** the agent exceeded agentTimeoutMs and was killed. */
+	agentTimedOut: boolean;
+	sensors: { name: string; ok: boolean; exitCode: number; timedOut?: boolean; durationMs?: number }[];
 }
 
 interface RunReport {
@@ -308,8 +426,35 @@ interface RunReport {
 	finishedAt: string;
 	task: string;
 	models: string[];
-	result: "pass" | "fail" | "already-green";
+	result: "pass" | "fail" | "already-green" | "trial-stalled";
 	iterations: IterationRecord[];
+}
+
+/**
+ * Re-read the operator-tunable fields from the manifest between iterations.
+ *
+ * The Bun rewrite's central practice was editing the WORKFLOW mid-run when the
+ * output went wrong ("one prompt edit and a few hours later, these things
+ * stopped happening") rather than hand-fixing the code. That is impossible if
+ * the manifest is read once at startup, so `rules` and `guide` are hot: a
+ * human watching the run appends a rule and the next iteration obeys it. Only
+ * these two fields are hot - changing sensors or scope mid-run would
+ * invalidate the checkpoint/progress accounting.
+ */
+async function reloadOperatorFields(
+	path: string,
+	m: Manifest,
+): Promise<{ changed: boolean; rules: string[]; guide: string[] }> {
+	try {
+		const fresh = parseManifest(await Bun.file(path).json());
+		const changed =
+			JSON.stringify(fresh.rules) !== JSON.stringify(m.rules) ||
+			JSON.stringify(fresh.guide) !== JSON.stringify(m.guide);
+		return { changed, rules: fresh.rules, guide: fresh.guide };
+	} catch {
+		// mid-edit / invalid JSON: keep the last good values, never crash the run.
+		return { changed: false, rules: m.rules, guide: m.guide };
+	}
 }
 
 // --- commands ---------------------------------------------------------------
@@ -339,10 +484,28 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 	}
 	const dry = flags.dry === true;
 	const freeze = m.baseline || flags.freeze === true;
+	// Trial mode: de-risk a long run by proving the sensors + prompt actually
+	// converge on a couple of iterations first (the Bun rewrite ported 3 files
+	// before all 1,448). A trial that moves nothing is a harness bug - almost
+	// always an over-specified or non-discriminating sensor - not a model that
+	// needs more iterations, and the verdict says so instead of burning budget.
+	let trial = 0;
+	if (flags.trial !== undefined) {
+		trial = typeof flags.trial === "string" ? Number.parseInt(flags.trial, 10) : 2;
+		if (!Number.isInteger(trial) || trial < 1) trial = 2;
+		m.maxIterations = Math.min(m.maxIterations, trial);
+	}
 
 	console.log(`loop: ${manifestPath}`);
 	console.log(`  models:  ${m.models.map((x) => x || "(pi default)").join(" -> ")}`);
 	console.log(`  max:     ${m.maxIterations}  stallPatience: ${m.stallPatience}`);
+	console.log(
+		`  budget:  sensor ${Math.round(m.timeoutMs / 1000)}s, agent ${Math.round(m.agentTimeoutMs / 1000)}s` +
+			(m.limits ? `  limits: ${limitsArgs(m.limits).filter((a) => a.includes("=")).join(" ")}` : ""),
+	);
+	if (trial) console.log(`  TRIAL:   capped at ${m.maxIterations} iteration(s)`);
+	if (m.guide.length) console.log(`  guide:   ${m.guide.join(", ")}`);
+	if (m.rules.length) console.log(`  rules:   ${m.rules.length} standing rule(s)`);
 	console.log(`  tools:   ${m.tools.join(",")}`);
 	console.log(`  scope:   ${m.writeScope.length ? m.writeScope.join(", ") : "(unrestricted)"}`);
 	console.log(`  sensors: ${m.sensors.map((s) => s.name).join(", ")}`);
@@ -455,15 +618,33 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 			`\n=== iteration ${i}/${m.maxIterations}  [model: ${model || "pi default"}, rung ${ladder.rung}] ===`,
 		);
 
+		// Hot-reload the operator-tunable fields so a watching human can steer
+		// the run without killing it.
+		const hot = await reloadOperatorFields(manifestPath, m);
+		if (hot.changed) {
+			m.rules = hot.rules;
+			m.guide = hot.guide;
+			console.log(`  ~ reloaded manifest rules/guide (${m.rules.length} rule(s))`);
+		}
+
 		const feedback = formatFailures(prev);
 		const prompt = buildPrompt(
 			m.task,
 			feedback,
 			iterationNotes(report),
 			formatAttemptHistory(report.iterations),
+			m.rules,
+			m.guide,
 		);
-		const agentExit = await runAgent(prompt, model, m.tools, sandboxed);
-		if (agentExit !== 0) console.warn(`  (agent exited ${agentExit}; continuing)`);
+		const agent = await runAgent(prompt, model, m.tools, sandboxed, m.agentTimeoutMs);
+		if (agent.timedOut) {
+			notes.push(
+				`Your previous iteration was KILLED after ${Math.round(m.agentTimeoutMs / 1000)}s without finishing. Work in smaller steps: make one concrete edit toward the failing check rather than a broad exploration.`,
+			);
+			console.warn(`  ! agent timed out after ${Math.round(m.agentTimeoutMs / 1000)}s; killed`);
+		} else if (agent.code !== 0) {
+			console.warn(`  (agent exited ${agent.code}; continuing)`);
+		}
 
 		// Ref-guard: the agent may run `git commit` (plan docs often instruct
 		// per-task commits). A commit leaves worktree == index, which would make
@@ -566,7 +747,14 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 			scopeViolations,
 			changedFiles: changed,
 			notes,
-			sensors: cur.map((s) => ({ name: s.name, ok: s.ok, exitCode: s.exitCode })),
+			agentTimedOut: agent.timedOut,
+			sensors: cur.map((s) => ({
+				name: s.name,
+				ok: s.ok,
+				exitCode: s.exitCode,
+				timedOut: s.timedOut,
+				durationMs: s.durationMs,
+			})),
 		});
 
 		if (d.keep) {
@@ -587,6 +775,30 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 	}
 
 	report.finishedAt = new Date().toISOString();
+	if (trial) {
+		// Trial verdict: did anything move at all? "No" points at the harness,
+		// not at the model - spending 12 more iterations will not fix a sensor
+		// that asserts the wrong thing.
+		const moved = report.iterations.some((it) => it.progressed);
+		report.result = moved ? "fail" : "trial-stalled";
+		await writeReport(report);
+		if (moved) {
+			console.log(
+				`\nTRIAL: sensors moved (${report.iterations[0]?.failingBefore} -> ${report.iterations.at(-1)?.failingAfter} failing) but are not green yet.\nThe harness converges - re-run without --trial for the full budget.`,
+			);
+			return 1;
+		}
+		console.error(
+			`\nTRIAL STALLED: ${m.maxIterations} iteration(s) moved the failing set not at all.\n` +
+				"Suspect the HARNESS before the model:\n" +
+				"  - is a sensor over-specified (asserting where code lives, or exact prose) rather than behaviour?\n" +
+				"  - does a sensor assert something the task never asked for?\n" +
+				"  - is the task too vague to act on, or too large for one iteration?\n" +
+				"  - did the agent time out (check agentTimedOut in the report)?\n" +
+				`Read ${REPORT_PATH}, fix the harness, re-trial.`,
+		);
+		return 1;
+	}
 	await writeReport(report);
 	console.error(`\nFAIL: sensors still red after ${m.maxIterations} iterations.`);
 	return 1;
@@ -597,7 +809,8 @@ function iterationNotes(report: RunReport): string[] {
 	const last = report.iterations.at(-1);
 	if (!last) return [];
 	const notes: string[] = [...last.notes];
-	if (!last.kept) notes.push("The previous attempt was rolled back (no progress); try a different approach.");
+	if (!last.kept && !last.agentTimedOut)
+		notes.push("The previous attempt was rolled back (no progress); try a different approach.");
 	if (last.escalated) notes.push("A stronger model is now handling this - reconsider the problem from scratch.");
 	return notes;
 }

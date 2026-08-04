@@ -34,6 +34,29 @@ export interface Sensor {
 	 * Default "pass" is the guard/regression case (build, lint, tests).
 	 */
 	expect?: "pass" | "fail";
+	/**
+	 * Wall-clock budget for this sensor, overriding manifest.timeoutMs. A
+	 * sensor that exceeds it is KILLED and reported as a failure, never as a
+	 * hang - an unbounded sensor (wedged test suite, dev server that never
+	 * exits) otherwise stalls the whole loop with no rollback and no report.
+	 */
+	timeoutMs?: number;
+}
+
+/**
+ * cgroup caps applied to sensor commands via `systemd-run --user --scope`.
+ * Sensors run OUTSIDE the bwrap jail (they are operator-configured and
+ * trusted) so the jail does not bound them; test suites that exhaust memory,
+ * sockets or pids can take the host down. Values are passed verbatim as
+ * systemd properties.
+ */
+export interface ResourceLimits {
+	/** systemd MemoryMax, e.g. "8G". */
+	memoryMax?: string;
+	/** systemd CPUQuota, e.g. "400%" (= 4 cores). */
+	cpuQuota?: string;
+	/** systemd TasksMax - caps forked processes/threads. */
+	tasksMax?: number;
 }
 
 export interface Manifest {
@@ -72,6 +95,28 @@ export interface Manifest {
 	 * stops writes OUTSIDE the repo and masks secret dirs (~/.ssh et al).
 	 */
 	sandbox: "auto" | "off" | "require";
+	/** default wall-clock budget per sensor (ms); Sensor.timeoutMs overrides. */
+	timeoutMs: number;
+	/** wall-clock budget for one agent iteration (ms). */
+	agentTimeoutMs: number;
+	/** cgroup caps for sensor commands (Linux + systemd only). */
+	limits?: ResourceLimits;
+	/**
+	 * Operator rules appended verbatim to EVERY iteration prompt, and re-read
+	 * from the manifest between iterations so a watching human can correct the
+	 * loop mid-run without killing it. This is the "fix the process that
+	 * generates the code, not the code" lever.
+	 */
+	rules: string[];
+	/**
+	 * Paths to binding convention documents (a porting guide, a lifetimes
+	 * table, an interface spec). Injected into every prompt as "read these
+	 * first, they are binding". Because each iteration is a fresh `pi -p`, an
+	 * on-disk guide is the ONLY channel that carries conventions across
+	 * iterations. Paths, not contents - the agent reads them with its own tool
+	 * so a large guide does not bloat every prompt.
+	 */
+	guide: string[];
 }
 
 export interface SensorResult {
@@ -83,11 +128,19 @@ export interface SensorResult {
 	output: string;
 	/** remediation guidance carried from the sensor definition. */
 	hint?: string;
+	/** the sensor exceeded its budget and was killed (output is partial). */
+	timedOut?: boolean;
+	/** wall-clock the sensor consumed, ms. */
+	durationMs?: number;
 }
 
 const DEFAULT_TOOLS = ["read", "edit", "write", "bash"];
 const DEFAULT_MAX_ITERATIONS = 10;
 const DEFAULT_STALL_PATIENCE = 2;
+/** 10 min per sensor: long enough for a real suite, short enough to notice. */
+export const DEFAULT_SENSOR_TIMEOUT_MS = 600_000;
+/** 30 min per agent iteration; a wedged `pi -p` must not stall the run. */
+export const DEFAULT_AGENT_TIMEOUT_MS = 1_800_000;
 
 /**
  * Validate an untyped parsed-JSON value into a Manifest. Throws Error with a
@@ -155,6 +208,16 @@ export function parseManifest(raw: unknown): Manifest {
 		writeScope = r.writeScope as string[];
 	}
 
+	const timeoutMs = positiveMs(r.timeoutMs, DEFAULT_SENSOR_TIMEOUT_MS, "manifest.timeoutMs");
+	const agentTimeoutMs = positiveMs(
+		r.agentTimeoutMs,
+		DEFAULT_AGENT_TIMEOUT_MS,
+		"manifest.agentTimeoutMs",
+	);
+	const limits = parseLimits(r.limits);
+	const rules = parseStringArray(r.rules, "manifest.rules");
+	const guide = parseStringArray(r.guide, "manifest.guide");
+
 	let sandbox: Manifest["sandbox"] = "auto";
 	if (r.sandbox !== undefined) {
 		if (r.sandbox !== "auto" && r.sandbox !== "off" && r.sandbox !== "require") {
@@ -191,7 +254,15 @@ export function parseManifest(raw: unknown): Manifest {
 			}
 			expect = so.expect;
 		}
-		return { name: so.name, cmd: so.cmd, hint, expect };
+		let sensorTimeout: number | undefined;
+		if (so.timeoutMs !== undefined) {
+			sensorTimeout = positiveMs(
+				so.timeoutMs,
+				DEFAULT_SENSOR_TIMEOUT_MS,
+				`manifest.sensors[${i}].timeoutMs`,
+			);
+		}
+		return { name: so.name, cmd: so.cmd, hint, expect, timeoutMs: sensorTimeout };
 	});
 
 	const names = sensors.map((s) => s.name);
@@ -208,7 +279,76 @@ export function parseManifest(raw: unknown): Manifest {
 		writeScope,
 		sandbox,
 		sensors,
+		timeoutMs,
+		agentTimeoutMs,
+		limits,
+		rules,
+		guide,
 	};
+}
+
+/** Optional positive-integer millisecond field with a default. */
+function positiveMs(v: unknown, fallback: number, label: string): number {
+	if (v === undefined) return fallback;
+	if (typeof v !== "number" || !Number.isInteger(v) || v < 1) {
+		throw new Error(`${label} must be a positive integer (milliseconds)`);
+	}
+	return v;
+}
+
+/** Optional string[] field, defaulting to empty. */
+function parseStringArray(v: unknown, label: string): string[] {
+	if (v === undefined) return [];
+	if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) {
+		throw new Error(`${label} must be an array of strings`);
+	}
+	return v as string[];
+}
+
+/** Validate the optional `limits` object. */
+export function parseLimits(v: unknown): ResourceLimits | undefined {
+	if (v === undefined) return undefined;
+	if (typeof v !== "object" || v === null || Array.isArray(v)) {
+		throw new Error("manifest.limits must be an object");
+	}
+	const o = v as Record<string, unknown>;
+	const out: ResourceLimits = {};
+	for (const k of ["memoryMax", "cpuQuota"] as const) {
+		if (o[k] !== undefined) {
+			if (typeof o[k] !== "string" || (o[k] as string).trim() === "") {
+				throw new Error(`manifest.limits.${k} must be a non-empty string`);
+			}
+			out[k] = o[k] as string;
+		}
+	}
+	if (o.tasksMax !== undefined) {
+		if (typeof o.tasksMax !== "number" || !Number.isInteger(o.tasksMax) || o.tasksMax < 1) {
+			throw new Error("manifest.limits.tasksMax must be a positive integer");
+		}
+		out.tasksMax = o.tasksMax;
+	}
+	return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * argv prefix that runs a command under a transient systemd scope with the
+ * configured cgroup caps. `--scope` runs synchronously in the caller's
+ * context and propagates the child's exit status (verified 2026-08-09:
+ * `systemd-run -q --user --scope -p MemoryMax=64M -- sh -c 'exit 7'` -> 7).
+ * `-q` suppresses the "Running as unit ..." banner so sensor output stays
+ * clean. Returns [] when nothing is configured.
+ *
+ * Bonus over a bare kill-on-timeout: the scope is a cgroup, so killing it
+ * takes the whole process tree - grandchildren a plain SIGKILL would orphan.
+ */
+export function limitsArgs(limits?: ResourceLimits): string[] {
+	if (!limits) return [];
+	const props: string[] = [];
+	if (limits.memoryMax) props.push("-p", `MemoryMax=${limits.memoryMax}`);
+	if (limits.cpuQuota) props.push("-p", `CPUQuota=${limits.cpuQuota}`);
+	if (limits.tasksMax !== undefined) props.push("-p", `TasksMax=${limits.tasksMax}`);
+	if (props.length === 0) return [];
+	return ["systemd-run", "-q", "--user", "--scope", ...props, "--"];
 }
 
 /** Normalize the {models?, model?} pair into a non-empty ladder ("" = default). */
@@ -286,15 +426,23 @@ export function truncate(s: string, max = 4000): string {
 export function formatFailures(results: SensorResult[]): string {
 	return results
 		.filter((r) => !r.ok)
-		.map(
-			(r) =>
-				`### sensor "${r.name}" failed (exit ${r.exitCode})\n` +
+		.map((r) => {
+			const head = r.timedOut
+				? `### sensor "${r.name}" TIMED OUT after ${Math.round((r.durationMs ?? 0) / 1000)}s (killed; output below is partial)`
+				: `### sensor "${r.name}" failed (exit ${r.exitCode})`;
+			const timeoutHint = r.timedOut
+				? "\n> this did not fail, it HUNG: look for a command that never exits (a server started without a kill, an interactive prompt, an infinite loop/retry), not for a logic bug in the output above"
+				: "";
+			return (
+				`${head}\n` +
 				`$ ${r.cmd}\n` +
 				"```\n" +
 				truncate(r.output).trimEnd() +
 				"\n```" +
-				(r.hint ? `\n> how to fix: ${r.hint}` : ""),
-		)
+				timeoutHint +
+				(r.hint ? `\n> how to fix: ${r.hint}` : "")
+			);
+		})
 		.join("\n\n");
 }
 
@@ -338,19 +486,38 @@ export function formatAttemptHistory(attempts: AttemptRecord[], max = 5): string
 }
 
 /**
- * Build the prompt for one iteration. First iteration (no feedback) is just
- * the task. Later iterations append the failing-sensor block plus anti-cheat
- * guardrails. `notes` carries loop-level signals (rollback happened, escalated,
- * out-of-scope edits reverted). `history` carries the negative-knowledge
- * block from formatAttemptHistory.
+ * Build the prompt for one iteration.
+ *
+ * `guide` and `rules` are rendered on EVERY iteration including the first:
+ * they are standing context, not feedback. The rest (failing sensors,
+ * anti-cheat rules, notes, negative-knowledge history) only appears once
+ * there is something to react to.
+ *
+ * The anti-cheat list is empirical. Test-weakening and git-ref mutation came
+ * from this loop's own runs; the stub rule and the paragraph-comment rule
+ * come from the Bun Rust rewrite, where "get all the crates to compile" was
+ * read as "stub out the functions with compilation errors", and workarounds
+ * arrived wrapped in long justifying comments. One prompt edit stopped both.
  */
 export function buildPrompt(
 	task: string,
 	feedback?: string,
 	notes?: string[],
 	history?: string,
+	rules?: string[],
+	guide?: string[],
 ): string {
-	if (!feedback) return task;
+	const guideBlock =
+		guide && guide.length
+			? "\n\n## Binding conventions - READ THESE FILES FIRST\n" +
+				`${guide.map((g) => `- ${g}`).join("\n")}\n` +
+				"They define how this change must be made. Follow them; do not restate or edit them."
+			: "";
+	const ruleBlock =
+		rules && rules.length
+			? `\n\n## Standing rules\n${rules.map((x) => `- ${x}`).join("\n")}`
+			: "";
+	if (!feedback) return task + guideBlock + ruleBlock;
 	const noteBlock =
 		notes && notes.length
 			? `\n\n## Loop notes\n${notes.map((n) => `- ${n}`).join("\n")}`
@@ -359,11 +526,13 @@ export function buildPrompt(
 		? `\n\n## Previous approaches that were rolled back - do not repeat them\n${history}`
 		: "";
 	return (
-		`${task}\n\n` +
+		`${task}${guideBlock}${ruleBlock}\n\n` +
 		"## Automated checks failed on the previous attempt\n" +
 		"Fix ONLY what is needed to make these checks pass. Rules:\n" +
 		"- Do NOT modify code, config, or tests unrelated to these failures.\n" +
 		"- Do NOT delete, skip, or weaken tests to force them green.\n" +
+		"- Do NOT stub, no-op, or TODO/unimplemented a function to make a check pass. A check satisfied by a stub is a FAILED iteration, not a green one - implement the behaviour or leave the check red.\n" +
+		"- If you need a paragraph-long comment to justify why a workaround is OK, the code is wrong - fix the code.\n" +
 		"- Do NOT change the sensor commands or the manifest.\n" +
 		"- Do NOT run git commit/reset/stash/tag - the loop owns git state; checkpoints are automatic and ref changes are undone.\n" +
 		"- Make the smallest change that addresses the reported errors.\n" +
