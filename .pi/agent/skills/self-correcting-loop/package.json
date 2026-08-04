@@ -1,7 +1,7 @@
 {
   "name": "@erfianugrah/pi-loop",
-  "version": "0.2.0",
-  "description": "Sensor-gated, self-correcting loop driver for pi. Language-agnostic: drives a fresh `pi -p` each iteration until the sensors pass. Sensors span computational (build/lint/test/typecheck/structural/security/browser-DOM) and inferential (LLM-as-judge on the diff; vision judge + baseline pixel-diff for UI/UX). Ships a governor (model-escalation ladder, git checkpoint/rollback, write-scope) plus dependency-free headless-Chromium, judge, and visual-regression sensors.",
+  "version": "0.3.0",
+  "description": "Sensor-gated, self-correcting loop driver for pi. Language-agnostic: drives a fresh `pi -p` each iteration until the sensors pass. Sensors span computational (build/lint/test/typecheck/structural/security/browser-DOM) and inferential (LLM-as-judge on the diff, N-way adversarial review; vision judge + baseline pixel-diff for UI/UX). Ships a governor (wall-clock budgets with process-group kill, cgroup resource limits, model-escalation ladder, git checkpoint/rollback, write-scope, bwrap jail) plus mid-run steering (hot-reloaded rules/guide) and a --trial mode that verdicts the harness before you spend the budget.",
   "license": "MIT",
   "author": "Erfi Anugrah",
   "type": "module",
@@ -17,6 +17,6 @@
   "scripts": {
     "test": "bun test"
   },
-  "keywords": ["pi", "loop", "tdd", "sensor", "self-correcting", "agent", "harness", "llm-as-judge", "visual-regression", "browser"],
+  "keywords": ["pi", "loop", "tdd", "sensor", "self-correcting", "agent", "harness", "llm-as-judge", "adversarial-review", "visual-regression", "browser"],
   "files": ["*.ts", "presets", "SKILL.md", "README.md"]
 }
