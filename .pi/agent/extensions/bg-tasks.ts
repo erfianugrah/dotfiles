@@ -245,6 +245,100 @@ function tmuxKillSession(name: string): void {
   spawnSync("tmux", ["kill-session", "-t", name], { stdio: "ignore" });
 }
 
+// ── descendant reaping ────────────────────────────────────────────────────
+//
+// Killing the tmux session is NOT sufficient. A child that calls setsid(2) --
+// or is wrapped in something that does -- leaves the pane's process group and
+// survives the pane's death. Observed 2026-08-04: the self-correcting-loop
+// spawns `timeout -k 5s -- bwrap ... -- pi -p` with bwrap's --new-session
+// (setsid). bg_kill killed the pane; the agent kept running for 11 more
+// minutes and went on editing the target repo with stale sensor feedback.
+// bwrap's --die-with-parent does not help: its parent is `timeout`, which
+// outlived the pane too.
+//
+// So: read the pane PID first, walk the real process tree via /proc-backed
+// `ps --ppid`, and signal every descendant leaf-first.
+
+function tmuxPanePids(name: string): number[] {
+  const r = spawnSync("tmux", ["list-panes", "-t", name, "-F", "#{pane_pid}"], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (r.status !== 0) return [];
+  return (r.stdout?.toString("utf-8") ?? "")
+    .split("\n")
+    .map((l) => Number.parseInt(l.trim(), 10))
+    .filter((n) => Number.isInteger(n) && n > 1);
+}
+
+function childPids(pid: number): number[] {
+  const r = spawnSync("ps", ["--ppid", String(pid), "-o", "pid="], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (r.status !== 0) return [];
+  return (r.stdout?.toString("utf-8") ?? "")
+    .split("\n")
+    .map((l) => Number.parseInt(l.trim(), 10))
+    .filter((n) => Number.isInteger(n) && n > 1);
+}
+
+/** Depth-first descendant list, deepest first. Cycle- and depth-guarded. */
+function descendantTree(roots: number[]): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  const walk = (pid: number, depth: number): void => {
+    if (depth > 20 || seen.has(pid)) return;
+    seen.add(pid);
+    for (const c of childPids(pid)) walk(c, depth + 1);
+    out.push(pid); // post-order => children before parents
+  };
+  for (const r of roots) walk(r, 0);
+  return out;
+}
+
+function signalPids(pids: number[], sig: NodeJS.Signals): number {
+  let n = 0;
+  for (const pid of pids) {
+    try {
+      process.kill(pid, sig);
+      n++;
+    } catch {
+      // already gone (ESRCH) or not ours (EPERM) -- nothing to do
+    }
+  }
+  return n;
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kill everything under the session's panes: TERM, brief grace, then KILL.
+ * Returns the number of processes that were still alive at TERM time.
+ */
+function reapPaneDescendants(name: string): number {
+  const roots = tmuxPanePids(name);
+  if (roots.length === 0) return 0;
+  const tree = descendantTree(roots);
+  if (tree.length === 0) return 0;
+
+  const termed = signalPids(tree, "SIGTERM");
+  // Grace period. Synchronous on purpose: bg_kill must not return while the
+  // agent is still writing to the repo.
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline && tree.some(pidAlive)) {
+    spawnSync("sleep", ["0.1"], { stdio: "ignore" });
+  }
+  const survivors = tree.filter(pidAlive);
+  if (survivors.length > 0) signalPids(survivors, "SIGKILL");
+  return termed;
+}
+
 // ── slug helpers ──────────────────────────────────────────────────────────
 
 function makeSlug(input: string): string {
@@ -1119,7 +1213,13 @@ function killAndMarkState(name: string): {
 } {
   const hadState = loadState(name) !== null;
   const hadSession = tmuxHasSession(name);
-  if (hadSession) tmuxKillSession(name);
+  if (hadSession) {
+    // Reap BEFORE killing the session: once the pane is gone we can no longer
+    // ask tmux for its pane PID, and any setsid'd descendant becomes an
+    // unfindable orphan reparented to init.
+    reapPaneDescendants(name);
+    tmuxKillSession(name);
+  }
   const s = loadState(name);
   if (s && s.completed_at === undefined) {
     s.completed_at = Date.now();
