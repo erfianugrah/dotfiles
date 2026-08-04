@@ -43,8 +43,14 @@ beforeAll(async () => {
 		timeoutMs: 20000,
 		sensors: [
 			{
+				// POSIX `grep`, deliberately NOT `rg`: ripgrep is absent on
+				// ubuntu-latest, where `! rg -q ...` exits 0 via 127 whether the
+				// fault is present or not. CI caught that on 2026-08-04 - and it
+				// caught it by reporting this very sensor STUCK, which is the
+				// feature working. A fixture sensor must not depend on an optional
+				// tool, or the test asserts the runner's PATH, not the behaviour.
 				name: "good-guard",
-				cmd: "! rg -q FORBIDDEN src.txt",
+				cmd: "! grep -q FORBIDDEN src.txt",
 				canary: "printf 'FORBIDDEN\\n' >> src.txt",
 			},
 			{
