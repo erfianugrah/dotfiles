@@ -336,6 +336,19 @@ function sandboxArgs(cwd: string): string[] {
 	const args = [
 		"--die-with-parent",
 		"--new-session",
+		// PID namespace: bwrap becomes PID 1 inside it, so when bwrap exits the
+		// kernel SIGKILLs everything still in the namespace. Without this the
+		// agent's descendants SURVIVE the timeout kill: `--new-session` calls
+		// setsid(2), which moves the sandbox out of the process group GNU
+		// `timeout` signals, so the deadline reaps bwrap but not what it
+		// spawned. Verified 2026-08-04: an agent killed at its deadline left a
+		// live descendant behind; with --unshare-pid, zero. The failure mode
+		// this prevents is the worst one the loop has - a killed-but-running
+		// agent keeps editing the repo against stale sensor feedback, outside
+		// the governor's checkpoint/rollback accounting.
+		// (`--proc` below is only correct in a new PID namespace anyway;
+		// without one it exposes the host's process table to the jail.)
+		"--unshare-pid",
 		"--ro-bind",
 		"/",
 		"/",

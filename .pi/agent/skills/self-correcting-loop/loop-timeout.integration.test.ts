@@ -118,6 +118,54 @@ test("a hanging AGENT is killed, and the iteration continues to sensors", async 
 	expect(elapsed).toBeLessThan(45_000);
 }, 90_000);
 
+// The sandboxed path is the DEFAULT, and it is the one that leaks: bwrap's
+// --new-session setsid()s out of the process group GNU `timeout` signals, so
+// the deadline reaps bwrap while its descendants live on. The original
+// timeout tests all ran LOOP_SANDBOX=off and were blind to it. A killed-but-
+// running agent is the worst failure the loop has: it keeps editing the repo
+// against stale sensor feedback, outside checkpoint/rollback accounting.
+// --unshare-pid makes bwrap PID 1 of a namespace the kernel tears down whole.
+test("a timed-out agent leaves NO live descendant inside the bwrap jail", async () => {
+	if (!Bun.which("bwrap")) return; // sandbox unavailable; nothing to assert
+	const marker = `loopjailcanary${Date.now()}`;
+	const jailAgent = join(dir, "jail-agent.sh");
+	// A forked grandchild: bash stays alive waiting, the sleep is the leaf.
+	await Bun.write(jailAgent, `#!/usr/bin/env bash\nsleep 400 & # ${marker}\nwait\n`);
+	chmodSync(jailAgent, 0o755);
+
+	await writeManifest({
+		task: "noop",
+		maxIterations: 1,
+		timeoutMs: 5000,
+		agentTimeoutMs: 3000,
+		sensors: [{ name: "feature", cmd: "false", expect: "fail" }],
+	});
+
+	const p = Bun.spawn(["bun", LOOP, "run"], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+		// NOTE: LOOP_SANDBOX deliberately NOT set to "off" - jail is the point.
+		env: { ...process.env, LOOP_PI_CMD: jailAgent },
+	});
+	const [stdout, stderr, code] = await Promise.all([
+		new Response(p.stdout).text(),
+		new Response(p.stderr).text(),
+		p.exited,
+	]);
+	const out = `${stdout}${stderr}`;
+
+	expect(out).toContain("sandbox: bwrap");
+	expect(out).toContain("agent timed out after");
+	expect(code).toBe(1);
+
+	// The load-bearing assertion: nothing from the jail outlived the deadline.
+	const survivors = Bun.spawnSync(["pgrep", "-fc", marker]);
+	const n = Number.parseInt(survivors.stdout.toString().trim() || "0", 10);
+	if (n > 0) Bun.spawnSync(["pkill", "-f", marker]); // don't leak into the suite
+	expect(n).toBe(0);
+}, 90_000);
+
 test("--trial stalls loudly and points at the harness, not the model", async () => {
 	// The fake agent changes nothing, so the failing set cannot move. That is
 	// the signature of a broken sensor, and the trial verdict must say so

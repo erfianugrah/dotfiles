@@ -80,6 +80,16 @@ The governor around the bare loop (all deterministic, no extra model calls):
   nothing reading the loop's output ever sees EOF), plus ports and disk.
   Verified in `loop-timeout.integration.test.ts`; the orphan count on a wedged
   agent went 1 -> 0 with the group kill.
+- **PID-namespace containment for the sandboxed agent** - the jail adds
+  `--unshare-pid`, so bwrap is PID 1 of a namespace the kernel tears down
+  whole when it exits. This is NOT redundant with the group kill: bwrap's
+  `--new-session` calls `setsid(2)`, which moves the sandbox out of the
+  process group GNU `timeout` signals, so the deadline reaps bwrap and
+  leaves its descendants running. Found 2026-08-04 when a killed agent kept
+  editing a repo for 11 more minutes - the worst failure this loop can have,
+  because the governor's checkpoint/rollback accounting no longer covers it
+  and the survivor works from stale sensor feedback. `--proc` was already
+  present and is only correct inside a new PID namespace anyway.
 - **resource limits** *(Bun)* - optional `limits` (`memoryMax` / `cpuQuota` /
   `tasksMax`) wraps each sensor in a transient `systemd-run --user --scope`
   cgroup. Sensors run OUTSIDE the bwrap jail, so nothing else bounds them; the
