@@ -2,9 +2,22 @@
   "task": "EDIT ME: describe the change the loop should make.",
   "maxIterations": 10,
   "model": null,
-  "tools": ["read", "edit", "write", "bash"],
+  "tools": [
+    "read",
+    "edit",
+    "write",
+    "bash"
+  ],
   "sensors": [
-    { "name": "check", "cmd": "npx --no-install astro check" },
-    { "name": "build", "cmd": "npx --no-install astro build" }
+    {
+      "name": "check",
+      "cmd": "npx --no-install astro check",
+      "canary": "mkdir -p src/pages && printf -- '---\\nconst zzCanary: number = \"not a number\";\\n---\\n<div>{zzCanary}</div>\\n' > src/pages/zz-canary.astro"
+    },
+    {
+      "name": "build",
+      "cmd": "npx --no-install astro build",
+      "canary": "mkdir -p src/pages && printf -- '---\\nimport { nope } from \"./zz-definitely-missing-canary\";\\n---\\n<div>{nope}</div>\\n' > src/pages/zz-canary-build.astro"
+    }
   ]
 }

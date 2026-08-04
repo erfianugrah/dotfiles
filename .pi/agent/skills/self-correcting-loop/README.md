@@ -65,6 +65,11 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   instructions) and `guide` (paths the agent must read first) are re-read from
   the manifest between iterations, so you can steer a running loop instead of
   killing it.
+- **`loop verify-sensors`** - mutation-test the sensor set before trusting it:
+  each sensor declares a `canary` that plants the fault it exists to catch, and
+  the tool asserts the sensor's state FLIPS, then reverts. Catches the two
+  failure classes the manifest could not: a guard that can never go red, and a
+  feature sensor that can never go green. Presets ship canaries.
 - **`--trial [N]`** - cap the run at N iterations and get a verdict about the
   HARNESS: sensors moved (re-run for real) vs `TRIAL STALLED` (the sensors are
   the bug, here's the checklist).
@@ -103,7 +108,7 @@ gate** (`judge` - correctness against the spec).
 ## Test
 
 ```bash
-bun test    # 156: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope/head-reset/index-guard/sandbox/timeout integration; CDP; browser flow/screenshot/hardening; judge code + visual gate; pixel-diff decode/diff/baseline
+bun test    # 172: pure-helper + arg-parser unit; governor/dirty/freeze/subdir-scope/head-reset/index-guard/sandbox/timeout/canary integration; CDP; browser flow/screenshot/hardening; judge code + visual gate; pixel-diff decode/diff/baseline
 ```
 
 See [`SKILL.md`](./SKILL.md) for the manifest reference, the harnessability

@@ -2,10 +2,27 @@
   "task": "EDIT ME: describe the change the loop should make.",
   "maxIterations": 10,
   "model": null,
-  "tools": ["read", "edit", "write", "bash"],
+  "tools": [
+    "read",
+    "edit",
+    "write",
+    "bash"
+  ],
   "sensors": [
-    { "name": "types", "cmd": "npx --no-install tsc --noEmit" },
-    { "name": "lint", "cmd": "npx --no-install biome check ." },
-    { "name": "test", "cmd": "npx --no-install vitest run" }
+    {
+      "name": "types",
+      "cmd": "npx --no-install tsc --noEmit",
+      "canary": "d=$([ -d src ] && echo src || echo .); printf 'export const zzCanary: number = \"not a number\";\\n' > \"$d/zz-canary.ts\""
+    },
+    {
+      "name": "lint",
+      "cmd": "npx --no-install biome check .",
+      "canary": "d=$([ -d src ] && echo src || echo .); printf 'export function zzCanary() { debugger; }\\n' > \"$d/zz-canary-lint.ts\""
+    },
+    {
+      "name": "test",
+      "cmd": "npx --no-install vitest run",
+      "canary": "d=$([ -d src ] && echo src || echo .); printf 'import { test, expect } from \"vitest\";\\ntest(\"zz canary\", () => { expect(1).toBe(2); });\\n' > \"$d/zz-canary.test.ts\""
+    }
   ]
 }

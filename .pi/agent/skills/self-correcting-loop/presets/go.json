@@ -2,10 +2,27 @@
   "task": "EDIT ME: describe the change the loop should make.",
   "maxIterations": 10,
   "model": null,
-  "tools": ["read", "edit", "write", "bash"],
+  "tools": [
+    "read",
+    "edit",
+    "write",
+    "bash"
+  ],
   "sensors": [
-    { "name": "build", "cmd": "go build ./..." },
-    { "name": "vet", "cmd": "go vet ./..." },
-    { "name": "test", "cmd": "go test ./..." }
+    {
+      "name": "build",
+      "cmd": "go build ./...",
+      "canary": "printf 'package zzcanary\\n\\nfunc broken( {\\n' > zz_canary_build.go"
+    },
+    {
+      "name": "vet",
+      "cmd": "go vet ./...",
+      "canary": "mkdir -p zzcanary && printf 'package zzcanary\\n\\nimport \"fmt\"\\n\\nfunc C() { fmt.Printf(\"%%d\", \"not-an-int\") }\\n' > zzcanary/c.go"
+    },
+    {
+      "name": "test",
+      "cmd": "go test ./...",
+      "canary": "mkdir -p zzcanary && printf 'package zzcanary\\n\\nimport \"testing\"\\n\\nfunc TestCanaryFails(t *testing.T) { t.Fatal(\"canary\") }\\n' > zzcanary/c_test.go"
+    }
   ]
 }

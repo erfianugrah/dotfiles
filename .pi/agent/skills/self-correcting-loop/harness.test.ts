@@ -15,7 +15,10 @@ import {
 	fingerprint,
 	type AttemptRecord,
 	formatAttemptHistory,
+	formatCanaryReport,
 	formatFailures,
+	isCanaryFailure,
+	judgeCanary,
 	globToRegExp,
 	limitsArgs,
 	matchGlob,
@@ -532,5 +535,63 @@ describe("anti-cheat guardrails", () => {
 		// pre-existing guardrails still present
 		expect(p).toContain("Do NOT delete, skip, or weaken tests");
 		expect(p).toContain("Do NOT run git commit/reset/stash/tag");
+	});
+});
+
+describe("canary verdicts", () => {
+	test("a guard that goes red under the fault and back = flipped", () => {
+		expect(judgeCanary(true, false, true)).toBe("flipped");
+	});
+
+	test("a feature sensor that goes green under a fake implementation = flipped", () => {
+		// direction-agnostic: expect:"fail" sensors start red and must be able
+		// to turn green, which is the unsatisfiability check.
+		expect(judgeCanary(false, true, false)).toBe("flipped");
+	});
+
+	test("same state with the fault planted = stuck (gates nothing)", () => {
+		expect(judgeCanary(true, true, true)).toBe("stuck");
+		expect(judgeCanary(false, false, false)).toBe("stuck");
+	});
+
+	test("flipped but did not come back = not-restored", () => {
+		expect(judgeCanary(true, false, false)).toBe("not-restored");
+		expect(judgeCanary(false, true, true)).toBe("not-restored");
+	});
+
+	test("only stuck / not-restored / canary-failed are failures", () => {
+		expect(isCanaryFailure("stuck")).toBe(true);
+		expect(isCanaryFailure("not-restored")).toBe(true);
+		expect(isCanaryFailure("canary-failed")).toBe(true);
+		expect(isCanaryFailure("flipped")).toBe(false);
+		expect(isCanaryFailure("unverified")).toBe(false);
+	});
+
+	test("manifest parses canary and rejects an empty one", () => {
+		const m = parseManifest({
+			task: "t",
+			sensors: [
+				{ name: "a", cmd: "a", canary: "echo boom > x" },
+				{ name: "b", cmd: "b" },
+			],
+		});
+		expect(m.sensors[0].canary).toBe("echo boom > x");
+		expect(m.sensors[1].canary).toBeUndefined();
+		expect(() =>
+			parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a", canary: "  " }] }),
+		).toThrow(/canary must be a non-empty string/);
+	});
+
+	test("report names the stuck sensors and explains what stuck means", () => {
+		const out = formatCanaryReport([
+			{ name: "good", verdict: "flipped", baselineOk: true, canaryOk: false, restoredOk: true },
+			{ name: "decorative", verdict: "stuck", baselineOk: true, canaryOk: true, restoredOk: true },
+			{ name: "judge", verdict: "unverified" },
+		]);
+		expect(out).toContain("1/3 sensor(s) proven to discriminate; 1 unverified.");
+		expect(out).toContain("STUCK");
+		expect(out).toContain("decorative");
+		expect(out).toContain("gate NOTHING");
+		expect(out).toContain("judge");
 	});
 });

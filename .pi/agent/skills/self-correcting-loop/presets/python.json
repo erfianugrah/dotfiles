@@ -2,10 +2,27 @@
   "task": "EDIT ME: describe the change the loop should make.",
   "maxIterations": 10,
   "model": null,
-  "tools": ["read", "edit", "write", "bash"],
+  "tools": [
+    "read",
+    "edit",
+    "write",
+    "bash"
+  ],
   "sensors": [
-    { "name": "lint", "cmd": "ruff check ." },
-    { "name": "format", "cmd": "ruff format --check ." },
-    { "name": "test", "cmd": "pytest -q" }
+    {
+      "name": "lint",
+      "cmd": "ruff check .",
+      "canary": "printf 'import os\\n' > zz_canary.py"
+    },
+    {
+      "name": "format",
+      "cmd": "ruff format --check .",
+      "canary": "printf 'x = [1,  2]\\ny   = 3\\n' > zz_canary_fmt.py"
+    },
+    {
+      "name": "test",
+      "cmd": "pytest -q",
+      "canary": "printf 'def test_canary_fails():\\n    assert False\\n' > test_zz_canary.py"
+    }
   ]
 }

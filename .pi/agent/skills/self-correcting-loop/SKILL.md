@@ -158,6 +158,7 @@ Two properties make this work on weak models:
 | `harness.test.ts` | Unit tests for the pure helpers. |
 | `loop.integration.test.ts` | End-to-end governor test with a scripted fake agent (rollback / stall+escalate / scope-revert / pass) - no real model needed. |
 | `loop-timeout.integration.test.ts` | Wall-clock budgets: hung sensor killed + rendered as a HANG, per-sensor override, fast sensor untouched, hung agent reaped, `--trial` stall verdict. Each case would hang forever without the deadline. |
+| `loop-verify.integration.test.ts` | `verify-sensors` end-to-end: catches a real `grep -v` inverted-negation sensor as STUCK, proves a feature sensor's flip, confirms an un-canaried sensor is never executed, tree restored after every canary, `--only` / `--strict` / broken-canary / non-git paths. |
 | `loop-steering.integration.test.ts` | `guide`/`rules` reach the real prompt, a rule appended DURING iteration 1 is in force for iteration 2, and a half-saved manifest is ignored rather than fatal. |
 | `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright). Ordered flow steps (wait/click/type/press/assert/screenshot) + viewport/full-page. The behaviour-harness layer for web targets; also a UI live-smoke tool. |
 | `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
@@ -347,6 +348,8 @@ manifest/usage error.
   properties. Skipped with a warning when `systemd-run` is absent.
 - `rules` - standing instructions appended verbatim to every prompt.
   **Hot-reloaded between iterations** - this is the mid-run steering lever.
+- `canary` (per sensor) - a command planting the fault the sensor catches;
+  drives `loop verify-sensors`. Absent = that sensor is reported unverified.
 - `guide` - paths to binding convention documents, injected into every prompt
   as "read these first". Also hot-reloaded. Write the guide BEFORE the loop
   runs, and review it as carefully as code - every iteration is judged against
@@ -401,9 +404,107 @@ sensors are **specific and deterministic**. Raise sensor quality by:
   under "continuous drift" - wire them so an unattended loop physically cannot
   land a leaked key or a known-vulnerable dep. Run them alongside the fast
   sensors: `{ "name": "vuln", "cmd": "osv-scanner -r --lockfile ..." }` (or a
-  language lockfile scan) and `{ "name": "secrets", "cmd": "gitleaks detect
-  --no-banner -v" }`. Pair each with a `hint` telling the model to bump/remove
+  language lockfile scan) and `{ "name": "secrets", "cmd": "gitleaks dir .
+  --no-banner" }`. Pair each with a `hint` telling the model to bump/remove
   the offending dep or move the secret to env, not to delete the scanner.
+
+  **Use `gitleaks dir` (filesystem), NOT `gitleaks detect` (git history).**
+  This doc recommended `detect` until 2026-08-09, and it was wrong in two
+  compounding ways. `detect` scans COMMITS - but the loop's ref-guard
+  deliberately undoes any commit the agent makes, so a leaked key lives in
+  the working tree and never reaches history. The guard was structurally
+  blind to the only threat model the loop actually has. It is also a
+  deprecated alias in current gitleaks (the commands are `dir` / `git` /
+  `stdin`), so it logs `0 commits scanned` and exits 0 - green forever.
+  `loop verify-sensors` found this: the sensor reported STUCK because the
+  canary planted a real token and the state did not change.
+
+  Note the scanner has its own vacuity trap: the canonical AWS example key
+  (`AKIAIOSFODNN7EXAMPLE` / `wJalrXUtnFEMI/...`) is allowlisted and will NOT
+  trip it, so a canary built from documentation examples proves nothing. Use
+  a `ghp_`- or `xoxb-`-shaped synthetic token.
+
+### `loop verify-sensors`: prove each sensor can flip, before trusting any of it
+
+**Run this on every new manifest, before the first `loop run`.** It is the
+cheapest step in the whole workflow and it is the one that catches the
+failure class that costs the most.
+
+```bash
+loop verify-sensors                 # mutation-test every sensor with a canary
+loop verify-sensors --only secrets  # one sensor
+loop verify-sensors --strict        # an undeclared canary is a failure
+```
+
+Declare, per sensor, a `canary`: a command that plants the exact fault the
+sensor exists to catch. The tool applies it, asserts the sensor's state
+**flips**, reverts via the git checkpoint, and asserts it comes back.
+
+```json
+{ "name": "no-stubs",
+  "cmd": "test $(rg -o 'panic\\(\"(TODO|not implemented' --glob '*.go' . | wc -l) -le 0",
+  "canary": "printf '\\nfunc c(){ panic(\"not implemented\") }\\n' >> main.go" }
+```
+
+**Why this exists.** The governor is well-tested; the sensors are hand-written
+shell with no harness of their own - and the loop's entire notion of truth
+rests on them. The manifest could already prove ONE endpoint of a sensor's
+range and never the other:
+
+- `expect: "fail"` proves a feature sensor is red at baseline. Nothing proved
+  it could ever go **green** - an *unsatisfiable* sensor looks identical to a
+  healthy one and burns the entire budget (the 2026-08-02 five-iteration burn).
+- A guard is green at baseline by definition. Nothing proved it could ever go
+  **red** - a guard that cannot fire is indistinguishable from a clean repo.
+
+The canary closes both because it asserts a **flip**, not a direction. Same
+mechanism verifies a guard going red and a feature sensor going green.
+
+Verdicts: `flipped` (discriminates), **`STUCK`** (same state with the fault
+planted - gates nothing), **`DIRTY`** (flipped but did not restore - the
+canary altered the tree or the sensor is non-deterministic), **`CANARY`** (the
+canary command itself errored, so nothing was proven), `unverified` (none
+declared - not a failure, but not evidence either).
+
+Cost: sensors WITHOUT a canary are never executed, so an expensive judge costs
+nothing unless you deliberately give it one. Sensors with a canary run three
+times (baseline / faulted / restored).
+
+Requires a git repo - the revert restores from the checkpoint index, so
+`--allow-dirty` round-trips uncommitted work intact.
+
+**Preset canaries.** Every shipped preset declares a canary per sensor, so
+`loop init && loop verify-sensors` gives a verified base on a new project.
+Four were confirmed end-to-end against throwaway projects on 2026-08-09
+(`go` 3/3, `python` 3/3, `rust` 3/3, `node` 3/3, each `base pass -> canary
+fail -> restored pass`). **`astro` is unverified** - that toolchain is not
+installed here, so treat its two canaries as drafts and let
+`verify-sensors` tell you. That is exactly the failure mode the command
+exists to surface, and it is why a preset canary is a starting point rather
+than a guarantee.
+
+Two gotchas found while verifying them, both of which will bite on real
+projects:
+
+- **`biome check .` lints `.pi/harness.json` too.** The loop's own manifest
+  can turn the lint sensor red (a missing trailing newline is enough), which
+  reads as "the repo is dirty" when it is really "the harness config is
+  unformatted". Format the manifest or scope the lint command.
+- **A syntax error is not a reliable lint canary.** `{a: 1,,}` parses fine
+  under biome's tolerant parser and produced no diagnostic. The preset uses
+  `debugger;` instead, which trips the recommended `noDebugger` rule.
+
+**Writing a canary that proves something:**
+
+- Plant the *real* fault, not a proxy. `echo bad >> file` does not prove a
+  linter works; a genuine lint violation does.
+- Beware allowlisted example values. The canonical AWS docs key will not trip
+  gitleaks, so a canary built from it "passes" while proving nothing.
+- If a sensor reports STUCK, EITHER the check is broken OR the canary plants
+  the wrong thing. Diagnose before editing - the first real STUCK found in
+  this repo was a broken sensor, and the fix was a different scanner mode.
+- A canary that cannot be expressed is a smell: it usually means the sensor
+  asserts something too vague to fault deliberately.
 
 ### Sensors that cannot fail (vacuous sensors - the silent killer)
 

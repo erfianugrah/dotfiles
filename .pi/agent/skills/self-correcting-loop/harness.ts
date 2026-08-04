@@ -41,6 +41,21 @@ export interface Sensor {
 	 * exits) otherwise stalls the whole loop with no rollback and no report.
 	 */
 	timeoutMs?: number;
+	/**
+	 * A command that PLANTS the exact fault this sensor exists to catch (commit
+	 * the secret, inject the error, delete the test, stub the function, break
+	 * the doc). `loop verify-sensors` applies it, asserts the sensor's state
+	 * FLIPS, then reverts.
+	 *
+	 * This is the missing half of the manifest's honesty. `expect: "fail"`
+	 * proves a feature sensor is red at baseline; nothing proved it could ever
+	 * go green (an unsatisfiable sensor looks identical to a healthy one and
+	 * burns the whole budget). A guard is green at baseline by definition;
+	 * nothing proved it could ever go red (a guard that cannot fire is
+	 * indistinguishable from a repo that is clean). The canary closes both,
+	 * because it asserts a FLIP rather than a direction.
+	 */
+	canary?: string;
 }
 
 /**
@@ -254,6 +269,13 @@ export function parseManifest(raw: unknown): Manifest {
 			}
 			expect = so.expect;
 		}
+		let canary: string | undefined;
+		if (so.canary !== undefined) {
+			if (typeof so.canary !== "string" || so.canary.trim() === "") {
+				throw new Error(`manifest.sensors[${i}].canary must be a non-empty string`);
+			}
+			canary = so.canary;
+		}
 		let sensorTimeout: number | undefined;
 		if (so.timeoutMs !== undefined) {
 			sensorTimeout = positiveMs(
@@ -262,7 +284,7 @@ export function parseManifest(raw: unknown): Manifest {
 				`manifest.sensors[${i}].timeoutMs`,
 			);
 		}
-		return { name: so.name, cmd: so.cmd, hint, expect, timeoutMs: sensorTimeout };
+		return { name: so.name, cmd: so.cmd, hint, expect, timeoutMs: sensorTimeout, canary };
 	});
 
 	const names = sensors.map((s) => s.name);
@@ -541,6 +563,124 @@ export function buildPrompt(
 		"\n\n" +
 		feedback
 	);
+}
+
+// --- sensor verification (canary / mutation testing) ------------------------
+
+/**
+ * Outcome of mutation-testing one sensor with its canary.
+ *
+ * - `flipped`      - the sensor changed state under the planted fault and
+ *                    returned to baseline after the revert. It discriminates.
+ * - `stuck`        - the sensor reported the SAME state with the fault present.
+ *                    It is decoration: it cannot see the thing it guards.
+ * - `not-restored` - the sensor flipped but did not return to baseline after
+ *                    the revert, so the canary left the tree altered (or the
+ *                    sensor is non-deterministic). Either way the result is
+ *                    untrustworthy and the working tree needs a look.
+ * - `canary-failed`- the canary command itself errored, so nothing was proven.
+ * - `unverified`   - no canary declared. Not a failure, but not evidence.
+ */
+export type CanaryVerdict =
+	| "flipped"
+	| "stuck"
+	| "not-restored"
+	| "canary-failed"
+	| "unverified";
+
+export interface CanaryResult {
+	name: string;
+	verdict: CanaryVerdict;
+	/** sensor pass/fail before the canary was applied. */
+	baselineOk?: boolean;
+	/** sensor pass/fail with the fault planted. */
+	canaryOk?: boolean;
+	/** sensor pass/fail after the revert. */
+	restoredOk?: boolean;
+	/** detail for canary-failed / not-restored. */
+	note?: string;
+}
+
+/**
+ * Direction-agnostic verdict: a healthy sensor's state must DIFFER under the
+ * planted fault, and must come back afterwards.
+ *
+ * Deliberately not "guard must go red" - a feature sensor (`expect: "fail"`)
+ * is red at baseline and its canary is a fake implementation that should turn
+ * it green. Asserting the flip covers both without the caller declaring which
+ * direction it expected.
+ */
+export function judgeCanary(
+	baselineOk: boolean,
+	canaryOk: boolean,
+	restoredOk: boolean,
+): CanaryVerdict {
+	if (canaryOk === baselineOk) return "stuck";
+	if (restoredOk !== baselineOk) return "not-restored";
+	return "flipped";
+}
+
+/** A verdict that means the sensor set cannot be trusted. */
+export function isCanaryFailure(v: CanaryVerdict): boolean {
+	return v === "stuck" || v === "not-restored" || v === "canary-failed";
+}
+
+/** Render the verification results as an operator-readable report. */
+export function formatCanaryReport(results: CanaryResult[]): string {
+	const glyph: Record<CanaryVerdict, string> = {
+		flipped: "ok      ",
+		stuck: "STUCK   ",
+		"not-restored": "DIRTY   ",
+		"canary-failed": "CANARY  ",
+		unverified: "unverif.",
+	};
+	const width = Math.max(4, ...results.map((r) => r.name.length));
+	const lines = results.map((r) => {
+		const states =
+			r.baselineOk === undefined
+				? ""
+				: `  [base ${r.baselineOk ? "pass" : "fail"} -> canary ${
+						r.canaryOk === undefined ? "?" : r.canaryOk ? "pass" : "fail"
+					} -> restored ${
+						r.restoredOk === undefined ? "?" : r.restoredOk ? "pass" : "fail"
+					}]`;
+		return `  ${glyph[r.verdict]} ${r.name.padEnd(width)}${states}${r.note ? `  ${r.note}` : ""}`;
+	});
+
+	const stuck = results.filter((r) => r.verdict === "stuck").map((r) => r.name);
+	const dirty = results.filter((r) => r.verdict === "not-restored").map((r) => r.name);
+	const broke = results.filter((r) => r.verdict === "canary-failed").map((r) => r.name);
+	const none = results.filter((r) => r.verdict === "unverified").map((r) => r.name);
+	const okCount = results.filter((r) => r.verdict === "flipped").length;
+
+	const out = [lines.join("\n"), ""];
+	out.push(
+		`${okCount}/${results.length} sensor(s) proven to discriminate; ${none.length} unverified.`,
+	);
+	if (stuck.length)
+		out.push(
+			`\nSTUCK - these did not change state with the fault planted, so they gate NOTHING:\n  ${stuck.join(", ")}\n` +
+				"  Either the check cannot see the fault (wrong path, inverted negation,\n" +
+				"  suppressed stderr, substring match) or the canary plants the wrong thing.\n" +
+				"  Fix one of the two before trusting a green run.",
+		);
+	if (dirty.length)
+		out.push(
+			`\nDIRTY - flipped but did not return to baseline after revert:\n  ${dirty.join(", ")}\n` +
+				"  The canary left the tree altered, or the sensor is non-deterministic.\n" +
+				"  Inspect `git status` before running anything else.",
+		);
+	if (broke.length)
+		out.push(
+			`\nCANARY - the canary command itself failed, so nothing was proven:\n  ${broke.join(", ")}`,
+		);
+	if (none.length)
+		out.push(
+			`\nUnverified (no canary declared):\n  ${none.join(", ")}\n` +
+				"  Add a `canary` that plants the exact fault each one exists to catch.\n" +
+				"  Until then these are assertions, not evidence.",
+		);
+	return out.join("\n");
 }
 
 /** Pure stack-detection for `loop init`: given the filenames present in a dir. */

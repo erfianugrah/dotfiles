@@ -2,10 +2,27 @@
   "task": "EDIT ME: describe the change the loop should make.",
   "maxIterations": 10,
   "model": null,
-  "tools": ["read", "edit", "write", "bash"],
+  "tools": [
+    "read",
+    "edit",
+    "write",
+    "bash"
+  ],
   "sensors": [
-    { "name": "build", "cmd": "cargo build --quiet" },
-    { "name": "clippy", "cmd": "cargo clippy --quiet -- -D warnings" },
-    { "name": "test", "cmd": "cargo test --quiet" }
+    {
+      "name": "build",
+      "cmd": "cargo build --quiet",
+      "canary": "f=$(ls src/main.rs src/lib.rs 2>/dev/null | head -1); printf '\\nfn zz_canary( {\\n' >> \"$f\""
+    },
+    {
+      "name": "clippy",
+      "cmd": "cargo clippy --quiet -- -D warnings",
+      "canary": "f=$(ls src/main.rs src/lib.rs 2>/dev/null | head -1); printf '\\npub fn zz_canary_unused() { let unused_zz = 1; }\\n' >> \"$f\""
+    },
+    {
+      "name": "test",
+      "cmd": "cargo test --quiet",
+      "canary": "f=$(ls src/main.rs src/lib.rs 2>/dev/null | head -1); printf '\\n#[test]\\nfn zz_canary_fails() { panic!(\"canary\"); }\\n' >> \"$f\""
+    }
   ]
 }

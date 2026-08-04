@@ -33,6 +33,7 @@ import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import * as os from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import {
+	type CanaryResult,
 	type LadderState,
 	type Manifest,
 	type Sensor,
@@ -48,11 +49,15 @@ import {
 	detectPreset,
 	fingerprint,
 	formatAttemptHistory,
+	formatCanaryReport,
 	formatFailures,
+	isCanaryFailure,
+	judgeCanary,
 	limitsArgs,
 	modelAt,
 	outOfScope,
 	parseManifest,
+	truncate,
 } from "./harness.ts";
 
 const SCRIPT_DIR = dirname(Bun.fileURLToPath(import.meta.url));
@@ -825,6 +830,125 @@ async function writeReport(report: RunReport): Promise<void> {
 	}
 }
 
+/**
+ * `loop verify-sensors` - mutation-test the sensor set before trusting it.
+ *
+ * For every sensor carrying a `canary`, plant the fault, assert the sensor's
+ * state FLIPS, revert, assert it comes back. A sensor that does not flip is
+ * decoration, and the whole loop's correctness rests on sensors: the governor
+ * is well-tested, the sensors are hand-written shell with no harness of their
+ * own. This is that harness.
+ *
+ * Cost control: sensors WITHOUT a canary are never executed here (they are
+ * reported `unverified`), so an expensive inferential gate like `judge` costs
+ * nothing unless you deliberately give it a canary.
+ */
+async function cmdVerify(flags: Record<string, string | boolean>): Promise<number> {
+	const manifestPath = typeof flags.manifest === "string" ? flags.manifest : DEFAULT_MANIFEST;
+	let m: Manifest;
+	try {
+		m = parseManifest(await Bun.file(manifestPath).json());
+	} catch (err) {
+		console.error(`manifest error (${manifestPath}): ${(err as Error).message}`);
+		return 2;
+	}
+
+	// Reverting a planted fault needs git. Without it we would have no way to
+	// undo the canary, which is far worse than refusing to run.
+	if (!(await isGitRepo())) {
+		console.error(
+			"verify-sensors needs a git repo: the canary plants a real fault in the\n" +
+				"working tree and the revert restores from the git checkpoint.",
+		);
+		return 2;
+	}
+	if ((await isDirty()) && flags["allow-dirty"] !== true) {
+		console.error(
+			"working tree is dirty. Commit or stash first, or pass --allow-dirty\n" +
+				"(your uncommitted work is snapshotted into the checkpoint index and\n" +
+				"restored after every canary, but starting clean makes a DIRTY verdict\n" +
+				"unambiguous).",
+		);
+		return 2;
+	}
+
+	const only =
+		typeof flags.only === "string"
+			? new Set(flags.only.split(",").map((s) => s.trim()).filter(Boolean))
+			: null;
+	const targets = only ? m.sensors.filter((s) => only.has(s.name)) : m.sensors;
+	if (only) {
+		const missing = [...only].filter((n) => !m.sensors.some((s) => s.name === n));
+		if (missing.length) {
+			console.error(`no such sensor(s): ${missing.join(", ")}`);
+			return 2;
+		}
+	}
+
+	console.log(`verify-sensors: ${manifestPath}`);
+	console.log(
+		`  ${targets.filter((s) => s.canary).length}/${targets.length} sensor(s) carry a canary\n`,
+	);
+
+	// Snapshot the starting tree: every revert restores to THIS state, so
+	// pre-existing uncommitted work round-trips intact under --allow-dirty.
+	await checkpoint();
+
+	const results: CanaryResult[] = [];
+	for (const s of targets) {
+		if (!s.canary) {
+			results.push({ name: s.name, verdict: "unverified" });
+			continue;
+		}
+		process.stdout.write(`  ${s.name} ... `);
+
+		const base = await runSensor(s, m);
+		const planted = await sh(["bash", "-lc", s.canary], s.timeoutMs ?? m.timeoutMs);
+		if (planted.code !== 0) {
+			// Restore anyway - a partially-applied canary still dirties the tree.
+			await rollback();
+			results.push({
+				name: s.name,
+				verdict: "canary-failed",
+				baselineOk: base.ok,
+				note: `canary exited ${planted.code}: ${truncate(planted.out, 200).replace(/\n/g, " ")}`,
+			});
+			console.log("CANARY FAILED");
+			continue;
+		}
+
+		const withFault = await runSensor(s, m);
+		await rollback();
+		const restored = await runSensor(s, m);
+
+		const verdict = judgeCanary(base.ok, withFault.ok, restored.ok);
+		results.push({
+			name: s.name,
+			verdict,
+			baselineOk: base.ok,
+			canaryOk: withFault.ok,
+			restoredOk: restored.ok,
+		});
+		console.log(
+			verdict === "flipped"
+				? "discriminates"
+				: verdict === "stuck"
+					? "STUCK (gates nothing)"
+					: "DIRTY (did not restore)",
+		);
+	}
+
+	console.log(`\n${formatCanaryReport(results)}`);
+
+	const broken = results.filter((r) => isCanaryFailure(r.verdict));
+	if (broken.length) return 1;
+	if (flags.strict === true && results.some((r) => r.verdict === "unverified")) {
+		console.error("\n--strict: every sensor must carry a canary.");
+		return 1;
+	}
+	return 0;
+}
+
 async function cmdInit(
 	positional: string[],
 	flags: Record<string, string | boolean>,
@@ -873,8 +997,14 @@ async function main(): Promise<void> {
 		case "init":
 			code = await cmdInit(positional, flags);
 			break;
+		case "verify-sensors":
+		case "verify":
+			code = await cmdVerify(flags);
+			break;
 		default:
-			console.error(`unknown command "${cmd}"\nusage: bun loop.ts [run|init] ...`);
+			console.error(
+				`unknown command "${cmd}"\nusage: bun loop.ts [run|init|verify-sensors] ...`,
+			);
 			code = 2;
 	}
 	process.exit(code);
