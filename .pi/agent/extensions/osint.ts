@@ -552,6 +552,77 @@ function summarise(inv: Investigation): Record<string, unknown> {
   };
 }
 
+// Category tags worth grouping POIs under. Order matters: the first match
+// wins. Transit keys are included because MRT stations carry railway=station
+// with no amenity/shop/leisure tag, and falling through to an arbitrary tag
+// value grouped five of them under "Singapore" (from network=Singapore).
+const POI_CATEGORY_KEYS = [
+  "amenity", "shop", "tourism", "leisure", "railway", "public_transport",
+  "highway", "building",
+] as const;
+
+const POI_CAP = 25;
+
+function poiCategory(tags: Record<string, unknown>): string {
+  for (const key of POI_CATEGORY_KEYS) {
+    const v = tags[key];
+    if (typeof v === "string" && v) return v;
+  }
+  return "other";
+}
+
+function formatGeo(inv: Investigation, mode: "summary" | "full" = "summary"): string {
+  const entity = asString(inv.entity);
+  const grouped = groupByKind(inv.findings);
+  const geocodes = grouped["geocode"] ?? [];
+  const pois = grouped["poi"] ?? [];
+  const parts: string[] = [`# Location: ${entity}`];
+
+  if (geocodes.length) {
+    const ex = (geocodes[0].extra ?? {}) as Record<string, unknown>;
+    const meta = [ex.type, ex.osm].filter((v) => typeof v === "string" && v);
+    const coord = `Coordinates: ${ex.lat}, ${ex.lon}`;
+    parts.push(meta.length ? `${coord}  (${meta.join(", ")})` : coord);
+  } else if (!pois.length) {
+    parts.push("No location data returned.");
+  }
+
+  if (pois.length) {
+    const byCat: Record<string, Finding[]> = {};
+    for (const p of pois) {
+      const tags = ((p.extra ?? {}) as Record<string, unknown>).tags ?? {};
+      (byCat[poiCategory(tags as Record<string, unknown>)] ??= []).push(p);
+    }
+    const dist = (f: Finding) => {
+      const d = ((f.extra ?? {}) as Record<string, unknown>).distance_m;
+      return typeof d === "number" ? d : Number.POSITIVE_INFINITY;
+    };
+    const cap = mode === "full" ? pois.length : POI_CAP;
+    let rendered = 0;
+    const lines: string[] = ["## POI nearby"];
+
+    for (const cat of Object.keys(byCat).sort()) {
+      const items = byCat[cat].sort((a, b) => dist(a) - dist(b));
+      lines.push(`\n### ${cat} (${items.length})`);
+      for (const p of items) {
+        if (rendered >= cap) break;
+        const d = dist(p);
+        const suffix = Number.isFinite(d) ? ` \u00b7 ${Math.round(d)}m` : "";
+        lines.push(`- ${asString(p.value)}${suffix}`);
+        rendered++;
+      }
+      if (rendered >= cap) break;
+    }
+    if (rendered < pois.length) {
+      lines.push(`\n_${pois.length - rendered} more POI not shown - pass mode='full'._`);
+    }
+    parts.push(lines.join("\n"));
+  }
+
+  parts.push(metaFooter(inv));
+  return parts.join("\n\n");
+}
+
 const osintDomain = defineTool({
   name: "osint_domain",
   promptSnippet: "osint_domain — domain DNS / subdomains / certs / WHOIS via subfinder + crt.sh + RDAP.",
@@ -760,6 +831,54 @@ const osintCve = defineTool({
   },
 });
 
+const osintGeo = defineTool({
+  name: "osint_geo",
+  promptSnippet:
+    "osint_geo \u2014 geocode a place name, reverse-geocode a coordinate, and find nearby POI (OpenStreetMap).",
+  promptGuidelines: [
+    "Pass `query` for a place name, or `lat`+`lon` for reverse geocoding. One or the other.",
+    "POI search only runs when `tags` is given, e.g. {\"shop\":\"supermarket\",\"railway\":\"station\"}. Values may be '*' to match any.",
+    "Amenity-density reconnaissance, not brand completeness \u2014 OSM commercial-POI coverage is partial, so treat counts as a floor.",
+    "Key-less (Nominatim + Overpass). Overpass rate-limits to 2 concurrent slots and 504s under load; failures are recorded, not raised.",
+  ],
+  label: "OSINT Geo",
+  description:
+    "Geocoding and POI search via OpenStreetMap: place name to coordinates, coordinates to address, and nearby features by OSM tag with distances.",
+  parameters: Type.Object({
+    query: Type.Optional(Type.String({ description: "Place name to geocode, e.g. 'Choa Chu Kang, Singapore'" })),
+    lat: Type.Optional(Type.Number({ description: "Latitude for reverse geocoding / POI search" })),
+    lon: Type.Optional(Type.Number({ description: "Longitude for reverse geocoding / POI search" })),
+    radius_m: Type.Optional(Type.Number({ description: "POI search radius in metres (default 2000, max 50000)" })),
+    tags: Type.Optional(Type.Record(Type.String(), Type.String(), {
+      description: "OSM tags to search for, e.g. {'shop':'supermarket'}. Omit to skip POI search.",
+    })),
+    limit: Type.Optional(Type.Number({ description: "Max results (default 50, max 200)" })),
+    mode: Type.Optional(Type.Union([Type.Literal("summary"), Type.Literal("full")], {
+      description: "'summary' (default) caps POI output; 'full' lists every hit",
+    })),
+  }),
+  async execute(_id, params, signal) {
+    const query = params.query?.trim() || undefined;
+    if (!query && (params.lat === undefined || params.lon === undefined)) {
+      return makeResult("Error: pass `query`, or both `lat` and `lon`.", { error: true });
+    }
+    const inv = await osintCall(
+      "/investigate/geo",
+      {
+        query: query ?? null,
+        lat: params.lat ?? null,
+        lon: params.lon ?? null,
+        radius_m: params.radius_m ?? 2000,
+        tags: params.tags ?? null,
+        limit: params.limit ?? 50,
+      },
+      60_000,
+      signal,
+    );
+    return makeResult(formatGeo(inv, params.mode ?? "summary"), summarise(inv));
+  },
+});
+
 const osintHarvest = defineTool({
   name: "osint_harvest",
   promptSnippet: "osint_harvest — theHarvester emails + hosts for a domain (slow, ~7min).",
@@ -819,5 +938,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(osintPhone);
   pi.registerTool(osintThreat);
   pi.registerTool(osintCve);
+  pi.registerTool(osintGeo);
   pi.registerTool(osintHarvest);
 }
