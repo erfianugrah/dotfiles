@@ -543,6 +543,28 @@ projects:
 - A canary that cannot be expressed is a smell: it usually means the sensor
   asserts something too vague to fault deliberately.
 
+### Iteration 1 already sees the baseline failures (and your hints)
+
+Non-obvious and worth internalising: `prev` is seeded with the **baseline**
+sensor run, so the very first agent prompt already contains the full failing
+block - every failing sensor's command, its output, and its `hint`. There is
+no "blind first attempt".
+
+Two consequences:
+
+- **Hints are read on iteration 1**, so a hint that states the answer hands it
+  over immediately. Usually correct (that is the point of a hint), but be
+  deliberate: `hint: "Banner() must return exactly: ops v2 ready"` makes the
+  task trivial, while `"output must match the golden; the diff shows what
+  differs"` makes the model read the evidence.
+- **You cannot force extra iterations by hiding information in a sensor.** A
+  golden-diff sensor prints the expected text in its own output, so the
+  "unknowable" value is in the iteration-1 prompt. Measured 2026-08-04: a task
+  designed to need two iterations converged in one for exactly this reason,
+  which invalidated a steering experiment built on top of it. If you need a
+  multi-iteration run, the task has to be genuinely too large for one pass -
+  difficulty is the only honest lever.
+
 ### Sensors that cannot fail (vacuous sensors - the silent killer)
 
 A green loop proves nothing if a sensor passes *vacuously* - the gate reports
