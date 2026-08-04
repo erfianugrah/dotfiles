@@ -164,3 +164,46 @@ describe("judge buildVisualPrompt", () => {
 		expect(p).not.toContain("git diff");
 	});
 });
+
+describe("judge parseVerdict - markdown-decorated verdicts", () => {
+	// A real reviewer (claude-haiku-4-5) emitted "**VERDICT: FAIL**" after
+	// correctly diagnosing a planted spec violation. The old bare-line regex
+	// could not match it, so a correct judgment was discarded as unparseable.
+	// Fail-closed hid the damage that time; the symmetric case - a bolded
+	// **VERDICT: PASS** - would have been silently converted into a FAIL and
+	// blocked good work. Measured 2026-08-04, 1 in 8 runs.
+	test("bold around the whole line", () => {
+		expect(parseVerdict("reasons here\n**VERDICT: FAIL**").verdict).toBe("fail");
+		expect(parseVerdict("reasons here\n**VERDICT: PASS**").verdict).toBe("pass");
+	});
+
+	test("bold around the label or the value only", () => {
+		expect(parseVerdict("**VERDICT:** PASS").verdict).toBe("pass");
+		expect(parseVerdict("VERDICT: **FAIL**").verdict).toBe("fail");
+		expect(parseVerdict("__VERDICT: PASS__").verdict).toBe("pass");
+	});
+
+	test("heading, list-marker and blockquote prefixes", () => {
+		expect(parseVerdict("## VERDICT: PASS").verdict).toBe("pass");
+		expect(parseVerdict("- VERDICT: FAIL").verdict).toBe("fail");
+		expect(parseVerdict("> VERDICT: PASS").verdict).toBe("pass");
+		expect(parseVerdict("### **VERDICT: FAIL**").verdict).toBe("fail");
+	});
+
+	test("trailing punctuation and backticks", () => {
+		expect(parseVerdict("VERDICT: PASS.").verdict).toBe("pass");
+		expect(parseVerdict("`VERDICT: FAIL`").verdict).toBe("fail");
+	});
+
+	test("still refuses prose mentions and unknown values", () => {
+		expect(parseVerdict("the VERDICT: PASS was inline").verdict).toBe("unknown");
+		expect(parseVerdict("VERDICT: MAYBE").verdict).toBe("unknown");
+		expect(parseVerdict("my verdict is that it passes").verdict).toBe("unknown");
+	});
+
+	test("last verdict still wins, and reasons stop before it", () => {
+		const r = parseVerdict("first thoughts\nVERDICT: PASS\nrethinking\n**VERDICT: FAIL**");
+		expect(r.verdict).toBe("fail");
+		expect(r.reasons).toContain("rethinking");
+	});
+});

@@ -148,7 +148,18 @@ export type Verdict = "pass" | "fail" | "unknown";
  * return everything before it as the reasons blob.
  */
 export function parseVerdict(stdout: string): { verdict: Verdict; reasons: string } {
-	const re = /^\s*VERDICT:\s*(PASS|FAIL)\s*$/gim;
+	// Tolerate markdown decoration around the verdict line. Models routinely
+	// emit `**VERDICT: FAIL**`, `## VERDICT: PASS`, `- VERDICT: FAIL` or
+	// `VERDICT: **PASS**`, and a bare-line regex silently classes all of those
+	// as unparseable. Measured 2026-08-04: 1 in 8 claude-haiku-4-5 reviews of
+	// the same diff came back `**VERDICT: FAIL**` after correctly diagnosing a
+	// planted spec violation - the judgment was discarded and only fail-closed
+	// kept the gate honest. The symmetric case is worse: a bolded PASS becomes
+	// a FAIL and blocks good work.
+	//
+	// Still deliberately anchored to line start + a `VERDICT:` label, so prose
+	// like "the VERDICT: PASS was inline" does NOT match.
+	const re = /^[\s>#*_`-]*VERDICT[*_`]*\s*:\s*[*_`]*\s*(PASS|FAIL)(?![A-Za-z0-9])[\s*_`.]*$/gim;
 	let m: RegExpExecArray | null;
 	let last: { verdict: Verdict; index: number } | null = null;
 	// biome-ignore lint/suspicious/noAssignInExpressions: standard regex-exec loop.

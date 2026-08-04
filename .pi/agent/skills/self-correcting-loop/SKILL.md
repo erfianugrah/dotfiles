@@ -703,6 +703,37 @@ SECOND `pi -p`, and exits on the model's `VERDICT: PASS/FAIL`. Use it well:
 - **Use a DIFFERENT / stronger model** than the one writing the code (`--model`).
   A judge that is the same model that wrote the diff is a closed loop, same as
   self-graded tests.
+- **Measured reviewer variance: zero, and `--adversarial` bought nothing.**
+  A/B on a fixed diff with one planted, unambiguous spec violation (`Median`
+  sorting the caller's slice, which the spec explicitly forbids), scored
+  against a clean control. 8 single-reviewer trials per arm per model:
+
+  | judge | caught the flaw | false-rejected clean |
+  |---|---|---|
+  | claude-sonnet-5 | 8/8 | 0/8 |
+  | claude-haiku-4-5 | 8/8 | 0/8 |
+
+  With p = 1.0 and q = 0.0, `1-(1-p)^k` is flat: a second and third reviewer
+  add cost and change no outcome. Be honest about the sample: n=8 with no
+  errors gives an exact 95% one-sided bound of p >= 0.688 and q <= 0.312,
+  so this rules out a *badly* noisy reviewer, not a mildly noisy one. The
+  flaw was also localised and spec-explicit - variance should be expected
+  to appear on ambiguous or diffuse defects. But the load-bearing
+  claim ("one sampled judgment is noisy") did NOT reproduce at this
+  difficulty, on either a strong or a weak judge.
+
+  **The one apparent miss was a bug in this harness, not model variance.**
+  A haiku run came back `unknown` -> fail-closed. The transcript showed it had
+  diagnosed the flaw correctly and written `**VERDICT: FAIL**`; `parseVerdict`
+  required a bare line and discarded it. Fail-closed hid the damage that time,
+  but the symmetric case is worse - a bolded `**VERDICT: PASS**` becomes a
+  FAIL and blocks good work. Fixed to tolerate markdown decoration (bold,
+  headings, list markers, blockquotes, backticks) while still refusing prose
+  mentions. Before assuming a judge is flaky, check that its verdict parses.
+
+  Practical consequence: **leave `--adversarial` at 1 unless you have measured
+  variance on your own diffs.** Harness to measure it:
+  `~/.local/share/loop-validation/judge-variance/`.
 - **Run 2+ reviewers with `--adversarial N`** *(Bun)*. The Bun rewrite's unit
   of work was `1 implementer -> 2 adversarial reviewers -> 1 fixer`, with the
   roles kept strictly apart: "The Claude that wrote the code wants the code to
