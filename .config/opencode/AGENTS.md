@@ -27,6 +27,7 @@ Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context
 - Local business / maps / reviews / opening hours → `web_research` with `mode: "local"` (forces Playwright on JS-heavy hosts).
 - Freshness-sensitive (<1 week) → `web_research` with `mode: "fresh"` (livecrawl=preferred + SearXNG cross-check).
 - Exa returns 0 useful results or errors twice → fall back to research SearXNG `:8888`.
+- User says "use the research tools/stack", or the task is non-coding web research (shopping, product comparison, local recommendations) → the `research` skill's self-hosted stack: SearXNG `https://searxng.erfi.io/search?q=...&format=json` (multi-engine; stronger than Exa for SG-local and long-tail results) plus crawler `https://crawler.erfi.io/extract` for page content. Read the research SKILL.md and drive it via `bash curl`. Exa (`websearch` / `web_research`) alone does NOT satisfy an explicit "use the research tools" request. These two self-hosted hosts are the ONLY carve-out to the "never bash curl a search engine" rule.
 - OSINT (domain / IP / email / username / phone / CVE / VirusTotal) → research skill `:8890/osint/*`. Not in `websearch` scope.
 - Container image versions → `oci_tags`, NEVER `websearch`.
 - Library API docs and framework concepts → `context7_query_docs`, NOT `websearch`. Resolve with `context7_resolve_library_id` first if no ID given.

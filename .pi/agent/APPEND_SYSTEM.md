@@ -42,6 +42,13 @@ When the user answers, record it via the `confidential_terms` tool (action `bloc
 - **Public remotes especially**: a confidential name on a public repo's default branch is effectively disclosed; removing it needs a history rewrite + force-push + (with forks) a GitHub Support request to GC the fork-network object store. Asking first is far cheaper.
 - Never echo a term you are redacting back into chat just to explain the redaction — refer to it obliquely.
 
+# Chat output surface
+
+Chat replies are read in a terminal and copy-pasted into other apps. Format for that surface, not for a markdown renderer:
+
+- **URLs as full absolute plain text** (`https://host/path`) - NEVER a bare hostname (`danishdesignco.com.sg` does not linkify, so it is not clickable) and NEVER a markdown link with a prettified label (the TUI renders the label and discards the target). This applies to Sources lists too: one full URL per entry.
+- **ASCII punctuation in chat replies too**, not just persisted artifacts: hyphen `-` instead of em/en-dash, straight quotes, `...` instead of the ellipsis character. These mis-decode as mojibake when pasted into non-UTF-8 composers.
+
 # Output: characters in committed / copy-pasted text
 
 Two rules, do not conflate them:
