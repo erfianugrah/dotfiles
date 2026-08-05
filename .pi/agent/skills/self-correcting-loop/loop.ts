@@ -52,6 +52,7 @@ import {
 	allPass,
 	applyFreeze,
 	blockedBy,
+	sensorDelta,
 	failingNames,
 	falsePremises,
 	gatingSensors,
@@ -967,6 +968,16 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 			model,
 			failingBefore: prevFailing,
 			failingAfter: curFailing,
+			// The counts drive the keep/rollback decision; these say WHICH sensor
+			// drove it. Without them a rollback is "1 -> 2" and you read the raw
+			// log to find out what cost the iteration.
+			...(() => {
+				const d = sensorDelta(prev, cur);
+				return {
+					...(d.fixed.length ? { fixed: d.fixed } : {}),
+					...(d.regressed.length ? { regressed: d.regressed } : {}),
+				};
+			})(),
 			progressed: d.progressed,
 			kept: d.keep,
 			escalated: adv.escalated,

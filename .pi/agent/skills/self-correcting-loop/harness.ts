@@ -195,6 +195,33 @@ export interface SensorResult {
 }
 
 /**
+ * Which sensors changed state between two passes, and in which direction.
+ *
+ * The aggregate failing count decides keep-vs-rollback, but it cannot say what
+ * happened. A real iteration built 15 working HTTP endpoints, left the code
+ * unformatted, went `1 -> 2 failing` and was reverted - and reconstructing
+ * that `gofmt` was the sensor that cost the work meant reading the raw log,
+ * because the report held only the counts and the verdict.
+ *
+ * Sensors present on only one side are ignored: an added or removed sensor is
+ * a manifest change, not a movement in the work.
+ */
+export function sensorDelta(
+	before: { name: string; ok: boolean }[],
+	after: { name: string; ok: boolean }[],
+): { fixed: string[]; regressed: string[] } {
+	const was = new Map(before.map((s) => [s.name, s.ok]));
+	const fixed: string[] = [];
+	const regressed: string[] = [];
+	for (const s of after) {
+		const prev = was.get(s.name);
+		if (prev === undefined || prev === s.ok) continue;
+		(s.ok ? fixed : regressed).push(s.name);
+	}
+	return { fixed, regressed };
+}
+
+/**
  * Which of a sensor's `after` dependencies is holding it back this pass, or
  * null if it is clear to run. A dependency that was itself skipped counts as
  * not-passed, so a two-level gate does not silently collapse.
@@ -782,6 +809,10 @@ export interface ReportView {
 		notes?: string[];
 		/** size of the prompt this iteration was given. Grows with feedback. */
 		promptChars?: number;
+		/** sensors that went red this iteration - on a rollback, the cause. */
+		regressed?: string[];
+		/** sensors that went green this iteration. */
+		fixed?: string[];
 		sensors?: {
 			name: string;
 			ok: boolean;
@@ -848,6 +879,9 @@ export function formatReport(r: ReportView): string {
 		if (it.scopeViolations?.length) flags.push(`scope-revert:${it.scopeViolations.length}`);
 		const outcome = it.kept ? (it.progressed ? "kept" : "kept (no gain)") : "ROLLED BACK";
 		const prompt = anyPrompt ? `${kchars(it.promptChars).padEnd(8)}` : "";
+		// The counts say an iteration was reverted; these say what did it.
+		if (it.fixed?.length) flags.push(`fixed: ${it.fixed.join(", ")}`);
+		if (it.regressed?.length) flags.push(`broke: ${it.regressed.join(", ")}`);
 		out.push(
 			`  ${String(it.iteration ?? it.n ?? "?").padStart(2)}  ${String(it.failingBefore ?? "?").padStart(2)} -> ${String(
 				it.failingAfter ?? "?",

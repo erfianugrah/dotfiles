@@ -710,7 +710,9 @@ loop report --prompt 2           # the EXACT text iteration 2 was given
 ```
 
 `loop report` turns the JSON into the thing you actually want after an
-unattended run: the failing-count trend, kept vs ROLLED BACK per iteration,
+unattended run: the failing-count trend, kept vs ROLLED BACK per iteration
+with the sensors that moved (`broke:` / `fixed:` - on a rollback, `broke:` is
+the cause),
 which rung the ladder was on, ESCALATED / AGENT-TIMEOUT / scope-revert flags,
 sensors that never passed **and the last output of each**, the slowest
 sensors, and the loop's notes.
@@ -1173,13 +1175,28 @@ change is intended and you want a judgment not a byte-compare).
   progress never reaches them. Treat the ladder as designed-and-unit-tested,
   not as field-proven.
 
-  That first real rollback is also a warning about the aggregate count: the
-  discarded iteration had built 15 working endpoints and failed on `gofmt`.
-  `1 -> 2 failing` is the correct reading of the signal the loop has, and it
-  still threw away substantive work over a formatting error. Cheap
-  auto-fixable gates deserve to be green BEFORE the expensive ones run (see
-  `after`), and the agent needs to know they are gates at all (see the derived
-  gate list) - both of those exist because of this single iteration.
+  That first real rollback is also the clearest statement of the aggregate
+  count's limit. The discarded iteration had built 15 working endpoints and
+  failed on `gofmt`; `1 -> 2 failing` is the correct reading of every signal
+  the loop had, and it still threw away substantive work over a formatting
+  error.
+
+  Note what does NOT fix it. `after` gating would have skipped the judge (its
+  dependency was red) and saved 147s - but a skipped sensor counts as failing,
+  so the count is still `1 -> 2` and the rollback still happens. Per-sensor
+  movement does not save it either: `gofmt` green -> red is a regression and
+  `judge` red -> red is not an improvement, so every available signal agrees.
+  The derived gate list is the only one of today's changes that addresses the
+  cause, by telling the agent `gofmt` was a gate before it declared success.
+
+  The information the loop actually lacks is a GRADIENT on the binary
+  inferential sensor. An iteration that resolves five of the judge's seven
+  objections is indistinguishable from one that resolves none, so work aimed
+  at the persistent blocker is invisible to the keep/rollback decision and any
+  incidental regression outweighs it. A scored judge would change this; the
+  reviewer tally (`1/2` vs `2/2` rejected) is already computed and discarded.
+  Unproven either way - reviewer disagreement is partly variance, and that
+  needs measuring before it is trusted as signal.
 
 ## Interaction with `epistemic-guard`
 

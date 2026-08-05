@@ -19,6 +19,7 @@ import {
 	formatFailures,
 	formatReport,
 	blockedBy,
+	sensorDelta,
 	isCanaryFailure,
 	judgeCanary,
 	globToRegExp,
@@ -1018,5 +1019,80 @@ describe("buildPrompt: the gate list", () => {
 
 	test("absent when no gates are passed (callers that do not supply them)", () => {
 		expect(buildPrompt("do X")).not.toContain("will be run");
+	});
+});
+
+describe("sensorDelta - which sensors moved, and which way", () => {
+	const r = (pairs: [string, boolean][]) => pairs.map(([name, ok]) => ({ name, ok }));
+
+	// The event this exists for: an iteration built 15 working endpoints, left
+	// the code unformatted, and was rolled back on `1 -> 2 failing`. The report
+	// recorded the counts and the verdict, so reconstructing WHICH sensor cost
+	// the work meant reading the raw log.
+	test("names the regression that caused a rollback", () => {
+		const d = sensorDelta(
+			r([["gofmt", true], ["judge", false]]),
+			r([["gofmt", false], ["judge", false]]),
+		);
+		expect(d.regressed).toEqual(["gofmt"]);
+		expect(d.fixed).toEqual([]);
+	});
+
+	test("names what improved, even when the total got worse", () => {
+		const d = sensorDelta(
+			r([["a", false], ["b", true], ["c", true]]),
+			r([["a", true], ["b", false], ["c", false]]),
+		);
+		expect(d.fixed).toEqual(["a"]);
+		expect(d.regressed).toEqual(["b", "c"]);
+	});
+
+	test("a sensor absent from either side is not a movement", () => {
+		const d = sensorDelta(r([["a", true]]), r([["a", true], ["new", false]]));
+		expect(d.fixed).toEqual([]);
+		expect(d.regressed).toEqual([]);
+	});
+
+	test("no movement at all", () => {
+		expect(sensorDelta(r([["a", false]]), r([["a", false]]))).toEqual({
+			fixed: [],
+			regressed: [],
+		});
+	});
+});
+
+describe("formatReport: why an iteration was rolled back", () => {
+	const base = { result: "fail", iterations: [] as unknown[] };
+
+	test("names the regression on the iteration line", () => {
+		const out = formatReport({
+			...base,
+			iterations: [
+				{
+					n: 4,
+					kept: false,
+					failingBefore: 1,
+					failingAfter: 2,
+					regressed: ["gofmt"],
+					sensors: [],
+				},
+			],
+		});
+		expect(out).toContain("ROLLED BACK");
+		expect(out).toContain("broke: gofmt");
+	});
+
+	test("names what was fixed too, so a partial win is visible", () => {
+		const out = formatReport({
+			...base,
+			iterations: [{ n: 2, kept: true, fixed: ["build", "test"], sensors: [] }],
+		});
+		expect(out).toContain("fixed: build, test");
+	});
+
+	test("silent when nothing moved", () => {
+		const out = formatReport({ ...base, iterations: [{ n: 1, kept: true, sensors: [] }] });
+		expect(out).not.toContain("broke:");
+		expect(out).not.toContain("fixed:");
 	});
 });

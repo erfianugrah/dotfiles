@@ -293,3 +293,55 @@ test("an expensive sensor is skipped while its cheap dependency is red", async (
 	rmSync(ran, { force: true });
 	rmSync(flag, { force: true });
 }, 120_000);
+
+test("a rollback records which sensor caused it", async () => {
+	// Real event this pins: an iteration built 15 working endpoints, left the
+	// code unformatted, went 1 -> 2 failing and was reverted. The report held
+	// the counts and the verdict; finding out that `gofmt` was what cost the
+	// work meant reading the raw log.
+	const d = mkdtempSync(join(tmpdir(), "loop-delta-"));
+	for (const a of [
+		["init", "-q"],
+		["config", "user.email", "t@example.invalid"],
+		["config", "user.name", "t"],
+	]) {
+		await Bun.spawn(["git", "-C", d, ...a], { stdout: "pipe", stderr: "pipe" }).exited;
+	}
+	// `tidy` is green until the agent drops a stray file; `feature` never lands.
+	await Bun.write(join(d, ".pi/harness.json"), JSON.stringify({
+		task: "build the feature",
+		maxIterations: 1,
+		timeoutMs: 20000,
+		agentTimeoutMs: 30000,
+		writeScope: ["ops/**"],
+		sensors: [
+			{ name: "tidy", cmd: "test ! -f ops/stray.txt" },
+			{ name: "feature", cmd: "test -f ops/done.txt", expect: "fail" },
+		],
+	}));
+	const agent = join(d, "agent.sh");
+	await Bun.write(agent, "#!/usr/bin/env bash\nmkdir -p ops\ntouch ops/stray.txt\nexit 0\n");
+	chmodSync(agent, 0o755);
+	await Bun.spawn(["git", "-C", d, "add", "-A"], { stdout: "pipe" }).exited;
+	await Bun.spawn(["git", "-C", d, "commit", "-qm", "b"], { stdout: "pipe", stderr: "pipe" }).exited;
+
+	const p = Bun.spawn(["bun", LOOP, "run"], {
+		cwd: d,
+		stdout: "pipe",
+		stderr: "pipe",
+		env: { ...process.env, LOOP_SANDBOX: "off", LOOP_PI_CMD: agent },
+	});
+	await new Response(p.stdout).text();
+	await p.exited;
+
+	const report = await Bun.file(join(d, ".pi/harness-report.json")).json();
+	expect(report.iterations[0].regressed).toEqual(["tidy"]);
+	expect(report.iterations[0].kept).toBe(false);
+
+	const q = Bun.spawn(["bun", LOOP, "report"], { cwd: d, stdout: "pipe", stderr: "pipe" });
+	const out = await new Response(q.stdout).text();
+	expect(out).toContain("broke: tidy");
+	expect(out).toContain("ROLLED BACK");
+
+	rmSync(d, { recursive: true, force: true });
+}, 120_000);
