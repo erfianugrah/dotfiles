@@ -445,6 +445,22 @@ manifest/usage error.
   a repo subdir with `writeScope: ["bin/migrate.sh"]` matches correctly even
   though git reports repo-root-relative paths internally.
   Empty = unrestricted. Requires the target to be a git repo.
+
+  **The fence shapes the architecture, so draw it with that in mind.** A
+  worked example: a run built an HTTP API over an existing CLI, with
+  `internal/parse` deliberately out of scope ("this is transport, not
+  parsing"). The agent needed lease-filter validation in both the CLI and the
+  API. Duplicating it is the thing a reviewer rejects, and the shared home for
+  it - `internal/parse` - was fenced off. So it put the shared code in the new
+  transport package and had the CLI import it, inverting the layering; that
+  created an import cycle for one endpoint, which it broke by duplicating a
+  struct and injecting a callback, under a four-line comment explaining why.
+
+  Every step is locally reasonable and the result is wrong. The fence
+  protected the module it named and deformed everything around it. When you
+  scope a run, ask where shared code will have to go, and if the answer is
+  "nowhere good", widen the scope to a small shared package rather than
+  leaving the agent to invent a home for it.
 - `sandbox` - `"auto"` (default: jail the agent with bwrap when available,
   warn + run bare otherwise), `"require"` (abort without bwrap), `"off"`.
   `LOOP_SANDBOX` env overrides; `LOOP_BWRAP` points at a specific bwrap
@@ -469,7 +485,16 @@ sensors are **specific and deterministic**. Raise sensor quality by:
   so real request/response shapes are validated offline, deterministically.
 - **Structural / architecture sensors** turn a boundary you *hope* holds into
   one the build enforces - a fitness function (Böckeler; ArchUnit). They are
-  fast and deterministic, so run them alongside the fast sensors. Per stack:
+  fast and deterministic, so run them alongside the fast sensors.
+
+  This is not hypothetical insurance. On the 2026-08-05 eaves run the agent
+  inverted the layering between the CLI and the new transport package (see
+  `writeScope` below), and BOTH adversarial opus reviewers passed it - despite
+  their own rubric saying "reject a change whose workaround needs a
+  paragraph-long comment to justify it", and the workaround carrying exactly
+  such a comment. A one-line `depguard` rule forbidding the import would have
+  been red, deterministic, and free. Where a boundary matters, do not delegate
+  it to a probabilistic reviewer. Per stack:
   Go `golangci-lint run` with a `depguard` rule (module-boundary example in
   `~/authkit/.golangci.yml`), TS `dependency-cruiser`, Python `import-linter`,
   JVM ArchUnit. Pair with a `hint` naming the rule that was crossed. This is
