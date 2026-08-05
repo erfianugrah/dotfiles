@@ -20,6 +20,12 @@ _BW_CACHE_TTL=300  # 5 minutes in-memory cache
 # secrets never touch disk and never outlive the login session.
 _BW_ENV_CACHE="${_BW_SESSION_DIR}/bw-env.zsh"
 
+# How long a snapshot stays usable. The stamp alone only invalidates on
+# bw_serve_start / bw_set, so a secret rotated in the web vault would
+# otherwise be served stale for the whole login session. The TTL bounds that
+# window: one shell per hour pays the full reload and everything self-heals.
+_BW_ENV_CACHE_TTL="${_BW_ENV_CACHE_TTL:-3600}"  # 1h
+
 # ---------------------------------------------------------------------------
 # Secret mappings — single source of truth
 # Format: "bw_item_name|ENV_VAR_NAME"
@@ -110,7 +116,7 @@ _bw_env_cache_write() {
     tmp="${_BW_ENV_CACHE}.$$"
     install -m 600 /dev/null "$tmp" 2>/dev/null || return 1
     {
-        print -r -- "# bw-env-cache session=${stamp}"
+        print -r -- "# bw-env-cache session=${stamp} written=$(date +%s)"
         for item in "${_BW_SECRETS[@]}"; do
             env_name=${item#*|}
             [[ -n ${(P)env_name} ]] && print -r -- "export ${env_name}=${(qq)${(P)env_name}}"
@@ -126,12 +132,20 @@ _bw_env_cache_write() {
 # not owned by us.
 _bw_env_cache_load() {
     emulate -L zsh
-    local f=$_BW_ENV_CACHE hdr stamp
+    local f=$_BW_ENV_CACHE hdr stamp kv hsession hwritten
     [[ -f $f && -r $f && -O $f ]] || return 1
     IFS= read -r hdr < "$f" || return 1
-    [[ $hdr == '# bw-env-cache session='* ]] || return 1
+    [[ $hdr == '# bw-env-cache '* ]] || return 1
+    for kv in ${=hdr#\# bw-env-cache }; do
+        case $kv in
+            session=*) hsession=${kv#session=} ;;
+            written=*) hwritten=${kv#written=} ;;
+        esac
+    done
     stamp=$(_bw_session_started) || return 1
-    [[ ${hdr#\# bw-env-cache session=} == "$stamp" ]] || return 1
+    [[ $hsession == "$stamp" ]] || return 1
+    [[ $hwritten == <-> ]] || return 1
+    (( $(date +%s) - hwritten < _BW_ENV_CACHE_TTL )) || return 1
     source "$f"
 }
 
@@ -360,19 +374,6 @@ _bw_load_items() {
     emulate -L zsh
     setopt typeset_silent
 
-    # --no-sync: skip the POST /sync round-trip. Used by the shell-start path,
-    # where the daemon was already synced by bw_serve_start and the sync cost
-    # (~0.5s, plus it wipes _BW_CACHE) buys nothing. Explicit `load_bw` still
-    # syncs, so "I just changed a vault item" keeps working.
-    local do_sync=1
-    while [[ $1 == --* ]]; do
-        case $1 in
-            --no-sync) do_sync=0; shift ;;
-            --) shift; break ;;
-            *) print -u2 "[bw] unknown flag: $1"; return 2 ;;
-        esac
-    done
-
     local -a items=("$@")
     local total=${#items[@]} current=0 loaded=0 skipped=0 failed=0
     local bw_name env_name val masked
@@ -389,12 +390,10 @@ _bw_load_items() {
     # "No value found" even though the item is in the web vault.
     # bw_serve_sync hits the daemon's POST /sync and clears the
     # shell-side cache on success.
-    if (( do_sync )); then
-        bw_serve_sync >/dev/null 2>&1 || {
-            print -u2 "[bw] sync failed, using stale cache"
-            clear_bw_cache >/dev/null 2>&1
-        }
-    fi
+    bw_serve_sync >/dev/null 2>&1 || {
+        print -u2 "[bw] sync failed, using stale cache"
+        clear_bw_cache >/dev/null 2>&1
+    }
 
     for item in "${items[@]}"; do
         bw_name=${item%|*}
@@ -451,13 +450,11 @@ load_sops_age_keys() {
     print "SOPS_AGE_KEYS set successfully"
 }
 
-# load_bw [--no-sync] - export every mapped secret + the SOPS Age keypair.
+# load_bw - export every mapped secret + the SOPS Age keypair.
 # On full success it snapshots the result to _BW_ENV_CACHE so subsequent
 # shells skip the ~20 HTTP round-trips entirely.
 load_bw() {
-    local -a flags=()
-    [[ $1 == --no-sync ]] && { flags=(--no-sync); shift }
-    _bw_load_items "${flags[@]}" "${_BW_SECRETS[@]}" || return 1
+    _bw_load_items "${_BW_SECRETS[@]}" || return 1
     load_sops_age_keys || return 1
     _bw_env_cache_write
 }

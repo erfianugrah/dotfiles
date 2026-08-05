@@ -168,14 +168,14 @@ source ~/dotfiles/wezterm.sh
 # next login; run bw_serve_start / load_bw manually whenever.
 # Fast path first: _bw_env_cache_load sources a tmpfs snapshot stamped with
 # the live bw session, costing ~1ms. Only on a miss (first shell after boot,
-# or after bw_serve_start / bw_set invalidated it) do we pay the full load.
-# Order matters - _bw_serve_ok is itself a ~0.5s curl, so it must sit behind
-# the cache check, not in front of it.
+# after bw_serve_start / bw_set invalidated it, or once the TTL lapses) do we
+# pay the full load. Order matters - _bw_serve_ok is itself a ~0.5s curl, so
+# it must sit behind the cache check, not in front of it.
 if [[ -o interactive ]] && (( $+functions[load_bw] )); then
   if ! _bw_env_cache_load; then
     if _bw_serve_ok; then
       local _bw_out
-      _bw_out=$(load_bw --no-sync 2>&1)
+      _bw_out=$(load_bw 2>&1)
       if (( $? != 0 )) || [[ "$_bw_out" == *FAILED* || "$_bw_out" == *stale* ]]; then
         print -u2 -- "$_bw_out"
       fi
