@@ -12,11 +12,12 @@
     "loop": "./loop.ts",
     "browser-assert": "./browser-assert.ts",
     "judge": "./judge.ts",
-    "pixel-diff": "./pixel-diff.ts"
+    "pixel-diff": "./pixel-diff.ts",
+    "prose-lint": "./prose-lint.ts"
   },
   "scripts": {
     "test": "bun test"
   },
-  "keywords": ["pi", "loop", "tdd", "sensor", "self-correcting", "agent", "harness", "llm-as-judge", "adversarial-review", "visual-regression", "browser"],
+  "keywords": ["pi", "loop", "tdd", "sensor", "self-correcting", "agent", "harness", "llm-as-judge", "adversarial-review", "visual-regression", "browser", "prose-lint"],
   "files": ["*.ts", "presets", "SKILL.md", "README.md"]
 }

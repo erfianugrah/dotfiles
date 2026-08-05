@@ -1,0 +1,24 @@
+{
+  "task": "EDIT ME: describe the documentation change the loop should make.",
+  "maxIterations": 8,
+  "model": null,
+  "tools": ["read", "edit", "write", "bash"],
+  "rules": [
+    "Do not delete a fact to make a sentence shorter. Numbers, backticked identifiers and URLs from the previous revision must survive the rewrite.",
+    "Do not chop sentences to beat a length gate. The mean-sentence-floor and variance floor exist to catch that and will fail the run."
+  ],
+  "sensors": [
+    {
+      "name": "prose",
+      "cmd": "rg --files -g '*.md' | xargs -r prose-lint",
+      "hint": "Cut marketing adjectives, hedges and filler transitions rather than shortening sentences. The score counts only those categories; passive voice and paragraph length are reported but never gated.",
+      "canary": "printf '# Canary\\n\\nOur robust and seamless solution effortlessly supercharges your world-class workflow to unlock next-generation value with minimal friction.\\n' > zz-canary.md"
+    },
+    {
+      "name": "prose-no-fact-loss",
+      "cmd": "rg --files -g '*.md' | xargs -r prose-lint --before HEAD --no-max --json > /dev/null || rg --files -g '*.md' | xargs -r prose-lint --before HEAD --no-max",
+      "hint": "The rewrite dropped a number, a backticked identifier or a URL that the committed revision had. Restore the specifics; tighten the prose around them instead.",
+      "canary": "f=$(rg --files -g '*.md' | head -1); printf '# Stub\\n\\nAll of the previous specifics are gone from this revision entirely.\\n' > \"$f\""
+    }
+  ]
+}

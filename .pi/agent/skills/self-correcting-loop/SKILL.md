@@ -207,6 +207,8 @@ Two properties make this work on weak models:
 | `judge.{parse,integration}.test.ts` | Unit (arg + verdict parsing) and end-to-end (scripted fake judge via `$LOOP_JUDGE_CMD`) tests. |
 | `pixel-diff.ts` | Computational visual-regression sensor: diffs a capture against a committed approved-baseline PNG (YIQ perceptual threshold, AA-tolerant). Zero-dep - PNG decode/encode via `node:zlib`. The deterministic half of the visual gate. |
 | `pixel-diff.{parse,integration}.test.ts` | Unit (decode/encode round-trip, YIQ delta, diff logic) and end-to-end (baseline lifecycle, tolerance, `--url` capture) tests. |
+| `prose-lint.ts` | Computational prose sensor: markdown-aware segmentation, a slop score over discriminating lexical categories, and structural gates a rewrite cannot satisfy by cheating. Zero-dep. The deterministic half of the writing gate, as `pixel-diff` is for UI. |
+| `prose-lint.{parse,integration}.test.ts` | Unit (segmentation, sentence splitting, each detector, threshold evaluation) and end-to-end (exit codes, `--before HEAD` fact retention against a real git repo, ratchet lifecycle, config merge) tests. |
 
 ## Usage
 
@@ -1162,6 +1164,68 @@ When to use which visual gate: **`pixel-diff`** for "nothing should change"
 (regression-locking a stable page - exact, deterministic); **`judge` VISUAL**
 for "does this new/changed page look right" (no baseline exists yet, or the
 change is intended and you want a judgment not a byte-compare).
+
+### Prose: the writing gate (`prose-lint.ts`)
+
+The deterministic counterpart to `judge` for documentation, the way
+`pixel-diff` is for UI. `judge` can tell you a doc reads like a model wrote it,
+but it costs a frontier model per iteration and its verdict is not
+reproducible. This is countable, instant and free.
+
+```bash
+prose-lint docs/*.md                       # default gate: slop <= 1.0/100w
+prose-lint README.md --explain             # file:line for every violation
+prose-lint doc.md --before HEAD            # also gate on fact retention
+prose-lint docs/*.md --baseline .pi/prose.json   # ratchet, adopt a legacy tree
+rg --files -g '*.md' | xargs -r prose-lint       # the sensor form (presets/docs.json)
+```
+
+**Two numbers, and only one of them gates.** `slop` counts marketing
+adjectives, hedges, filler openers, nominalizations, phrasal verbs and referent
+rotation. `style` counts passive voice and long paragraphs, and is reported
+only. That split came out of measurement: passive was 76 of 81 violations in
+this skill's own SKILL.md, and sampling showed they were real passives in
+correct prose ("the run is refused"). A measure that fires equally on good and
+bad writing is not a discriminator. Measured both ways, with passive in the
+score the generated sample scored 4.08 against our SKILL.md at 0.83; with it
+out, 3.06 against 0.02.
+
+**Counts go in the score; distribution shape goes in the gates.** The gates are
+hard booleans, never score contributors, because a counter you can pay for by
+deleting three more adjectives is not a counter:
+
+| gate | catches | threshold | derived from |
+|---|---|---|---|
+| `mean-sentence-floor` | prose chopped into stubs to beat a length rule | 5 | corpus min 6.6, chopped sample 2.9 |
+| `mean-sentence-ceiling` | sustained run-ons | 25 | corpus max 17.3, generated sample 32.7 |
+| `sentence-variance-floor` | uniform sentence length | 2 | corpus min 3.6, chopped sample 0.6 |
+| `fact-retention` | specifics deleted to shorten the text | 0.9 | NOT measured - needs revision pairs |
+
+Thresholds come from a 49-document corpus (this repo's skills, READMEs,
+AGENTS.md) tested against two adversarial samples. Re-derive them for a corpus
+with a different register rather than trusting these. Note what the corpus
+refuted: the variance floor is a CHOPPING detector only. Our tersest CLI
+reference doc sits at stddev 3.6 and the generated sample at 3.3, so no
+threshold separates those two without failing real documents. Run-ons are the
+ceiling's job. One job per gate.
+
+**Em-dashes and semicolons are reported and never scored.** Stated here so it
+reads as a design decision rather than a result: a linter that excludes
+em-dashes from its total cannot then be cited as evidence that banning
+em-dashes fails to reduce slop, because that would be true by construction.
+
+**What it deliberately does not do.** There is no POS tagger (zero-dep), so
+passive and nominalization are regex heuristics - survivable precisely because
+neither one gates. Referent rotation is curated synonym sets, not coreference;
+a derive-abbreviations-from-the-text detector was built, measured at 286 hits
+and approximately zero true positives on our own SKILL.md (`loop`/`loop-built`,
+`not`/`nothing`), and deleted. Markdown only.
+
+**The circularity to avoid.** As a lint, teaching to the test is the point. As
+evidence it is worthless: if you use this to show that some writing skill
+reduces slop, and that skill's rule list is where these word lists came from,
+you have measured instruction-following. Score that claim with a rubric the
+skill has never seen.
 
 ## Limits (be honest about these)
 

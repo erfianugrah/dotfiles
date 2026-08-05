@@ -9,7 +9,7 @@ UI/UX). **The loop - not the model - decides "done"**, which is what makes it
 hold up on sub-Opus models.
 
 This directory is both a pi **skill** (`SKILL.md`) and an installable package
-(`bin`: `loop`, `browser-assert`, `judge`, `pixel-diff`). Full concepts, manifest
+(`bin`: `loop`, `browser-assert`, `judge`, `pixel-diff`, `prose-lint`). Full concepts, manifest
 schema, the governor, and honest limits live in [`SKILL.md`](./SKILL.md) - this
 README is the 30-second start.
 
@@ -17,7 +17,7 @@ README is the 30-second start.
 
 ```bash
 # it ships inside the pi-harness; to get the CLIs on PATH:
-cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`, `judge`, `pixel-diff`
+cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`, `judge`, `pixel-diff`, `prose-lint`
 ```
 
 Bun >= 1.3. Zero runtime dependencies (Bun built-ins only).
@@ -117,8 +117,20 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   against a committed approved-baseline PNG (YIQ perceptual, AA-tolerant; zero
   dep). The deterministic counterpart to the vision judge - use it to lock a
   stable page against exact pixel regressions; `--update-baseline` to reapprove.
+- **prose-lint** - a *computational* writing sensor, the deterministic
+  counterpart to the judge for docs. Reports two numbers and gates on one:
+  `slop` (marketing adjectives, hedges, filler openers, nominalizations,
+  referent rotation) gates; `style` (passive, long paragraphs) is reported,
+  because measured on this repo passive fires as hard on correct prose as on
+  generated prose and swamps the signal. Separately, four structural gates
+  catch the rewrites a score cannot: chopping sentences into stubs, sustained
+  run-ons, uniform sentence length, and deleting facts (`--before HEAD` diffs
+  numbers, backticked identifiers and URLs against the committed revision).
+  Thresholds are derived from a 49-document corpus, not guessed. Em-dash and
+  semicolon counts are reported and deliberately never scored.
 
-Sensor types to reach for: build/typecheck/unit (fast gate), **structural /
+Sensor types to reach for: build/typecheck/unit (fast gate), **prose**
+(`prose-lint` - for repos where the docs are the deliverable), **structural /
 architecture** (`golangci-lint` depguard, `dependency-cruiser`, `import-linter`,
 ArchUnit - fitness functions), **security / drift** (`osv-scanner`, `gitleaks`),
 **mutation testing** (gremlins/StrykerJS/PIT - grades test quality; expensive,
