@@ -361,9 +361,42 @@ unset_bw_vars         # wipe all exported secrets from current shell
 `load_bw` auto-starts the service if not running. The session survives
 terminal/tmux restarts. `.zshrc` runs it automatically: the first
 interactive shell after login prompts for the master password once (which
-also seeds the gpg-agent signing cache), later shells re-export silently
-from the running daemon. If you skip that first prompt, run `bw_serve_start`
-manually.
+also seeds the gpg-agent signing cache), later shells re-export silently.
+If you skip that first prompt, run `bw_serve_start` manually.
+
+**Shell-startup cost.** Resolving the secrets means ~20 sequential HTTP
+calls to the daemon (1 sync + 17 items + 2 SOPS notes), and `.zshrc` used to
+pay that in *every* interactive shell - so every new tmux window. `load_bw`
+therefore snapshots the resolved exports to `$XDG_RUNTIME_DIR/bw-env.zsh`
+(0600, tmpfs, wiped on logout/reboot, so secrets never touch disk), and
+later shells just source it.
+
+Measured on one idle machine, min of 5: full load 1.11s, snapshot hit 0.52s,
+and a shell with the Bitwarden block stubbed out entirely 0.56s. That last
+comparison is the useful one - **a snapshot hit is indistinguishable from not
+doing Bitwarden at all**. The absolute saving is not a fixed number: it was
+~2.2s when first measured on a loaded box with cold page caches and ~0.6s
+once everything was warm, so treat it as "between half a second and a couple
+of seconds, largest exactly when the machine is busy".
+
+On hosts without `XDG_RUNTIME_DIR` (macOS) the snapshot falls back to
+`$TMPDIR`, which is real disk and not guaranteed to be cleared on logout -
+the file is still 0600, but the never-touches-disk property does not hold
+there. Set `_BW_ENV_CACHE_TTL=0` to disable the snapshot entirely if that
+matters on a given machine.
+
+The snapshot is stamped with the bw session epoch and a write time, and is
+refused unless all of these hold: the stamp matches the live session, the
+file is owned by you, and it is younger than `_BW_ENV_CACHE_TTL`. So it is
+invalidated by `bw_serve_start` (new session) and by `bw_set` /
+`clear_bw_cache` (explicit), and expires on its own after an hour. Any miss
+falls through to a normal full load, which rewrites the snapshot.
+
+Practical consequence: a secret you rotate **in the web vault** can be up to
+an hour stale in newly-opened shells. `bw_set` has no such lag (it
+invalidates), and `load_bw` in an existing shell always forces a fresh sync.
+Already-running shells and agents keep their old env either way - that is
+fundamental to env vars, not a caching artifact.
 
 **Staleness gotcha:** a long-running serve daemon's access token can expire
 silently - `/status` still says "unlocked" and `/sync` still returns
@@ -410,6 +443,8 @@ session age. If served secrets ever look stale, the fix is `bw_serve_start`
 | `LANG` / `LC_ALL` | `C.UTF-8` | |
 | `ANSIBLE_PLAYBOOK_DIR` | `~/my-playbooks` | used by `ansible_on/off/update` |
 | `BW_SERVE_PORT` | `8087` | Bitwarden serve port |
+| `_BW_CACHE_TTL` | `300` | in-process `_bw_get` cache TTL in seconds |
+| `_BW_ENV_CACHE_TTL` | `3600` | cross-shell secret snapshot TTL in seconds; bounds how long a web-vault edit can be stale in new shells |
 | `_TF_CACHE_TTL` | `300` | tf_out cache TTL in seconds |
 
 ### tmux (`.tmux.conf`)
@@ -537,9 +572,18 @@ duration of each command.
 
 ### `bitwarden.zsh` — Bitwarden Serve API
 
-Local REST API (`bw serve`) with in-memory cache (5 min TTL). Secret
-mappings defined in `_BW_SECRETS` / `_BW_WRANGLER_SECRETS` arrays — single
-source of truth for `load_bw`, `load_wrangler_token`, and `unset_bw_vars`.
+Local REST API (`bw serve`) with a two-tier cache. Secret mappings defined
+in `_BW_SECRETS` / `_BW_WRANGLER_SECRETS` arrays - single source of truth
+for `load_bw`, `load_wrangler_token`, and `unset_bw_vars`.
+
+- **`_BW_CACHE`** (5 min TTL) - per-process associative array behind
+  `_bw_get`. Only helps repeated lookups *within one shell*; a new shell
+  always starts empty.
+- **`_BW_ENV_CACHE`** (1h TTL) - the cross-shell snapshot at
+  `$XDG_RUNTIME_DIR/bw-env.zsh` that makes new tmux windows cheap. See
+  [bw-serve](#bw-serve-bitwarden-cli-rest-api) for the invalidation rules.
+  Values are written with zsh `${(qq)}` quoting, so quotes, newlines and
+  `$(...)` round-trip literally and cannot execute when sourced.
 
 | Function | Description |
 |---|---|
@@ -547,8 +591,8 @@ source of truth for `load_bw`, `load_wrangler_token`, and `unset_bw_vars`.
 | `bw_serve_stop` | Stop service, clear session file and cache |
 | `bw_serve_status` | Check if API is reachable, show service status/logs |
 | `bw_serve_sync` | Sync vault from Bitwarden server, clear local cache |
-| `clear_bw_cache` | Flush in-memory key-value cache |
-| `load_bw` | Export personal secrets (Cloudflare, AWS, Authentik, SOPS Age keys, etc.) |
+| `clear_bw_cache` | Flush the in-process cache and drop the cross-shell snapshot |
+| `load_bw` | Sync, export personal secrets (Cloudflare, AWS, Authentik, SOPS Age keys, etc.), then write the cross-shell snapshot |
 | `load_wrangler_token` | Export Cloudflare Wrangler API token |
 | `load_sops_age_keys` | Export the current SOPS Age keypair (key 2) into `SOPS_AGE_KEYS` |
 | `unset_bw_vars` | Wipe all Bitwarden-loaded env vars from current shell |

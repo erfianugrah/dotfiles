@@ -10,7 +10,7 @@ BW_SERVE_ADDR="http://127.0.0.1:${BW_SERVE_PORT}"
 _BW_SESSION_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 
 typeset -gA _BW_CACHE _BW_CACHE_TS
-_BW_CACHE_TTL=300  # 5 minutes in-memory cache
+_BW_CACHE_TTL="${_BW_CACHE_TTL:-300}"  # 5 minutes in-memory cache
 
 # Cross-shell env cache. _BW_CACHE above is a per-process associative array,
 # so it can never help a freshly-spawned shell (new tmux window = new zsh =
@@ -112,6 +112,9 @@ _bw_session_age() {
 _bw_env_cache_write() {
     emulate -L zsh
     local stamp tmp item env_name
+    # TTL 0 disables the snapshot outright - no write, so nothing lands in
+    # $TMPDIR on hosts without a tmpfs XDG_RUNTIME_DIR.
+    (( _BW_ENV_CACHE_TTL > 0 )) || { _bw_env_cache_invalidate; return 0 }
     stamp=$(_bw_session_started) || return 1
     tmp="${_BW_ENV_CACHE}.$$"
     install -m 600 /dev/null "$tmp" 2>/dev/null || return 1
