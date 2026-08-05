@@ -1164,6 +1164,22 @@ change is intended and you want a judgment not a byte-compare).
 - **Timeouts bound the loop, not the spend.** A budget stops a hang; it does
   not stop N iterations of expensive-but-productive work. `maxIterations` and
   the model ladder are the cost controls.
+- **The governor's later rungs are thinly evidenced.** Rollback-on-no-progress
+  has now fired for real (2026-08-05, eaves Tier 2 phase A, iteration 4: the
+  agent finished the whole feature, left the code unformatted, went 1 -> 2
+  failing and had the lot reverted). Escalation, `stallPatience` and the
+  negative-knowledge history are still exercised only by scripted agents in
+  `loop.integration.test.ts` - a run where the cheap model keeps making
+  progress never reaches them. Treat the ladder as designed-and-unit-tested,
+  not as field-proven.
+
+  That first real rollback is also a warning about the aggregate count: the
+  discarded iteration had built 15 working endpoints and failed on `gofmt`.
+  `1 -> 2 failing` is the correct reading of the signal the loop has, and it
+  still threw away substantive work over a formatting error. Cheap
+  auto-fixable gates deserve to be green BEFORE the expensive ones run (see
+  `after`), and the agent needs to know they are gates at all (see the derived
+  gate list) - both of those exist because of this single iteration.
 
 ## Interaction with `epistemic-guard`
 
