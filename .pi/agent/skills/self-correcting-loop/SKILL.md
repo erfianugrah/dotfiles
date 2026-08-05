@@ -199,6 +199,7 @@ Two properties make this work on weak models:
 | `loop-steering.integration.test.ts` | `guide`/`rules` reach the real prompt, a rule appended DURING iteration 1 is in force for iteration 2, and a half-saved manifest is ignored rather than fatal. |
 | `loop-logpath.integration.test.ts` | Redirecting the run log INTO the repo is eaten by the scope guard: 3-arm A/B (outside repo / inside repo / no writeScope) plus the pre-checkpoint warning. |
 | `loop-runlog.integration.test.ts` | The loop owns its trace: `.pi/harness-run.log` with no redirection, appends across runs, `--no-log`, loop artifacts are not dirt / not scope violations / not changed-files / never staged / not deleted by a rollback's `git clean`, a failing sensor's output survives into the report, and `loop report` renders + fails cleanly. |
+| `loop-reap.integration.test.ts` | A sensor or agent that backgrounds a process leaves nothing alive: the leak that made four feature sensors pass against an unimplemented tree. Also pins that reaping happens AFTER the output drain, so the diagnosis survives. |
 | `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright). Ordered flow steps (wait/click/type/press/assert/screenshot) + viewport/full-page. The behaviour-harness layer for web targets; also a UI live-smoke tool. |
 | `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
 | `judge.ts` | Inferential (LLM-as-judge) sensor with two modes: CODE (feeds the git diff + spec to a second `pi -p`) and VISUAL (screenshots a live URL via browser-assert and has a vision model assess the rendered UI/UX). Both gate on `VERDICT: PASS/FAIL`. The computational sensors check the code compiles/passes; this checks it did the *right thing* / *looks right*. Fail-closed by default. |
@@ -483,6 +484,59 @@ sensors are **specific and deterministic**. Raise sensor quality by:
   trip it, so a canary built from documentation examples proves nothing. Use
   a `ghp_`- or `xoxb-`-shaped synthetic token.
 
+### Count the spec's universals before they become sensors
+
+Every quantifier in the task spec - "both", "all", "every", "none", and any
+bare cardinal ("the 14 checks", "all 15 endpoints") - is a claim your sensors
+will inherit and your judge will re-assert. Derive it rather than asserting
+it: one `grep -c` before the run, and a count-deriving sensor wherever the
+number reaches the output. **No sensor authored from the spec can dispute the
+spec.**
+
+This is a loop-specific hazard, not general advice. Outside the loop a false
+premise yields one wrong artifact you might notice while writing it. Inside,
+the same sentence becomes the task, the sensors AND the `judge --spec` - three
+signals with one parent.
+
+Worked instance. An eaves task spec said "all 15 GET endpoints under /api/v0
+plus /healthz, exactly as the roadmap lists them". The roadmap lists 14.
+Nobody counted. The sentence propagated verbatim into the judge spec, and out
+into docs that contradicted each other (`roadmap.md` claiming 15 + /healthz,
+`architecture.md` claiming 14 + /healthz).
+
+The interesting part is what the judge did with it. It did not go quiet - it
+went **red, and blamed the wrong file**:
+
+> `docs/roadmap.md` phase-A note says "15 GET endpoints + /healthz" (i.e. 16);
+> `docs/architecture.md` says "14 GET endpoints + /healthz (15 total)". The
+> roadmap line is wrong.
+
+The roadmap was the only artifact in the chain that was right. The judge
+inherited "15" as a premise, met a contradiction, and resolved it against the
+one place it could look without questioning itself. An agent obeying that
+finding would have "fixed" the roadmap to say 15 and entrenched the error with
+a reviewer's authority behind it. So the failure mode is not silence - it is a
+confident, actionable, wrong defect report. "My judge would catch it" is right
+that it fires and wrong about what it says.
+
+`--trial` does not cover this. The bad count never made a sensor stuck; it
+made the OUTPUT self-contradictory. Trial verdicts the sensors, not the
+premises they were written from.
+
+Where the number reaches the output, make it a sensor that computes N rather
+than one that hard-codes it - eaves' `doctor-count-docs` is the shape:
+
+```json
+{
+  "name": "doctor-count-docs",
+  "cmd": "N=$(EAVES_FIXTURE_DIR=testdata/fixtures go run . doctor | grep -cE '^(OK|WARN|FAIL|SKIP)'); test -z \"$(rg -o --no-filename '[0-9]+ checks?' README.md docs/*.md | grep -oE '^[0-9]+' | sort -u | grep -vx \"$N\")\"",
+  "hint": "A doc states a check count that does not match the binary. Derive the real number and update every doc that claims one."
+}
+```
+
+A pre-flight `grep -c` protects one run. A count-deriving sensor protects
+every future one, including the runs where nobody remembers this rule.
+
 ### `loop verify-sensors`: prove each sensor can flip, before trusting any of it
 
 **Run this on every new manifest, before the first `loop run`.** It is the
@@ -523,7 +577,18 @@ Verdicts: `flipped` (discriminates), **`STUCK`** (same state with the fault
 planted - gates nothing), **`DIRTY`** (flipped but did not restore - the
 canary altered the tree or the sensor is non-deterministic), **`CANARY`** (the
 canary command itself errored, so nothing was proven), `unverified` (none
-declared - not a failure, but not evidence either).
+declared - not a failure, but not evidence either), `pending` (an uncanaried
+FEATURE sensor).
+
+`pending` is reported separately from `unverified` on purpose. A feature
+sensor cannot carry a canary before its feature exists - the fault you would
+plant IS the implementation - so filing it beside a guard that merely lacks
+one inflates the gap count in the single report you read right before deciding
+to spend money. On eaves that read "9 unverified" when the real number was 3.
+Feature sensors are verified by a different instrument: the baseline `expect`
+check aborts the run if one already passes on the unchanged tree, and going
+green at the end proves the other end of the range. `--strict` ignores them
+and fails only on uncanaried guards.
 
 Cost: sensors WITHOUT a canary are never executed, so an expensive judge costs
 nothing unless you deliberately give it one. Sensors with a canary run three
@@ -557,6 +622,12 @@ projects:
 
 - Plant the *real* fault, not a proxy. `echo bad >> file` does not prove a
   linter works; a genuine lint violation does.
+- **A test you write for the loop needs the same treatment.** After adding
+  process reaping I ran the new regression tests and all three passed - but
+  one of them had passed *before* the fix too, so it was proving nothing.
+  Disabling just the agent-side reap turned it red, which is what earned it.
+  Canary your own assertions or you are writing the vacuous sensors this
+  section warns about, one layer up.
 - Beware allowlisted example values. The canonical AWS docs key will not trip
   gitleaks, so a canary built from it "passes" while proving nothing.
 - If a sensor reports STUCK, EITHER the check is broken OR the canary plants
@@ -719,6 +790,26 @@ real cases below shipped in a "green" hand-written verification harness
   possible repo FAILS the sensor while a stubbed one passes the syntax check.
   A negative sensor that inverts on the happy path is worse than no sensor.
   (Caught by mutation-testing this very recipe before documenting it.)
+
+- **A sensor greened by a process the LAST run leaked.** *(2026-08-05)* This
+  one is not about the sensor's logic at all - the check was correct and the
+  repo was empty. A previous run's four `eaves serve` processes were still
+  bound to 127.0.0.1:18631-18634, so four feature sensors curl'd a live API
+  that the tree under test did not implement. It is the worst shape of vacuous
+  green: nothing in the sensor is wrong, and re-reading it teaches you nothing.
+
+  The leak is the ordinary way you write a server sensor - `go run . serve &
+  SP=$!` ... `kill $SP` kills the `go run` wrapper, not the compiled binary it
+  exec'd. Two mechanisms that look like they cover it do not: GNU `timeout`
+  creates a process group but only signals it when the deadline fires, and
+  `systemd-run --user --scope` does **not** reap the cgroup on normal exit
+  (verified directly - a backgrounded `sleep` outlived the scope). The loop now
+  SIGKILLs the sensor's and the agent's process group after each completes,
+  which is a fix in the harness rather than advice to sensor authors.
+
+  What caught it was the `expect: "fail"` baseline check reporting the four as
+  non-discriminating. A feature sensor **without** `expect` would have been
+  silently green from iteration 0 - declare it on every feature sensor.
 
 **Mutation-test every negative sensor once, by hand, before trusting it:**
 plant the trigger (commit the secret to a temp repo, inject `error TS` into

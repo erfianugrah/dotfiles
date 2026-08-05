@@ -777,6 +777,15 @@ export interface CanaryResult {
 	restoredOk?: boolean;
 	/** detail for canary-failed / not-restored. */
 	note?: string;
+	/**
+	 * An uncanaried FEATURE sensor (`expect: "fail"`). Not a gap in the same
+	 * sense as an uncanaried guard: the fault you would plant to prove it
+	 * discriminates is the implementation itself, which does not exist yet. It
+	 * is verified instead by the baseline `expect` check (which fails the run if
+	 * it already passes on the unchanged tree) and by going green when the
+	 * feature lands.
+	 */
+	pending?: boolean;
 }
 
 /**
@@ -828,12 +837,18 @@ export function formatCanaryReport(results: CanaryResult[]): string {
 	const stuck = results.filter((r) => r.verdict === "stuck").map((r) => r.name);
 	const dirty = results.filter((r) => r.verdict === "not-restored").map((r) => r.name);
 	const broke = results.filter((r) => r.verdict === "canary-failed").map((r) => r.name);
-	const none = results.filter((r) => r.verdict === "unverified").map((r) => r.name);
+	const none = results
+		.filter((r) => r.verdict === "unverified" && !r.pending)
+		.map((r) => r.name);
+	const pending = results
+		.filter((r) => r.verdict === "unverified" && r.pending)
+		.map((r) => r.name);
 	const okCount = results.filter((r) => r.verdict === "flipped").length;
 
 	const out = [lines.join("\n"), ""];
 	out.push(
-		`${okCount}/${results.length} sensor(s) proven to discriminate; ${none.length} unverified.`,
+		`${okCount}/${results.length} sensor(s) proven to discriminate; ${none.length} unverified` +
+			`${pending.length ? `; ${pending.length} pending (feature sensors)` : ""}.`,
 	);
 	if (stuck.length)
 		out.push(
@@ -857,6 +872,14 @@ export function formatCanaryReport(results: CanaryResult[]): string {
 			`\nUnverified (no canary declared):\n  ${none.join(", ")}\n` +
 				"  Add a `canary` that plants the exact fault each one exists to catch.\n" +
 				"  Until then these are assertions, not evidence.",
+		);
+	if (pending.length)
+		out.push(
+			`\nPending (feature sensors, expect: "fail"):\n  ${pending.join(", ")}\n` +
+				"  Not a gap: the fault you would plant to prove these is the feature\n" +
+				"  itself. They are checked at baseline instead (a feature sensor that\n" +
+				"  already passes on the unchanged tree aborts the run) and proven by\n" +
+				"  going green when the work lands.",
 		);
 	return out.join("\n");
 }

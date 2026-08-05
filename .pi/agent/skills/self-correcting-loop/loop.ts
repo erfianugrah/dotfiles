@@ -152,9 +152,16 @@ const BACKSTOP_MARGIN_MS = 15_000;
 async function sh(
 	cmd: string[],
 	timeoutMs?: number,
+	opts: { reap?: boolean } = {},
 ): Promise<{ code: number; out: string; timedOut: boolean; durationMs: number }> {
 	const started = Date.now();
-	const proc = Bun.spawn([...timeoutPrefix(timeoutMs), ...cmd], {
+	const prefix = timeoutPrefix(timeoutMs);
+	// Only signal a process group we KNOW we created, or the kill lands on the
+	// loop's own group (Bun.spawn does not detach: a plain child inherits our
+	// pgid, so `kill -pid` there would take the loop down with it).
+	const setsid = opts.reap && prefix.length === 0 ? Bun.which("setsid") : null;
+	const ownsGroup = Boolean(opts.reap) && (prefix.length > 0 || setsid !== null);
+	const proc = Bun.spawn([...(setsid ? [setsid] : []), ...prefix, ...cmd], {
 		stdout: "pipe",
 		stderr: "pipe",
 		...(timeoutMs
@@ -166,10 +173,37 @@ async function sh(
 		new Response(proc.stderr).text(),
 		proc.exited,
 	]);
+	// After the drain, never before: a reaper that raced the read would eat the
+	// diagnosis. (A survivor holding our stdout pipe open stalls the read until
+	// the native backstop fires - that is the timeout's job, not the reaper's.)
+	if (ownsGroup) reapGroup(proc.pid);
 	const durationMs = Date.now() - started;
 	const lateEnough = timeoutMs !== undefined && durationMs >= timeoutMs * 0.95;
 	const timedOut = lateEnough && (proc.killed || isTimeoutExit(code));
 	return { code, out: `${stdout}${stderr}`.trim(), timedOut, durationMs };
+}
+
+/**
+ * SIGKILL everything left in the process group led by `pid`.
+ *
+ * The leak this exists for: a sensor or agent backgrounds a server, kills the
+ * wrapper it launched (`go run`, `npm run`, `bunx`) and exits 0 - while the
+ * compiled/forked grandchild keeps the port. The next run then finds a feature
+ * sensor already green against a tree that does not implement the feature,
+ * which is the worst failure this harness can have: a true-looking signal with
+ * no work behind it.
+ *
+ * Neither existing mechanism covers it. GNU `timeout` creates the group (it
+ * makes itself leader) but only signals it when the deadline fires.
+ * `systemd-run --user --scope` does not reap the cgroup on normal exit -
+ * verified directly, a backgrounded `sleep` outlives the scope.
+ */
+function reapGroup(pid: number): void {
+	try {
+		process.kill(-pid, "SIGKILL");
+	} catch {
+		// ESRCH: the group is already empty, which is the common case.
+	}
 }
 
 const git = (...args: string[]) => sh(["git", ...args]);
@@ -312,6 +346,7 @@ async function runSensor(s: Sensor, m: Manifest): Promise<SensorResult> {
 	const { code, out, timedOut, durationMs } = await sh(
 		[...limitsPrefix(m), "bash", "-lc", s.cmd],
 		budget,
+		{ reap: true },
 	);
 	return {
 		name: s.name,
@@ -476,6 +511,11 @@ async function runAgent(
 		killSignal: "SIGKILL",
 	});
 	const code = await proc.exited;
+	// Same reaping as sensors, and likelier to matter here: an agent that starts
+	// a dev server to try something by hand leaves it bound, and the next run's
+	// feature sensor finds the port already answering. Safe only because the
+	// timeout prefix above made this child a group leader.
+	if (timeoutPrefix(timeoutMs).length > 0) reapGroup(proc.pid);
 	const durationMs = Date.now() - started;
 	return {
 		code,
@@ -1125,7 +1165,10 @@ async function cmdVerify(flags: Record<string, string | boolean>): Promise<numbe
 	const results: CanaryResult[] = [];
 	for (const s of targets) {
 		if (!s.canary) {
-			results.push({ name: s.name, verdict: "unverified" });
+			// A feature sensor has no canary to declare yet - the fault would be
+			// the implementation. Flag it so the report does not file it next to a
+			// guard that simply lacks one.
+			results.push({ name: s.name, verdict: "unverified", pending: s.expect === "fail" });
 			continue;
 		}
 		process.stdout.write(`  ${s.name} ... `);
@@ -1170,8 +1213,11 @@ async function cmdVerify(flags: Record<string, string | boolean>): Promise<numbe
 
 	const broken = results.filter((r) => isCanaryFailure(r.verdict));
 	if (broken.length) return 1;
-	if (flags.strict === true && results.some((r) => r.verdict === "unverified")) {
-		console.error("\n--strict: every sensor must carry a canary.");
+	// Pending feature sensors are exempt: --strict demands evidence a sensor
+	// CAN discriminate, and for those the evidence is the baseline expect check
+	// plus the eventual green, not a canary.
+	if (flags.strict === true && results.some((r) => r.verdict === "unverified" && !r.pending)) {
+		console.error("\n--strict: every guard sensor must carry a canary.");
 		return 1;
 	}
 	return 0;

@@ -71,6 +71,12 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   timeouts, scope reverts, slowest sensors, and every never-passing sensor
   WITH its last output - so an expensive LLM sensor's rejection is a
   diagnosis in the report, not a name you have to re-run to understand.
+- **process reaping** - a sensor or agent that backgrounds a server (`go run
+  . serve &` then killing the wrapper, not the binary) used to leave it bound,
+  so the NEXT run's feature sensors passed against a tree that implemented
+  nothing. Both process groups are SIGKILLed after each completes. Neither
+  GNU `timeout` (signals only on deadline) nor `systemd-run --scope` (does not
+  reap on normal exit) covered this.
 - **`loop verify-sensors`** - mutation-test the sensor set before trusting it:
   each sensor declares a `canary` that plants the fault it exists to catch, and
   the tool asserts the sensor's state FLIPS, then reverts. Catches the two

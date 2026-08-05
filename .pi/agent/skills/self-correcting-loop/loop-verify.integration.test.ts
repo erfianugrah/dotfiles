@@ -140,8 +140,32 @@ test("--strict makes an undeclared canary a failure", async () => {
 	const lax = await verify(["--only", "good-guard"]);
 	expect(lax.code).toBe(0);
 	const strict = await verify(["--only", "good-guard,no-canary", "--strict"]);
-	expect(strict.out).toContain("every sensor must carry a canary");
+	expect(strict.out).toContain("every guard sensor must carry a canary");
 	expect(strict.code).toBe(1);
+}, 120_000);
+
+test("an uncanaried FEATURE sensor is pending, not an unverified gap", async () => {
+	// `feature` in the fixture does carry a canary, so drop it for this check:
+	// before the feature exists there is no fault to plant that is not the
+	// implementation. Reporting it beside a guard that merely lacks a canary
+	// inflates the gap count in the report you read before spending money.
+	const m = await Bun.file(join(dir, ".pi/harness.json")).json();
+	const saved = JSON.stringify(m);
+	for (const s of m.sensors) if (s.name === "feature") s.canary = undefined;
+	await Bun.write(join(dir, ".pi/harness.json"), JSON.stringify(m));
+
+	const r = await verify(["--only", "good-guard,feature", "--allow-dirty"]);
+	expect(r.out).toContain("1 pending (feature sensors)");
+	expect(r.out).not.toContain("Unverified (no canary declared)");
+	expect(r.out).toContain('Pending (feature sensors, expect: "fail")');
+	expect(r.code).toBe(0);
+
+	// --strict must not fail on it either: the evidence is the baseline expect
+	// check and the eventual green, not a canary.
+	const s = await verify(["--only", "good-guard,feature", "--strict", "--allow-dirty"]);
+	expect(s.code).toBe(0);
+
+	await Bun.write(join(dir, ".pi/harness.json"), saved);
 }, 120_000);
 
 test("a canary that itself errors is reported, not silently counted as proof", async () => {

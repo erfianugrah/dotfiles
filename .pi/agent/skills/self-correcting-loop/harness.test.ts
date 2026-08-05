@@ -612,6 +612,35 @@ describe("canary verdicts", () => {
 		expect(out).toContain("gate NOTHING");
 		expect(out).toContain("judge");
 	});
+
+	// A feature sensor cannot carry a canary before its feature exists: the
+	// fault you would plant IS the implementation. Listing it as a gap next to
+	// an uncanaried guard overstates the problem in the one report you read
+	// right before deciding to spend money - it read "9 unverified" when the
+	// real number was 3.
+	test("separates pending feature sensors from genuinely uncanaried guards", () => {
+		const out = formatCanaryReport([
+			{ name: "build", verdict: "flipped", baselineOk: true, canaryOk: false, restoredOk: true },
+			{ name: "vet", verdict: "unverified" },
+			{ name: "serve-healthz", verdict: "unverified", pending: true },
+			{ name: "serve-405", verdict: "unverified", pending: true },
+		]);
+		expect(out).toContain("1/4 sensor(s) proven to discriminate; 1 unverified");
+		expect(out).toContain("2 pending");
+		// the real gap is named alone, not padded with sensors that cannot have one
+		expect(out).toMatch(/Unverified \(no canary declared\):\n {2}vet\n/);
+		expect(out).toContain("serve-healthz, serve-405");
+		expect(out).toContain("expect: \"fail\"");
+	});
+
+	test("pending sensors alone do not read as an unverified backlog", () => {
+		const out = formatCanaryReport([
+			{ name: "build", verdict: "flipped", baselineOk: true, canaryOk: false, restoredOk: true },
+			{ name: "serve-healthz", verdict: "unverified", pending: true },
+		]);
+		expect(out).toContain("1/2 sensor(s) proven to discriminate; 0 unverified");
+		expect(out).not.toContain("Unverified (no canary declared)");
+	});
 });
 
 describe("scope guard never reverts loop-owned state", () => {
