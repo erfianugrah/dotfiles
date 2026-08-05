@@ -937,6 +937,13 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 			})),
 		});
 
+		// Flush after EVERY iteration, not just at the end. A 14-iteration run is
+		// hours long, and `loop report` reading the previous run's file the whole
+		// time is worse than useless - it looks current. `result` stays "fail"
+		// until the run actually finishes, which is the honest reading of a run
+		// still in progress.
+		await writeReport(report);
+
 		if (d.keep) {
 			// Kept: current becomes the new best.
 			prev = cur;

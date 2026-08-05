@@ -678,6 +678,12 @@ history, the checkpoint index, and the rollback `git clean`. Otherwise:
 You do not need to gitignore them. A tool that requires every repo to ignore
 its droppings has pushed its own problem downstream.
 
+The report is rewritten after **every** iteration, so `loop report` and
+`--prompt N` are usable on a run still in progress - `result` stays `fail`
+until it finishes, which is the honest reading of an unfinished run. Before
+this it was written only at the end, so for the hours a long run takes, the
+command showed the PREVIOUS run's file while looking current.
+
 **`loop report --prompt N`** dumps the exact text iteration N was handed,
 recorded to `.pi/harness-prompts/iteration-N.txt` before the agent starts (so
 it survives a wedged iteration or a killed run). Everything else in the report

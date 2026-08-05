@@ -266,3 +266,48 @@ test("recorded prompts are loop artifacts, not agent work", async () => {
 	}
 	expect(existsSync(join(dir, ".pi/harness-prompts/iteration-1.txt"))).toBe(true);
 });
+
+test("the report is current mid-run, not left stale until the end", async () => {
+	// A 14-iteration run is hours long. `loop report` reading the PREVIOUS
+	// run's file for all of it is worse than having no report: it looks
+	// current. Written after every iteration now.
+	await manifest({
+		maxIterations: 3,
+		sensors: [{ name: "never", cmd: "false", hint: "cannot be satisfied" }],
+	});
+	rmSync(join(dir, ".pi/harness-report.json"), { force: true });
+
+	const p = Bun.spawn(["bun", LOOP, "run", "--allow-dirty"], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+		env: { ...process.env, LOOP_SANDBOX: "off", LOOP_PI_CMD: join(dir, "agent.sh") },
+	});
+
+	// Poll for a report appearing WHILE the run is still going.
+	let midRun: { iterations: unknown[] } | null = null;
+	for (let i = 0; i < 100 && p.exitCode === null; i++) {
+		if (existsSync(join(dir, ".pi/harness-report.json"))) {
+			try {
+				const r = await Bun.file(join(dir, ".pi/harness-report.json")).json();
+				if (r.iterations?.length >= 1 && r.iterations.length < 3) {
+					midRun = r;
+					break;
+				}
+			} catch {
+				// half-written file: keep polling
+			}
+		}
+		await Bun.sleep(50);
+	}
+	await p.exited;
+
+	expect(midRun).not.toBeNull();
+	expect((midRun as { iterations: unknown[] }).iterations.length).toBeGreaterThanOrEqual(1);
+
+	const final = await Bun.file(join(dir, ".pi/harness-report.json")).json();
+	expect(final.iterations.length).toBe(3);
+	expect(final.finishedAt).toBeTruthy();
+
+	await manifest(); // restore the shared fixture
+});
