@@ -311,3 +311,28 @@ test("the report is current mid-run, not left stale until the end", async () => 
 
 	await manifest(); // restore the shared fixture
 });
+
+test("the recorded prompt carries the real gate list, from the manifest", async () => {
+	// The task text's "verify with:" line is hand-maintained and drifts. The
+	// manifest already knows every command that will run, so the prompt now
+	// derives the list instead of trusting the restatement.
+	await manifest({
+		maxIterations: 1,
+		sensors: [
+			{ name: "feature", cmd: "test -f ops/done.txt", expect: "fail" },
+			{ name: "fmt-gate", cmd: "test -z \"$(echo)\"" },
+			{ name: "premise-claim", cmd: "true", kind: "premise" },
+		],
+	});
+	rmSync(join(dir, ".pi/harness-prompts"), { recursive: true, force: true });
+	await run();
+
+	const prompt = await Bun.file(join(dir, ".pi/harness-prompts/iteration-1.txt")).text();
+	expect(prompt).toContain("Every check that will be run against your work");
+	expect(prompt).toContain("fmt-gate");
+	expect(prompt).toContain("test -f ops/done.txt");
+	// A premise is a baseline claim about the tree, not something to satisfy.
+	expect(prompt).not.toContain("premise-claim");
+
+	await manifest();
+});

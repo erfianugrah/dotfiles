@@ -849,6 +849,10 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 			formatAttemptHistory(report.iterations),
 			m.rules,
 			m.guide,
+			// The gate list comes from the manifest, so it cannot drift from what
+			// actually runs. Premises are excluded: they are baseline-only claims
+			// about the tree, never something the agent should try to satisfy.
+			m.sensors.filter((s) => s.kind !== "premise").map((s) => ({ name: s.name, cmd: s.cmd })),
 		);
 		// Persist BEFORE the agent runs: if the iteration wedges or the loop is
 		// killed, the prompt that caused it is the thing you most want to read.

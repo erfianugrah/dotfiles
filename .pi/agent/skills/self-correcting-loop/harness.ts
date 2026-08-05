@@ -670,7 +670,29 @@ export function buildPrompt(
 	history?: string,
 	rules?: string[],
 	guide?: string[],
+	gates?: { name: string; cmd: string }[],
 ): string {
+	/**
+	 * The authoritative gate list, derived from the manifest rather than
+	 * hand-written into the task.
+	 *
+	 * Observed on a real run: an agent finished a 15-endpoint HTTP API and
+	 * reported "All tests pass: build, vet, unit tests, smoke tests" - exactly
+	 * the verify line the task had given it - while `gofmt` was red. The task's
+	 * verify line and the sensor set had drifted apart, and the agent had no way
+	 * to know. The rollback that followed discarded the whole implementation
+	 * over a formatting error, because 1 -> 2 failing is no progress.
+	 *
+	 * Same family as a spec's unchecked universals: a hand-maintained restatement
+	 * of something the manifest already knows exactly.
+	 */
+	const gateBlock =
+		gates && gates.length
+			? "\n\n## Every check that will be run against your work\n" +
+				"Self-verify with THESE, not with a list from the task text - they are\n" +
+				"the gate, and they are what decides whether the iteration is kept.\n" +
+				gates.map((g) => `- ${g.name}: \`${g.cmd}\``).join("\n")
+			: "";
 	const guideBlock =
 		guide && guide.length
 			? "\n\n## Binding conventions - READ THESE FILES FIRST\n" +
@@ -682,7 +704,7 @@ export function buildPrompt(
 			? `\n\n## Standing rules\n${rules.map((x) => `- ${x}`).join("\n")}`
 			: "";
 	const guardrails = `\n\n## Ground rules\n${STANDING_GUARDRAILS.map((r) => `- ${r}`).join("\n")}`;
-	if (!feedback) return task + guideBlock + ruleBlock + guardrails;
+	if (!feedback) return task + guideBlock + ruleBlock + guardrails + gateBlock;
 	const noteBlock =
 		notes && notes.length
 			? `\n\n## Loop notes\n${notes.map((n) => `- ${n}`).join("\n")}`
@@ -691,7 +713,7 @@ export function buildPrompt(
 		? `\n\n## Previous approaches that were rolled back - do not repeat them\n${history}`
 		: "";
 	return (
-		`${task}${guideBlock}${ruleBlock}${guardrails}\n\n` +
+		`${task}${guideBlock}${ruleBlock}${guardrails}${gateBlock}\n\n` +
 		"## Automated checks failed on the previous attempt\n" +
 		"Fix ONLY what is needed to make these checks pass. In addition to the ground rules above:\n" +
 		"- Do NOT modify code, config, or tests unrelated to these failures.\n" +

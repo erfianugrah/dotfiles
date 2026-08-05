@@ -992,3 +992,31 @@ describe("blockedBy - which gated sensors cannot run this pass", () => {
 		);
 	});
 });
+
+describe("buildPrompt: the gate list", () => {
+	const gates = [
+		{ name: "build", cmd: "go build ./..." },
+		{ name: "gofmt", cmd: "test -z \"$(gofmt -l .)\"" },
+	];
+
+	// Observed: an agent finished a 15-endpoint HTTP API, self-reported
+	// "All tests pass: build, vet, unit tests, smoke tests" - which was the
+	// verify line the TASK gave it - and gofmt was red. It had no way to know
+	// gofmt was a gate. The task's verify line and the sensor set had drifted.
+	test("tells the agent every check that will be run against it", () => {
+		const p = buildPrompt("do X", undefined, undefined, undefined, undefined, undefined, gates);
+		expect(p).toContain("go build ./...");
+		expect(p).toContain("gofmt -l");
+		expect(p).toContain("build");
+	});
+
+	test("is present on the feedback path too, not just the first attempt", () => {
+		const p = buildPrompt("do X", "sensor foo failed", undefined, undefined, undefined, undefined, gates);
+		expect(p).toContain("gofmt -l");
+		expect(p).toContain("sensor foo failed");
+	});
+
+	test("absent when no gates are passed (callers that do not supply them)", () => {
+		expect(buildPrompt("do X")).not.toContain("will be run");
+	});
+});
