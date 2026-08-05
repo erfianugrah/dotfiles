@@ -738,9 +738,21 @@ export function matchGlob(path: string, glob: string): boolean {
 }
 
 /** Paths that are NOT covered by any scope glob. Empty scope = unrestricted. */
+/**
+ * Paths the loop owns and must never revert, regardless of writeScope.
+ *
+ * `.pi/` holds the manifest and the run report. The guard reverts anything
+ * outside writeScope by restoring it from the checkpoint index, so without
+ * this exemption the loop can clobber its own state - including the report
+ * that is the only durable record of what a run did.
+ */
+const LOOP_OWNED = [".pi/"];
+
 export function outOfScope(paths: string[], scope: string[]): string[] {
 	if (scope.length === 0) return [];
-	return paths.filter((p) => !scope.some((g) => matchGlob(p, g)));
+	return paths.filter(
+		(p) => !LOOP_OWNED.some((d) => p.startsWith(d)) && !scope.some((g) => matchGlob(p, g)),
+	);
 }
 
 // --- loop control decisions -------------------------------------------------

@@ -611,3 +611,18 @@ describe("canary verdicts", () => {
 		expect(out).toContain("judge");
 	});
 });
+
+describe("scope guard never reverts loop-owned state", () => {
+	test(".pi/ is exempt even when writeScope excludes it", () => {
+		const changed = [".pi/harness.json", ".pi/harness-report.json", "ops/ops.go", "run.log"];
+		expect(outOfScope(changed, ["ops/**"])).toEqual(["run.log"]);
+	});
+
+	test("still reports genuinely out-of-scope paths", () => {
+		expect(outOfScope(["docs/x.md", "ops/a.go"], ["ops/**"])).toEqual(["docs/x.md"]);
+	});
+
+	test("no writeScope means nothing is out of scope (unchanged)", () => {
+		expect(outOfScope([".pi/harness.json", "anything"], [])).toEqual([]);
+	});
+});

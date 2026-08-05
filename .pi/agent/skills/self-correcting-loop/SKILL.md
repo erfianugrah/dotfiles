@@ -543,6 +543,33 @@ projects:
 - A canary that cannot be expressed is a smell: it usually means the sensor
   asserts something too vague to fault deliberately.
 
+### Never redirect the loop's output INTO the repo
+
+```bash
+loop run > /tmp/run.log 2>&1     # correct
+loop run > run.log 2>&1          # log truncates the moment work starts
+```
+
+`checkpoint()` is `git add -A`, so a redirect target inside the repo gets
+staged. Every line written after that makes it differ from the index, the
+scope guard treats it as an out-of-scope modification, and reverts it to the
+checkpoint content. The log therefore stops at exactly the point the first
+iteration begins - no iteration headers, no progress lines, no verdict. It
+reads as "the loop went silent", and the run itself is completely fine.
+
+The loop now warns when it detects this (printed *before* the checkpoint, so
+the warning survives the revert it describes), and `.pi/**` is exempt from the
+scope guard so the manifest and report can never be clobbered the same way.
+
+Diagnosis note, because this one cost hours: the symptom looks exactly like a
+buffering or file-descriptor bug, and it is neither. It reproduces with `>`,
+with `| tee`, and under a real PTY; a scripted fake agent emitting 5000 lines
+never triggers it; and a minimal repro proved a real `pi` child does not
+disturb the parent's descriptors. The discriminating test is a 3-way A/B:
+writeScope AND log-in-repo truncates, either one alone is fine. When output
+vanishes, suspect something that rewrites the file, not something that fails
+to write it.
+
 ### Iteration 1 already sees the baseline failures (and your hints)
 
 Non-obvious and worth internalising: `prev` is seeded with the **baseline**

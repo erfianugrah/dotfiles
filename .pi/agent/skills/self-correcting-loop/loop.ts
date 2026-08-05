@@ -605,6 +605,10 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 			"\n  ! not a git repo: checkpoint/rollback/scope-guard disabled (feed-forward only).",
 		);
 	} else {
+		// BEFORE the checkpoint, deliberately: anything printed after it is part
+		// of the very truncation this warns about, so a warning emitted later
+		// would itself be reverted away.
+		warnIfLogInsideRepo(m.writeScope);
 		await checkpoint(); // index := current working tree (best known good).
 	}
 	// Ref-guard state: HEAD + the checkpoint index as a tree object. HEAD never
@@ -856,6 +860,39 @@ async function writeReport(report: RunReport): Promise<void> {
  * reported `unverified`), so an expensive inferential gate like `judge` costs
  * nothing unless you deliberately give it a canary.
  */
+/**
+ * Warn when the operator has redirected our stdout INTO the repo.
+ *
+ * `checkpoint()` is `git add -A`, so a `loop run > run.log` inside the repo
+ * stages run.log; every line written afterwards makes it differ from the
+ * index, the scope guard sees an out-of-scope modification and reverts it to
+ * the checkpoint content. The log therefore truncates at exactly the moment
+ * the loop starts working, which reads as "the loop went silent" and hides
+ * every iteration header, progress line and the final verdict.
+ *
+ * Diagnosed 2026-08-04 after chasing fds, buffering and PTYs; the 3-way A/B
+ * is unambiguous - writeScope + log-in-repo truncates, either alone is fine.
+ * We cannot see the shell's redirect target from inside the manifest, but we
+ * can read it off fd 1 on Linux and say so.
+ */
+function warnIfLogInsideRepo(scope: string[]): void {
+	if (scope.length === 0) return; // no scope guard, nothing reverts
+	try {
+		if (!statSync("/proc/self/fd/1").isFile()) return;
+		const target = realpathSync("/proc/self/fd/1");
+		const repo = realpathSync(process.cwd());
+		if (!target.startsWith(`${repo}/`)) return;
+		console.warn(
+			`\n  ! stdout is redirected to ${target.slice(repo.length + 1)}, which is INSIDE the repo.\n` +
+				"    The scope guard will revert it (it is outside writeScope), truncating this\n" +
+				"    log the moment the first iteration starts. Redirect outside the repo instead,\n" +
+				"    e.g. `loop run > /tmp/run.log 2>&1`, or read .pi/harness-report.json.",
+		);
+	} catch {
+		// /proc unavailable or fd 1 not resolvable - nothing to warn about.
+	}
+}
+
 async function cmdVerify(flags: Record<string, string | boolean>): Promise<number> {
 	const manifestPath = typeof flags.manifest === "string" ? flags.manifest : DEFAULT_MANIFEST;
 	let m: Manifest;
