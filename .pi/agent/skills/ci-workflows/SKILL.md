@@ -24,7 +24,7 @@ Pin to the **major version tag** (e.g. `@v6`) unless you have a specific reason 
 
 | Action | Version | Notes |
 |---|---|---|
-| `actions/checkout` | `v6` | v6.0.2; Node 24 runtime; v5/v4/v3 still on Node 20/16 |
+| `actions/checkout` | `v7` | v7.0.1 (re-verified 2026-08-05, floating `v7` tag exists); Node 24 runtime |
 | `actions/setup-node` | `v6` | v6.4.0 |
 | `actions/setup-python` | `v6` | v6.2.0 |
 | `actions/setup-go` | `v6` | v6.4.0 |
@@ -42,7 +42,7 @@ Pin to the **major version tag** (e.g. `@v6`) unless you have a specific reason 
 | `oven-sh/setup-bun` | `v2` | v2.2.0 |
 | `denoland/setup-deno` | `v2` | v2.0.4 |
 | `pnpm/action-setup` | `v6` | v6.0.8 |
-| `astral-sh/setup-uv` | `v8` | v8.1.0 — Python via uv (fast, replaces setup-python + pip flow) |
+| `astral-sh/setup-uv` | `v9.0.0` | **Exact tag required.** Re-verified 2026-08-05: latest is v9.0.0, but astral-sh stopped publishing floating major tags after v7, so `@v8` and `@v9` do NOT resolve and fail the job at "Set up job" with `unable to resolve action`. v9.0.0 also flipped `prune-cache` to `false` by default. |
 
 ### Docker
 
@@ -364,7 +364,21 @@ Copy this same file to both `.github/workflows/ci.yml` and `.gitea/workflows/ci.
 
 ### Stale action versions
 
-The single biggest LLM failure on CI YAML: pinning to `@v3` or `@v4` from training-data defaults when `@v6` is current. **ALWAYS check the action's latest release** via `webfetch https://api.github.com/repos/<owner>/<repo>/releases/latest | jq .tag_name` before writing the YAML. Don't trust memory.
+The single biggest LLM failure on CI YAML: pinning to `@v3` or `@v4` from training-data defaults when the current major is several ahead. **ALWAYS check the action's latest release** via `webfetch https://api.github.com/repos/<owner>/<repo>/releases/latest | jq .tag_name` before writing the YAML. Don't trust memory - and don't trust this table either; two of its rows were a major behind within three months.
+
+### A latest release does NOT imply a floating major tag
+
+Checking `releases/latest` tells you the release, not what you can write in `uses:`. Some orgs publish a moving `v9` alongside `v9.0.0`; astral-sh stopped doing that after v7. Pinning `@v9` from a verified `tag_name: v9.0.0` fails the job before any step runs:
+
+    ##[error]Unable to resolve action `astral-sh/setup-uv@v9`, unable to find version `v9`
+
+So verify the TAG you are about to write actually exists, not just the release:
+
+```bash
+gh api repos/astral-sh/setup-uv/tags --jq '.[].name' | head
+```
+
+If the floating major isn't in that list, pin the exact version.
 
 ### `actions/upload-artifact` v3 deprecation
 
