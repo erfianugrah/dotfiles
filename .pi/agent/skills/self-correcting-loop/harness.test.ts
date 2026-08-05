@@ -28,6 +28,7 @@ import {
 	outOfScope,
 	parseLimits,
 	parseManifest,
+	stuckSensors,
 	truncate,
 } from "./harness.ts";
 
@@ -624,5 +625,47 @@ describe("scope guard never reverts loop-owned state", () => {
 
 	test("no writeScope means nothing is out of scope (unchanged)", () => {
 		expect(outOfScope([".pi/harness.json", "anything"], [])).toEqual([]);
+	});
+});
+
+describe("stuckSensors - per-sensor movement (what the aggregate count hides)", () => {
+	const it_ = (pairs: [string, boolean][]) => ({
+		sensors: pairs.map(([name, ok]) => ({ name, ok })),
+	});
+
+	test("names a sensor that never passed while others recovered", () => {
+		// The measured miscalibration: build recovers, design-doc never can.
+		expect(
+			stuckSensors([
+				it_([["build", false], ["design-doc", false]]),
+				it_([["build", true], ["design-doc", false]]),
+			]),
+		).toEqual(["design-doc"]);
+	});
+
+	test("nothing stuck when every sensor passed at some point", () => {
+		expect(
+			stuckSensors([
+				it_([["build", false], ["test", true]]),
+				it_([["build", true], ["test", true]]),
+			]),
+		).toEqual([]);
+	});
+
+	test("all stuck when nothing ever passed", () => {
+		expect(stuckSensors([it_([["a", false], ["b", false]]), it_([["a", false], ["b", false]])])).toEqual([
+			"a",
+			"b",
+		]);
+	});
+
+	test("empty iteration list yields nothing", () => {
+		expect(stuckSensors([])).toEqual([]);
+	});
+
+	test("preserves manifest order and does not duplicate", () => {
+		expect(
+			stuckSensors([it_([["z", false], ["a", false]]), it_([["z", false], ["a", false]])]),
+		).toEqual(["z", "a"]);
 	});
 });

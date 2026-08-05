@@ -240,11 +240,31 @@ pipeline before turning it loose on all 1,448. `--trial [N]` (default 2) is
 that step: cap the run at N iterations and print a verdict about the HARNESS
 rather than the code.
 
-- sensors moved -> "the harness converges, re-run without `--trial`" (exit 1)
-- sensors did not move at all -> `TRIAL STALLED` (exit 1, `result:
-  "trial-stalled"` in the report) with the diagnostic checklist: over-specified
-  sensor, sensor asserting something the task never asked for, task too vague
-  or too large, agent timing out.
+- every sensor moved but not all green -> "the harness converges, re-run
+  without `--trial`" (exit 1)
+- **some sensor never passed** -> `trial-partial` (exit 1), naming them and
+  routing to `loop verify-sensors --only <name>`
+- nothing moved at all -> `TRIAL STALLED` (exit 1, `result: "trial-stalled"`)
+  with the diagnostic checklist: over-specified sensor, sensor asserting
+  something the task never asked for, task too vague or too large, agent
+  timing out.
+
+The middle case exists because the original aggregate-count verdict was
+*measured wrong* on the most realistic fault. Calibration, 3 arms, full run
+as ground truth:
+
+| sensors | trial (N=2) | full run | old verdict |
+|---|---|---|---|
+| only-unsatisfiable | stalled | fail | correct |
+| satisfiable + one unsatisfiable | moved 2 -> 1 | **fail** | **"converges, re-run"** |
+| fully satisfiable | pass | pass | correct |
+
+A mostly-good sensor set with one unsatisfiable sensor shows progress on the
+others, so the aggregate count drops and the old verdict said "converging" -
+after which the full run burned every iteration and failed. Per-sensor
+movement is the signal the count hides. It is evidence, not proof: a sensor
+that genuinely needs three iterations looks identical at N=2, which is why the
+message says "check these first" rather than declaring the harness broken.
 
 A failing set that does not move is almost never "needs more iterations" - it
 is a harness bug. The 2026-08-02 run below burned five iterations and ~30

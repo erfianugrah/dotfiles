@@ -57,6 +57,7 @@ import {
 	modelAt,
 	outOfScope,
 	parseManifest,
+	stuckSensors,
 	truncate,
 } from "./harness.ts";
 
@@ -444,7 +445,7 @@ interface RunReport {
 	finishedAt: string;
 	task: string;
 	models: string[];
-	result: "pass" | "fail" | "already-green" | "trial-stalled";
+	result: "pass" | "fail" | "already-green" | "trial-stalled" | "trial-partial";
 	iterations: IterationRecord[];
 }
 
@@ -802,8 +803,28 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 		// not at the model - spending 12 more iterations will not fix a sensor
 		// that asserts the wrong thing.
 		const moved = report.iterations.some((it) => it.progressed);
-		report.result = moved ? "fail" : "trial-stalled";
+		// Per-sensor movement, not just the aggregate count: a mostly-good sensor
+		// set with ONE unsatisfiable sensor shows progress on the others and used
+		// to be reported as "converging", after which the full run burned every
+		// iteration and failed anyway.
+		const stuck = stuckSensors(report.iterations);
+		report.result = stuck.length ? "trial-partial" : moved ? "fail" : "trial-stalled";
 		await writeReport(report);
+		if (stuck.length) {
+			console.error(
+				`\nTRIAL: ${stuck.length} sensor(s) never passed in ${m.maxIterations} iteration(s):\n` +
+					`  ${stuck.join(", ")}\n` +
+					(moved
+						? `Other sensors DID move (${report.iterations[0]?.failingBefore} -> ${report.iterations.at(-1)?.failingAfter} failing), so the aggregate looks like progress -\n` +
+							"but the run cannot go green until the above move too. Check them FIRST.\n"
+						: "") +
+					"Likely causes: unsatisfiable as written (asserts something the task never\n" +
+					"asks for), requires a path outside writeScope, or genuinely needs more\n" +
+					"iterations than the trial allows. Verify with: loop verify-sensors --only " +
+					`${stuck[0]}`,
+			);
+			return 1;
+		}
 		if (moved) {
 			console.log(
 				`\nTRIAL: sensors moved (${report.iterations[0]?.failingBefore} -> ${report.iterations.at(-1)?.failingAfter} failing) but are not green yet.\nThe harness converges - re-run without --trial for the full budget.`,

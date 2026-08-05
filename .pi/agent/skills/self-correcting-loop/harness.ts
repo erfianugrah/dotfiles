@@ -580,6 +580,39 @@ export function buildPrompt(
 	);
 }
 
+/**
+ * Sensors that never once passed across the recorded iterations.
+ *
+ * The trial verdict used to key purely on the AGGREGATE failing count, which
+ * is blind to the most common real harness fault: a mostly-good sensor set
+ * with ONE unsatisfiable sensor. Progress on the others drops the count, the
+ * aggregate says "converging", and the full run then burns every iteration
+ * and fails. Measured 2026-08-04:
+ *
+ *   only-unsatisfiable          trial stalled -> full fail   (correct)
+ *   satisfiable + unsatisfiable trial "moved" -> full fail   (WRONG)
+ *   fully satisfiable           trial pass    -> full pass   (correct)
+ *
+ * A sensor that never changes state is the signal the aggregate hides. Note
+ * it is evidence, not proof: a sensor needing three iterations looks the same
+ * at N=2, which is why the caller reports it as "check these first" rather
+ * than declaring the harness broken.
+ */
+export function stuckSensors(
+	iterations: { sensors: { name: string; ok: boolean }[] }[],
+): string[] {
+	if (iterations.length === 0) return [];
+	const everPassed = new Set<string>();
+	const seen: string[] = [];
+	for (const it of iterations) {
+		for (const s of it.sensors) {
+			if (!seen.includes(s.name)) seen.push(s.name);
+			if (s.ok) everPassed.add(s.name);
+		}
+	}
+	return seen.filter((n) => !everPassed.has(n));
+}
+
 // --- sensor verification (canary / mutation testing) ------------------------
 
 /**
