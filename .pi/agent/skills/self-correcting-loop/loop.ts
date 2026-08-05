@@ -76,6 +76,8 @@ const PRESET_DIR = join(SCRIPT_DIR, "presets");
 const DEFAULT_MANIFEST = ".pi/harness.json";
 const REPORT_PATH = ".pi/harness-report.json";
 const RUN_LOG_PATH = ".pi/harness-run.log";
+/** Per-sensor output kept in the report. Enough for a verdict, not a transcript. */
+const REPORT_OUTPUT_CAP = 4000;
 const PI_CMD = process.env.LOOP_PI_CMD ?? "pi";
 
 // --- arg parsing ------------------------------------------------------------
@@ -235,9 +237,25 @@ async function changedPaths(): Promise<string[]> {
 	return [...set];
 }
 
-/** Promote the working tree to the "best known good" checkpoint (the index). */
+/**
+ * Promote the working tree to the "best known good" checkpoint (the index).
+ *
+ * `git add -A` would stage the loop's OWN artifacts, which is how the run log
+ * ended up inside the diff a judge sensor reviews (it was flagged as
+ * out-of-scope noise, correctly) and inside any commit made after a run. They
+ * are excluded from the dirty check, the scope fence and the changed-files
+ * history already; not staging them closes the last hole. Repos should not
+ * have to gitignore another tool's droppings.
+ */
 async function checkpoint(): Promise<void> {
 	await git("add", "-A");
+	for (const a of LOOP_ARTIFACTS) {
+		if (!existsSync(a)) continue;
+		// `reset` needs a HEAD; before the first commit `rm --cached` is the
+		// only way to take a path back out of the index.
+		const r = await git("reset", "-q", "--", a);
+		if (r.code !== 0) await git("rm", "--cached", "-q", "--", a);
+	}
 }
 
 /** HEAD sha, or null when the repo has no commits yet. */
@@ -251,10 +269,17 @@ async function writeTree(): Promise<string> {
 	return (await git("write-tree")).out.trim();
 }
 
-/** Restore the working tree to the last checkpoint. */
+/**
+ * Restore the working tree to the last checkpoint.
+ *
+ * The loop's artifacts are excluded from `clean`: they are untracked by
+ * construction now that checkpoint() unstages them, so an unqualified
+ * `clean -fdq` would delete the run log mid-run - the loop erasing its own
+ * trace at the exact moment (a rollback) the trace matters most.
+ */
 async function rollback(): Promise<void> {
 	await git("checkout", "--", ".");
-	await git("clean", "-fdq");
+	await git("clean", "-fdq", ...LOOP_ARTIFACTS.flatMap((a) => ["-e", a]));
 }
 
 /**
@@ -475,7 +500,15 @@ interface IterationRecord {
 	notes: string[];
 	/** the agent exceeded agentTimeoutMs and was killed. */
 	agentTimedOut: boolean;
-	sensors: { name: string; ok: boolean; exitCode: number; timedOut?: boolean; durationMs?: number }[];
+	sensors: {
+		name: string;
+		ok: boolean;
+		exitCode: number;
+		timedOut?: boolean;
+		durationMs?: number;
+		/** failing sensors only: the tail of their output, so the report explains itself. */
+		output?: string;
+	}[];
 }
 
 interface RunReport {
@@ -824,6 +857,10 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 				exitCode: s.exitCode,
 				timedOut: s.timedOut,
 				durationMs: s.durationMs,
+				// Failures only. A passing sensor's output is noise; a failing one's
+				// is the diagnosis, and for an LLM sensor it is the single most
+				// expensive artifact the run produced. It was being thrown away.
+				...(s.ok ? {} : { output: truncate(s.output ?? "", REPORT_OUTPUT_CAP) }),
 			})),
 		});
 

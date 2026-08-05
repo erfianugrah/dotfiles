@@ -140,3 +140,73 @@ test("loop report renders the run, and fails cleanly with no report", async () =
 	expect(await q.exited).toBe(2);
 	expect(err).toContain("no report at");
 });
+
+test("the loop never stages its own artifacts", async () => {
+	// checkpoint() is `git add -A`, so the run log landed in the index - and
+	// therefore in the diff a judge sensor reviews (flagged as out-of-scope
+	// noise, correctly) and in any commit the operator makes after a run.
+	// Excluding them from the dirty check and the scope fence was not enough.
+	await run();
+	const staged = await git("diff", "--cached", "--name-only");
+	expect(staged).not.toContain("harness-run.log");
+	expect(staged).not.toContain("harness-report.json");
+	const indexed = await git("ls-files", "--", ".pi");
+	expect(indexed).not.toContain("harness-run.log");
+	expect(indexed).not.toContain("harness-report.json");
+	expect(indexed).toContain("harness.json"); // the manifest IS user work
+});
+
+test("a rollback does not delete the trace that explains it", async () => {
+	// Unstaged artifacts are untracked, so the rollback's `git clean -fdq`
+	// would delete the run log at exactly the moment it matters most.
+	const idle = join(dir, "idle.sh");
+	await Bun.write(idle, "#!/usr/bin/env bash\nexit 0\n"); // never satisfies the sensor
+	chmodSync(idle, 0o755);
+	rmSync(join(dir, "ops/done.txt"), { force: true }); // sensor must start red
+	rmSync(join(dir, ".pi/harness-run.log"), { force: true });
+
+	const p = Bun.spawn(["bun", LOOP, "run", "--allow-dirty"], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+		env: { ...process.env, LOOP_SANDBOX: "off", LOOP_PI_CMD: idle },
+	});
+	const out = await new Response(p.stdout).text();
+	await p.exited;
+
+	expect(out).toContain("iteration");
+	expect(existsSync(join(dir, ".pi/harness-run.log"))).toBe(true);
+	const log = await Bun.file(join(dir, ".pi/harness-run.log")).text();
+	expect(log).toContain("=== iteration 1/");
+});
+
+test("a failing sensor's output survives into the report and `loop report`", async () => {
+	// The run's most expensive artifact - an LLM sensor's verdict - was being
+	// discarded: the report kept ok/exitCode/durationMs and dropped the text,
+	// so "never passed: judge" was the whole diagnosis and the reasoning had to
+	// be recovered by re-running the sensor by hand.
+	await manifest({
+		maxIterations: 1,
+		sensors: [
+			{
+				name: "reviewer",
+				cmd: "echo 'REJECT: the handler is a stub' >&2; exit 1",
+				hint: "address the review",
+			},
+		],
+	});
+	await run();
+
+	const report = await Bun.file(join(dir, ".pi/harness-report.json")).json();
+	const sensor = report.iterations[0].sensors.find((s: { name: string }) => s.name === "reviewer");
+	expect(sensor.ok).toBe(false);
+	expect(sensor.output).toContain("REJECT: the handler is a stub");
+
+	const p = Bun.spawn(["bun", LOOP, "report"], { cwd: dir, stdout: "pipe", stderr: "pipe" });
+	const out = await new Response(p.stdout).text();
+	expect(await p.exited).toBe(0);
+	expect(out).toContain("never passed: reviewer");
+	expect(out).toContain("REJECT: the handler is a stub");
+
+	await manifest(); // restore the shared fixture for any later test
+});

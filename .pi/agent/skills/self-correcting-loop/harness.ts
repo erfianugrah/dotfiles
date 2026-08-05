@@ -635,8 +635,30 @@ export interface ReportView {
 		scopeViolations?: string[];
 		changedFiles?: string[];
 		notes?: string[];
-		sensors?: { name: string; ok: boolean; timedOut?: boolean; durationMs?: number }[];
+		sensors?: {
+			name: string;
+			ok: boolean;
+			timedOut?: boolean;
+			durationMs?: number;
+			/** captured for FAILING sensors only - the diagnosis, not just the verdict. */
+			output?: string;
+		}[];
 	}[];
+}
+
+/** Lines of a stuck sensor's output to surface in the report. */
+const STUCK_OUTPUT_LINES = 24;
+
+/**
+ * The tail of a sensor's output, capped.
+ *
+ * Tail rather than head: a failing command's verdict is at the end (the last
+ * assertion, the reviewer's REASONS block), while the head is setup noise.
+ */
+function tailLines(s: string, max = STUCK_OUTPUT_LINES): string[] {
+	const lines = s.split("\n").filter((l) => l.trim() !== "");
+	if (lines.length <= max) return lines;
+	return [`... ${lines.length - max} more line(s) above ...`, ...lines.slice(-max)];
 }
 
 /**
@@ -679,6 +701,23 @@ export function formatReport(r: ReportView): string {
 	);
 	if (stuck.length) {
 		out.push("", `never passed: ${stuck.join(", ")}`);
+		// The name alone is not a diagnosis. Carry the LAST recorded output of
+		// each stuck sensor: for an expensive inferential sensor (a judge burning
+		// minutes of a frontier model per iteration) that text IS the run's most
+		// valuable output, and without it the only way to learn why the run failed
+		// is to re-run the sensor by hand.
+		for (const name of stuck) {
+			const lastFail = [...its]
+				.reverse()
+				.flatMap((it) => (it.sensors ?? []).filter((s) => s.name === name && !s.ok))[0];
+			const body = lastFail?.output?.trim();
+			out.push("", `  ${name}:`);
+			if (!body) {
+				out.push("    (no output recorded)");
+				continue;
+			}
+			for (const l of tailLines(body)) out.push(`    ${l}`);
+		}
 	}
 
 	// Slowest sensors, from the last iteration that recorded durations.

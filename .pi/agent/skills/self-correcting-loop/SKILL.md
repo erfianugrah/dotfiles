@@ -198,7 +198,7 @@ Two properties make this work on weak models:
 | `loop-verify.integration.test.ts` | `verify-sensors` end-to-end: catches a real `grep -v` inverted-negation sensor as STUCK, proves a feature sensor's flip, confirms an un-canaried sensor is never executed, tree restored after every canary, `--only` / `--strict` / broken-canary / non-git paths. |
 | `loop-steering.integration.test.ts` | `guide`/`rules` reach the real prompt, a rule appended DURING iteration 1 is in force for iteration 2, and a half-saved manifest is ignored rather than fatal. |
 | `loop-logpath.integration.test.ts` | Redirecting the run log INTO the repo is eaten by the scope guard: 3-arm A/B (outside repo / inside repo / no writeScope) plus the pre-checkpoint warning. |
-| `loop-runlog.integration.test.ts` | The loop owns its trace: `.pi/harness-run.log` with no redirection, appends across runs, `--no-log`, loop artifacts are not dirt / not scope violations / not changed-files, and `loop report` renders + fails cleanly. |
+| `loop-runlog.integration.test.ts` | The loop owns its trace: `.pi/harness-run.log` with no redirection, appends across runs, `--no-log`, loop artifacts are not dirt / not scope violations / not changed-files / never staged / not deleted by a rollback's `git clean`, a failing sensor's output survives into the report, and `loop report` renders + fails cleanly. |
 | `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright). Ordered flow steps (wait/click/type/press/assert/screenshot) + viewport/full-page. The behaviour-harness layer for web targets; also a UI live-smoke tool. |
 | `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
 | `judge.ts` | Inferential (LLM-as-judge) sensor with two modes: CODE (feeds the git diff + spec to a second `pi -p`) and VISUAL (screenshots a live URL via browser-assert and has a vision model assess the rendered UI/UX). Both gate on `VERDICT: PASS/FAIL`. The computational sensors check the code compiles/passes; this checks it did the *right thing* / *looks right*. Fail-closed by default. |
@@ -580,12 +580,31 @@ loop report --report path.json   # or an archived one
 `loop report` turns the JSON into the thing you actually want after an
 unattended run: the failing-count trend, kept vs ROLLED BACK per iteration,
 which rung the ladder was on, ESCALATED / AGENT-TIMEOUT / scope-revert flags,
-sensors that never passed, the slowest sensors, and the loop's notes.
+sensors that never passed **and the last output of each**, the slowest
+sensors, and the loop's notes.
+
+That per-sensor output is the difference between a verdict and a diagnosis.
+The first real multi-iteration run ended `never passed: judge` - a sensor that
+had spent 147 seconds of a frontier model per iteration writing a detailed
+rejection, none of which was recorded anywhere. The text existed in memory
+(the agent is fed it as the next prompt's feedback) and was dropped on the way
+to the report. Failing sensors now persist a 4,000-char tail; passing ones
+stay silent, because a passing sensor's output is noise.
 
 The loop's own artifacts (`.pi/harness-run.log`, `.pi/harness-report.json`)
-are excluded from the dirty-tree check, the scope fence, and the changed-files
-history - otherwise the loop refuses to start because of its own output, which
-is exactly what happened the first time the run log was added.
+are excluded from the dirty-tree check, the scope fence, the changed-files
+history, the checkpoint index, and the rollback `git clean`. Otherwise:
+
+- the loop refuses to start because of its own output (what happened the first
+  time the run log was added),
+- `git add -A` stages the log, so it enters the diff a judge sensor reviews
+  (one promptly flagged it as out-of-scope noise, correctly) and any commit you
+  make after a run,
+- and once unstaged, an unqualified `git clean -fdq` on rollback deletes the
+  trace at exactly the moment it matters most.
+
+You do not need to gitignore them. A tool that requires every repo to ignore
+its droppings has pushed its own problem downstream.
 
 ### Never redirect the loop's output INTO the repo
 

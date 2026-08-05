@@ -68,7 +68,9 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
 - **Self-owned run log + `loop report`** - every run tees to
   `.pi/harness-run.log` (no redirection needed; `--no-log` opts out), and
   `loop report` renders the failing trend, kept/rolled-back, escalations,
-  timeouts, scope reverts, never-passing sensors and slowest sensors.
+  timeouts, scope reverts, slowest sensors, and every never-passing sensor
+  WITH its last output - so an expensive LLM sensor's rejection is a
+  diagnosis in the report, not a name you have to re-run to understand.
 - **`loop verify-sensors`** - mutation-test the sensor set before trusting it:
   each sensor declares a `canary` that plants the fault it exists to catch, and
   the tool asserts the sensor's state FLIPS, then reverts. Catches the two

@@ -726,4 +726,56 @@ describe("formatReport", () => {
 		expect(out).toContain("note 0");
 		expect(out).toContain("more");
 	});
+
+	// A stuck sensor's NAME is not a diagnosis. The judge sensor is the case
+	// that proved it: 147s of opus review per iteration, and the report said
+	// only "never passed: judge" - the reasoning had to be recovered by
+	// re-running the sensor by hand.
+	test("shows WHY each stuck sensor failed, from its last recorded output", () => {
+		const out = formatReport({
+			...base,
+			iterations: [
+				{
+					n: 1,
+					kept: true,
+					sensors: [
+						{ name: "build", ok: true },
+						{ name: "judge", ok: false, output: "first-pass verdict" },
+					],
+				},
+				{
+					n: 2,
+					kept: true,
+					sensors: [
+						{ name: "build", ok: true },
+						{ name: "judge", ok: false, output: "REJECT: the handler is a stub" },
+					],
+				},
+			],
+		});
+		expect(out).toContain("never passed: judge");
+		expect(out).toContain("REJECT: the handler is a stub");
+		// the LAST failure is the current state; earlier ones are superseded
+		expect(out).not.toContain("first-pass verdict");
+	});
+
+	test("caps stuck-sensor output so a verbose judge cannot flood the report", () => {
+		const long = Array.from({ length: 60 }, (_, i) => `line ${i}`).join("\n");
+		const out = formatReport({
+			...base,
+			iterations: [{ n: 1, kept: true, sensors: [{ name: "judge", ok: false, output: long }] }],
+		});
+		expect(out).toContain("line 59"); // the tail is what matters: the verdict
+		expect(out).not.toContain("line 0\n");
+		expect(out).toContain("more line");
+	});
+
+	test("says so when a stuck sensor recorded no output at all", () => {
+		const out = formatReport({
+			...base,
+			iterations: [{ n: 1, kept: true, sensors: [{ name: "smoke", ok: false }] }],
+		});
+		expect(out).toContain("never passed: smoke");
+		expect(out).toContain("no output recorded");
+	});
 });
