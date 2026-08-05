@@ -623,6 +623,91 @@ function formatGeo(inv: Investigation, mode: "summary" | "full" = "summary"): st
   return parts.join("\n\n");
 }
 
+const ARCHIVE_CAP = 20;
+
+function deltaStr(delta: unknown): string {
+  if (typeof delta !== "number") return "";
+  if (delta === 0) return "  (same size)";
+  return `  (${delta > 0 ? "+" : ""}${delta} bytes)`;
+}
+
+function formatArchive(inv: Investigation, mode: "summary" | "full" = "summary"): string {
+  const entity = asString(inv.entity);
+  const snaps = groupByKind(inv.findings)["snapshot"] ?? [];
+  const parts: string[] = [`# Archive history: ${entity}`];
+
+  if (!snaps.length) {
+    const info = (inv.info ?? []) as string[];
+    const errors = (inv.errors ?? []) as string[];
+    parts.push(info.length ? info.join("\n") : errors.length ? errors.join("\n") : "No captures.");
+    parts.push(metaFooter(inv));
+    return parts.join("\n\n");
+  }
+
+  const ts = (f: Finding) => asString(((f.extra ?? {}) as Record<string, unknown>).timestamp);
+  const ordered = [...snaps].sort((a, b) => ts(a).localeCompare(ts(b)));
+  const firstEx = (ordered[0].extra ?? {}) as Record<string, unknown>;
+  const lastEx = (ordered[ordered.length - 1].extra ?? {}) as Record<string, unknown>;
+  let window = `${ordered.length} content changes`;
+  if (firstEx.iso && lastEx.iso && firstEx.iso !== lastEx.iso) {
+    window += ` between ${firstEx.iso} and ${lastEx.iso}`;
+  }
+  parts.push(window);
+
+  const cap = mode === "full" ? ordered.length : ARCHIVE_CAP;
+  const lines: string[] = ["## Changes"];
+  for (const snap of ordered.slice(0, cap)) {
+    const ex = (snap.extra ?? {}) as Record<string, unknown>;
+    const status = ex.status === "200" ? "" : ` [${asString(ex.status)}]`;
+    lines.push(`- ${asString(ex.iso) || asString(snap.value)}${status}${deltaStr(ex.delta_bytes)}\n  ${asString(ex.url)}`);
+  }
+  parts.push(lines.join("\n"));
+  if (ordered.length > cap) {
+    parts.push(`_(showing ${cap} of ${ordered.length} changes - pass mode='full' for all)_`);
+  }
+
+  parts.push(metaFooter(inv));
+  return parts.join("\n\n");
+}
+
+const archiveLookup = defineTool({
+  name: "archive_lookup",
+  promptSnippet:
+    "archive_lookup - Wayback change log for a URL: when a page changed, byte deltas, openable snapshots.",
+  promptGuidelines: [
+    "The stack's only TEMPORAL tool. Use for what a page USED to say and when it changed - pricing, leadership, policy, claims that quietly disappeared.",
+    "Returns the MOST RECENT changes by default (digest-collapsed) - the archive stores many identical copies and only transitions are edits. Pass earliest=true for the origin question ('what did this look like originally').",
+    "Byte deltas are for triage, not proof: a small delta is usually a template tweak, a large one a rewrite. Open the snapshot URL to confirm.",
+    "Dates are digits only, YYYY[MM[DD]] - a dashed date is rejected rather than silently widening the window.",
+    "Absence of captures is not absence of a page: the archive's coverage is uneven, so treat the change count as a floor.",
+  ],
+  label: "Archive Lookup",
+  description:
+    "Wayback Machine change log for a URL: when the page changed, with byte deltas and directly-openable archived snapshots.",
+  parameters: Type.Object({
+    url: Type.String({ description: "URL to look up, e.g. 'example.com/pricing'" }),
+    limit: Type.Optional(Type.Number({ description: "Max changes (default 50, cap 200)" })),
+    from_date: Type.Optional(Type.String({ description: "Lower bound, digits only: '2021' or '202106'" })),
+    to_date: Type.Optional(Type.String({ description: "Upper bound, digits only" })),
+    earliest: Type.Optional(Type.Boolean({
+      description: "Sample the OLDEST changes instead of the most recent (origin question). Default false.",
+    })),
+    mode: Type.Optional(Type.Union([Type.Literal("summary"), Type.Literal("full")], {
+      description: "'summary' (default) caps at 20 changes; 'full' lists all",
+    })),
+  }),
+  async execute(_id, params, signal) {
+    const url = params.url?.trim();
+    if (!url) return makeResult("Error: `url` is required.", { error: true });
+    const payload: Record<string, unknown> = { url, limit: params.limit ?? 50 };
+    if (params.from_date?.trim()) payload.from_date = params.from_date.trim();
+    if (params.to_date?.trim()) payload.to_date = params.to_date.trim();
+    if (params.earliest) payload.earliest = true;
+    const inv = await osintCall("/investigate/archive", payload, 60_000, signal);
+    return makeResult(formatArchive(inv, params.mode ?? "summary"), summarise(inv));
+  },
+});
+
 const osintDomain = defineTool({
   name: "osint_domain",
   promptSnippet: "osint_domain — domain DNS / subdomains / certs / WHOIS via subfinder + crt.sh + RDAP.",
@@ -940,4 +1025,5 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(osintCve);
   pi.registerTool(osintGeo);
   pi.registerTool(osintHarvest);
+  pi.registerTool(archiveLookup);
 }
