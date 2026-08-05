@@ -807,17 +807,19 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 		// set with ONE unsatisfiable sensor shows progress on the others and used
 		// to be reported as "converging", after which the full run burned every
 		// iteration and failed anyway.
-		const stuck = stuckSensors(report.iterations);
+		// Precedence matters: when NOTHING moved, "stalled" is the clearer
+		// verdict and every sensor is trivially stuck. trial-partial is for the
+		// genuinely misleading case - the aggregate advanced while a sensor sat
+		// still, which is what the count-only verdict used to call "converging".
+		const stuck = moved ? stuckSensors(report.iterations) : [];
 		report.result = stuck.length ? "trial-partial" : moved ? "fail" : "trial-stalled";
 		await writeReport(report);
 		if (stuck.length) {
 			console.error(
 				`\nTRIAL: ${stuck.length} sensor(s) never passed in ${m.maxIterations} iteration(s):\n` +
 					`  ${stuck.join(", ")}\n` +
-					(moved
-						? `Other sensors DID move (${report.iterations[0]?.failingBefore} -> ${report.iterations.at(-1)?.failingAfter} failing), so the aggregate looks like progress -\n` +
-							"but the run cannot go green until the above move too. Check them FIRST.\n"
-						: "") +
+					`Other sensors DID move (${report.iterations[0]?.failingBefore} -> ${report.iterations.at(-1)?.failingAfter} failing), so the aggregate looks like progress -\n` +
+					"but the run cannot go green until the above move too. Check them FIRST.\n" +
 					"Likely causes: unsatisfiable as written (asserts something the task never\n" +
 					"asks for), requires a path outside writeScope, or genuinely needs more\n" +
 					"iterations than the trial allows. Verify with: loop verify-sensors --only " +
