@@ -12,6 +12,14 @@ _BW_SESSION_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 typeset -gA _BW_CACHE _BW_CACHE_TS
 _BW_CACHE_TTL=300  # 5 minutes in-memory cache
 
+# Cross-shell env cache. _BW_CACHE above is a per-process associative array,
+# so it can never help a freshly-spawned shell (new tmux window = new zsh =
+# empty cache = 20 sequential HTTP round-trips to the serve daemon, ~2.2s).
+# This file carries the already-resolved exports so later shells just source
+# it. Lives in XDG_RUNTIME_DIR: tmpfs, 0700, wiped on logout/reboot - so the
+# secrets never touch disk and never outlive the login session.
+_BW_ENV_CACHE="${_BW_SESSION_DIR}/bw-env.zsh"
+
 # ---------------------------------------------------------------------------
 # Secret mappings — single source of truth
 # Format: "bw_item_name|ENV_VAR_NAME"
@@ -63,13 +71,73 @@ _bw_serve_ok() {
 # "success", data days stale). Restart with bw_serve_start when this fires.
 _BW_SESSION_MAX_AGE="${_BW_SESSION_MAX_AGE:-43200}"  # 12h
 
+# _bw_session_started - the BW_SESSION_STARTED epoch from the session file.
+# Parsed inline rather than `zsh -c 'source ...'`: spawning a shell to read
+# one integer cost ~0.2s on every interactive startup.
+_bw_session_started() {
+    emulate -L zsh
+    local f="${_BW_SESSION_DIR}/bw-session.env" line
+    [[ -f $f ]] || return 1
+    while IFS= read -r line; do
+        if [[ $line == BW_SESSION_STARTED=* ]]; then
+            line=${line#BW_SESSION_STARTED=}
+            [[ $line == <-> ]] || return 1
+            print -r -- "$line"
+            return 0
+        fi
+    done < "$f"
+    return 1
+}
+
 # _bw_session_age - seconds since bw_serve_start wrote the session file, -1 if unknown
 _bw_session_age() {
-    local f="${_BW_SESSION_DIR}/bw-session.env" started
-    [[ -f $f ]] || { echo -1; return; }
-    started=$(zsh -c 'source "$1" >/dev/null 2>&1; echo $BW_SESSION_STARTED' _ "$f" 2>/dev/null)
-    [[ "$started" == <-> ]] || { echo -1; return; }
+    local started
+    started=$(_bw_session_started) || { echo -1; return; }
     echo $(( $(date +%s) - started ))
+}
+
+# ---------------------------------------------------------------------------
+# Cross-shell env cache
+# ---------------------------------------------------------------------------
+
+# _bw_env_cache_write - snapshot the currently-exported secrets for later shells.
+# Stamped with the bw session epoch, so bw_serve_start (which rewrites the
+# session file with a new timestamp) implicitly invalidates it.
+_bw_env_cache_write() {
+    emulate -L zsh
+    local stamp tmp item env_name
+    stamp=$(_bw_session_started) || return 1
+    tmp="${_BW_ENV_CACHE}.$$"
+    install -m 600 /dev/null "$tmp" 2>/dev/null || return 1
+    {
+        print -r -- "# bw-env-cache session=${stamp}"
+        for item in "${_BW_SECRETS[@]}"; do
+            env_name=${item#*|}
+            [[ -n ${(P)env_name} ]] && print -r -- "export ${env_name}=${(qq)${(P)env_name}}"
+        done
+        [[ -n $SOPS_AGE_KEYS ]] && print -r -- "export SOPS_AGE_KEYS=${(qq)SOPS_AGE_KEYS}"
+    } >| "$tmp" || { rm -f "$tmp"; return 1 }
+    mv -f "$tmp" "$_BW_ENV_CACHE" 2>/dev/null || { rm -f "$tmp"; return 1 }
+}
+
+# _bw_env_cache_load - source the snapshot if it matches the live bw session.
+# Returns non-zero on miss/stale/untrusted so the caller falls back to a full
+# load. The -O check matters: we are sourcing this file, so refuse anything
+# not owned by us.
+_bw_env_cache_load() {
+    emulate -L zsh
+    local f=$_BW_ENV_CACHE hdr stamp
+    [[ -f $f && -r $f && -O $f ]] || return 1
+    IFS= read -r hdr < "$f" || return 1
+    [[ $hdr == '# bw-env-cache session='* ]] || return 1
+    stamp=$(_bw_session_started) || return 1
+    [[ ${hdr#\# bw-env-cache session=} == "$stamp" ]] || return 1
+    source "$f"
+}
+
+_bw_env_cache_invalidate() {
+    rm -f "$_BW_ENV_CACHE" 2>/dev/null
+    return 0
 }
 
 # _bw_warn_if_stale - loud nudge on stderr when the serve session is suspect.
@@ -268,6 +336,7 @@ bw_serve_sync() {
 clear_bw_cache() {
     _BW_CACHE=()
     _BW_CACHE_TS=()
+    _bw_env_cache_invalidate
     echo "Bitwarden in-memory cache cleared."
 }
 
@@ -291,6 +360,19 @@ _bw_load_items() {
     emulate -L zsh
     setopt typeset_silent
 
+    # --no-sync: skip the POST /sync round-trip. Used by the shell-start path,
+    # where the daemon was already synced by bw_serve_start and the sync cost
+    # (~0.5s, plus it wipes _BW_CACHE) buys nothing. Explicit `load_bw` still
+    # syncs, so "I just changed a vault item" keeps working.
+    local do_sync=1
+    while [[ $1 == --* ]]; do
+        case $1 in
+            --no-sync) do_sync=0; shift ;;
+            --) shift; break ;;
+            *) print -u2 "[bw] unknown flag: $1"; return 2 ;;
+        esac
+    done
+
     local -a items=("$@")
     local total=${#items[@]} current=0 loaded=0 skipped=0 failed=0
     local bw_name env_name val masked
@@ -307,10 +389,12 @@ _bw_load_items() {
     # "No value found" even though the item is in the web vault.
     # bw_serve_sync hits the daemon's POST /sync and clears the
     # shell-side cache on success.
-    bw_serve_sync >/dev/null 2>&1 || {
-        print -u2 "[bw] sync failed, using stale cache"
-        clear_bw_cache >/dev/null 2>&1
-    }
+    if (( do_sync )); then
+        bw_serve_sync >/dev/null 2>&1 || {
+            print -u2 "[bw] sync failed, using stale cache"
+            clear_bw_cache >/dev/null 2>&1
+        }
+    fi
 
     for item in "${items[@]}"; do
         bw_name=${item%|*}
@@ -335,6 +419,7 @@ _bw_load_items() {
     done
 
     print "[bw] Done: $loaded loaded, $skipped unchanged, $failed failed (of $total)"
+    (( failed == 0 ))
 }
 
 # load_sops_age_keys - load the current SOPS Age keypair from Bitwarden into
@@ -366,9 +451,15 @@ load_sops_age_keys() {
     print "SOPS_AGE_KEYS set successfully"
 }
 
+# load_bw [--no-sync] - export every mapped secret + the SOPS Age keypair.
+# On full success it snapshots the result to _BW_ENV_CACHE so subsequent
+# shells skip the ~20 HTTP round-trips entirely.
 load_bw() {
-    _bw_load_items "${_BW_SECRETS[@]}"
-    load_sops_age_keys
+    local -a flags=()
+    [[ $1 == --no-sync ]] && { flags=(--no-sync); shift }
+    _bw_load_items "${flags[@]}" "${_BW_SECRETS[@]}" || return 1
+    load_sops_age_keys || return 1
+    _bw_env_cache_write
 }
 
 load_wrangler_token() {
@@ -479,8 +570,10 @@ bw_set() {
         print -u2 "[bw] WARNING: daemon read-back mismatch - serve session likely stale. Run bw_serve_start, then retry bw_serve_sync."
     fi
 
-    # Re-export in this shell
+    # Re-export in this shell, and drop the cross-shell snapshot so the next
+    # new shell re-reads rather than resurrecting the old value.
     export "$env_name=$value"
+    _bw_env_cache_invalidate
     print "[bw] $env_name refreshed in this shell ($(_bw_mask "$value"))."
     print "[bw] other shells + running agents keep the old value - run load_bw there / restart them."
 }
