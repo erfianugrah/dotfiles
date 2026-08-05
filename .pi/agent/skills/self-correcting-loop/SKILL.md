@@ -1175,16 +1175,25 @@ change is intended and you want a judgment not a byte-compare).
   no-progress iterations tripped `stallPatience: 3` and the ladder escalated
   haiku -> sonnet.
 
-  The stall was not a capability limit. The agent's own summary each time
-  listed what it had verified - build, vet, test, smoke, doctor - which was
-  exactly the "Verify with:" line the task text gave it, and `gofmt` was not on
-  that line. It could not see the gate it kept failing. Escalating buys a
-  stronger model to make the same uninformed mistake at a higher price.
+  Sonnet then passed everything on iteration 7, `gofmt` included, and the run
+  ended green. So escalation WORKED - I predicted it would fail the same way
+  and it did not.
 
-  This is the argument for deriving the gate list from the manifest rather than
-  restating it in the task, and it generalises: before reading a stall as "the
-  model is too weak", check whether the loop ever told it what it was being
-  judged on. `loop report --prompt N` answers that in one command.
+  But look at what the cheap model was up against. Feedback is built from the
+  best-known-good state, so after iteration 4 was reverted, the prompt for
+  iteration 5 described iteration 3's failures - judge only. The word `gofmt`
+  never appeared. The attempt history said `touched serve.go (failing 1 -> 2,
+  rolled back)` without naming what broke. **The failure that causes a rollback
+  was the one thing the next prompt could not see**, so iteration 6 walked into
+  it again, and the loop read the repetition as the model being too weak.
+
+  Two fixes, both cheaper than a model rung: the gate list is now derived from
+  the manifest so the agent knows `gofmt` is a gate before it declares success,
+  and the attempt history now names the sensors each rejected attempt broke.
+  Generalisation: before reading a stall as "the model is too weak", check
+  whether the loop ever told it what it was being judged on. `loop report
+  --prompt N` answers that in one command - it exists because this took an hour
+  of reading raw logs to see.
 
 - **The governor's later rungs are thinly evidenced.** As of that run,
   rollback-on-no-progress and `stallPatience` escalation have both fired for

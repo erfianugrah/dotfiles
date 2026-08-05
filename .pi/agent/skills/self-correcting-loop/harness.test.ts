@@ -1096,3 +1096,31 @@ describe("formatReport: why an iteration was rolled back", () => {
 		expect(out).not.toContain("fixed:");
 	});
 });
+
+describe("formatAttemptHistory: why the attempt was rejected", () => {
+	// The failure that CAUSES a rollback never reaches the next prompt: feedback
+	// is built from the best-known-good state, which by definition does not
+	// contain it. Observed cost: a run where iterations 4 and 6 made the
+	// identical mistake (feature complete, code unformatted) because nothing
+	// between them ever mentioned gofmt.
+	const attempt = (n: number, regressed?: string[]) => ({
+		iteration: n,
+		kept: false,
+		changedFiles: ["serve.go"],
+		failingBefore: 1,
+		failingAfter: 2,
+		regressed,
+	});
+
+	test("names the sensors the rejected attempt broke", () => {
+		const out = formatAttemptHistory([attempt(4, ["gofmt"])]);
+		expect(out).toContain("iteration 4");
+		expect(out).toContain("broke gofmt");
+	});
+
+	test("lists several, and still reads when none were recorded", () => {
+		expect(formatAttemptHistory([attempt(5, ["build", "test"])])).toContain("broke build, test");
+		expect(formatAttemptHistory([attempt(2)])).toContain("failing 1 -> 2");
+		expect(formatAttemptHistory([attempt(2)])).not.toContain("broke");
+	});
+});

@@ -631,6 +631,16 @@ export interface AttemptRecord {
 	changedFiles: string[];
 	failingBefore: number;
 	failingAfter: number;
+	/**
+	 * Sensors this attempt turned red - the reason it was rejected.
+	 *
+	 * Without it the next prompt cannot mention the failure that caused the
+	 * rollback: feedback is built from the best-known-good state, which by
+	 * definition does not contain that failure. A real run made the identical
+	 * mistake in iterations 4 and 6 (feature complete, code unformatted)
+	 * because nothing between them ever said the word gofmt.
+	 */
+	regressed?: string[];
 }
 
 /**
@@ -650,7 +660,8 @@ export function formatAttemptHistory(attempts: AttemptRecord[], max = 5): string
 			a.changedFiles.length <= 4
 				? a.changedFiles.join(", ")
 				: `${a.changedFiles.slice(0, 4).join(", ")} +${a.changedFiles.length - 4} more`;
-		return `- iteration ${a.iteration}: touched ${files} (failing ${a.failingBefore} -> ${a.failingAfter}, rolled back)`;
+		const broke = a.regressed?.length ? `, broke ${a.regressed.join(", ")}` : "";
+		return `- iteration ${a.iteration}: touched ${files} (failing ${a.failingBefore} -> ${a.failingAfter}${broke}, rolled back)`;
 	});
 	const overflow = dead.length - shown.length;
 	if (overflow > 0) lines.unshift(`(${overflow} earlier rolled-back attempt(s) omitted)`);

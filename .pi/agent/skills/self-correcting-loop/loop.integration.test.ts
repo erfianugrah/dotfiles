@@ -345,3 +345,51 @@ test("a rollback records which sensor caused it", async () => {
 
 	rmSync(d, { recursive: true, force: true });
 }, 120_000);
+
+test("the next prompt names what the rolled-back attempt broke", async () => {
+	// The failure that CAUSES a rollback is the one thing the next prompt could
+	// not see: feedback is built from the best-known-good state, which by
+	// definition does not contain it. A real run made the identical mistake in
+	// iterations 4 and 6 - feature complete, code unformatted - because nothing
+	// between them ever said the word gofmt. Three iterations and two complete
+	// implementations were spent on a fact the loop already knew.
+	const d = mkdtempSync(join(tmpdir(), "loop-negknow-"));
+	for (const a of [
+		["init", "-q"],
+		["config", "user.email", "t@example.invalid"],
+		["config", "user.name", "t"],
+	]) {
+		await Bun.spawn(["git", "-C", d, ...a], { stdout: "pipe", stderr: "pipe" }).exited;
+	}
+	await Bun.write(join(d, ".pi/harness.json"), JSON.stringify({
+		task: "build the feature",
+		maxIterations: 2,
+		timeoutMs: 20000,
+		agentTimeoutMs: 30000,
+		writeScope: ["ops/**"],
+		sensors: [
+			{ name: "tidy", cmd: "test ! -f ops/stray.txt" },
+			{ name: "feature", cmd: "test -f ops/done.txt", expect: "fail" },
+		],
+	}));
+	const agent = join(d, "agent.sh");
+	await Bun.write(agent, "#!/usr/bin/env bash\nmkdir -p ops\ntouch ops/stray.txt\nexit 0\n");
+	chmodSync(agent, 0o755);
+	await Bun.spawn(["git", "-C", d, "add", "-A"], { stdout: "pipe" }).exited;
+	await Bun.spawn(["git", "-C", d, "commit", "-qm", "b"], { stdout: "pipe", stderr: "pipe" }).exited;
+
+	const p = Bun.spawn(["bun", LOOP, "run"], {
+		cwd: d,
+		stdout: "pipe",
+		stderr: "pipe",
+		env: { ...process.env, LOOP_SANDBOX: "off", LOOP_PI_CMD: agent },
+	});
+	await new Response(p.stdout).text();
+	await p.exited;
+
+	const second = await Bun.file(join(d, ".pi/harness-prompts/iteration-2.txt")).text();
+	expect(second).toContain("rolled back");
+	expect(second).toContain("broke tidy");
+
+	rmSync(d, { recursive: true, force: true });
+}, 120_000);
