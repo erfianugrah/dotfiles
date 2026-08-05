@@ -7,7 +7,7 @@ description: Set up CI/CD workflows for GitHub Actions or Gitea Actions (self-ho
 
 The Gitea Actions runtime (`act_runner`) is a deliberate compatibility layer over GitHub Actions YAML. Workflows mostly copy across, but several fields are silently ignored and the runner image model differs. This skill encodes both platforms with verified-current action versions and the gitea-specific gotchas.
 
-All versions below were queried from `api.github.com/repos/<owner>/<action>/releases/latest` on 2026-05-21. Re-verify with `webfetch` before pinning in a new project if it's been >3 months.
+All versions below were queried from `api.github.com/repos/<owner>/<action>/releases/latest` on 2026-08-05, and every floating major tag was separately confirmed to resolve via `git/matching-refs/tags/<major>`. Re-verify before pinning in a new project if it's been >3 months.
 
 ## When to use what
 
@@ -16,48 +16,57 @@ All versions below were queried from `api.github.com/repos/<owner>/<action>/rele
 - Both directories can co-exist; pick whichever runner is registered
 - Filenames: `ci.yml`, `release.yml`, `deploy.yml` — concise, one workflow per concern
 
-## Verified-current action versions (2026-05-21)
+## Verified-current action versions (2026-08-05)
 
-Pin to the **major version tag** (e.g. `@v6`) unless you have a specific reason to lock to a SHA. Major-tag pinning lets dependabot patch-bump automatically.
+Pin to the **major version tag** (e.g. `@v7`) unless you have a specific reason to lock to a SHA. Major-tag pinning lets dependabot patch-bump automatically.
+
+**Not every publisher ships a floating major tag.** `actions/*` and `docker/*` do; `astral-sh/setup-uv` and `denoland/setup-deno` do NOT. Pinning `@vN` on those fails at "Set up job" with `unable to resolve action`. Confirm before pinning a major you have not used before:
+
+```bash
+gh api repos/<owner>/<action>/git/matching-refs/tags/v7 \
+  --jq '[.[]|select(.ref=="refs/tags/v7")]|length'
+# 1 = floating tag exists; 0 = pin the exact point release instead
+```
 
 ### Core actions (`actions/*`)
 
 | Action | Version | Notes |
 |---|---|---|
 | `actions/checkout` | `v7` | v7.0.1 (re-verified 2026-08-05, floating `v7` tag exists); Node 24 runtime |
-| `actions/setup-node` | `v6` | v6.4.0 |
-| `actions/setup-python` | `v6` | v6.2.0 |
-| `actions/setup-go` | `v6` | v6.4.0 |
-| `actions/setup-java` | `v5` | v5.2.0 |
-| `actions/cache` | `v5` | v5.0.5 |
+| `actions/setup-node` | `v7` | v7.0.0 (major bump from v6 since the 2026-05 pass) |
+| `actions/setup-python` | `v7` | v7.0.0 (major bump from v6) |
+| `actions/setup-go` | `v7` | v7.0.0 (major bump from v6) |
+| `actions/setup-java` | `v5` | v5.7.0 |
+| `actions/cache` | `v6` | v6.1.0 (major bump from v5) |
 | `actions/upload-artifact` | `v7` | v7.0.1 |
 | `actions/download-artifact` | `v8` | v8.0.1 — note: v8 is one major **ahead** of upload |
 | `actions/configure-pages` | `v6` | v6.0.0 |
 | `actions/deploy-pages` | `v5` | v5.0.0 |
+| `actions/upload-pages-artifact` | `v5` | v5.0.0; the pages example in this skill previously pinned v3, two majors behind |
 
 ### Language / package managers
 
 | Action | Version | Notes |
 |---|---|---|
 | `oven-sh/setup-bun` | `v2` | v2.2.0 |
-| `denoland/setup-deno` | `v2` | v2.0.4 |
-| `pnpm/action-setup` | `v6` | v6.0.8 |
+| `denoland/setup-deno` | `v2.0.5` | **Exact tag required.** Verified 2026-08-05: denoland ships no floating major tag at all, `v1`/`v2`/`v3` each resolve to zero refs and only point releases like `v2.0.5` exist. This table previously said `@v2`, which does not resolve. |
+| `pnpm/action-setup` | `v6` | v6.0.10 |
 | `astral-sh/setup-uv` | `v9.0.0` | **Exact tag required.** Re-verified 2026-08-05: latest is v9.0.0, but astral-sh stopped publishing floating major tags after v7, so `@v8` and `@v9` do NOT resolve and fail the job at "Set up job" with `unable to resolve action`. v9.0.0 also flipped `prune-cache` to `false` by default. |
 
 ### Docker
 
 | Action | Version | Notes |
 |---|---|---|
-| `docker/setup-buildx-action` | `v4` | v4.0.0; Node 24 runtime (requires Runner ≥ 2.327.1) |
-| `docker/build-push-action` | `v7` | v7.2.0 |
-| `docker/login-action` | `v4` | v4.1.0 |
-| `docker/metadata-action` | `v6` | v6.0.0 |
+| `docker/setup-buildx-action` | `v4` | v4.2.0; Node 24 runtime (requires Runner ≥ 2.327.1) |
+| `docker/build-push-action` | `v7` | v7.3.0 |
+| `docker/login-action` | `v4` | v4.6.0 |
+| `docker/metadata-action` | `v6` | v6.2.0 |
 
 ### Release & misc
 
 | Action | Version | Notes |
 |---|---|---|
-| `softprops/action-gh-release` | `v3` | v3.0.0; Node 24 — stay on v2.6.2 if Node 20 needed |
+| `softprops/action-gh-release` | `v3` | v3.0.2; Node 24 — stay on v2.6.2 if Node 20 needed |
 
 ### Verification protocol — DON'T trust this table forever
 
@@ -87,7 +96,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -121,12 +130,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run build
       - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: ./dist
 
@@ -159,7 +168,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
 
@@ -206,7 +215,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
@@ -246,7 +255,7 @@ Use the `full` image only when you need GitHub-runner-parity (rare). Default `ca
 
 ### Action source
 
-Gitea downloads non-fully-qualified actions from **github.com** by default (since v1.21). So `uses: actions/checkout@v6` resolves to `https://github.com/actions/checkout.git`. To pin to a Gitea-hosted action, use the absolute URL:
+Gitea downloads non-fully-qualified actions from **github.com** by default (since v1.21). So `uses: actions/checkout@v7` resolves to `https://github.com/actions/checkout.git`. To pin to a Gitea-hosted action, use the absolute URL:
 
 ```yaml
 - uses: https://gitea.com/actions/checkout@v4
@@ -283,7 +292,7 @@ jobs:
   test:
     runs-on: ubuntu-latest    # → catthehacker/ubuntu:act-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -306,7 +315,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
 
@@ -352,7 +361,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun test
@@ -386,7 +395,7 @@ GitHub deprecated v3 in 2024 and **breaks running workflows** when artifacts are
 
 ### v6 actions need Node 24
 
-`actions/checkout@v6`, `actions/setup-node@v6`, `docker/*@v4+`, `softprops/action-gh-release@v3` all use the Node 24 actions runtime. Self-hosted runners must be **Actions Runner ≥ 2.327.1**. Older self-hosted runners hang or fail on these. Either upgrade the runner or pin to the previous major (v5/v3/v2.6.2 respectively).
+`actions/checkout@v7`, `actions/setup-node@v7`, `docker/*@v4+`, `softprops/action-gh-release@v3` all use the Node 24 actions runtime. Self-hosted runners must be **Actions Runner ≥ 2.327.1**. Older self-hosted runners hang or fail on these. Either upgrade the runner or pin to the previous major (v5/v3/v2.6.2 respectively).
 
 ### Gitea `concurrency:` doesn't queue
 
@@ -414,7 +423,7 @@ strategy:
     node: [20, 22, 24]
 runs-on: ubuntu-latest
 steps:
-  - uses: actions/setup-node@v6
+  - uses: actions/setup-node@v7
     with:
       node-version: ${{ matrix.node }}
 ```
