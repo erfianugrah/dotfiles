@@ -18,12 +18,15 @@ import {
 	formatCanaryReport,
 	formatFailures,
 	formatReport,
+	blockedBy,
 	isCanaryFailure,
 	judgeCanary,
 	globToRegExp,
 	limitsArgs,
 	matchGlob,
 	modelAt,
+	falsePremises,
+	gatingSensors,
 	nonDiscriminating,
 	normalizeModels,
 	outOfScope,
@@ -399,6 +402,93 @@ describe("nonDiscriminating", () => {
 	test("a missing baseline result is not flagged", () => {
 		const sensors = [{ name: "ghost", cmd: "g", expect: "fail" as const }];
 		expect(nonDiscriminating(sensors, [])).toEqual([]);
+	});
+});
+
+describe("falsePremises", () => {
+	const res = (name: string, ok: boolean) => ({
+		name, cmd: "x", ok, exitCode: ok ? 0 : 1, output: "",
+	});
+
+	test("flags a premise that fails at baseline", () => {
+		// The case that produced this: a task to unify "the four primitives these
+		// two guides share" against a second guide that shared none of them.
+		const sensors = [
+			{ name: "build", cmd: "b" },
+			{ name: "premise-shared-primitives", cmd: "p", kind: "premise" as const },
+		];
+		expect(falsePremises(sensors, [res("build", true), res("premise-shared-primitives", false)]))
+			.toEqual(["premise-shared-primitives"]);
+	});
+
+	test("a premise that holds is not flagged", () => {
+		const sensors = [{ name: "p", cmd: "p", kind: "premise" as const }];
+		expect(falsePremises(sensors, [res("p", true)])).toEqual([]);
+	});
+
+	test("a failing GUARD is not a false premise - it is the work", () => {
+		// The asymmetry is the whole point: red guard = fix the tree, red premise =
+		// fix the spec. Conflating them is how the false claim gets invented.
+		const sensors = [{ name: "build", cmd: "b" }, { name: "feat", cmd: "f", expect: "fail" as const }];
+		expect(falsePremises(sensors, [res("build", false), res("feat", false)])).toEqual([]);
+	});
+
+	test("reports every offender, not just the first", () => {
+		const sensors = [
+			{ name: "a", cmd: "a", kind: "premise" as const },
+			{ name: "b", cmd: "b", kind: "premise" as const },
+			{ name: "c", cmd: "c", kind: "premise" as const },
+		];
+		expect(falsePremises(sensors, [res("a", false), res("b", true), res("c", false)]))
+			.toEqual(["a", "c"]);
+	});
+
+	test("a missing baseline result is not flagged", () => {
+		const sensors = [{ name: "ghost", cmd: "g", kind: "premise" as const }];
+		expect(falsePremises(sensors, [])).toEqual([]);
+	});
+
+	test("gatingSensors drops premises and keeps everything else", () => {
+		const sensors = [
+			{ name: "build", cmd: "b" },
+			{ name: "p", cmd: "p", kind: "premise" as const },
+			{ name: "feat", cmd: "f", kind: "sensor" as const, expect: "fail" as const },
+		];
+		expect(gatingSensors(sensors).map((s) => s.name)).toEqual(["build", "feat"]);
+	});
+});
+
+describe("manifest kind field", () => {
+	test("parses premise and defaults to undefined", () => {
+		const m = parseManifest({
+			task: "t",
+			sensors: [
+				{ name: "a", cmd: "a" },
+				{ name: "b", cmd: "b", kind: "premise" },
+				{ name: "c", cmd: "c", kind: "sensor" },
+			],
+		});
+		expect(m.sensors.map((s) => s.kind)).toEqual([undefined, "premise", "sensor"]);
+	});
+
+	test("rejects a bogus kind value", () => {
+		expect(() =>
+			parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a", kind: "guard" }] }),
+		).toThrow(/kind must be/);
+	});
+
+	test("rejects a premise that declares expect", () => {
+		// kind: "premise" + expect: "fail" would assert the spec rests on something
+		// known to be false.
+		expect(() =>
+			parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a", kind: "premise", expect: "fail" }] }),
+		).toThrow(/premise cannot declare expect/);
+	});
+
+	test("rejects a premise that declares a canary", () => {
+		expect(() =>
+			parseManifest({ task: "t", sensors: [{ name: "a", cmd: "a", kind: "premise", canary: "x" }] }),
+		).toThrow(/premise cannot declare a canary/);
 	});
 });
 
@@ -830,5 +920,75 @@ describe("formatReport", () => {
 		});
 		expect(out).toContain("never passed: smoke");
 		expect(out).toContain("no output recorded");
+	});
+});
+
+describe("sensor gating: after", () => {
+	test("parses a dependency list", () => {
+		const m = parseManifest({
+			task: "t",
+			sensors: [
+				{ name: "build", cmd: "true" },
+				{ name: "judge", cmd: "true", after: ["build"] },
+			],
+		});
+		expect(m.sensors[1].after).toEqual(["build"]);
+	});
+
+	test("a dependency must name a real sensor", () => {
+		expect(() =>
+			parseManifest({
+				task: "t",
+				sensors: [{ name: "judge", cmd: "true", after: ["buidl"] }],
+			}),
+		).toThrow(/unknown sensor "buidl"/);
+	});
+
+	// Declaration order is the cycle prevention: a sensor may only wait on one
+	// already declared. No graph, no cycle detection, no surprises about which
+	// pass a sensor runs in.
+	test("a dependency must be declared EARLIER, which makes cycles impossible", () => {
+		expect(() =>
+			parseManifest({
+				task: "t",
+				sensors: [
+					{ name: "judge", cmd: "true", after: ["build"] },
+					{ name: "build", cmd: "true" },
+				],
+			}),
+		).toThrow(/must be declared before/);
+		expect(() =>
+			parseManifest({ task: "t", sensors: [{ name: "a", cmd: "true", after: ["a"] }] }),
+		).toThrow(/must be declared before/);
+	});
+
+	test("rejects a non-string-array after", () => {
+		expect(() =>
+			parseManifest({ task: "t", sensors: [{ name: "a", cmd: "true", after: "build" }] }),
+		).toThrow(/after must be an array/);
+	});
+});
+
+describe("blockedBy - which gated sensors cannot run this pass", () => {
+	const s = (name: string, after?: string[]) => ({ name, cmd: "x", after });
+
+	test("names the failed dependency", () => {
+		expect(blockedBy(s("judge", ["build", "test"]), [
+			{ name: "build", ok: false },
+			{ name: "test", ok: true },
+		])).toBe("build");
+	});
+
+	test("no dependency, or all green, means it runs", () => {
+		expect(blockedBy(s("build"), [])).toBeNull();
+		expect(blockedBy(s("judge", ["build"]), [{ name: "build", ok: true }])).toBeNull();
+	});
+
+	// A dependency that was itself skipped has not passed, so the dependent
+	// cannot run either - otherwise a two-level gate silently collapses.
+	test("a skipped dependency blocks too", () => {
+		expect(blockedBy(s("judge", ["smoke"]), [{ name: "smoke", ok: false, skipped: true }])).toBe(
+			"smoke",
+		);
 	});
 });

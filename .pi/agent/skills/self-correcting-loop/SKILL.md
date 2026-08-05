@@ -189,13 +189,14 @@ Two properties make this work on weak models:
 
 | File | Role |
 |---|---|
-| `harness.ts` | Pure core: manifest schema/validation, prompt + feedback + attempt-history builders, stack detection, glob/scope, decide/ladder logic. Unit-tested (43 cases). |
+| `harness.ts` | Pure core: manifest schema/validation, prompt + feedback + attempt-history builders, stack detection, glob/scope, decide/ladder logic. Unit-tested. |
 | `loop.ts` | CLI driver (Bun): spawns `pi -p`, runs sensors, git checkpoint/rollback, scope guard, escalation, report. |
 | `presets/*.json` | Starter manifests per stack (go/node/rust/astro/python). |
 | `harness.test.ts` | Unit tests for the pure helpers. |
 | `loop.integration.test.ts` | End-to-end governor test with a scripted fake agent (rollback / stall+escalate / scope-revert / pass) - no real model needed. |
 | `loop-timeout.integration.test.ts` | Wall-clock budgets: hung sensor killed + rendered as a HANG, per-sensor override, fast sensor untouched, hung agent reaped, `--trial` stall verdict. Each case would hang forever without the deadline. |
 | `loop-verify.integration.test.ts` | `verify-sensors` end-to-end: catches a real `grep -v` inverted-negation sensor as STUCK, proves a feature sensor's flip, confirms an un-canaried sensor is never executed, tree restored after every canary, `--only` / `--strict` / broken-canary / non-git paths. |
+| `loop-premise.integration.test.ts` | `kind: "premise"` end-to-end: a false premise refuses the run (exit 2) and says fix the SPEC, a premise that holds is reported and then dropped from the gating set, a false premise outranks an ordinary failing guard, and `verify-sensors` skips premises rather than filing them as uncanaried. |
 | `loop-steering.integration.test.ts` | `guide`/`rules` reach the real prompt, a rule appended DURING iteration 1 is in force for iteration 2, and a half-saved manifest is ignored rather than fatal. |
 | `loop-logpath.integration.test.ts` | Redirecting the run log INTO the repo is eaten by the scope guard: 3-arm A/B (outside repo / inside repo / no writeScope) plus the pre-checkpoint warning. |
 | `loop-runlog.integration.test.ts` | The loop owns its trace: `.pi/harness-run.log` with no redirection, appends across runs, `--no-log`, loop artifacts are not dirt / not scope violations / not changed-files / never staged / not deleted by a rollback's `git clean`, a failing sensor's output survives into the report, and `loop report` renders + fails cleanly. |
@@ -309,6 +310,9 @@ Mark those `"expect": "fail"`. The run is REFUSED (exit 2) if such a sensor
 passes at baseline, because a feature sensor that is already green gates
 nothing - the loop can converge having built nothing and still report PASS.
 Guards (build/lint/test) default to `"expect": "pass"` and are never flagged.
+The symmetric case is `"kind": "premise"` - a sensor that must be GREEN at
+baseline because it encodes a factual claim the spec depends on; red there
+means the spec is wrong and the run is refused before a token is spent.
 
 Two failure modes this encodes, both observed on a real run (2026-08-02,
 eaves roadmap Tier 1):
@@ -361,7 +365,9 @@ manifest/usage error.
       "hint": "tests were removed or stopped being collected - restore them" },
     { "name": "feature-wechat-provider", "expect": "fail",
       "cmd": "go test ./providers/wechat -run TestWeChat -count=1",
-      "hint": "the provider must round-trip an auth code; see the module spec" }
+      "hint": "the provider must round-trip an auth code; see the module spec" },
+    { "name": "judge", "after": ["build", "test"],
+      "cmd": "judge --base HEAD --spec '...' --model anthropic/claude-opus-5" }
   ]
 }
 ```
@@ -370,6 +376,22 @@ manifest/usage error.
 - `expect` - `"fail"` marks a FEATURE sensor that must be red on the unchanged
   tree; the run is refused if it is green (see the discrimination lesson
   above). Omit it for guards.
+- `after` - names of sensors that must PASS in the same pass before this one
+  runs. Cost control for expensive gates: on a real run the judge cost 147s of
+  a frontier model per iteration while the other 22 sensors together took under
+  30s, and it paid that even when `build` was red - where an inferential
+  reviewer has nothing useful to say about code that does not compile. A
+  skipped sensor is NOT a passing one: it counts as failing, so the run can
+  never be declared done on a pass where it did not execute, and it is recorded
+  as `skipped` so `never passed: judge` cannot quietly mean `never ran`. Its
+  feedback to the model is one line, not a stale command and hint dressed up as
+  a failure. Dependencies must be declared earlier in the list, which makes
+  cycles impossible without a graph walk.
+- `kind` - `"premise"` marks a claim about the CURRENT tree that the spec rests
+  on. It must be green at baseline; red refuses the run because the spec is
+  wrong, not the tree. Baseline-only: it never gates an iteration, never reaches
+  the model, and is skipped by `verify-sensors`. Cannot carry `expect` or
+  `canary`. See "Count the spec's universals" below.
 - `sensors` - the feedback controls. Each `cmd` runs under `bash -lc`; exit 0 =
   pass. Order them cheap-to-expensive (build before test) - all must pass. Each
   sensor may carry an optional `hint` string, appended to the feedback when it
@@ -536,6 +558,44 @@ than one that hard-codes it - eaves' `doctor-count-docs` is the shape:
 
 A pre-flight `grep -c` protects one run. A count-deriving sensor protects
 every future one, including the runs where nobody remembers this rule.
+
+#### Premise sensors: put the spec's factual claim in front of the machinery
+
+The pre-flight count above is discipline, and discipline is the thing that
+fails. A claim about current state IS a sensor, so write it as one:
+
+```json
+{ "name": "premise-shared-primitives", "kind": "premise",
+  "cmd": "grep -q password_hash guides/consolidation.mdx && grep -q password_hash guides/promotion.mdx" }
+```
+
+`kind: "premise"` declares a claim the SPEC rests on. It must be green at
+baseline; red REFUSES the run (exit 2) with a message that says fix the spec,
+not the tree. It is checked once and then dropped from the gating set - a claim
+about the state the spec was written against is not an invariant the work must
+preserve, and it must never reach the model as feedback, because "make this
+true" is the failure being prevented. A premise may not carry `expect` (its
+expectation is fixed by what it is) or a `canary` (planting a fault would prove
+grep works, not that the claim holds); both are manifest errors.
+
+This is the symmetric case to `expect: "fail"`, and the machinery was already
+half-built. That one refuses a spec asking for something already true. This one
+refuses a spec asserting something that was never true. Without it a red sensor
+at baseline reads as "the thing to fix" - which for a premise means the loop's
+cheapest path to green is to invent the state the spec assumed.
+
+Worked instance (2026-08-08, lexicanum). A task said "unify the four primitives
+these two migration guides share". The second guide shared none of them: the
+two directions do not use the same mechanism at all. Every sensor written from
+that sentence inherited the error, so they were all satisfiable only by
+fabricating the agreement they were meant to consolidate. The premise above
+fails in milliseconds. The point is not that `grep` is clever - it is that a
+claim about current state belongs in front of the machinery instead of behind
+it.
+
+What this does NOT cover: whether the goal was right. If "unify the primitives"
+had been a bad design rather than a false premise, every sensor here would be
+green and the output still wrong. That part stays human.
 
 ### `loop verify-sensors`: prove each sensor can flip, before trusting any of it
 
@@ -1127,7 +1187,7 @@ EMPTY every pass. Consequences:
 
 ```bash
 cd ~/.pi/agent/skills/self-correcting-loop && bun test harness.test.ts   # pure helpers
-cd ~/.pi/agent/skills/self-correcting-loop && bun test                   # all 158
+cd ~/.pi/agent/skills/self-correcting-loop && bun test                   # everything
 ```
 
 The `limits` path is A/B-verifiable by hand - with `limits` set, a sensor

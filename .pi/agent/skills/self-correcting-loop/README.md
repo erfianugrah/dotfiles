@@ -77,6 +77,11 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   nothing. Both process groups are SIGKILLed after each completes. Neither
   GNU `timeout` (signals only on deadline) nor `systemd-run --scope` (does not
   reap on normal exit) covered this.
+- **`after` sensor gating** - `"after": ["build", "test"]` skips an expensive
+  sensor until the cheap ones are green. The judge measured 147s of a frontier
+  model per iteration against under 30s for the other 22 sensors combined, and
+  it was paying that on iterations where the build was broken. Skipped counts
+  as failing, never as passing.
 - **`loop report --prompt N`** - the exact text iteration N was handed,
   captured before the agent starts. The report shows what the loop observed;
   this shows what it said, which is where its own bugs turned out to live.

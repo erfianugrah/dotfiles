@@ -224,3 +224,72 @@ exit 0
 
 	rmSync(repo2, { recursive: true, force: true });
 }, 30000);
+
+test("an expensive sensor is skipped while its cheap dependency is red", async () => {
+	// The judge cost 147s of a frontier model per iteration on a real run while
+	// every other sensor together took under 30s - and it paid that even when
+	// `build` was failing, where an inferential reviewer has nothing useful to
+	// say about code that does not compile.
+	const d = mkdtempSync(join(tmpdir(), "loop-after-"));
+	for (const a of [
+		["init", "-q"],
+		["config", "user.email", "t@example.invalid"],
+		["config", "user.name", "t"],
+	]) {
+		await Bun.spawn(["git", "-C", d, ...a], { stdout: "pipe", stderr: "pipe" }).exited;
+	}
+	// Both markers live OUTSIDE the repo: a rollback's `git clean` deletes
+	// untracked files, which would wipe the very evidence under test.
+	const ran = `${d}.judge-ran.txt`;
+	const flag = `${d}.second.flag`;
+	await Bun.write(join(d, ".pi/harness.json"), JSON.stringify({
+		task: "make build pass",
+		maxIterations: 2,
+		timeoutMs: 20000,
+		agentTimeoutMs: 30000,
+		writeScope: ["ops/**"],
+		sensors: [
+			{ name: "build", cmd: "test -f ops/built.txt", expect: "fail" },
+			{ name: "expensive", cmd: `echo ran >> ${ran}; true`, after: ["build"] },
+		],
+	}));
+	// Agent that does nothing on the first call, then satisfies build. Written
+	// BEFORE the commit: an untracked script is real dirt and the loop is right
+	// to refuse a run over it.
+	const agent = join(d, "agent.sh");
+	await Bun.write(
+		agent,
+		`#!/usr/bin/env bash\nif [ -f ${flag} ]; then mkdir -p ops; touch ops/built.txt; else touch ${flag}; fi\nexit 0\n`,
+	);
+	chmodSync(agent, 0o755);
+	await Bun.spawn(["git", "-C", d, "add", "-A"], { stdout: "pipe" }).exited;
+	await Bun.spawn(["git", "-C", d, "commit", "-qm", "b"], { stdout: "pipe", stderr: "pipe" }).exited;
+
+	const p = Bun.spawn(["bun", LOOP, "run"], {
+		cwd: d,
+		stdout: "pipe",
+		stderr: "pipe",
+		env: { ...process.env, LOOP_SANDBOX: "off", LOOP_PI_CMD: agent },
+	});
+	const out = await new Response(p.stdout).text();
+	await p.exited;
+
+	expect(out).toContain("expensive ... skipped (build must pass first)");
+
+	// It ran exactly once: the pass where build finally went green. Baseline and
+	// the first failing iteration both skipped it.
+	const runs = existsSync(ran) ? (await Bun.file(ran).text()).trim().split("\n").length : 0;
+	expect(runs).toBe(1);
+
+	// Skipped is not passing: the report says so, and the run could not have
+	// been declared done on a pass where it never executed.
+	const report = await Bun.file(join(d, ".pi/harness-report.json")).json();
+	const first = report.iterations[0].sensors.find((s: { name: string }) => s.name === "expensive");
+	expect(first.ok).toBe(false);
+	expect(first.skipped).toBe(true);
+	expect(first.output).toContain('"build" must pass first');
+
+	rmSync(d, { recursive: true, force: true });
+	rmSync(ran, { force: true });
+	rmSync(flag, { force: true });
+}, 120_000);

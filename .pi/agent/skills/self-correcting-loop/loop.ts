@@ -51,7 +51,10 @@ import {
 	advanceLadder,
 	allPass,
 	applyFreeze,
+	blockedBy,
 	failingNames,
+	falsePremises,
+	gatingSensors,
 	nonDiscriminating,
 	buildPrompt,
 	countFailing,
@@ -400,6 +403,23 @@ function limitsPrefix(m: Manifest): string[] {
 async function runAllSensors(m: Manifest): Promise<SensorResult[]> {
 	const results: SensorResult[] = [];
 	for (const s of m.sensors) {
+		// Gated sensors are skipped, not run, when a dependency is red. Declaration
+		// order guarantees the dependency already has a result here.
+		const blocker = blockedBy(s, results);
+		if (blocker) {
+			console.log(`    - ${s.name} ... skipped (${blocker} must pass first)`);
+			results.push({
+				name: s.name,
+				cmd: s.cmd,
+				ok: false,
+				exitCode: -1,
+				output: `not run: "${blocker}" must pass first`,
+				hint: s.hint,
+				durationMs: 0,
+				skipped: true,
+			});
+			continue;
+		}
 		process.stdout.write(`    - ${s.name} ... `);
 		const r = await runSensor(s, m);
 		console.log(
@@ -671,7 +691,9 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 	if (m.rules.length) console.log(`  rules:   ${m.rules.length} standing rule(s)`);
 	console.log(`  tools:   ${m.tools.join(",")}`);
 	console.log(`  scope:   ${m.writeScope.length ? m.writeScope.join(", ") : "(unrestricted)"}`);
-	console.log(`  sensors: ${m.sensors.map((s) => s.name).join(", ")}`);
+	console.log(
+		`  sensors: ${m.sensors.map((s) => (s.kind === "premise" ? `${s.name} (premise)` : s.name)).join(", ")}`,
+	);
 	if (freeze) console.log("  freeze:  on (pre-existing failures tolerated)");
 
 	// Agent filesystem sandbox. Sensors + judge stay outside the jail.
@@ -724,13 +746,38 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 		);
 		return 2;
 	}
+	// A premise (kind: "premise") that FAILS on the unchanged tree says the SPEC
+	// is wrong, not the tree. Refuse: a red sensor at baseline otherwise reads as
+	// "the thing to fix", which for a premise means the loop's cheapest path to
+	// green is to invent the state the task falsely assumed.
+	const broken = falsePremises(m.sensors, rawBaseline);
+	if (broken.length) {
+		console.error(
+			`\nfalse premise(s): ${broken.join(", ")}\n` +
+				`these declare kind: "premise" but FAIL on the unchanged tree, so the task is\n` +
+				`written against a repo that does not exist. Fix the SPEC, not the tree.\n` +
+				`re-read the sentence the task came from and count its universals: "both", "all",\n` +
+				`"every", "none", "shared" are the load-bearing claims, they are what the sensors\n` +
+				`inherit, and one count settles each of them.`,
+		);
+		return 2;
+	}
+	// Premises are baseline-only. Dropping them here keeps a spec-time claim from
+	// becoming an invariant the work must preserve, and keeps "make this true"
+	// out of the feedback the model sees.
+	const premises = new Set(m.sensors.filter((s) => s.kind === "premise").map((s) => s.name));
+	if (premises.size) {
+		console.log(`  (premises hold: ${[...premises].join(", ")})`);
+		m = { ...m, sensors: gatingSensors(m.sensors) };
+	}
+	const baselineResults = rawBaseline.filter((r) => !premises.has(r.name));
 	// Freeze: sensors already failing at baseline are tolerated (debt), so only
 	// NEW failures gate. applyFreeze marks them ok for gating purposes.
-	const frozen = freeze ? failingNames(rawBaseline) : new Set<string>();
+	const frozen = freeze ? failingNames(baselineResults) : new Set<string>();
 	if (frozen.size) {
 		console.log(`  (freeze: tolerating pre-existing failures: ${[...frozen].join(", ")})`);
 	}
-	let prev = applyFreeze(rawBaseline, frozen);
+	let prev = applyFreeze(baselineResults, frozen);
 	if (allPass(prev)) {
 		console.log(
 			freeze
@@ -930,6 +977,7 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 				exitCode: s.exitCode,
 				timedOut: s.timedOut,
 				durationMs: s.durationMs,
+				...(s.skipped ? { skipped: true } : {}),
 				// Failures only. A passing sensor's output is noise; a failing one's
 				// is the diagnosis, and for an LLM sensor it is the single most
 				// expensive artifact the run produced. It was being thrown away.
@@ -1208,9 +1256,14 @@ async function cmdVerify(flags: Record<string, string | boolean>): Promise<numbe
 		typeof flags.only === "string"
 			? new Set(flags.only.split(",").map((s) => s.trim()).filter(Boolean))
 			: null;
-	const targets = only ? m.sensors.filter((s) => only.has(s.name)) : m.sensors;
+	// Premises are excluded: there is no fault to plant. The claim either holds
+	// on the current tree or the run is refused, and `loop run --dry` is where
+	// that is reported.
+	const verifiable = gatingSensors(m.sensors);
+	const skipped = m.sensors.length - verifiable.length;
+	const targets = only ? verifiable.filter((s) => only.has(s.name)) : verifiable;
 	if (only) {
-		const missing = [...only].filter((n) => !m.sensors.some((s) => s.name === n));
+		const missing = [...only].filter((n) => !verifiable.some((s) => s.name === n));
 		if (missing.length) {
 			console.error(`no such sensor(s): ${missing.join(", ")}`);
 			return 2;
@@ -1219,7 +1272,9 @@ async function cmdVerify(flags: Record<string, string | boolean>): Promise<numbe
 
 	console.log(`verify-sensors: ${manifestPath}`);
 	console.log(
-		`  ${targets.filter((s) => s.canary).length}/${targets.length} sensor(s) carry a canary\n`,
+		`  ${targets.filter((s) => s.canary).length}/${targets.length} sensor(s) carry a canary` +
+			(skipped ? `  (${skipped} premise(s) skipped: checked at baseline)` : "") +
+			"\n",
 	);
 
 	// Snapshot the starting tree: every revert restores to THIS state, so

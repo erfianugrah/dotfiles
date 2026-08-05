@@ -21,6 +21,31 @@ export interface Sensor {
 	/** shell command; exit 0 = pass, non-zero = fail. stdout+stderr captured. */
 	cmd: string;
 	/**
+	 * "premise" declares a claim about the CURRENT tree that the task's spec
+	 * rests on, rather than something the loop should achieve. It must be GREEN
+	 * at baseline; red means the spec is wrong, and the run is refused before a
+	 * token is spent.
+	 *
+	 * This is the symmetric case to `expect: "fail"`. That one catches a spec
+	 * asking for something already true. This one catches a spec asserting
+	 * something that was never true - "unify the four primitives these two guides
+	 * share" when the second guide has none of them. Without it, a red sensor at
+	 * baseline reads as "the thing to fix", which is exactly the wrong reading
+	 * for a premise: the model will dutifully make the false claim true.
+	 *
+	 * Checked at baseline ONLY, then dropped from the gating set. A claim about
+	 * the state the spec was written against is not an invariant the work must
+	 * preserve - the change may legitimately falsify it - and it must never reach
+	 * the model as feedback, because "make this true" is the failure being
+	 * prevented.
+	 *
+	 * Write the claim, not its consequence: grep for the thing you asserted
+	 * exists, count the files you said share it, diff the two lists you called
+	 * identical. A premise is cheap by construction; if it is expensive to write,
+	 * it is probably a guard.
+	 */
+	kind?: "sensor" | "premise";
+	/**
 	 * Optional remediation guidance appended to the feedback when this sensor
 	 * fails - a "positive prompt injection" that tells the model HOW to fix the
 	 * class of failure, not just that it failed. (OpenAI custom-lint pattern.)
@@ -56,6 +81,24 @@ export interface Sensor {
 	 * because it asserts a FLIP rather than a direction.
 	 */
 	canary?: string;
+	/**
+	 * Names of sensors that must PASS in the same pass before this one runs.
+	 *
+	 * Cost control for expensive gates. On a real run the judge cost 147s of a
+	 * frontier model per iteration while the other 22 sensors together took
+	 * under 30s - and it paid that even when `build` was red, where an
+	 * inferential reviewer has nothing useful to say about code that does not
+	 * compile. `after: ["build", "test"]` skips it until the cheap gates are
+	 * green.
+	 *
+	 * A skipped sensor is NOT a passing one: it counts as failing (the run
+	 * cannot be declared done without it) but is reported as skipped, so
+	 * "never passed: judge" does not silently mean "never ran".
+	 *
+	 * Dependencies must be declared earlier in the list, which makes cycles
+	 * impossible without a graph walk.
+	 */
+	after?: string[];
 }
 
 /**
@@ -147,6 +190,24 @@ export interface SensorResult {
 	timedOut?: boolean;
 	/** wall-clock the sensor consumed, ms. */
 	durationMs?: number;
+	/** gated by `after` and never executed this pass (counts as failing). */
+	skipped?: boolean;
+}
+
+/**
+ * Which of a sensor's `after` dependencies is holding it back this pass, or
+ * null if it is clear to run. A dependency that was itself skipped counts as
+ * not-passed, so a two-level gate does not silently collapse.
+ */
+export function blockedBy(
+	sensor: { after?: string[] },
+	results: { name: string; ok: boolean; skipped?: boolean }[],
+): string | null {
+	for (const dep of sensor.after ?? []) {
+		const r = results.find((x) => x.name === dep);
+		if (!r || !r.ok) return dep;
+	}
+	return null;
 }
 
 const DEFAULT_TOOLS = ["read", "edit", "write", "bash"];
@@ -262,12 +323,28 @@ export function parseManifest(raw: unknown): Manifest {
 			}
 			hint = so.hint;
 		}
+		let kind: "sensor" | "premise" | undefined;
+		if (so.kind !== undefined) {
+			if (so.kind !== "sensor" && so.kind !== "premise") {
+				throw new Error(`manifest.sensors[${i}].kind must be "sensor" or "premise"`);
+			}
+			kind = so.kind;
+		}
 		let expect: "pass" | "fail" | undefined;
 		if (so.expect !== undefined) {
 			if (so.expect !== "pass" && so.expect !== "fail") {
 				throw new Error(`manifest.sensors[${i}].expect must be "pass" or "fail"`);
 			}
 			expect = so.expect;
+		}
+		if (kind === "premise" && expect !== undefined) {
+			// A premise's expectation is fixed by what it is: green at baseline, or
+			// the spec is wrong. Letting it carry `expect` would allow
+			// `kind: "premise", expect: "fail"`, which asserts the spec is built on
+			// something known to be false.
+			throw new Error(
+				`manifest.sensors[${i}]: a premise cannot declare expect - it must pass at baseline by definition`,
+			);
 		}
 		let canary: string | undefined;
 		if (so.canary !== undefined) {
@@ -284,7 +361,47 @@ export function parseManifest(raw: unknown): Manifest {
 				`manifest.sensors[${i}].timeoutMs`,
 			);
 		}
-		return { name: so.name, cmd: so.cmd, hint, expect, timeoutMs: sensorTimeout, canary };
+		if (kind === "premise" && canary !== undefined) {
+			// Planting a fault in a premise proves the grep works, not that the
+			// claim holds. Its verification is the baseline run itself.
+			throw new Error(
+				`manifest.sensors[${i}]: a premise cannot declare a canary - the baseline run is its verification`,
+			);
+		}
+		let after: string[] | undefined;
+		if (so.after !== undefined) {
+			if (!Array.isArray(so.after) || !so.after.every((d) => typeof d === "string")) {
+				throw new Error(`manifest.sensors[${i}].after must be an array of sensor names`);
+			}
+			const earlier = (r.sensors as { name?: unknown }[])
+				.slice(0, i)
+				.map((p) => p?.name)
+				.filter((n): n is string => typeof n === "string");
+			const all = (r.sensors as { name?: unknown }[])
+				.map((p) => p?.name)
+				.filter((n): n is string => typeof n === "string");
+			for (const dep of so.after as string[]) {
+				if (!all.includes(dep)) {
+					throw new Error(`manifest.sensors[${i}].after: unknown sensor "${dep}"`);
+				}
+				if (!earlier.includes(dep)) {
+					throw new Error(
+						`manifest.sensors[${i}].after: "${dep}" must be declared before "${so.name}" (declaration order is what makes cycles impossible)`,
+					);
+				}
+			}
+			after = so.after as string[];
+		}
+		return {
+			name: so.name,
+			cmd: so.cmd,
+			kind,
+			hint,
+			expect,
+			timeoutMs: sensorTimeout,
+			canary,
+			after,
+		};
 	});
 
 	const names = sensors.map((s) => s.name);
@@ -449,6 +566,12 @@ export function formatFailures(results: SensorResult[]): string {
 	return results
 		.filter((r) => !r.ok)
 		.map((r) => {
+			// A gated sensor that never ran has nothing to report and no fix to
+			// suggest. One line, so the model knows it is still outstanding
+			// without a stale command and hint pretending to be a failure.
+			if (r.skipped) {
+				return `### sensor "${r.name}" was NOT RUN\n> ${r.output}`;
+			}
 			const head = r.timedOut
 				? `### sensor "${r.name}" TIMED OUT after ${Math.round((r.durationMs ?? 0) / 1000)}s (killed; output below is partial)`
 				: `### sensor "${r.name}" failed (exit ${r.exitCode})`;
@@ -642,6 +765,8 @@ export interface ReportView {
 			ok: boolean;
 			timedOut?: boolean;
 			durationMs?: number;
+			/** gated by `after` and never executed. */
+			skipped?: boolean;
 			/** captured for FAILING sensors only - the diagnosis, not just the verdict. */
 			output?: string;
 		}[];
@@ -1032,4 +1157,34 @@ export function nonDiscriminating(
 	return sensors
 		.filter((s) => s.expect === "fail" && byName.get(s.name)?.ok === true)
 		.map((s) => s.name);
+}
+
+/**
+ * Premise sensors (kind: "premise") that FAILED at baseline.
+ *
+ * The spec is wrong, not the tree. Whatever the task says rests on a claim
+ * about the current state that does not hold, so running the loop makes the
+ * model true up the false claim instead of doing the work. Observed for real -
+ * a task to "unify the four primitives these two guides share" against two
+ * guides that shared none of them; every sensor written from that sentence
+ * inherited the error, and the run could only converge by inventing the
+ * agreement it was asked to consolidate.
+ */
+export function falsePremises(
+	sensors: Sensor[],
+	baseline: SensorResult[],
+): string[] {
+	const byName = new Map(baseline.map((r) => [r.name, r]));
+	return sensors
+		.filter((s) => s.kind === "premise" && byName.get(s.name)?.ok === false)
+		.map((s) => s.name);
+}
+
+/**
+ * The sensors that gate iterations: everything except premises, which are
+ * baseline-only. Keeping a premise in the gating set would turn a spec-time
+ * claim into an invariant and feed "make this true" back to the model.
+ */
+export function gatingSensors(sensors: Sensor[]): Sensor[] {
+	return sensors.filter((s) => s.kind !== "premise");
 }
