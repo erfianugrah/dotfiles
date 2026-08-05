@@ -2,12 +2,13 @@
  * osint — OSINT investigations via the research stack's FastAPI service.
  *
  * Wraps `POST https://osint.erfi.io/investigate/{domain,ip,email,username,
- * url,phone,threat,cve,harvest}` (production) / `http://localhost:8890/...`
- * (local dev) with bearer auth from `RESEARCH_TOKEN`. Mirrors the python
- * MCP wrapper at ~/research/mcp/research-server.py + formatters/osint.py
- * but as a single self-contained pi extension — no async job manager
- * (pi tool calls block on fetch directly), no caching, just the 9 tools
- * and terse markdown rendering.
+ * url,phone,threat,cve,geo,harvest,archive}` (production) /
+ * `http://localhost:8890/...` (local dev) with bearer auth from
+ * `RESEARCH_TOKEN`. Mirrors the python MCP wrapper at
+ * ~/research/mcp/research-server.py + formatters/osint.py but as a single
+ * self-contained pi extension — no async job manager (pi tool calls block
+ * on fetch directly), no caching, just the 11 tools and terse markdown
+ * rendering.
  *
  * URL + auth pattern matches web-research.ts / webfetch.ts:
  *   - OSINT_URL env var overrides the default
@@ -22,7 +23,9 @@
  *   osint_phone     — libphonenumber + paid scanner aggregation
  *   osint_threat    — VirusTotal hash/URL/IP/domain reputation
  *   osint_cve       — NVD CVE lookup
+ *   osint_geo       — OSM geocode / reverse-geocode / nearby POI by tag
  *   osint_harvest   — theHarvester emails + hosts (slow, ~7min)
+ *   archive_lookup  — Wayback change log for a URL (the one temporal tool)
  */
 
 import { Type } from "@earendil-works/pi-ai";
@@ -533,25 +536,6 @@ function formatHarvest(inv: Investigation): string {
   return parts.join("\n\n");
 }
 
-// ── tool definitions ──────────────────────────────────────────────────────
-
-function makeResult(text: string, details: Record<string, unknown>): {
-  content: { type: "text"; text: string }[];
-  details: Record<string, unknown>;
-} {
-  return { content: [{ type: "text", text }], details };
-}
-
-function summarise(inv: Investigation): Record<string, unknown> {
-  return {
-    entity: inv.entity,
-    findings: (inv.findings ?? []).length,
-    sources: inv.sources_queried ?? [],
-    elapsed_ms: inv.elapsed_ms ?? 0,
-    errors: inv.errors ?? [],
-  };
-}
-
 // Category tags worth grouping POIs under. Order matters: the first match
 // wins. Transit keys are included because MRT stations carry railway=station
 // with no amenity/shop/leisure tag, and falling through to an arbitrary tag
@@ -670,43 +654,24 @@ function formatArchive(inv: Investigation, mode: "summary" | "full" = "summary")
   return parts.join("\n\n");
 }
 
-const archiveLookup = defineTool({
-  name: "archive_lookup",
-  promptSnippet:
-    "archive_lookup - Wayback change log for a URL: when a page changed, byte deltas, openable snapshots.",
-  promptGuidelines: [
-    "The stack's only TEMPORAL tool. Use for what a page USED to say and when it changed - pricing, leadership, policy, claims that quietly disappeared.",
-    "Returns the MOST RECENT changes by default (digest-collapsed) - the archive stores many identical copies and only transitions are edits. Pass earliest=true for the origin question ('what did this look like originally').",
-    "Byte deltas are for triage, not proof: a small delta is usually a template tweak, a large one a rewrite. Open the snapshot URL to confirm.",
-    "Dates are digits only, YYYY[MM[DD]] - a dashed date is rejected rather than silently widening the window.",
-    "Absence of captures is not absence of a page: the archive's coverage is uneven, so treat the change count as a floor.",
-  ],
-  label: "Archive Lookup",
-  description:
-    "Wayback Machine change log for a URL: when the page changed, with byte deltas and directly-openable archived snapshots.",
-  parameters: Type.Object({
-    url: Type.String({ description: "URL to look up, e.g. 'example.com/pricing'" }),
-    limit: Type.Optional(Type.Number({ description: "Max changes (default 50, cap 200)" })),
-    from_date: Type.Optional(Type.String({ description: "Lower bound, digits only: '2021' or '202106'" })),
-    to_date: Type.Optional(Type.String({ description: "Upper bound, digits only" })),
-    earliest: Type.Optional(Type.Boolean({
-      description: "Sample the OLDEST changes instead of the most recent (origin question). Default false.",
-    })),
-    mode: Type.Optional(Type.Union([Type.Literal("summary"), Type.Literal("full")], {
-      description: "'summary' (default) caps at 20 changes; 'full' lists all",
-    })),
-  }),
-  async execute(_id, params, signal) {
-    const url = params.url?.trim();
-    if (!url) return makeResult("Error: `url` is required.", { error: true });
-    const payload: Record<string, unknown> = { url, limit: params.limit ?? 50 };
-    if (params.from_date?.trim()) payload.from_date = params.from_date.trim();
-    if (params.to_date?.trim()) payload.to_date = params.to_date.trim();
-    if (params.earliest) payload.earliest = true;
-    const inv = await osintCall("/investigate/archive", payload, 60_000, signal);
-    return makeResult(formatArchive(inv, params.mode ?? "summary"), summarise(inv));
-  },
-});
+// ── tool definitions ──────────────────────────────────────────────────────
+
+function makeResult(text: string, details: Record<string, unknown>): {
+  content: { type: "text"; text: string }[];
+  details: Record<string, unknown>;
+} {
+  return { content: [{ type: "text", text }], details };
+}
+
+function summarise(inv: Investigation): Record<string, unknown> {
+  return {
+    entity: inv.entity,
+    findings: (inv.findings ?? []).length,
+    sources: inv.sources_queried ?? [],
+    elapsed_ms: inv.elapsed_ms ?? 0,
+    errors: inv.errors ?? [],
+  };
+}
 
 const osintDomain = defineTool({
   name: "osint_domain",
@@ -997,6 +962,44 @@ const osintHarvest = defineTool({
   },
 });
 
+const archiveLookup = defineTool({
+  name: "archive_lookup",
+  promptSnippet:
+    "archive_lookup - Wayback change log for a URL: when a page changed, byte deltas, openable snapshots.",
+  promptGuidelines: [
+    "The stack's only TEMPORAL tool. Use for what a page USED to say and when it changed - pricing, leadership, policy, claims that quietly disappeared.",
+    "Returns the MOST RECENT changes by default (digest-collapsed) - the archive stores many identical copies and only transitions are edits. Pass earliest=true for the origin question ('what did this look like originally').",
+    "Byte deltas are for triage, not proof: a small delta is usually a template tweak, a large one a rewrite. Open the snapshot URL to confirm.",
+    "Dates are digits only, YYYY[MM[DD]] - a dashed date is rejected rather than silently widening the window.",
+    "Absence of captures is not absence of a page: the archive's coverage is uneven, so treat the change count as a floor.",
+  ],
+  label: "Archive Lookup",
+  description:
+    "Wayback Machine change log for a URL: when the page changed, with byte deltas and directly-openable archived snapshots.",
+  parameters: Type.Object({
+    url: Type.String({ description: "URL to look up, e.g. 'example.com/pricing'" }),
+    limit: Type.Optional(Type.Number({ description: "Max changes (default 50, cap 200)" })),
+    from_date: Type.Optional(Type.String({ description: "Lower bound, digits only: '2021' or '202106'" })),
+    to_date: Type.Optional(Type.String({ description: "Upper bound, digits only" })),
+    earliest: Type.Optional(Type.Boolean({
+      description: "Sample the OLDEST changes instead of the most recent (origin question). Default false.",
+    })),
+    mode: Type.Optional(Type.Union([Type.Literal("summary"), Type.Literal("full")], {
+      description: "'summary' (default) caps at 20 changes; 'full' lists all",
+    })),
+  }),
+  async execute(_id, params, signal) {
+    const url = params.url?.trim();
+    if (!url) return makeResult("Error: `url` is required.", { error: true });
+    const payload: Record<string, unknown> = { url, limit: params.limit ?? 50 };
+    if (params.from_date?.trim()) payload.from_date = params.from_date.trim();
+    if (params.to_date?.trim()) payload.to_date = params.to_date.trim();
+    if (params.earliest) payload.earliest = true;
+    const inv = await osintCall("/investigate/archive", payload, 60_000, signal);
+    return makeResult(formatArchive(inv, params.mode ?? "summary"), summarise(inv));
+  },
+});
+
 // Exports for unit tests + extension entry.
 export const _internals = {
   groupByKind,
@@ -1010,6 +1013,10 @@ export const _internals = {
   formatThreat,
   formatCve,
   formatHarvest,
+  formatGeo,
+  formatArchive,
+  poiCategory,
+  deltaStr,
   authHeaders,
   OSINT_URL,
 };

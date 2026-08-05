@@ -2415,6 +2415,192 @@ describe("osint.formatPhone", () => {
   });
 });
 
+describe("osint.poiCategory", () => {
+  test("first matching key wins over later ones", () => {
+    expect(osint.poiCategory({ amenity: "cafe", shop: "bakery" })).toBe("cafe");
+  });
+  test("transit keys classify a station that has no amenity/shop tag", () => {
+    // Regression: MRT stations carry railway=station + network=Singapore, and
+    // an arbitrary-tag fallback grouped them under "Singapore".
+    expect(osint.poiCategory({ railway: "station", network: "Singapore" })).toBe("station");
+  });
+  test("unclassifiable tags fall back to 'other', never an arbitrary value", () => {
+    expect(osint.poiCategory({ network: "Singapore", operator: "SMRT" })).toBe("other");
+    expect(osint.poiCategory({})).toBe("other");
+  });
+  test("non-string tag values are skipped", () => {
+    expect(osint.poiCategory({ amenity: 42, shop: "bakery" })).toBe("bakery");
+  });
+});
+
+describe("osint.formatGeo", () => {
+  const poi = (name: string, tags: Record<string, unknown>, distance_m?: number) => ({
+    kind: "poi",
+    value: name,
+    extra: { tags, ...(distance_m === undefined ? {} : { distance_m }) },
+  });
+
+  test("renders geocode line with type/osm metadata", () => {
+    const out = osint.formatGeo({
+      entity: "Choa Chu Kang, Singapore",
+      findings: [
+        {
+          kind: "geocode",
+          value: "Choa Chu Kang",
+          extra: { lat: 1.385, lon: 103.744, type: "suburb", osm: "relation/123" },
+        },
+      ],
+    });
+    expect(out).toContain("# Location: Choa Chu Kang, Singapore");
+    expect(out).toContain("Coordinates: 1.385, 103.744");
+    expect(out).toContain("(suburb, relation/123)");
+  });
+
+  test("groups POI by category, sorts by distance, rounds metres", () => {
+    const out = osint.formatGeo({
+      entity: "1.0,2.0",
+      findings: [
+        poi("Far Cafe", { amenity: "cafe" }, 900.4),
+        poi("Near Cafe", { amenity: "cafe" }, 120.6),
+        poi("CCK MRT", { railway: "station", network: "Singapore" }, 50),
+      ],
+    });
+    expect(out).toContain("### cafe (2)");
+    expect(out).toContain("### station (1)");
+    expect(out.indexOf("Near Cafe")).toBeLessThan(out.indexOf("Far Cafe"));
+    expect(out).toContain("- Near Cafe \u00b7 121m");
+    expect(out).toContain("- Far Cafe \u00b7 900m");
+  });
+
+  test("POI with no distance renders without a distance suffix", () => {
+    const out = osint.formatGeo({
+      entity: "x",
+      findings: [poi("Nameless Shop", { shop: "supermarket" })],
+    });
+    expect(out).toContain("- Nameless Shop\n");
+    expect(out).not.toContain("Infinitym");
+  });
+
+  test("summary caps POI output and reports the remainder", () => {
+    const many = Array.from({ length: 40 }, (_, i) =>
+      poi(`Cafe ${i}`, { amenity: "cafe" }, i),
+    );
+    const out = osint.formatGeo({ entity: "x", findings: many }, "summary");
+    expect(out).toContain("### cafe (40)");
+    expect(out).toContain("Cafe 24");
+    expect(out).not.toContain("Cafe 25");
+    expect(out).toContain("15 more POI not shown");
+  });
+
+  test("full lists every POI with no remainder note", () => {
+    const many = Array.from({ length: 40 }, (_, i) =>
+      poi(`Cafe ${i}`, { amenity: "cafe" }, i),
+    );
+    const out = osint.formatGeo({ entity: "x", findings: many }, "full");
+    expect(out).toContain("Cafe 39");
+    expect(out).not.toContain("more POI not shown");
+  });
+
+  test("no geocode and no POI \u2192 explicit empty message", () => {
+    const out = osint.formatGeo({ entity: "nowhere" });
+    expect(out).toContain("No location data returned");
+  });
+
+  test("POI-only result does not claim the location is empty", () => {
+    const out = osint.formatGeo({
+      entity: "1.0,2.0",
+      findings: [poi("Some Cafe", { amenity: "cafe" }, 10)],
+    });
+    expect(out).not.toContain("No location data returned");
+    expect(out).toContain("## POI nearby");
+  });
+});
+
+describe("osint.deltaStr", () => {
+  test("signs the delta and flags a no-op change", () => {
+    expect(osint.deltaStr(512)).toContain("+512 bytes");
+    expect(osint.deltaStr(-512)).toContain("-512 bytes");
+    expect(osint.deltaStr(0)).toContain("same size");
+  });
+  test("non-numeric delta renders nothing", () => {
+    expect(osint.deltaStr(undefined)).toBe("");
+    expect(osint.deltaStr("512")).toBe("");
+  });
+});
+
+describe("osint.formatArchive", () => {
+  const snap = (iso: string, extra: Record<string, unknown> = {}) => ({
+    kind: "snapshot",
+    value: iso.replace(/[^0-9]/g, "").slice(0, 14),
+    extra: {
+      iso,
+      timestamp: iso.replace(/[^0-9]/g, "").slice(0, 14),
+      status: "200",
+      url: `https://web.archive.org/web/${iso.replace(/[^0-9]/g, "").slice(0, 14)}/e.com`,
+      ...extra,
+    },
+  });
+
+  test("orders oldest-first and reports the window", () => {
+    const out = osint.formatArchive({
+      entity: "e.com/pricing",
+      findings: [snap("2024-06-01"), snap("2021-01-01"), snap("2023-03-03")],
+    });
+    expect(out).toContain("# Archive history: e.com/pricing");
+    expect(out).toContain("3 content changes between 2021-01-01 and 2024-06-01");
+    // Compare inside the change list only \u2014 the window header also names the
+    // first and last dates, which would skew a whole-document indexOf.
+    const changes = out.slice(out.indexOf("## Changes"));
+    expect(changes.indexOf("2021-01-01")).toBeLessThan(changes.indexOf("2023-03-03"));
+    expect(changes.indexOf("2023-03-03")).toBeLessThan(changes.indexOf("2024-06-01"));
+  });
+
+  test("single capture reports no window range", () => {
+    const out = osint.formatArchive({ entity: "e.com", findings: [snap("2022-02-02")] });
+    expect(out).toContain("1 content changes");
+    expect(out).not.toContain("between");
+  });
+
+  test("non-200 status is surfaced, 200 is not", () => {
+    const out = osint.formatArchive({
+      entity: "e.com",
+      findings: [snap("2022-01-01", { status: "404" }), snap("2022-02-02")],
+    });
+    expect(out).toContain("[404]");
+    expect(out).not.toContain("[200]");
+  });
+
+  test("byte deltas ride along each change line", () => {
+    const out = osint.formatArchive({
+      entity: "e.com",
+      findings: [snap("2022-01-01", { delta_bytes: 4096 })],
+    });
+    expect(out).toContain("+4096 bytes");
+  });
+
+  test("summary caps at 20 changes, full lists all", () => {
+    const many = Array.from({ length: 30 }, (_, i) =>
+      snap(`2022-01-${String(i + 1).padStart(2, "0")}`),
+    );
+    const summary = osint.formatArchive({ entity: "e.com", findings: many }, "summary");
+    expect(summary).toContain("2022-01-20");
+    expect(summary).not.toContain("2022-01-21");
+    expect(summary).toContain("showing 20 of 30 changes");
+
+    const full = osint.formatArchive({ entity: "e.com", findings: many }, "full");
+    expect(full).toContain("2022-01-30");
+    expect(full).not.toContain("showing 20 of 30");
+  });
+
+  test("no snapshots \u2192 prefers info, then errors, then a bare fallback", () => {
+    expect(
+      osint.formatArchive({ entity: "e.com", info: ["wayback: no captures in range"] }),
+    ).toContain("no captures in range");
+    expect(osint.formatArchive({ entity: "e.com", errors: ["cdx 503"] })).toContain("cdx 503");
+    expect(osint.formatArchive({ entity: "e.com" })).toContain("No captures.");
+  });
+});
+
 describe("osint.authHeaders", () => {
   const orig = process.env.RESEARCH_TOKEN;
   test("empty when token unset", () => {
