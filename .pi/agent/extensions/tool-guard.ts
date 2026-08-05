@@ -26,7 +26,25 @@
  *   webfetch <docs.erfi.io>    → docs_read / docs_grep (the URL's content
  *                                 is on docs.erfi.io, query the source)
  *
- * Soft guards (warn but allow — used for patterns where the LLM may have
+ * Research-stack routing (decision + reinforcement, two tiers):
+ *
+ *   research_route (hard) - the user explicitly said "use the research
+ *     tools/stack" (or named searxng/crawler). The input listener arms a
+ *     per-session flag AND appends a routing note to the user message
+ *     (decision aid). While armed, websearch / webfetch / web_research in
+ *     default mode are BLOCKED with the exact SearXNG + crawler curl
+ *     recipe (reinforcement: the block reason is the lesson). A call that
+ *     hits the research stack (bash curl to searxng.erfi.io /
+ *     crawler.erfi.io, or web_research mode local/fresh/crosscheck)
+ *     disarms the guard. Lifts after 2 blocks (stack may be down) and at
+ *     agent_end (does not leak into later turns).
+ *
+ *   research_route_soft (one-time) - a bare Exa websearch on a
+ *     non-technical / local query (shopping, SG-local, reviews) gets a
+ *     single self-exempting block per session nudging toward web_research
+ *     mode local/fresh or SearXNG directly. Re-issuing proceeds with Exa.
+ *
+ * Soft guards (warn but allow - used for patterns where the LLM may have
  * legitimate reasons):
  *
  *   bash sed -i ... <big-file>  → suggest sd or ast-grep for >100KB files
@@ -52,7 +70,7 @@ import { join } from "node:path";
 //      find_name, find_path, rg_files, curl_search, npm_when_bun, pnpm_in_bun_project,
 //      npx_when_bunx, sed_inplace_large_file, docker_logs_servarr, head_full_file,
 //      unsigned_git_commit, webfetch_docs, write_too_large, edit_dotenv, edit_lockfile,
-//      edit_git_internals, edit_node_modules.
+//      edit_git_internals, edit_node_modules, research_route, research_route_soft.
 const DISABLED: Set<string> = new Set();
 
 // ---- Reformulation-loop guard ----
@@ -415,9 +433,13 @@ const BASH_RULES: BlockRule[] = [
   },
   {
     id: "curl_search",
-    pattern: /^\s*curl\s+[^|&;]*\b(google\.com|bing\.com|duckduckgo\.com|searxng|search\.brave|kagi)\b/i,
+    // searxng\.erfi\.io / crawler\.erfi\.io are the user's OWN research
+    // stack - the research_route guard actively forces calls onto them, so
+    // exempting them here is load-bearing (otherwise the two guards
+    // deadlock: one forces curl-to-searxng, the other blocks it).
+    pattern: /^\s*curl\s+[^|&;]*\b(google\.com|bing\.com|duckduckgo\.com|search\.brave|kagi|searxng(?!\.erfi\.io))\b/i,
     reason:
-      "Never `bash curl` a search engine. Use `websearch` (Exa) for discovery, `web_research` when making a claim (auto-fetches top results), or the `research` skill's SearXNG fallback at :8888.",
+      "Never `bash curl` a search engine. Use `websearch` (Exa) for discovery, `web_research` when making a claim (auto-fetches top results), or the `research` skill's SearXNG fallback at :8888. Exempt: the self-hosted stack (searxng.erfi.io, crawler.erfi.io) - curl those freely per the research skill.",
     segment: true,
   },
 
@@ -659,6 +681,124 @@ export function checkReformulationLoop(toolName: string, sessionKey: string): st
   return null;
 }
 
+// ---- Research-stack routing guard ----
+//
+// Failure mode (audited 2026-08-05, sofa-bed session on kimi-k3): the user's
+// first message said "use the research tools" and the model still ran 6x
+// websearch + 3x web_research + 1x webfetch - all Exa - and never touched
+// the self-hosted SearXNG/crawler stack. Prompt rules alone don't reach
+// weaker models; a block-with-reason does.
+//
+// Two surfaces:
+//   input listener  - detects the explicit ask, arms the per-session flag,
+//     and appends a routing note to the user message (the decision aid).
+//   tool_call       - while armed, blocks Exa tools with the exact research
+//     stack recipe (the reinforcement). Disarms on compliance, after
+//     MAX_BLOCKS blocks (stack may genuinely be down), and at agent_end.
+//
+// "use ... research tools/stack" is required - bare mentions of the stack
+// ("the research stack is down") are meta-discussion, not a request. The
+// searxng/crawler host alternatives fire regardless of phrasing because
+// naming the host IS the intent.
+export const RESEARCH_INTENT_RE =
+  /\buse\s+(?:the\s+|my\s+)?research\s+(?:tools?|stack)\b|\bsearxng(?:\.erfi\.io)?\b|\bcrawler\.erfi\.io\b/i;
+
+export function detectResearchIntent(text: string): boolean {
+  return RESEARCH_INTENT_RE.test(text ?? "");
+}
+
+// web_research modes that route through the research stack (crawler fetches
+// and/or SearXNG cross-check) - they count as compliance.
+export const RESEARCH_STACK_MODES = new Set(["local", "fresh", "crosscheck"]);
+const RESEARCH_HOSTS_RE = /\b(?:searxng|crawler)\.erfi\.io\b/;
+const RESEARCH_ROUTE_MAX_BLOCKS = 2;
+
+const RESEARCH_ROUTE_NOTE =
+  "\n\n[tool-guard routing: \"research tools\" = the self-hosted research stack, NOT Exa. " +
+  "Search: bash curl -s 'https://searxng.erfi.io/search?q=<urlencoded>&format=json'. " +
+  "Fetch a page: bash curl -s -X POST 'https://crawler.erfi.io/extract' -H 'Content-Type: application/json' " +
+  '-d \'{"url":"<url>"}\' (response field: markdown; add "force_js":true for SPAs). ' +
+  'Add -H "Authorization: Bearer $RESEARCH_TOKEN" when off-LAN. ' +
+  "Full API: read ~/.pi/agent/skills/research/SKILL.md. " +
+  "websearch / webfetch / web_research-default are BLOCKED by tool-guard for this request; " +
+  "web_research mode local/fresh/crosscheck counts as the stack.]";
+
+const RESEARCH_ROUTE_BLOCK_REASON =
+  "tool-guard[research_route]: the user explicitly asked for the research tools - that means the self-hosted research stack, not Exa. " +
+  "Search: bash curl -s 'https://searxng.erfi.io/search?q=<urlencoded>&format=json'. " +
+  "Fetch: bash curl -s -X POST 'https://crawler.erfi.io/extract' -H 'Content-Type: application/json' -d '{\"url\":\"<url>\"}' (field: markdown; \"force_js\":true for SPAs). " +
+  "Add -H \"Authorization: Bearer $RESEARCH_TOKEN\" when off-LAN. Full API: ~/.pi/agent/skills/research/SKILL.md. " +
+  "(web_research with mode local/fresh/crosscheck also complies - it routes through this stack. " +
+  `Guard lifts after ${RESEARCH_ROUTE_MAX_BLOCKS} blocks if the stack is genuinely unreachable.)`;
+
+export type ResearchRouteInput = {
+  query?: string;
+  mode?: string;
+  url?: string;
+  command?: string;
+};
+export type ResearchRouteDecision =
+  | { action: "allow" }
+  | { action: "comply" } // stack call observed - disarm, let it through
+  | { action: "block"; reason: string };
+
+// Pure decision while the research_route flag is armed. Exported for tests.
+export function decideResearchRoute(
+  toolName: string,
+  input: ResearchRouteInput,
+  blocksSoFar: number,
+): ResearchRouteDecision {
+  if (toolName === "bash") {
+    return RESEARCH_HOSTS_RE.test(input.command ?? "")
+      ? { action: "comply" }
+      : { action: "allow" };
+  }
+  if (toolName === "web_research" && RESEARCH_STACK_MODES.has(input.mode ?? "")) {
+    return { action: "comply" };
+  }
+  if (toolName === "websearch" || toolName === "webfetch" || toolName === "web_research") {
+    if (blocksSoFar >= RESEARCH_ROUTE_MAX_BLOCKS) return { action: "allow" };
+    return { action: "block", reason: RESEARCH_ROUTE_BLOCK_REASON };
+  }
+  return { action: "allow" };
+}
+
+// Soft tier: a bare Exa websearch on a non-technical / local query is the
+// weakest search path the stack offers (Exa's index is US-centric and thin
+// for SG-local shopping / reviews / long-tail). One self-exempting nudge
+// per session. Only bare websearch - web_research already auto-fetches via
+// the crawler, so it partially exercises the stack even in default mode.
+// Exported for tests.
+export function decideResearchRouteSoft(
+  toolName: string,
+  input: { query?: string },
+): boolean {
+  return (
+    toolName === "websearch" &&
+    NON_TECHNICAL_QUERY.test((input.query ?? "").trim())
+  );
+}
+
+const RESEARCH_ROUTE_SOFT_REASON =
+  "tool-guard[research_route_soft]: non-technical/local research query - bare Exa websearch is the weakest path here (SG-local, shopping, long-tail). " +
+  "Prefer the research stack: web_research with mode:\"local\" (crawler-backed fetches) or mode:\"fresh\" (SearXNG cross-check), " +
+  "or SearXNG directly: bash curl -s 'https://searxng.erfi.io/search?q=<urlencoded>&format=json'. " +
+  "Re-issue the same call to proceed with Exa anyway (fires once per session).";
+
+type ResearchRouteState = { armed: boolean; blocks: number };
+const researchRouteStates = new Map<string, ResearchRouteState>();
+const researchSoftFired = new Set<string>();
+
+function sessionKeyOf(ctx: {
+  sessionManager?: { getSessionFile?: () => string };
+}): string {
+  try {
+    return ctx.sessionManager?.getSessionFile?.() ?? "default";
+  } catch {
+    return "default";
+  }
+}
+
 // Extract every target path from an apply_patch envelope. Mirrors
 // apply-patch.ts's parsePatch but bail-fast — we only need the file paths,
 // not the hunks. Any line matching `*** (Add|Update|Delete|Move) File: <path>`
@@ -689,13 +829,51 @@ export default function (pi: ExtensionAPI) {
       const key = ctx.sessionManager.getSessionFile?.() ?? "default";
       loopStates.delete(key);
       docsFirstSessions.delete(key);
+      researchRouteStates.delete(key);
+      researchSoftFired.delete(key);
     } catch { /* ignore */ }
+  });
+
+  pi.on("agent_end", async (_event, ctx) => {
+    try {
+      researchRouteStates.delete(sessionKeyOf(ctx));
+    } catch { /* ignore */ }
+  });
+
+  // Arm the research-route guard when the user explicitly asks for the
+  // research tools, and append the routing note to their message so the
+  // decision is made BEFORE the first tool call, not after a block.
+  pi.on("input", async (event, ctx) => {
+    if (DISABLED.has("research_route")) return undefined;
+    if (event.source === "extension") return undefined;
+    if (!detectResearchIntent(event.text)) return undefined;
+    researchRouteStates.set(sessionKeyOf(ctx), { armed: true, blocks: 0 });
+    return { action: "transform", text: event.text + RESEARCH_ROUTE_NOTE };
   });
 
   pi.on("tool_call", async (event, ctx) => {
     const sessionKey = (() => {
       try { return ctx.sessionManager.getSessionFile?.() ?? "default"; } catch { return "default"; }
     })();
+
+    // Research-stack routing (explicit ask). Runs before every other guard
+    // so a blocked Exa call gets the research recipe, not a generic reason.
+    if (!DISABLED.has("research_route")) {
+      const st = researchRouteStates.get(sessionKey);
+      if (st?.armed) {
+        const d = decideResearchRoute(
+          event.toolName,
+          event.input as ResearchRouteInput,
+          st.blocks,
+        );
+        if (d.action === "comply") {
+          researchRouteStates.delete(sessionKey);
+        } else if (d.action === "block") {
+          st.blocks += 1;
+          return { block: true, reason: d.reason };
+        }
+      }
+    }
 
     // Reformulation-loop guard runs on every tool call (search families only)
     if (!DISABLED.has("reformulation_loop")) {
@@ -728,6 +906,17 @@ export default function (pi: ExtensionAPI) {
           };
         }
       }
+    }
+
+    // Research-stack routing (heuristic soft tier): nudge a bare Exa
+    // websearch on a non-technical query toward the stack, once per session.
+    if (
+      !DISABLED.has("research_route_soft") &&
+      !researchSoftFired.has(sessionKey) &&
+      decideResearchRouteSoft(event.toolName, event.input as { query?: string })
+    ) {
+      researchSoftFired.add(sessionKey);
+      return { block: true, reason: RESEARCH_ROUTE_SOFT_REASON };
     }
 
     // bash anti-patterns

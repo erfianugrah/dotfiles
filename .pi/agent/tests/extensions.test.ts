@@ -20,6 +20,9 @@ import {
   extractTopics,
   matchDocsTopic,
   decideDocsFirst,
+  detectResearchIntent,
+  decideResearchRoute,
+  decideResearchRouteSoft,
 } from "../extensions/tool-guard.ts";
 import {
   matchIntent,
@@ -405,6 +408,85 @@ describe("tool-guard.decideDocsFirst", () => {
   test("non-technical check wins over a topic match (pricing is not in docs)", () => {
     const d = decideDocsFirst("websearch", { query: "supabase pricing tiers" }, topics);
     expect(d).toEqual({ block: false, via: "non-technical" });
+  });
+});
+
+// ── tool-guard: research-stack routing ───────────────────────────────────
+
+describe("tool-guard.detectResearchIntent", () => {
+  test("explicit 'use the research tools' arms", () => {
+    expect(detectResearchIntent("use the research tools and find me the best sofa bed in sg")).toBe(true);
+  });
+  test("'use my research stack' arms", () => {
+    expect(detectResearchIntent("use my research stack for this")).toBe(true);
+  });
+  test("naming searxng arms regardless of phrasing", () => {
+    expect(detectResearchIntent("check searxng for this")).toBe(true);
+  });
+  test("meta-discussion without 'use' does not arm", () => {
+    expect(detectResearchIntent("the research stack is down again")).toBe(false);
+  });
+  test("generic 'research' as a verb does not arm", () => {
+    expect(detectResearchIntent("research the best approach for this refactor")).toBe(false);
+  });
+  test("'do some market research' does not arm", () => {
+    expect(detectResearchIntent("do some market research on sofa beds")).toBe(false);
+  });
+});
+
+describe("tool-guard.decideResearchRoute", () => {
+  test("bare websearch is blocked while armed", () => {
+    const d = decideResearchRoute("websearch", { query: "sofa bed sg" }, 0);
+    expect(d.action).toBe("block");
+    if (d.action === "block") expect(d.reason).toContain("searxng.erfi.io");
+  });
+  test("webfetch is blocked while armed", () => {
+    expect(decideResearchRoute("webfetch", { url: "https://example.com" }, 0).action).toBe("block");
+  });
+  test("web_research default mode is blocked while armed", () => {
+    expect(decideResearchRoute("web_research", { query: "x" }, 0).action).toBe("block");
+  });
+  test("web_research mode:local complies (routes through the stack)", () => {
+    expect(decideResearchRoute("web_research", { query: "x", mode: "local" }, 0).action).toBe("comply");
+  });
+  test("web_research mode:fresh complies", () => {
+    expect(decideResearchRoute("web_research", { query: "x", mode: "fresh" }, 0).action).toBe("comply");
+  });
+  test("bash curl to searxng.erfi.io complies and disarms", () => {
+    expect(
+      decideResearchRoute("bash", { command: "curl -s 'https://searxng.erfi.io/search?q=x&format=json'" }, 0).action,
+    ).toBe("comply");
+  });
+  test("bash curl to crawler.erfi.io complies", () => {
+    expect(
+      decideResearchRoute("bash", { command: "curl -s -X POST https://crawler.erfi.io/extract -d '{}'" }, 0).action,
+    ).toBe("comply");
+  });
+  test("bash curl to a real search engine is allowed through to other guards", () => {
+    expect(decideResearchRoute("bash", { command: "curl -s https://google.com/search?q=x" }, 0).action).toBe("allow");
+  });
+  test("guard lifts after MAX_BLOCKS (stack may be down)", () => {
+    expect(decideResearchRoute("websearch", { query: "x" }, 2).action).toBe("allow");
+  });
+  test("unrelated tools pass through", () => {
+    expect(decideResearchRoute("read", { path: "x" }, 0).action).toBe("allow");
+    expect(decideResearchRoute("docs_search", { query: "x" }, 0).action).toBe("allow");
+  });
+});
+
+describe("tool-guard.decideResearchRouteSoft", () => {
+  test("bare websearch on a local/shopping query nudges", () => {
+    expect(decideResearchRouteSoft("websearch", { query: "best sofa bed in sg" })).toBe(true);
+    expect(decideResearchRouteSoft("websearch", { query: "where to buy a gyro ball" })).toBe(true);
+  });
+  test("technical websearch does not nudge", () => {
+    expect(decideResearchRouteSoft("websearch", { query: "postgres vacuum tuning" })).toBe(false);
+  });
+  test("web_research never nudges (already fetches via the crawler)", () => {
+    expect(decideResearchRouteSoft("web_research", { query: "buy a sofa bed" })).toBe(false);
+  });
+  test("empty query does not nudge", () => {
+    expect(decideResearchRouteSoft("websearch", {})).toBe(false);
   });
 });
 
