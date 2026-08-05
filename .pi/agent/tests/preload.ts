@@ -25,17 +25,20 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
 
 const piAiStub = () => {
   const identity = (x: unknown) => x;
+  // Proxy rather than a hand-listed set of helpers. The old stub enumerated 8
+  // (Object/String/Number/Boolean/Array/Optional/Union/Literal), so the first
+  // extension to reach for a 9th took down the ENTIRE unit suite: a schema is
+  // built at module scope, so `Type.X is not a function` is a module-load
+  // error, not a test failure. `Type.Record` in osint.ts did exactly that -
+  // 0 pass / 1 fail / 1 error, and the real package exports Record just fine,
+  // so the extension worked at runtime while CI stayed red. A proxy makes the
+  // stub total: no future Type helper can break the suite this way.
+  const Type = new Proxy(
+    {},
+    { get: () => identity, has: () => true },
+  ) as Record<string, unknown>;
   return {
-    Type: {
-      Object: identity,
-      String: identity,
-      Number: identity,
-      Boolean: identity,
-      Array: identity,
-      Optional: identity,
-      Union: identity,
-      Literal: identity,
-    },
+    Type,
     complete: async () => ({ content: [] }),
     getModel: () => undefined,
   };
