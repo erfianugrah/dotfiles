@@ -635,6 +635,8 @@ export interface ReportView {
 		scopeViolations?: string[];
 		changedFiles?: string[];
 		notes?: string[];
+		/** size of the prompt this iteration was given. Grows with feedback. */
+		promptChars?: number;
 		sensors?: {
 			name: string;
 			ok: boolean;
@@ -644,6 +646,13 @@ export interface ReportView {
 			output?: string;
 		}[];
 	}[];
+}
+
+/** Compact char count: 4200 -> "4.1k", 31500 -> "31k". */
+function kchars(n?: number): string {
+	if (n == null) return "-";
+	const k = n / 1024;
+	return k < 10 ? `${k.toFixed(1)}k` : `${Math.round(k)}k`;
 }
 
 /** Lines of a stuck sensor's output to surface in the report. */
@@ -680,18 +689,22 @@ export function formatReport(r: ReportView): string {
 	if (r.task) out.push(`task:   ${r.task.split("\n")[0].slice(0, 88)}`);
 	if (its.length === 0) return `${out.join("\n")}\n\n(no iterations recorded)`;
 
+	// Only show the prompt column when something recorded one - old reports and
+	// runs that predate prompt capture should not sprout an empty column.
+	const anyPrompt = its.some((it) => it.promptChars != null);
 	out.push("");
-	out.push("  it  failing   outcome        model");
+	out.push(`  it  failing   outcome        ${anyPrompt ? "prompt  " : ""}model`);
 	for (const it of its) {
 		const flags: string[] = [];
 		if (it.escalated) flags.push("ESCALATED");
 		if (it.agentTimedOut) flags.push("AGENT-TIMEOUT");
 		if (it.scopeViolations?.length) flags.push(`scope-revert:${it.scopeViolations.length}`);
 		const outcome = it.kept ? (it.progressed ? "kept" : "kept (no gain)") : "ROLLED BACK";
+		const prompt = anyPrompt ? `${kchars(it.promptChars).padEnd(8)}` : "";
 		out.push(
 			`  ${String(it.iteration ?? it.n ?? "?").padStart(2)}  ${String(it.failingBefore ?? "?").padStart(2)} -> ${String(
 				it.failingAfter ?? "?",
-			).padEnd(3)} ${outcome.padEnd(15)}${it.model ?? ""}${flags.length ? `  [${flags.join(", ")}]` : ""}`,
+			).padEnd(3)} ${outcome.padEnd(15)}${prompt}${it.model ?? ""}${flags.length ? `  [${flags.join(", ")}]` : ""}`,
 		);
 	}
 

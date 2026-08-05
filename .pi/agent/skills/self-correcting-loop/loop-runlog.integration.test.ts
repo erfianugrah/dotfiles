@@ -210,3 +210,59 @@ test("a failing sensor's output survives into the report and `loop report`", asy
 
 	await manifest(); // restore the shared fixture for any later test
 });
+
+test("the exact prompt each iteration was given is recorded and readable", async () => {
+	// Three of the four defects found on the first real run came from reading
+	// an agent prompt by hand out of `ps` output: the loop's own log inside the
+	// reviewed diff, a baseline judge verdict presented as "the previous
+	// attempt failed", and the size of the assembled feedback. The prompt was
+	// the one thing the loop built and never showed back.
+	rmSync(join(dir, ".pi/harness-prompts"), { recursive: true, force: true });
+	await manifest({ maxIterations: 1 });
+	await run();
+
+	const recorded = await Bun.file(join(dir, ".pi/harness-prompts/iteration-1.txt")).text();
+	expect(recorded).toContain("noop"); // the task
+	expect(recorded.length).toBeGreaterThan(0);
+
+	const report = await Bun.file(join(dir, ".pi/harness-report.json")).json();
+	expect(report.iterations[0].promptChars).toBe(recorded.length);
+
+	const p = Bun.spawn(["bun", LOOP, "report", "--prompt", "1"], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const out = await new Response(p.stdout).text();
+	expect(await p.exited).toBe(0);
+	expect(out).toContain("noop");
+
+	// An iteration that never ran is a usage error, and says what IS available.
+	const q = Bun.spawn(["bun", LOOP, "report", "--prompt", "9"], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const err = await new Response(q.stderr).text();
+	expect(await q.exited).toBe(2);
+	expect(err).toContain("no prompt recorded for iteration 9");
+	expect(err).toContain("have: 1");
+});
+
+test("recorded prompts are loop artifacts, not agent work", async () => {
+	// Same trap as the run log, one directory deeper: a per-iteration file
+	// written mid-run would otherwise be staged by checkpoint(), enter the
+	// scope fence, pollute changed-files, and be deleted by a rollback clean.
+	await manifest({ maxIterations: 1 });
+	await run();
+
+	const staged = await git("diff", "--cached", "--name-only");
+	expect(staged).not.toContain("harness-prompts");
+
+	const report = await Bun.file(join(dir, ".pi/harness-report.json")).json();
+	for (const it of report.iterations) {
+		expect(it.changedFiles ?? []).not.toContain(".pi/harness-prompts/iteration-1.txt");
+		expect(it.scopeViolations ?? []).toEqual([]);
+	}
+	expect(existsSync(join(dir, ".pi/harness-prompts/iteration-1.txt"))).toBe(true);
+});

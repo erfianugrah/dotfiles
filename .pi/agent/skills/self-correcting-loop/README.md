@@ -77,6 +77,9 @@ sensors), `--allow-dirty` (skip the clean-tree guard).
   nothing. Both process groups are SIGKILLed after each completes. Neither
   GNU `timeout` (signals only on deadline) nor `systemd-run --scope` (does not
   reap on normal exit) covered this.
+- **`loop report --prompt N`** - the exact text iteration N was handed,
+  captured before the agent starts. The report shows what the loop observed;
+  this shows what it said, which is where its own bugs turned out to live.
 - **`loop verify-sensors`** - mutation-test the sensor set before trusting it:
   each sensor declares a `canary` that plants the fault it exists to catch, and
   the tool asserts the sensor's state FLIPS, then reverts. Catches the two

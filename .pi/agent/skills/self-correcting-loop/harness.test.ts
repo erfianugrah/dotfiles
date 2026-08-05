@@ -799,6 +799,30 @@ describe("formatReport", () => {
 		expect(out).toContain("more line");
 	});
 
+	// The prompt is the one thing the loop hands the model and never showed
+	// back. Three of four defects found on the first real run came from
+	// reading it by hand out of `ps` output.
+	test("shows how big each iteration's prompt was", () => {
+		const out = formatReport({
+			...base,
+			iterations: [
+				{ n: 1, kept: true, promptChars: 4200, sensors: [] },
+				{ n: 2, kept: false, promptChars: 31500, sensors: [] },
+			],
+		});
+		expect(out).toContain("4.1k");
+		expect(out).toContain("31k");
+		expect(out).toContain("prompt");
+	});
+
+	test("omits the prompt column entirely when no iteration recorded one", () => {
+		const out = formatReport({
+			...base,
+			iterations: [{ n: 1, kept: true, sensors: [] }],
+		});
+		expect(out).not.toContain("prompt");
+	});
+
 	test("says so when a stuck sensor recorded no output at all", () => {
 		const out = formatReport({
 			...base,

@@ -37,6 +37,7 @@ import {
 	readdirSync,
 	realpathSync,
 	statSync,
+	writeFileSync,
 	writeSync,
 } from "node:fs";
 import * as os from "node:os";
@@ -76,6 +77,18 @@ const PRESET_DIR = join(SCRIPT_DIR, "presets");
 const DEFAULT_MANIFEST = ".pi/harness.json";
 const REPORT_PATH = ".pi/harness-report.json";
 const RUN_LOG_PATH = ".pi/harness-run.log";
+/**
+ * Exact prompt handed to the agent each iteration, one file per iteration.
+ *
+ * The prompt is the only thing the loop constructs and never showed back. It
+ * is also where the defects have been: three of the four found on the first
+ * real run came from reading one by hand out of `ps` output - the loop's own
+ * log inside the reviewed diff, a baseline judge verdict presented as "the
+ * previous attempt failed", and the sheer size of the assembled feedback.
+ * `loop report --prompt N` makes that a command instead of an accident.
+ */
+const PROMPT_DIR = ".pi/harness-prompts";
+const promptPath = (i: number) => join(PROMPT_DIR, `iteration-${i}.txt`);
 /** Per-sensor output kept in the report. Enough for a verdict, not a transcript. */
 const REPORT_OUTPUT_CAP = 4000;
 const PI_CMD = process.env.LOOP_PI_CMD ?? "pi";
@@ -221,6 +234,8 @@ async function isGitRepo(): Promise<boolean> {
  * the next one.
  */
 const LOOP_ARTIFACTS = [REPORT_PATH, RUN_LOG_PATH];
+/** Loop-owned DIRECTORIES; matched by prefix, since their contents vary. */
+const LOOP_ARTIFACT_DIRS = [PROMPT_DIR];
 
 /**
  * Suffix match, not equality: `git status --porcelain` reports paths relative
@@ -228,7 +243,10 @@ const LOOP_ARTIFACTS = [REPORT_PATH, RUN_LOG_PATH];
  * a subdir sees `sub/.pi/harness-run.log`. Matching the tail handles both.
  */
 function isLoopArtifact(p: string): boolean {
-	return LOOP_ARTIFACTS.some((a) => p === a || p.endsWith(`/${a}`));
+	return (
+		LOOP_ARTIFACTS.some((a) => p === a || p.endsWith(`/${a}`)) ||
+		LOOP_ARTIFACT_DIRS.some((d) => p.startsWith(`${d}/`) || p.includes(`/${d}/`))
+	);
 }
 
 async function isDirty(): Promise<boolean> {
@@ -283,7 +301,7 @@ async function changedPaths(): Promise<string[]> {
  */
 async function checkpoint(): Promise<void> {
 	await git("add", "-A");
-	for (const a of LOOP_ARTIFACTS) {
+	for (const a of [...LOOP_ARTIFACTS, ...LOOP_ARTIFACT_DIRS]) {
 		if (!existsSync(a)) continue;
 		// `reset` needs a HEAD; before the first commit `rm --cached` is the
 		// only way to take a path back out of the index.
@@ -313,7 +331,11 @@ async function writeTree(): Promise<string> {
  */
 async function rollback(): Promise<void> {
 	await git("checkout", "--", ".");
-	await git("clean", "-fdq", ...LOOP_ARTIFACTS.flatMap((a) => ["-e", a]));
+	await git(
+		"clean",
+		"-fdq",
+		...[...LOOP_ARTIFACTS, ...LOOP_ARTIFACT_DIRS].flatMap((a) => ["-e", a]),
+	);
 }
 
 /**
@@ -538,6 +560,8 @@ interface IterationRecord {
 	changedFiles: string[];
 	/** loop-level signals for the next prompt (scope reverts, rollback, ref-guard). */
 	notes: string[];
+	/** size of the exact prompt handed to the agent (the file is under PROMPT_DIR). */
+	promptChars: number;
 	/** the agent exceeded agentTimeoutMs and was killed. */
 	agentTimedOut: boolean;
 	sensors: {
@@ -779,6 +803,14 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 			m.rules,
 			m.guide,
 		);
+		// Persist BEFORE the agent runs: if the iteration wedges or the loop is
+		// killed, the prompt that caused it is the thing you most want to read.
+		try {
+			mkdirSync(PROMPT_DIR, { recursive: true });
+			writeFileSync(promptPath(i), prompt);
+		} catch {
+			// A read-only or missing .pi is not worth failing a run over.
+		}
 		const agent = await runAgent(prompt, model, m.tools, sandboxed, m.agentTimeoutMs);
 		if (agent.timedOut) {
 			notes.push(
@@ -890,6 +922,7 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 			scopeViolations,
 			changedFiles: changed,
 			notes,
+			promptChars: prompt.length,
 			agentTimedOut: agent.timedOut,
 			sensors: cur.map((s) => ({
 				name: s.name,
@@ -1094,6 +1127,30 @@ function warnIfLogInsideRepo(scope: string[]): void {
 
 /** `loop report` - render the last run's report for a human. */
 async function cmdReport(flags: Record<string, string | boolean>): Promise<number> {
+	// `--prompt N` dumps the exact text iteration N was given. Everything else
+	// in the report describes what the loop OBSERVED; this is the one view of
+	// what it SAID, which is where the harness's own bugs show up.
+	if (flags.prompt !== undefined && flags.prompt !== false) {
+		const n = Number(flags.prompt);
+		if (!Number.isInteger(n) || n < 1) {
+			console.error("--prompt takes an iteration number, e.g. `loop report --prompt 2`.");
+			return 2;
+		}
+		if (!existsSync(promptPath(n))) {
+			const have = existsSync(PROMPT_DIR)
+				? readdirSync(PROMPT_DIR)
+						.map((f) => f.match(/iteration-(\d+)\.txt/)?.[1])
+						.filter(Boolean)
+						.join(", ")
+				: "";
+			console.error(
+				`no prompt recorded for iteration ${n}${have ? ` (have: ${have})` : " (no prompts recorded yet)"}.`,
+			);
+			return 2;
+		}
+		console.log(await Bun.file(promptPath(n)).text());
+		return 0;
+	}
 	const path = typeof flags.report === "string" ? flags.report : REPORT_PATH;
 	if (!existsSync(path)) {
 		console.error(`no report at ${path}\nrun \`loop run\` first (or pass --report <path>).`);

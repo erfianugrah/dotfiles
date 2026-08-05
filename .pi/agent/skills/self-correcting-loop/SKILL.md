@@ -646,6 +646,7 @@ trace. After a run:
 ```bash
 loop report                      # rendered summary of the last run
 loop report --report path.json   # or an archived one
+loop report --prompt 2           # the EXACT text iteration 2 was given
 ```
 
 `loop report` turns the JSON into the thing you actually want after an
@@ -676,6 +677,23 @@ history, the checkpoint index, and the rollback `git clean`. Otherwise:
 
 You do not need to gitignore them. A tool that requires every repo to ignore
 its droppings has pushed its own problem downstream.
+
+**`loop report --prompt N`** dumps the exact text iteration N was handed,
+recorded to `.pi/harness-prompts/iteration-N.txt` before the agent starts (so
+it survives a wedged iteration or a killed run). Everything else in the report
+describes what the loop OBSERVED; this is the only view of what it SAID.
+
+That asymmetry is not cosmetic. Three of the four defects found on the first
+real run came from reading an agent prompt by hand out of `ps` output - the
+loop's own log sitting inside the reviewed diff, a baseline judge verdict
+presented to iteration 1 as "the previous attempt failed", and the sheer size
+of the assembled feedback. None was visible in the report or the trace. The
+observability work made the RUN legible; this makes the thing the run is
+actually made of legible.
+
+The report's `prompt` column carries the size per iteration, which is the
+cheap version of the same question - a prompt that doubles between iterations
+is feedback accumulating faster than the model can use it.
 
 ### Never redirect the loop's output INTO the repo
 
