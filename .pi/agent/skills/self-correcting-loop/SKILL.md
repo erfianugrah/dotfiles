@@ -1166,14 +1166,32 @@ change is intended and you want a judgment not a byte-compare).
 - **Timeouts bound the loop, not the spend.** A budget stops a hang; it does
   not stop N iterations of expensive-but-productive work. `maxIterations` and
   the model ladder are the cost controls.
-- **The governor's later rungs are thinly evidenced.** Rollback-on-no-progress
-  has now fired for real (2026-08-05, eaves Tier 2 phase A, iteration 4: the
-  agent finished the whole feature, left the code unformatted, went 1 -> 2
-  failing and had the lot reverted). Escalation, `stallPatience` and the
-  negative-knowledge history are still exercised only by scripted agents in
-  `loop.integration.test.ts` - a run where the cheap model keeps making
-  progress never reaches them. Treat the ladder as designed-and-unit-tested,
-  not as field-proven.
+- **Escalation can be triggered by a harness defect, and then it is the wrong
+  remedy.** The 2026-08-05 eaves run is the case study. Iteration 4: the agent
+  built all 15 endpoints, left the code unformatted, went 1 -> 2 failing,
+  reverted. Iteration 5: broke the build, 1 -> 12, reverted. Iteration 6:
+  rebuilt all 15 endpoints, left the code unformatted again, 1 -> 2, reverted -
+  byte-for-byte the same failure as iteration 4. Three consecutive
+  no-progress iterations tripped `stallPatience: 3` and the ladder escalated
+  haiku -> sonnet.
+
+  The stall was not a capability limit. The agent's own summary each time
+  listed what it had verified - build, vet, test, smoke, doctor - which was
+  exactly the "Verify with:" line the task text gave it, and `gofmt` was not on
+  that line. It could not see the gate it kept failing. Escalating buys a
+  stronger model to make the same uninformed mistake at a higher price.
+
+  This is the argument for deriving the gate list from the manifest rather than
+  restating it in the task, and it generalises: before reading a stall as "the
+  model is too weak", check whether the loop ever told it what it was being
+  judged on. `loop report --prompt N` answers that in one command.
+
+- **The governor's later rungs are thinly evidenced.** As of that run,
+  rollback-on-no-progress and `stallPatience` escalation have both fired for
+  real. The negative-knowledge history and the upper rungs beyond the first
+  escalation are still exercised only by scripted agents in
+  `loop.integration.test.ts`. Treat those as designed-and-unit-tested, not as
+  field-proven.
 
   That first real rollback is also the clearest statement of the aggregate
   count's limit. The discarded iteration had built 15 working endpoints and
