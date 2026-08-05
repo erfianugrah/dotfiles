@@ -17,6 +17,7 @@ import {
 	formatAttemptHistory,
 	formatCanaryReport,
 	formatFailures,
+	formatReport,
 	isCanaryFailure,
 	judgeCanary,
 	globToRegExp,
@@ -667,5 +668,62 @@ describe("stuckSensors - per-sensor movement (what the aggregate count hides)", 
 		expect(
 			stuckSensors([it_([["z", false], ["a", false]]), it_([["z", false], ["a", false]])]),
 		).toEqual(["z", "a"]);
+	});
+});
+
+describe("formatReport", () => {
+	const base = {
+		task: "Implement the thing\nsecond line ignored",
+		result: "fail",
+		startedAt: "2026-08-04T10:00:00.000Z",
+		finishedAt: "2026-08-04T10:02:30.000Z",
+	};
+
+	test("renders the failing trend, outcome and flags per iteration", () => {
+		const out = formatReport({
+			...base,
+			iterations: [
+				{ n: 1, model: "haiku", failingBefore: 3, failingAfter: 2, kept: true, progressed: true,
+				  sensors: [{ name: "build", ok: true, durationMs: 1200 }, { name: "test", ok: false, durationMs: 9000 }] },
+				{ n: 2, model: "sonnet", failingBefore: 2, failingAfter: 2, kept: false, progressed: false,
+				  escalated: true, scopeViolations: ["docs/x.md"],
+				  sensors: [{ name: "build", ok: true }, { name: "test", ok: false }] },
+			],
+		});
+		expect(out).toContain("result: fail");
+		expect(out).toContain("wall: 150s");
+		expect(out).toContain("Implement the thing");
+		expect(out).not.toContain("second line ignored");
+		expect(out).toContain("3 -> 2");
+		expect(out).toContain("ROLLED BACK");
+		expect(out).toContain("ESCALATED");
+		expect(out).toContain("scope-revert:1");
+		expect(out).toContain("never passed: test");
+		expect(out).toContain("slowest sensors:");
+		// the report field is `iteration`; the renderer must not print "?"
+		expect(formatReport({ ...base, iterations: [{ iteration: 7, failingBefore: 1, failingAfter: 0, kept: true, sensors: [] }] })).toContain(" 7  ");
+	});
+
+	test("flags an agent timeout", () => {
+		const out = formatReport({
+			...base,
+			iterations: [{ n: 1, failingBefore: 1, failingAfter: 1, kept: false, agentTimedOut: true, sensors: [] }],
+		});
+		expect(out).toContain("AGENT-TIMEOUT");
+	});
+
+	test("handles an empty / minimal report without throwing", () => {
+		expect(formatReport({})).toContain("no iterations recorded");
+		expect(formatReport({ result: "pass", iterations: [] })).toContain("result: pass");
+	});
+
+	test("deduplicates notes and caps the list", () => {
+		const many = Array.from({ length: 12 }, (_, i) => `note ${i}`);
+		const out = formatReport({
+			...base,
+			iterations: [{ n: 1, kept: true, notes: [...many, "note 0"], sensors: [] }],
+		});
+		expect(out).toContain("note 0");
+		expect(out).toContain("more");
 	});
 });

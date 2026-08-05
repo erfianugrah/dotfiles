@@ -197,6 +197,8 @@ Two properties make this work on weak models:
 | `loop-timeout.integration.test.ts` | Wall-clock budgets: hung sensor killed + rendered as a HANG, per-sensor override, fast sensor untouched, hung agent reaped, `--trial` stall verdict. Each case would hang forever without the deadline. |
 | `loop-verify.integration.test.ts` | `verify-sensors` end-to-end: catches a real `grep -v` inverted-negation sensor as STUCK, proves a feature sensor's flip, confirms an un-canaried sensor is never executed, tree restored after every canary, `--only` / `--strict` / broken-canary / non-git paths. |
 | `loop-steering.integration.test.ts` | `guide`/`rules` reach the real prompt, a rule appended DURING iteration 1 is in force for iteration 2, and a half-saved manifest is ignored rather than fatal. |
+| `loop-logpath.integration.test.ts` | Redirecting the run log INTO the repo is eaten by the scope guard: 3-arm A/B (outside repo / inside repo / no writeScope) plus the pre-checkpoint warning. |
+| `loop-runlog.integration.test.ts` | The loop owns its trace: `.pi/harness-run.log` with no redirection, appends across runs, `--no-log`, loop artifacts are not dirt / not scope violations / not changed-files, and `loop report` renders + fails cleanly. |
 | `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright). Ordered flow steps (wait/click/type/press/assert/screenshot) + viewport/full-page. The behaviour-harness layer for web targets; also a UI live-smoke tool. |
 | `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
 | `judge.ts` | Inferential (LLM-as-judge) sensor with two modes: CODE (feeds the git diff + spec to a second `pi -p`) and VISUAL (screenshots a live URL via browser-assert and has a vision model assess the rendered UI/UX). Both gate on `VERDICT: PASS/FAIL`. The computational sensors check the code compiles/passes; this checks it did the *right thing* / *looks right*. Fail-closed by default. |
@@ -563,10 +565,33 @@ projects:
 - A canary that cannot be expressed is a smell: it usually means the sensor
   asserts something too vague to fault deliberately.
 
+### Reading a run: `.pi/harness-run.log` and `loop report`
+
+You do not need to redirect anything. Every run tees its console output to
+`.pi/harness-run.log` (append-only, so history accumulates; `--no-log` opts
+out). `.pi/**` is exempt from the scope guard, so the loop cannot eat its own
+trace. After a run:
+
+```bash
+loop report                      # rendered summary of the last run
+loop report --report path.json   # or an archived one
+```
+
+`loop report` turns the JSON into the thing you actually want after an
+unattended run: the failing-count trend, kept vs ROLLED BACK per iteration,
+which rung the ladder was on, ESCALATED / AGENT-TIMEOUT / scope-revert flags,
+sensors that never passed, the slowest sensors, and the loop's notes.
+
+The loop's own artifacts (`.pi/harness-run.log`, `.pi/harness-report.json`)
+are excluded from the dirty-tree check, the scope fence, and the changed-files
+history - otherwise the loop refuses to start because of its own output, which
+is exactly what happened the first time the run log was added.
+
 ### Never redirect the loop's output INTO the repo
 
 ```bash
-loop run > /tmp/run.log 2>&1     # correct
+loop run                         # best: trace goes to .pi/harness-run.log
+loop run > /tmp/run.log 2>&1     # fine
 loop run > run.log 2>&1          # log truncates the moment work starts
 ```
 

@@ -29,7 +29,16 @@
  * integration test can substitute a scripted fake agent.
  */
 
-import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	realpathSync,
+	statSync,
+	writeSync,
+} from "node:fs";
 import * as os from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import {
@@ -51,6 +60,7 @@ import {
 	formatAttemptHistory,
 	formatCanaryReport,
 	formatFailures,
+	formatReport,
 	isCanaryFailure,
 	judgeCanary,
 	limitsArgs,
@@ -65,6 +75,7 @@ const SCRIPT_DIR = dirname(Bun.fileURLToPath(import.meta.url));
 const PRESET_DIR = join(SCRIPT_DIR, "presets");
 const DEFAULT_MANIFEST = ".pi/harness.json";
 const REPORT_PATH = ".pi/harness-report.json";
+const RUN_LOG_PATH = ".pi/harness-run.log";
 const PI_CMD = process.env.LOOP_PI_CMD ?? "pi";
 
 // --- arg parsing ------------------------------------------------------------
@@ -165,8 +176,31 @@ async function isGitRepo(): Promise<boolean> {
 	return (await git("rev-parse", "--is-inside-work-tree")).code === 0;
 }
 
+/**
+ * Artifacts the loop generates itself. They are not user work, so they must
+ * not make the tree look dirty - otherwise the loop refuses to start because
+ * of its own output. The run log tripped this immediately (it is created
+ * before the dirty check); the report has always had the same latent issue,
+ * since it is written at the end of every run and would dirty the tree for
+ * the next one.
+ */
+const LOOP_ARTIFACTS = [REPORT_PATH, RUN_LOG_PATH];
+
+/**
+ * Suffix match, not equality: `git status --porcelain` reports paths relative
+ * to the REPO ROOT while our constants are cwd-relative, so a loop running in
+ * a subdir sees `sub/.pi/harness-run.log`. Matching the tail handles both.
+ */
+function isLoopArtifact(p: string): boolean {
+	return LOOP_ARTIFACTS.some((a) => p === a || p.endsWith(`/${a}`));
+}
+
 async function isDirty(): Promise<boolean> {
-	return (await git("status", "--porcelain")).out.trim() !== "";
+	const lines = (await git("status", "--porcelain")).out.split("\n");
+	return lines.some((l) => {
+		const p = l.slice(3).trim(); // porcelain: XY <path>
+		return p !== "" && !isLoopArtifact(p);
+	});
 }
 
 /**
@@ -192,7 +226,11 @@ async function changedPaths(): Promise<string[]> {
 	for (const l of `${tracked}\n${untracked}`.split("\n")) {
 		const p = l.trim();
 		if (!p) continue;
-		set.add(prefix && p.startsWith(prefix) ? p.slice(prefix.length) : p);
+		const rel = prefix && p.startsWith(prefix) ? p.slice(prefix.length) : p;
+		// The loop's own log/report are not agent edits: they must not enter the
+		// scope fence or the negative-knowledge history of changed files.
+		if (isLoopArtifact(rel) || isLoopArtifact(p)) continue;
+		set.add(rel);
 	}
 	return [...set];
 }
@@ -479,6 +517,15 @@ async function reloadOperatorFields(
 // --- commands ---------------------------------------------------------------
 
 async function cmdRun(flags: Record<string, string | boolean>): Promise<number> {
+	const stopRunLog = flags["no-log"] === true ? () => {} : startRunLog();
+	try {
+		return await cmdRunInner(flags);
+	} finally {
+		stopRunLog();
+	}
+}
+
+async function cmdRunInner(flags: Record<string, string | boolean>): Promise<number> {
 	const manifestPath = resolve(
 		typeof flags.manifest === "string" ? flags.manifest : DEFAULT_MANIFEST,
 	);
@@ -884,6 +931,58 @@ async function writeReport(report: RunReport): Promise<void> {
  * nothing unless you deliberately give it a canary.
  */
 /**
+ * Tee every console line into a log the LOOP owns.
+ *
+ * Until now the only durable record of a run was the JSON report, and the
+ * human-readable trace depended on the operator redirecting stdout correctly
+ * - where the obvious choice, `loop run > run.log` inside the repo, is
+ * silently eaten by the scope guard (git add -A stages it, later writes make
+ * it differ from the index, the guard reverts it). An unattended tool whose
+ * only trace depends on getting shell redirection right is not observable.
+ *
+ * `.pi/**` is exempt from the scope guard, so a log written here survives by
+ * construction. Appends (never truncates) so a re-run keeps prior history,
+ * and writes synchronously so a killed process still leaves the tail on disk.
+ *
+ * Returns a restore function; callers should not need it outside tests.
+ */
+function startRunLog(): () => void {
+	let fd: number;
+	try {
+		mkdirSync(dirname(RUN_LOG_PATH), { recursive: true });
+		fd = openSync(RUN_LOG_PATH, "a");
+	} catch {
+		return () => {}; // read-only cwd or similar - console still works
+	}
+	const stamp = new Date().toISOString();
+	writeSync(fd, `\n===== loop run ${stamp} =====\n`);
+	const orig = { log: console.log, warn: console.warn, error: console.error };
+	const tee =
+		(fn: (...a: unknown[]) => void) =>
+		(...args: unknown[]) => {
+			fn(...args);
+			try {
+				writeSync(fd, `${args.map((a) => (typeof a === "string" ? a : String(a))).join(" ")}\n`);
+			} catch {
+				/* disk full / fd gone: never let logging break a run */
+			}
+		};
+	console.log = tee(orig.log);
+	console.warn = tee(orig.warn);
+	console.error = tee(orig.error);
+	return () => {
+		console.log = orig.log;
+		console.warn = orig.warn;
+		console.error = orig.error;
+		try {
+			closeSync(fd);
+		} catch {
+			/* already closed */
+		}
+	};
+}
+
+/**
  * Warn when the operator has redirected our stdout INTO the repo.
  *
  * `checkpoint()` is `git add -A`, so a `loop run > run.log` inside the repo
@@ -914,6 +1013,25 @@ function warnIfLogInsideRepo(scope: string[]): void {
 	} catch {
 		// /proc unavailable or fd 1 not resolvable - nothing to warn about.
 	}
+}
+
+/** `loop report` - render the last run's report for a human. */
+async function cmdReport(flags: Record<string, string | boolean>): Promise<number> {
+	const path = typeof flags.report === "string" ? flags.report : REPORT_PATH;
+	if (!existsSync(path)) {
+		console.error(`no report at ${path}\nrun \`loop run\` first (or pass --report <path>).`);
+		return 2;
+	}
+	let parsed: unknown;
+	try {
+		parsed = await Bun.file(path).json();
+	} catch (err) {
+		console.error(`report at ${path} is not valid JSON: ${(err as Error).message}`);
+		return 2;
+	}
+	console.log(`\n${formatReport(parsed as Parameters<typeof formatReport>[0])}`);
+	if (existsSync(RUN_LOG_PATH)) console.log(`\nfull trace: ${RUN_LOG_PATH}`);
+	return 0;
 }
 
 async function cmdVerify(flags: Record<string, string | boolean>): Promise<number> {
@@ -1074,9 +1192,12 @@ async function main(): Promise<void> {
 		case "verify":
 			code = await cmdVerify(flags);
 			break;
+		case "report":
+			code = await cmdReport(flags);
+			break;
 		default:
 			console.error(
-				`unknown command "${cmd}"\nusage: bun loop.ts [run|init|verify-sensors] ...`,
+				`unknown command "${cmd}"\nusage: bun loop.ts [run|init|verify-sensors|report] ...`,
 			);
 			code = 2;
 	}

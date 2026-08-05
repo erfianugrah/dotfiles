@@ -613,6 +613,97 @@ export function stuckSensors(
 	return seen.filter((n) => !everPassed.has(n));
 }
 
+// --- run report rendering ---------------------------------------------------
+
+/** Structural view of the report JSON, so the renderer stays pure. */
+export interface ReportView {
+	task?: string;
+	result?: string;
+	startedAt?: string;
+	finishedAt?: string;
+	iterations?: {
+		/** field is `iteration` in the report; `n` accepted for convenience. */
+		iteration?: number;
+		n?: number;
+		model?: string;
+		failingBefore?: number;
+		failingAfter?: number;
+		kept?: boolean;
+		progressed?: boolean;
+		escalated?: boolean;
+		agentTimedOut?: boolean;
+		scopeViolations?: string[];
+		changedFiles?: string[];
+		notes?: string[];
+		sensors?: { name: string; ok: boolean; timedOut?: boolean; durationMs?: number }[];
+	}[];
+}
+
+/**
+ * Render a finished run so a human can see what happened.
+ *
+ * The report already carried the failing-count trend, kept/rolled-back,
+ * escalations, scope violations, timeout flags and per-sensor durations - all
+ * of it unreadable without jq. After an unattended multi-iteration run that is
+ * the difference between diagnosing a bad run and re-running it blind.
+ */
+export function formatReport(r: ReportView): string {
+	const its = r.iterations ?? [];
+	const out: string[] = [];
+	const dur =
+		r.startedAt && r.finishedAt
+			? `${Math.round((Date.parse(r.finishedAt) - Date.parse(r.startedAt)) / 1000)}s`
+			: "?";
+	out.push(`result: ${r.result ?? "unknown"}   iterations: ${its.length}   wall: ${dur}`);
+	if (r.task) out.push(`task:   ${r.task.split("\n")[0].slice(0, 88)}`);
+	if (its.length === 0) return `${out.join("\n")}\n\n(no iterations recorded)`;
+
+	out.push("");
+	out.push("  it  failing   outcome        model");
+	for (const it of its) {
+		const flags: string[] = [];
+		if (it.escalated) flags.push("ESCALATED");
+		if (it.agentTimedOut) flags.push("AGENT-TIMEOUT");
+		if (it.scopeViolations?.length) flags.push(`scope-revert:${it.scopeViolations.length}`);
+		const outcome = it.kept ? (it.progressed ? "kept" : "kept (no gain)") : "ROLLED BACK";
+		out.push(
+			`  ${String(it.iteration ?? it.n ?? "?").padStart(2)}  ${String(it.failingBefore ?? "?").padStart(2)} -> ${String(
+				it.failingAfter ?? "?",
+			).padEnd(3)} ${outcome.padEnd(15)}${it.model ?? ""}${flags.length ? `  [${flags.join(", ")}]` : ""}`,
+		);
+	}
+
+	// Sensors that never passed - the same signal --trial uses, useful post-hoc.
+	const stuck = stuckSensors(
+		its.map((it) => ({ sensors: (it.sensors ?? []).map((s) => ({ name: s.name, ok: s.ok })) })),
+	);
+	if (stuck.length) {
+		out.push("", `never passed: ${stuck.join(", ")}`);
+	}
+
+	// Slowest sensors, from the last iteration that recorded durations.
+	const last = [...its].reverse().find((it) => it.sensors?.some((s) => s.durationMs != null));
+	const timed = (last?.sensors ?? []).filter((s) => s.durationMs != null);
+	if (timed.length) {
+		const top = [...timed].sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0)).slice(0, 3);
+		out.push(
+			"",
+			`slowest sensors: ${top
+				.map((s) => `${s.name} ${((s.durationMs ?? 0) / 1000).toFixed(1)}s${s.timedOut ? " (TIMED OUT)" : ""}`)
+				.join(", ")}`,
+		);
+	}
+
+	const notes = its.flatMap((it) => it.notes ?? []);
+	if (notes.length) {
+		const uniq = [...new Set(notes)];
+		out.push("", "notes:");
+		for (const n of uniq.slice(0, 8)) out.push(`  - ${n.split("\n")[0].slice(0, 100)}`);
+		if (uniq.length > 8) out.push(`  ... ${uniq.length - 8} more`);
+	}
+	return out.join("\n");
+}
+
 // --- sensor verification (canary / mutation testing) ------------------------
 
 /**
