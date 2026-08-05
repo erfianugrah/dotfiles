@@ -10,6 +10,7 @@ import {
 	findPassive,
 	findPhrases,
 	findRotation,
+	isLabel,
 	lengthStats,
 	longParagraphs,
 	maskCode,
@@ -308,6 +309,43 @@ describe("proseSentences", () => {
 		const segs = segment("One here. Two here. Three here.\n");
 		expect(proseSentences(segs)).toHaveLength(3);
 	});
+
+	test("drops block labels, which are captions rather than sentences", () => {
+		// A command-heavy guide is mostly "Output:" / "Tunnel Config:" lines
+		// introducing fences. Counting them collapses the mean sentence length
+		// and fails the chopping gate on prose that is not chopped.
+		const src = "Tunnel Config:\n\nThe tunnel connects the cluster to the edge network.\n\nOutput:\n";
+		expect(proseSentences(segment(src))).toEqual([
+			"The tunnel connects the cluster to the edge network.",
+		]);
+	});
+
+	test("drops a thematic break instead of counting it as a zero-word sentence", () => {
+		const segs = segment("First paragraph here.\n\n---\n\nSecond paragraph here.\n");
+		expect(proseSentences(segs)).toEqual(["First paragraph here.", "Second paragraph here."]);
+	});
+});
+
+describe("isLabel", () => {
+	test("a short colon-terminated fragment is a label", () => {
+		expect(isLabel("Output:")).toBe(true);
+		expect(isLabel("Tunnel k8s Secret:")).toBe(true);
+		expect(isLabel("Storage for logs:")).toBe(true);
+	});
+
+	test("a real sentence containing a colon is not a label", () => {
+		expect(isLabel("Note: the parser reads the file.")).toBe(false);
+		expect(isLabel("The rule is simple: one term for one thing, everywhere in the doc:")).toBe(false);
+	});
+
+	test("a long colon-terminated clause is not a label", () => {
+		expect(isLabel("The following seven configuration files load in a fixed order:")).toBe(false);
+	});
+
+	test("text without a trailing colon is never a label", () => {
+		expect(isLabel("Output")).toBe(false);
+		expect(isLabel("")).toBe(false);
+	});
 });
 
 describe("lengthStats", () => {
@@ -581,6 +619,22 @@ describe("extractFacts", () => {
 		expect(extractFacts("upgrade to 1.2.3 now")).toContain("1.2.3");
 	});
 
+	test("keeps a unit fused to its number", () => {
+		// Regression: a trailing word boundary made the gate blind to exactly
+		// the numbers worth protecting, because \b fails between a digit and a
+		// letter. Deleting "~172ms" from a measured doc used to pass silently.
+		expect(extractFacts("Hyperdrive (~172ms) beats PostgREST (~208ms)")).toEqual(["172ms", "208ms"]);
+		expect(extractFacts("a 50% cut over 10km").sort()).toEqual(["10km", "50%"]);
+	});
+
+	test("still captures a bare number followed by a separate unit word", () => {
+		expect(extractFacts("100 requests per minute")).toEqual(["100"]);
+	});
+
+	test("does not split a number out of an identifier", () => {
+		expect(extractFacts("the abc123 token")).toEqual([]);
+	});
+
 	test("empty input yields no facts", () => {
 		expect(extractFacts("")).toEqual([]);
 	});
@@ -688,6 +742,33 @@ describe("evaluateCounters", () => {
 		const f = r.find((c) => c.name === "fact-retention");
 		expect(f?.passed).toBe(false);
 		expect(f?.detail).toContain("Retry-After");
+	});
+
+	test("ONE fact lost from a large document still fails", () => {
+		// The defect a real 294-fact reference doc exposed: a ratio scales
+		// tolerance with document size, so deleting a measured latency scored
+		// 0.997 and passed a 0.9 gate. maxFactsLost is the binding limit.
+		const r = evaluateCounters(
+			stats(15, 10),
+			{ ratio: 293 / 294, lost: ["172ms"], total: 294 },
+			DEFAULT_COUNTERS,
+		);
+		const f = r.find((c) => c.name === "fact-retention");
+		expect(f?.passed).toBe(false);
+		expect(f?.detail).toContain("172ms");
+	});
+
+	test("losing nothing passes, and the count is reported not the percentage", () => {
+		const r = evaluateCounters(stats(15, 10), { ratio: 1, lost: [], total: 294 }, DEFAULT_COUNTERS);
+		const f = r.find((c) => c.name === "fact-retention");
+		expect(f?.passed).toBe(true);
+		expect(f?.detail).toContain("294 of 294");
+	});
+
+	test("maxFactsLost can be relaxed deliberately", () => {
+		const lax = { ...DEFAULT_COUNTERS, maxFactsLost: 2 };
+		const r = evaluateCounters(stats(15, 10), { ratio: 292 / 294, lost: ["a", "b"], total: 294 }, lax);
+		expect(r.find((c) => c.name === "fact-retention")?.passed).toBe(true);
 	});
 
 	test("an empty document trips nothing (no sentences, no claims)", () => {

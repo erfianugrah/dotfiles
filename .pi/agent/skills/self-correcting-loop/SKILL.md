@@ -1199,7 +1199,15 @@ deleting three more adjectives is not a counter:
 | `mean-sentence-floor` | prose chopped into stubs to beat a length rule | 5 | corpus min 6.6, chopped sample 2.9 |
 | `mean-sentence-ceiling` | sustained run-ons | 25 | corpus max 17.3, generated sample 32.7 |
 | `sentence-variance-floor` | uniform sentence length | 2 | corpus min 3.6, chopped sample 0.6 |
-| `fact-retention` | specifics deleted to shorten the text | 0.9 | NOT measured - needs revision pairs |
+| `fact-retention` | specifics deleted to shorten the text | 0 facts lost | see below |
+
+Fact retention gates on an ABSOLUTE count, not a ratio. It began as a ratio and
+a real 294-fact reference doc showed why that is the wrong shape: deleting a
+measured latency left retention at 0.997 and sailed through a 0.9 gate. A ratio
+scales tolerance with document size, so the longest and most measurement-dense
+documents - the ones most worth protecting - get the most licence to lose a
+number. `maxFactsLost` defaults to 0; `minFactRetention` survives as a
+secondary, lax bound for anyone who deliberately raises the count.
 
 Thresholds come from a 49-document corpus (this repo's skills, READMEs,
 AGENTS.md) tested against two adversarial samples. Re-derive them for a corpus
@@ -1213,6 +1221,13 @@ ceiling's job. One job per gate.
 reads as a design decision rather than a result: a linter that excludes
 em-dashes from its total cannot then be cited as evidence that banning
 em-dashes fails to reduce slop, because that would be true by construction.
+
+**Block labels and thematic breaks are not sentences.** A command-heavy guide
+is full of `Output:` / `Tunnel Config:` lines introducing fences, and a bare
+`---` rule. Counted as sentences they collapse the mean: one real guide scored
+4.8 words per sentence and failed the chopping gate on prose that was not
+chopped, because 23 of its 63 "sentences" were labels and rules. Both are
+excluded from the length distribution and still scanned for vocabulary.
 
 **What it deliberately does not do.** There is no POS tagger (zero-dep), so
 passive and nominalization are regex heuristics - survivable precisely because

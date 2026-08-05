@@ -179,6 +179,8 @@ const RE_LIST = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/;
 const RE_TABLE_ROW = /^\s*\|.*\|\s*$/;
 const RE_TABLE_DELIM = /^[\s|:-]+$/;
 const RE_QUOTE = /^\s*>\s?(.*)$/;
+/** Thematic break: ---, ***, ___ (three or more, optionally spaced). */
+const RE_HRULE = /^\s{0,3}(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$/;
 
 /**
  * Split a markdown document into classified segments. Masking runs first, so
@@ -203,6 +205,13 @@ export function segment(src: string): Segment[] {
 		const lineNo = i + 1;
 
 		if (!raw.trim()) {
+			flush();
+			continue;
+		}
+
+		// A thematic break is punctuation, not content. Left in, it became a
+		// zero-word "sentence" that dragged the mean-length metric down.
+		if (RE_HRULE.test(raw)) {
 			flush();
 			continue;
 		}
@@ -319,11 +328,38 @@ export function words(text: string): string[] {
 // Class B: structural metrics. Hard to satisfy without actually rewriting.
 // ---------------------------------------------------------------------------
 
-/** Every sentence in the prose-bearing segments (para + list). */
+/** Longest label admitted by isLabel, in words. */
+const MAX_LABEL_WORDS = 6;
+
+/**
+ * True for a short colon-terminated fragment such as "Tunnel Config:" or
+ * "Output:" - a caption introducing a code block, not a sentence.
+ *
+ * Without this, a command-heavy guide reads as chopped prose: one real doc in
+ * the corpus scored a mean of 4.8 words per sentence purely because 20 of its
+ * 63 "sentences" were block labels, and it failed the chopping gate despite
+ * its actual prose being ordinary. Labels still feed the lexical detectors;
+ * they are excluded only from the length distribution.
+ */
+export function isLabel(text: string): boolean {
+	const t = text.trim();
+	if (!t.endsWith(":")) return false;
+	if (/[.!?]/.test(t.slice(0, -1))) return false;
+	return words(t).length <= MAX_LABEL_WORDS;
+}
+
+/**
+ * Every sentence in the prose-bearing segments (para + list).
+ *
+ * Block labels and word-free fragments are dropped: both are punctuation or
+ * scaffolding rather than prose, and both distort the length distribution that
+ * the structural gates read.
+ */
 export function proseSentences(segs: Segment[]): string[] {
 	return segs
 		.filter((s) => s.kind === "para" || s.kind === "list")
-		.flatMap((s) => splitSentences(s.text));
+		.flatMap((s) => splitSentences(s.text))
+		.filter((s) => words(s).length > 0 && !isLabel(s));
 }
 
 export interface LengthStats {
@@ -704,7 +740,21 @@ export interface CounterConfig {
 	 */
 	maxMeanSentence: number;
 	minStddev: number;
+	/**
+	 * Fraction of the previous revision's facts that must survive. Secondary to
+	 * maxFactsLost and lax by default, because a ratio is the wrong shape for
+	 * this job on its own: it scales tolerance with document size, so a large
+	 * measured reference would be permitted to lose more numbers than a short
+	 * one.
+	 */
 	minFactRetention: number;
+	/**
+	 * Absolute number of facts a revision may drop. This is the binding limit.
+	 * Found on a real 294-fact reference doc: deleting a measured latency left
+	 * retention at 0.997 and sailed through a 0.9 ratio gate, which is exactly
+	 * the edit the gate exists to catch.
+	 */
+	maxFactsLost: number;
 	/** Below this many sentences the variance floor is not evaluated. */
 	minSentencesForVariance: number;
 }
@@ -726,15 +776,16 @@ export interface CounterConfig {
  * sample's 3.3, so no threshold separates those two without failing real
  * docs. Run-ons are the mean ceiling's job. One job per gate.
  *
- * minFactRetention is the exception: it is NOT measured, because calibrating
- * it needs before/after revision pairs the corpus does not contain. Treat it
- * as a starting point.
+ * The fact-retention pair is calibrated differently: maxFactsLost is the
+ * binding limit and defaults to zero tolerance, because a revision that drops
+ * a measured number is the case the gate exists for. Raise it deliberately.
  */
 export const DEFAULT_COUNTERS: CounterConfig = {
 	minMeanSentence: 5,
 	maxMeanSentence: 25,
 	minStddev: 2,
 	minFactRetention: 0.9,
+	maxFactsLost: 0,
 	minSentencesForVariance: 8,
 };
 
@@ -760,7 +811,16 @@ export interface FactRetention {
 }
 
 const RE_BACKTICKED = /`([^`\n]+)`/g;
-const RE_NUMBER = /\b\d+(?:[.,]\d+)*\b/g;
+/**
+ * A number, with any unit fused to it kept as part of the fact.
+ *
+ * The trailing `\b` this replaced made the whole gate blind to the numbers it
+ * most needed to protect: `\b172\b` does not match inside "172ms", because the
+ * boundary fails between a digit and a letter. On a corpus of measurements -
+ * where latencies, sizes and durations nearly always carry a fused unit -
+ * deleting "~172ms" from a sentence passed the gate silently.
+ */
+const RE_NUMBER = /(?<![A-Za-z0-9])\d+(?:[.,]\d+)*(?:[A-Za-z%]{1,4})?/g;
 const RE_URL = /\bhttps?:\/\/\S+/g;
 
 /**
@@ -861,13 +921,13 @@ export function evaluateCounters(
 	if (facts === null || facts.total === 0) {
 		out.push({ name: "fact-retention", passed: true, detail: "skipped: no before-text to compare" });
 	} else {
-		const ok = facts.ratio >= cfg.minFactRetention;
+		const ok = facts.lost.length <= cfg.maxFactsLost && facts.ratio >= cfg.minFactRetention;
 		out.push({
 			name: "fact-retention",
 			passed: ok,
 			detail: ok
-				? `kept ${(facts.ratio * 100) | 0}% of ${facts.total} facts`
-				: `dropped ${facts.lost.length} of ${facts.total} facts from the previous revision: ${facts.lost.slice(0, 8).join(", ")}`,
+				? `kept ${facts.total - facts.lost.length} of ${facts.total} facts`
+				: `dropped ${facts.lost.length} of ${facts.total} facts from the previous revision: ${facts.lost.slice(0, 8).join(", ")}${facts.lost.length > 8 ? ", ..." : ""}`,
 		});
 	}
 
