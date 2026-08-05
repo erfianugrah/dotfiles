@@ -25,9 +25,15 @@
  *
  * Simplifications vs opencode's version:
  *   - No fuzzy hunk matching. Each '-' line must match the file content EXACTLY
- *     at the location identified by the @@ context. Failure raises a clear error.
- *   - No file rename (*** Move to:) — use Update with full content for now.
- *   - No BOM/encoding fancy handling — UTF-8 assumed.
+ *     and UNIQUELY. Unprefixed @@ context lines are NOT used to locate a
+ *     replacement, only to anchor a pure insertion. Failure raises a clear error.
+ *   - No file rename (*** Move to:) - use Update with full content for now.
+ *   - No BOM/encoding fancy handling - UTF-8 assumed.
+ *
+ * Same-path ops:
+ *   Staging is keyed by absolute path, so several Update ops on one file chain
+ *   (each applies to the previous result) instead of racing on a shared tmp
+ *   file. Add/Delete on a path already touched in the same patch is rejected.
  *
  * Atomicity:
  *   1. Parse + apply all hunks in memory. If any hunk fails, NO file IO.
@@ -54,198 +60,18 @@ import { defineTool, generateDiffString, type ExtensionAPI } from "@earendil-wor
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve as pathResolve, relative as pathRelative } from "node:path";
 import { randomBytes } from "node:crypto";
+import {
+  applyHunks,
+  parsePatch,
+  renderApplyDiffs,
+  type FileOp,
+} from "./lib/apply-patch-core";
 
-export type FileOp =
-  | { type: "add"; path: string; content: string }
-  | { type: "delete"; path: string }
-  | { type: "update"; path: string; hunks: Hunk[] };
-
-export type Hunk = {
-  context: string; // line after @@
-  oldLines: string[]; // lines starting with '-'
-  newLines: string[]; // lines starting with '+'
-};
-
-// Exported for unit tests. Pure function: input string → list of file ops.
-export function parsePatch(text: string): FileOp[] {
-  const normalised = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const lines = normalised.split("\n");
-
-  // Strip *** Begin Patch / *** End Patch envelope if present
-  let start = 0;
-  let end = lines.length;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() === "*** Begin Patch") {
-      start = i + 1;
-      break;
-    }
-  }
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].trim() === "*** End Patch") {
-      end = i;
-      break;
-    }
-  }
-  const body = lines.slice(start, end);
-
-  const ops: FileOp[] = [];
-  let i = 0;
-  while (i < body.length) {
-    const line = body[i];
-    const addMatch = line.match(/^\*\*\* Add File: (.+)$/);
-    const updateMatch = line.match(/^\*\*\* Update File: (.+)$/);
-    const deleteMatch = line.match(/^\*\*\* Delete File: (.+)$/);
-
-    if (addMatch) {
-      const path = addMatch[1].trim();
-      const contentLines: string[] = [];
-      i++;
-      while (i < body.length && !body[i].match(/^\*\*\* (Add|Update|Delete) File:/)) {
-        if (body[i] === "" && i + 1 >= body.length) break;
-        const ln = body[i];
-        if (!ln.startsWith("+")) {
-          throw new Error(
-            `Add File "${path}": every line must start with '+' (got: ${JSON.stringify(ln)})`,
-          );
-        }
-        contentLines.push(ln.slice(1));
-        i++;
-      }
-      const content = contentLines.join("\n") + (contentLines.length > 0 ? "\n" : "");
-      ops.push({ type: "add", path, content });
-      continue;
-    }
-
-    if (deleteMatch) {
-      ops.push({ type: "delete", path: deleteMatch[1].trim() });
-      i++;
-      continue;
-    }
-
-    if (updateMatch) {
-      const path = updateMatch[1].trim();
-      const hunks: Hunk[] = [];
-      i++;
-      // Each hunk starts with @@. Lines between @@ markers are - or + or whitespace context (ignored).
-      while (i < body.length && !body[i].match(/^\*\*\* (Add|Update|Delete) File:/)) {
-        if (body[i].startsWith("@@")) {
-          const context = body[i].slice(2).trim();
-          i++;
-          const oldLines: string[] = [];
-          const newLines: string[] = [];
-          while (
-            i < body.length &&
-            !body[i].startsWith("@@") &&
-            !body[i].match(/^\*\*\* (Add|Update|Delete) File:/)
-          ) {
-            const ln = body[i];
-            if (ln.startsWith("-")) oldLines.push(ln.slice(1));
-            else if (ln.startsWith("+")) newLines.push(ln.slice(1));
-            // context lines (no prefix) are matched by surrounding hunk
-            // boundaries; not stored explicitly in this simple parser
-            i++;
-          }
-          hunks.push({ context, oldLines, newLines });
-        } else {
-          // Skip blank lines between hunks
-          i++;
-        }
-      }
-      if (hunks.length === 0) {
-        throw new Error(`Update File "${path}": no @@ hunks found`);
-      }
-      ops.push({ type: "update", path, hunks });
-      continue;
-    }
-
-    // Skip blank lines and unrecognised lines between ops
-    i++;
-  }
-
-  if (ops.length === 0) {
-    throw new Error("Patch contained no file operations");
-  }
-  return ops;
-}
-
-async function applyUpdate(
-  filePath: string,
-  hunks: Hunk[],
-): Promise<{ before: string; after: string }> {
-  let content: string;
-  try {
-    content = await readFile(filePath, "utf8");
-  } catch (err) {
-    throw new Error(`Update File "${filePath}": cannot read (${(err as Error).message})`);
-  }
-
-  let result = content;
-  for (let hIdx = 0; hIdx < hunks.length; hIdx++) {
-    const hunk = hunks[hIdx];
-    const oldBlock = hunk.oldLines.join("\n");
-    const newBlock = hunk.newLines.join("\n");
-
-    if (oldBlock.length === 0) {
-      // Pure insertion. Locate by context line.
-      if (!hunk.context) {
-        throw new Error(`Update File "${filePath}" hunk ${hIdx + 1}: pure insertion needs @@ context`);
-      }
-      const ctxIdx = result.indexOf(hunk.context);
-      if (ctxIdx === -1) {
-        throw new Error(
-          `Update File "${filePath}" hunk ${hIdx + 1}: @@ context ${JSON.stringify(hunk.context)} not found`,
-        );
-      }
-      // Insert after the context line
-      const lineEnd = result.indexOf("\n", ctxIdx);
-      const insertAt = lineEnd === -1 ? result.length : lineEnd + 1;
-      result = result.slice(0, insertAt) + newBlock + "\n" + result.slice(insertAt);
-      continue;
-    }
-
-    // Find oldBlock and replace with newBlock. Must be unique.
-    const firstIdx = result.indexOf(oldBlock);
-    if (firstIdx === -1) {
-      throw new Error(
-        `Update File "${filePath}" hunk ${hIdx + 1}: old block not found.\nExpected:\n${oldBlock}`,
-      );
-    }
-    const secondIdx = result.indexOf(oldBlock, firstIdx + 1);
-    if (secondIdx !== -1) {
-      throw new Error(
-        `Update File "${filePath}" hunk ${hIdx + 1}: old block matches multiple times; add @@ context to disambiguate`,
-      );
-    }
-    result = result.slice(0, firstIdx) + newBlock + result.slice(firstIdx + oldBlock.length);
-  }
-
-  return { before: content, after: result };
-}
-
-/**
- * Build an edit-style diff block for the applied changes, matching pi's native
- * edit tool output (line-numbered `+`/`-`/` ` gutters — pi colorizes by prefix
- * at render time). Pure + dependency-injected so it's unit-testable without
- * pi's bundled `generateDiffString`.
- *
- * `add` ops are skipped: the model authored the new file content, so a diff
- * from empty adds nothing but tokens. `delete` ops never reach here. Only
- * `update` ops (where the on-disk result may differ from what the model
- * pictured) get a diff.
- */
-export function renderApplyDiffs(
-  files: Array<{ relPath: string; oldContent: string; newContent: string; isNew: boolean }>,
-  diffFn: (oldContent: string, newContent: string) => string,
-): string {
-  const blocks: string[] = [];
-  for (const f of files) {
-    if (f.isNew) continue;
-    const diff = diffFn(f.oldContent, f.newContent);
-    if (diff.trim().length === 0) continue;
-    blocks.push(`### ${f.relPath}\n${diff}`);
-  }
-  return blocks.join("\n\n");
-}
+// Pure core (parser + hunk application + diff rendering) lives in
+// ./lib/apply-patch-core so it can be unit-tested without pi's runtime
+// modules. Re-exported here to keep the public surface unchanged.
+export type { FileOp, Hunk } from "./lib/apply-patch-core";
+export { applyHunks, parsePatch, renderApplyDiffs } from "./lib/apply-patch-core";
 
 const applyPatchTool = defineTool({
   name: "apply_patch",
@@ -287,24 +113,38 @@ const applyPatchTool = defineTool({
       };
     }
 
-    // Stage all changes in memory, then write atomically.
-    type Staged =
-      | { type: "write"; path: string; content: string; isNew: boolean }
-      | { type: "delete"; path: string };
-
-    const staged: Staged[] = [];
-    // Parallel record of write ops for post-promote diff rendering. Index-free
-    // (matched by path) — only consumed on the all-success path.
-    const diffInputs: Array<{
-      relPath: string;
+    // Stage all changes in memory, then write atomically. Keyed by absolute
+    // path: the tmp filename is derived from the path, so two staged writes to
+    // one path would share a tmp and silently drop the first. Chaining them
+    // through the map instead makes repeat Update ops on a file compose.
+    type StagedWrite = {
+      kind: "write";
+      abs: string;
+      content: string;
       oldContent: string;
-      newContent: string;
       isNew: boolean;
-    }> = [];
+    };
+    type Staged = StagedWrite | { kind: "delete"; abs: string };
+
+    const stagedByPath = new Map<string, Staged>();
+
     for (const op of ops) {
       const abs = isAbsolute(op.path) ? op.path : pathResolve(ctx.cwd, op.path);
+      const prior = stagedByPath.get(abs);
 
       if (op.type === "add") {
+        if (prior) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `Add File "${op.path}": path is already touched earlier in this patch`,
+              },
+            ],
+            details: { failedAt: op.path },
+          };
+        }
         // Confirm doesn't already exist
         try {
           await stat(abs);
@@ -314,21 +154,34 @@ const applyPatchTool = defineTool({
             details: { failedAt: op.path },
           };
         } catch {
-          // good — doesn't exist
+          // good - doesn't exist
         }
-        staged.push({ type: "write", path: abs, content: op.content, isNew: true });
-        diffInputs.push({
-          relPath: pathRelative(ctx.cwd, abs),
+        stagedByPath.set(abs, {
+          kind: "write",
+          abs,
+          content: op.content,
           oldContent: "",
-          newContent: op.content,
           isNew: true,
         });
         continue;
       }
 
       if (op.type === "delete") {
+        if (prior) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `Delete File "${op.path}": path is already touched earlier in this patch`,
+              },
+            ],
+            details: { failedAt: op.path },
+          };
+        }
+        let st: Awaited<ReturnType<typeof stat>>;
         try {
-          await stat(abs);
+          st = await stat(abs);
         } catch {
           return {
             isError: true,
@@ -336,14 +189,63 @@ const applyPatchTool = defineTool({
             details: { failedAt: op.path },
           };
         }
-        staged.push({ type: "delete", path: abs });
+        if (st.isDirectory()) {
+          return {
+            isError: true,
+            content: [
+              { type: "text", text: `Delete File "${op.path}": is a directory, not a file` },
+            ],
+            details: { failedAt: op.path },
+          };
+        }
+        stagedByPath.set(abs, { kind: "delete", abs });
         continue;
       }
 
       // update
-      let updated: { before: string; after: string };
+      if (prior?.kind === "delete") {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Update File "${op.path}": file is deleted earlier in this patch`,
+            },
+          ],
+          details: { failedAt: op.path },
+        };
+      }
+
+      let base: string;
+      let oldContent: string;
+      let isNew: boolean;
+      if (prior) {
+        // Chain onto the in-memory result of the earlier op on this path.
+        base = prior.content;
+        oldContent = prior.oldContent;
+        isNew = prior.isNew;
+      } else {
+        try {
+          base = await readFile(abs, "utf8");
+        } catch (err) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `Update File "${op.path}": cannot read (${(err as Error).message})`,
+              },
+            ],
+            details: { failedAt: op.path },
+          };
+        }
+        oldContent = base;
+        isNew = false;
+      }
+
+      let next: string;
       try {
-        updated = await applyUpdate(abs, op.hunks);
+        next = applyHunks(op.path, base, op.hunks);
       } catch (err) {
         return {
           isError: true,
@@ -351,14 +253,20 @@ const applyPatchTool = defineTool({
           details: { failedAt: op.path },
         };
       }
-      staged.push({ type: "write", path: abs, content: updated.after, isNew: false });
-      diffInputs.push({
-        relPath: pathRelative(ctx.cwd, abs),
-        oldContent: updated.before,
-        newContent: updated.after,
-        isNew: false,
-      });
+      stagedByPath.set(abs, { kind: "write", abs, content: next, oldContent, isNew });
     }
+
+    const staged = [...stagedByPath.values()];
+    // Diff inputs for the success path. Add ops are excluded: the model
+    // authored that content, so a from-empty diff is pure token bloat.
+    const diffInputs = staged
+      .filter((s): s is StagedWrite => s.kind === "write" && !s.isNew)
+      .map((s) => ({
+        relPath: pathRelative(ctx.cwd, s.abs),
+        oldContent: s.oldContent,
+        newContent: s.content,
+        isNew: false,
+      }));
 
     // Two-phase commit so a mid-batch failure rolls every change back:
     //   1. WRITE phase: each new/updated path goes to a <path>.tmp-<rand>.
@@ -377,13 +285,13 @@ const applyPatchTool = defineTool({
     try {
       // Phase 1: write all tmps
       for (const s of staged) {
-        if (s.type === "write") {
-          await mkdir(dirname(s.path), { recursive: true });
-          const tmp = `${s.path}${tmpSuffix}`;
+        if (s.kind === "write") {
+          await mkdir(dirname(s.abs), { recursive: true });
+          const tmp = `${s.abs}${tmpSuffix}`;
           await writeFile(tmp, s.content, "utf8");
-          tmpFiles.push({ tmp, final: s.path, isNew: s.isNew });
+          tmpFiles.push({ tmp, final: s.abs, isNew: s.isNew });
         } else {
-          deletes.push(s.path);
+          deletes.push(s.abs);
         }
       }
     } catch (err) {
