@@ -970,6 +970,24 @@ call per iteration. It raises confidence, it does not replace a specification -
 a vague `--spec` judges vaguely. It is the answer to "green but wrong", not a
 license to skip writing down what "right" means.
 
+**Two things the judge does not review.** Both were found the hard way, on the
+same run.
+
+- **The loop's own artifacts.** `collectDiff` includes untracked files so a
+  brand-new file is visible - which meant `.pi/harness-run.log` was handed to
+  the reviewers as part of the change. Both of them wrote it up as a defect
+  ("committing a harness run log as the sole deliverable is unrequested
+  scope"), correctly by their lights. Unstaging it at checkpoint time was not
+  enough: that only moved it from `git diff <base>` into `git ls-files
+  --others`, which this collector also reads. Filtered in both places now.
+- **An empty diff.** At baseline the tree matches the base ref, so an
+  adversarial CODE judge spends minutes of a frontier model reaching a
+  guaranteed FAIL - and its verbose "the work was not started" reasoning then
+  lands in iteration 1's prompt under the heading *"Automated checks failed on
+  the previous attempt"*, describing an attempt that never happened. Measured
+  at 147s of opus per baseline, doubled by `--adversarial 2`. The judge now
+  short-circuits: no diff, no model call, one-line fail-closed verdict.
+
 ### VISUAL mode: UI/UX awareness for a live dev server
 
 DOM asserts (`browser-assert`) prove elements *exist*; they cannot see that the

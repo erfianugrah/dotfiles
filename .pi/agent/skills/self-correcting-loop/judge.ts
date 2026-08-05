@@ -247,13 +247,49 @@ async function sh(cmd: string[], stdin?: string): Promise<{ code: number; out: s
 	return { code, out: `${stdout}${stderr}` };
 }
 
+/**
+ * The loop's own output, which is not the agent's work and must not be
+ * reviewed as if it were.
+ *
+ * This bit us for real: the run log reached two reviewers as an untracked file
+ * and both wrote it up as a defect - "committing a harness run log as the sole
+ * deliverable is unrequested scope". Unstaging it at checkpoint time only
+ * moved it from `git diff <base>` into `git ls-files --others`, which this
+ * collector also reads, so the exclusion has to live here too.
+ */
+const JUDGE_IGNORED = [".pi/harness-run.log", ".pi/harness-report.json"];
+
+/** Suffix match, so a loop running in a subdir of the repo is covered. */
+export function omitLoopArtifacts(paths: string[]): string[] {
+	return paths.filter((p) => !JUDGE_IGNORED.some((a) => p === a || p.endsWith(`/${a}`)));
+}
+
+/**
+ * Is there anything here worth spending a frontier model on?
+ *
+ * At baseline the tree matches the base ref, so the answer is a guaranteed
+ * FAIL that costs minutes of adversarial review to reach - and whose verbose
+ * "the work was not started" reasoning is then fed to iteration 1 as feedback
+ * about a previous attempt that never happened. Observed: ~150s of opus per
+ * run, twice over (--adversarial 2), to say nothing.
+ */
+export function isJudgeableDiff(diff: string): boolean {
+	return diff.trim().length > 0;
+}
+
 async function collectDiff(base: string): Promise<string> {
-	const tracked = (await sh(["git", "diff", base])).out;
+	// Exclude the artifacts from the tracked side too, in case a repo has
+	// committed them at some point (several do, via a defensive .gitignore).
+	const tracked = (
+		await sh(["git", "diff", base, "--", ".", ...JUDGE_IGNORED.map((a) => `:(exclude)${a}`)])
+	).out;
 	// Include untracked files so a brand-new file is judged, not invisible.
-	const others = (await sh(["git", "ls-files", "--others", "--exclude-standard"])).out
-		.split("\n")
-		.map((l) => l.trim())
-		.filter(Boolean);
+	const others = omitLoopArtifacts(
+		(await sh(["git", "ls-files", "--others", "--exclude-standard"])).out
+			.split("\n")
+			.map((l) => l.trim())
+			.filter(Boolean),
+	);
 	let extra = "";
 	for (const f of others) {
 		const content = (await sh(["git", "diff", "--no-index", "/dev/null", f])).out;
@@ -305,7 +341,15 @@ async function main(): Promise<number> {
 		// The judge must be able to read the PNG.
 		if (!args.tools.includes("read")) args.tools.push("read");
 	} else {
-		prompt = buildJudgePrompt(args.spec, await collectDiff(args.base), args.rubric);
+		const diff = await collectDiff(args.base);
+		if (!isJudgeableDiff(diff)) {
+			// Fail-closed and free: the change under review has not been made.
+			// Saying so in one line beats paying for two adversarial reviewers to
+			// reach the same conclusion at length and then feeding it forward.
+			console.log("judge: FAIL (nothing to review - the tree matches the base ref)");
+			return args.lenient ? 0 : 1;
+		}
+		prompt = buildJudgePrompt(args.spec, diff, args.rubric);
 	}
 
 	// Prompt goes via STDIN, not argv: a single argument is capped at

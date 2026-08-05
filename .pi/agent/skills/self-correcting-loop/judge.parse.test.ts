@@ -3,7 +3,9 @@ import {
 	type Args,
 	buildJudgePrompt,
 	buildVisualPrompt,
+	isJudgeableDiff,
 	isVisual,
+	omitLoopArtifacts,
 	parseArgs,
 	parseVerdict,
 } from "./judge.ts";
@@ -144,6 +146,46 @@ describe("judge buildJudgePrompt", () => {
 
 	test("empty diff is spelled out, not left blank", () => {
 		expect(buildJudgePrompt("s", "   ", "")).toContain("no diff");
+	});
+});
+
+// The loop's own run log reached the reviewers as an untracked file and got
+// written up as a defect: "committing a harness run log as the sole
+// deliverable is unrequested scope". Unstaging it moved it from `git diff`
+// into `git ls-files --others`, which the judge also collects - so the fix
+// has to be here, not only in the checkpoint.
+describe("judge omitLoopArtifacts", () => {
+	test("drops the loop's own artifacts from the untracked list", () => {
+		expect(
+			omitLoopArtifacts([
+				".pi/harness-run.log",
+				".pi/harness-report.json",
+				"internal/serve/serve.go",
+			]),
+		).toEqual(["internal/serve/serve.go"]);
+	});
+
+	test("matches by suffix, so a repo subdir is covered too", () => {
+		expect(omitLoopArtifacts(["sub/.pi/harness-run.log", "sub/main.go"])).toEqual(["sub/main.go"]);
+	});
+
+	test("leaves the manifest alone - that IS reviewable work", () => {
+		expect(omitLoopArtifacts([".pi/harness.json"])).toEqual([".pi/harness.json"]);
+	});
+});
+
+// At baseline the tree matches the base ref, so an adversarial CODE judge
+// spends minutes of a frontier model to conclude "nothing was built" - a
+// guaranteed FAIL carrying no information, whose verbose reasoning then
+// becomes iteration 1's "the previous attempt failed" feedback.
+describe("judge isJudgeableDiff", () => {
+	test("an empty diff is not worth a model call", () => {
+		expect(isJudgeableDiff("")).toBe(false);
+		expect(isJudgeableDiff("   \n\n")).toBe(false);
+	});
+
+	test("any real change is", () => {
+		expect(isJudgeableDiff("diff --git a/x b/x\n+line")).toBe(true);
 	});
 });
 
