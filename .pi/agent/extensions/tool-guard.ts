@@ -41,6 +41,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { spawn } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // Set to e.g. ["docs_path", "find_name"] to suppress specific rules without
 // removing the extension. See rule IDs below.
@@ -113,19 +117,36 @@ function stateFor(sessionKey: string): LoopState {
   return s;
 }
 
-// ---- Docs-first chain guard ----
+// ---- Docs-first chain guard (topic-aware) ----
 //
-// Enforces: check docs.erfi.io BEFORE reaching for websearch / web_research.
+// Enforces: check docs.erfi.io BEFORE reaching for websearch / web_research --
+// but ONLY when the query plausibly intersects what docs.erfi.io covers
+// (technical documentation). The original blanket version blocked the first
+// web call of every session, which forced a pointless docs_sources round-trip
+// for shopping / local / news queries ("best gyro ball in SG") that a
+// technical-docs index definitionally cannot answer.
 //
-// Chain the guard encodes at runtime:
-//   websearch / web_research called?
-//     → docs_* tool called this session?  (tracked in docsFirstSessions)
-//         yes → allow (model did the check; took the "else" branch if docs had nothing)
-//         no  → block once: "call docs_sources first; if ≥1 file use docs_*;
-//                             if 0 files call websearch again — gate opens"
+// Decision chain for websearch / web_research (decideDocsFirst):
+//   1. web_research mode:"local" | "fresh"  -> allow. Those modes ARE the
+//      research stack (SearXNG + Playwright crawler); never docs territory.
+//   2. query matches NON_TECHNICAL_QUERY     -> allow (shopping, local
+//      business, news, weather, travel, ...)
+//   3. topic cache loaded AND no query word matches any docs source topic
+//                                           -> allow (docs provably has no
+//      coverage for this query)
+//   4. otherwise                            -> block once per session with
+//      the docs-first chain. The block message names the matched source and
+//      self-exempts non-technical queries (re-issue immediately).
 //
-// One block per session: enough to enforce the habit, not enough to be
-// annoying when docs genuinely has no coverage for the topic.
+// Silent allows do NOT open the gate -- a later genuinely-technical query in
+// the same session still gets the one-time docs-first reminder.
+//
+// The topic cache (~/.pi/agent/.docs-topics.json) holds topic words derived
+// from the docs index's source list, fetched over the same SSH channel
+// docs.ts uses. Refreshed lazily in the background (never inside a blocking
+// tool_call await) at most once per TOPIC_CACHE_TTL_MS. If the cache is
+// unavailable (first-ever session, docs host unreachable) the guard falls
+// back to the old blanket block-once behaviour.
 const DOCS_FIRST_TOOLS = new Set([
   "docs_sources", "docs_search", "docs_grep", "docs_find", "docs_read", "docs_summary",
 ]);
@@ -133,6 +154,195 @@ const WEB_SEARCH_TOOLS = new Set(["websearch", "web_research"]);
 // Sessions where docs_* was called OR the one-time redirect already fired.
 // Either event opens the gate for the rest of the session.
 const docsFirstSessions = new Set<string>();
+
+// Keep in sync with docs.ts (auto-generated; constants are not exported).
+const DOCS_SSH_HOST = "docs@docs.erfi.io";
+const DOCS_SSH_PORT = "2222";
+const TOPIC_CACHE_PATH = join(homedir(), ".pi", "agent", ".docs-topics.json");
+const TOPIC_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+// High-precision non-technical intents: docs.erfi.io holds ONLY technical
+// docs, so any query in these lanes is definitionally a web/research-stack
+// query. Keep this list conservative -- a false negative just means the old
+// block-once path runs (status quo), a false positive silently skips a docs
+// check that might have helped.
+const NON_TECHNICAL_QUERY = new RegExp(
+  [
+    "\\bbuy(ing)?\\b", "\\bpurchase\\b", "\\bshop(ping)?\\b", "\\bcheapest\\b",
+    "\\bdeals?\\b", "\\bprices?\\b", "\\bpricing\\b", "\\bcost of\\b",
+    "\\brestaurants?\\b", "\\bhawker\\b", "\\bcafes?\\b", "\\bfood\\b",
+    "\\bhotels?\\b", "\\bflights?\\b", "\\bweather\\b", "\\bnews\\b",
+    "\\bheadlines?\\b", "\\bmovies?\\b", "\\bshowtimes?\\b",
+    "\\bopening hours\\b", "\\bnear me\\b", "\\bin singapore\\b", "\\bin sg\\b",
+  ].join("|"),
+  "i",
+);
+
+// Words that appear in docs source names but carry no topic signal.
+const TOPIC_STOPLIST = new Set([
+  "api", "apis", "docs", "doc", "guide", "guides", "cli", "sdk", "ref",
+  "reference", "overview", "dev", "www",
+]);
+
+// Derive matchable topic words from docs source names. "supabase-auth-api"
+// yields {supabase-auth-api, supabase-auth, supabase, auth}. Components
+// shorter than 3 chars ("go", "r") are dropped -- too many English-word
+// collisions ("how do I go about X"). A missing topic just means the
+// docs-first block never fires for that source, not that docs go unchecked
+// (the AGENTS.md docs-first rules still apply); a false-positive topic only
+// costs one self-exempting block per session, so this trades toward recall.
+// Exported for unit tests.
+export function extractTopics(sources: string[]): string[] {
+  const topics = new Set<string>();
+  for (const raw of sources) {
+    const name = raw.trim().toLowerCase();
+    if (!name) continue;
+    const noApi = name.replace(/-api$/, "");
+    for (const cand of [name, noApi, ...noApi.split("-")]) {
+      if (cand.length >= 3 && !TOPIC_STOPLIST.has(cand)) topics.add(cand);
+    }
+  }
+  return [...topics];
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// First topic that appears as a whole word in the query, else null.
+// Exported for unit tests.
+export function matchDocsTopic(query: string, topics: string[]): string | null {
+  if (!query || topics.length === 0) return null;
+  const q = query.toLowerCase();
+  for (const t of topics) {
+    if (new RegExp(`\\b${escapeRe(t)}\\b`, "i").test(q)) return t;
+  }
+  return null;
+}
+
+export type DocsFirstInput = { query?: string; mode?: string };
+export type DocsFirstDecision =
+  | { block: false; via: "mode" | "non-technical" | "no-topic" }
+  | { block: true; matchedTopic: string | null };
+
+// Pure decision for the docs_first guard. `topics` is the cached docs topic
+// list, or null when the cache is unavailable (falls back to blanket block).
+// Exported for unit tests.
+export function decideDocsFirst(
+  toolName: string,
+  input: DocsFirstInput,
+  topics: string[] | null,
+): DocsFirstDecision {
+  // mode:"local" (maps/reviews/hours) and mode:"fresh" (<1-week news) are
+  // the research stack by definition -- docs.erfi.io can never answer them.
+  if (toolName === "web_research" && (input.mode === "local" || input.mode === "fresh")) {
+    return { block: false, via: "mode" };
+  }
+  const query = (input.query ?? "").trim();
+  if (query && NON_TECHNICAL_QUERY.test(query)) {
+    return { block: false, via: "non-technical" };
+  }
+  if (topics !== null) {
+    const matched = matchDocsTopic(query, topics);
+    if (!matched) return { block: false, via: "no-topic" };
+    return { block: true, matchedTopic: matched };
+  }
+  // Coverage unknown (cache not warmed) -- old behaviour: block once.
+  return { block: true, matchedTopic: null };
+}
+
+type TopicCache = { fetchedAt: number; topics: string[] };
+let topicCache: TopicCache | null | undefined; // undefined = not read from disk yet
+let topicRefreshInFlight = false;
+
+function loadTopics(): string[] | null {
+  if (topicCache === undefined) {
+    topicCache = null;
+    try {
+      const raw = JSON.parse(readFileSync(TOPIC_CACHE_PATH, "utf-8")) as {
+        fetchedAt?: unknown;
+        topics?: unknown;
+      };
+      if (
+        Array.isArray(raw.topics) &&
+        raw.topics.every((t) => typeof t === "string")
+      ) {
+        topicCache = {
+          fetchedAt: typeof raw.fetchedAt === "number" ? raw.fetchedAt : 0,
+          topics: raw.topics as string[],
+        };
+      }
+    } catch { /* missing/corrupt cache -> null */ }
+  }
+  if (!topicCache || Date.now() - topicCache.fetchedAt > TOPIC_CACHE_TTL_MS) {
+    refreshTopicsInBackground();
+  }
+  return topicCache ? topicCache.topics : null;
+}
+
+// Fire-and-forget: fetch the docs source list over the same SSH channel
+// docs.ts uses, derive topics, persist. Never awaited from tool_call.
+function refreshTopicsInBackground(): void {
+  if (topicRefreshInFlight) return;
+  topicRefreshInFlight = true;
+  // Source-list derivation: split each index line on TAB first (embedded
+  // newlines in summaries produce continuation prose lines), then take the
+  // path's first component, filtered to plausible source names. A bare
+  // `awk -F/ '{print $1}'` over the raw index returns summary prose -
+  // verified against the live index 2026-08.
+  const remote =
+    "if [ -s /docs/_index.tsv ]; then awk -F'\\t' '{n=split($1,a,\"/\"); if (n>1 && a[1] ~ /^[a-z0-9][a-z0-9._-]*$/) print a[1]}' /docs/_index.tsv | sort -u; " +
+    "else ls -1 /docs; fi";
+  const proc = spawn(
+    "ssh",
+    [
+      "-o", "StrictHostKeyChecking=no",
+      "-o", "UserKnownHostsFile=/dev/null",
+      "-o", "LogLevel=ERROR",
+      "-o", "ConnectTimeout=5",
+      "-p", DOCS_SSH_PORT,
+      DOCS_SSH_HOST,
+      remote,
+    ],
+    { stdio: ["ignore", "pipe", "ignore"] },
+  );
+  const out: Buffer[] = [];
+  proc.stdout.on("data", (b) => out.push(b));
+  proc.on("error", () => { topicRefreshInFlight = false; });
+  proc.on("close", (code) => {
+    topicRefreshInFlight = false;
+    if (code !== 0) return;
+    const sources = Buffer.concat(out).toString("utf-8")
+      .split("\n").map((s) => s.trim()).filter(Boolean);
+    const topics = extractTopics(sources);
+    if (topics.length === 0) return;
+    topicCache = { fetchedAt: Date.now(), topics };
+    try {
+      writeFileSync(TOPIC_CACHE_PATH, JSON.stringify(topicCache));
+    } catch { /* cache write is best-effort */ }
+  });
+}
+
+function docsFirstBlockReason(toolName: string, matchedTopic: string | null): string {
+  const reopen =
+    `Then re-issue the \`${toolName}\` call -- the gate is now open for the rest of this session.`;
+  const nonTechNote =
+    `If the query is actually non-technical (shopping, local business, news, weather), ` +
+    `skip docs entirely and re-issue immediately -- prefer \`web_research\` with mode:"local"/"fresh" ` +
+    `or the research stack's SearXNG (:8888) for those; docs.erfi.io only holds technical documentation.`;
+  if (matchedTopic) {
+    return (
+      `tool-guard[docs_first]: this looks technical and docs.erfi.io has a "${matchedTopic}" source that may cover it. ` +
+      `Check docs first: \`docs_search query=\"<keywords>\" source=\"${matchedTopic}\"\`, then docs_read / docs_grep the hits. ` +
+      `If docs comes up empty, ${reopen} ${nonTechNote}`
+    );
+  }
+  return (
+    `tool-guard[docs_first]: docs.erfi.io has ~158 indexed technical sources; coverage for this query is unknown ` +
+    `(topic cache not warmed yet). Follow the docs-first chain: (1) \`docs_sources <filter>\` to check coverage; ` +
+    `(2) if >=1 file -> use docs_search / docs_read / docs_grep; (3) if 0 files -> ${reopen} ${nonTechNote}`
+  );
+}
 
 // Hard-block rules: regex on bash command, plus a redirect message.
 type BlockRule = {
@@ -465,6 +675,12 @@ export function extractPatchPaths(patchText: string): string[] {
 }
 
 export default function (pi: ExtensionAPI) {
+  // Warm the docs topic cache at session start so the docs_first guard can
+  // make its coverage decision synchronously later. Fire-and-forget.
+  pi.on("session_start", async () => {
+    try { loadTopics(); } catch { /* best-effort */ }
+  });
+
   // Reset per-session loop state when sessions transition. Pi keeps the
   // extension module loaded across /new, /resume, /fork — module-scope
   // state survives. Without this, search counters leak across sessions.
@@ -493,19 +709,24 @@ export default function (pi: ExtensionAPI) {
       // fall through — never block docs_* tools
     }
 
-    // Docs-first chain: redirect websearch / web_research if docs not yet consulted
+    // Docs-first chain: redirect websearch / web_research only when the
+    // query plausibly intersects docs.erfi.io coverage (decideDocsFirst).
+    // Silent allows do NOT open the gate -- a later technical query in the
+    // same session still gets the one-time reminder.
     if (!DISABLED.has("docs_first") && WEB_SEARCH_TOOLS.has(event.toolName)) {
       if (!docsFirstSessions.has(sessionKey)) {
-        docsFirstSessions.add(sessionKey); // fire once per session
-        return {
-          block: true,
-          reason:
-            `tool-guard[docs_first]: docs.erfi.io has 158 indexed sources covering most technical topics. ` +
-            `Follow the docs-first chain before reaching for \`${event.toolName}\`: ` +
-            `(1) call \`docs_sources <filter>\` to check coverage; ` +
-            `(2) if ≥1 file → use \`docs_search\` / \`docs_read\` / \`docs_grep\` instead; ` +
-            `(3) if 0 files → call \`${event.toolName}\` again — the gate opens once docs_sources has been consulted.`,
-        };
+        const decision = decideDocsFirst(
+          event.toolName,
+          event.input as DocsFirstInput,
+          loadTopics(),
+        );
+        if (decision.block) {
+          docsFirstSessions.add(sessionKey); // one block per session
+          return {
+            block: true,
+            reason: docsFirstBlockReason(event.toolName, decision.matchedTopic),
+          };
+        }
       }
     }
 

@@ -17,6 +17,9 @@ import {
   extractPatchPaths,
   checkReformulationLoop,
   stripAnsiCSpans,
+  extractTopics,
+  matchDocsTopic,
+  decideDocsFirst,
 } from "../extensions/tool-guard.ts";
 import {
   matchIntent,
@@ -311,6 +314,97 @@ describe("tool-guard.checkReformulationLoop", () => {
     const k = freshKey();
     expect(checkReformulationLoop("bash", k)).toBeNull();
     expect(checkReformulationLoop("edit", k)).toBeNull();
+  });
+});
+
+// ── tool-guard: docs_first topic awareness ────────────────────────────────
+
+describe("tool-guard.extractTopics", () => {
+  test("strips the -api suffix and keeps the full name", () => {
+    const topics = extractTopics(["cloudflare-api"]);
+    expect(topics).toContain("cloudflare");
+    expect(topics).toContain("cloudflare-api");
+    expect(topics).not.toContain("api");
+  });
+
+  test("splits hyphenated names into components", () => {
+    const topics = extractTopics(["supabase-auth-api"]);
+    expect(topics).toContain("supabase");
+    expect(topics).toContain("auth");
+    expect(topics).toContain("supabase-auth");
+  });
+
+  test("drops stoplist words and sub-3-char components", () => {
+    const topics = extractTopics(["aws-api", "go", "k3s"]);
+    expect(topics).toContain("aws");
+    expect(topics).toContain("k3s");
+    expect(topics).not.toContain("go"); // too short: English-word collisions
+    expect(topics).not.toContain("api");
+  });
+});
+
+describe("tool-guard.matchDocsTopic", () => {
+  const topics = extractTopics(["postgres", "supabase-auth-api", "keycloak"]);
+
+  test("matches a whole word case-insensitively", () => {
+    expect(matchDocsTopic("Keycloak SAML logout loop", topics)).toBe("keycloak");
+  });
+
+  test("does not match substrings of longer words", () => {
+    expect(matchDocsTopic("postgresql RLS policy", topics)).toBeNull();
+  });
+
+  test("returns null when nothing matches (shopping query)", () => {
+    expect(matchDocsTopic("best gyro ball I can get", topics)).toBeNull();
+  });
+
+  test("empty inputs never match", () => {
+    expect(matchDocsTopic("", topics)).toBeNull();
+    expect(matchDocsTopic("postgres", [])).toBeNull();
+  });
+});
+
+describe("tool-guard.decideDocsFirst", () => {
+  const topics = extractTopics(["postgres", "keycloak", "supabase"]);
+
+  test("web_research mode:local never blocks", () => {
+    const d = decideDocsFirst("web_research", { query: "best gyro ball in SG", mode: "local" }, null);
+    expect(d).toEqual({ block: false, via: "mode" });
+  });
+
+  test("web_research mode:fresh never blocks", () => {
+    const d = decideDocsFirst("web_research", { query: "postgres CVE this week", mode: "fresh" }, topics);
+    expect(d).toEqual({ block: false, via: "mode" });
+  });
+
+  test("non-technical query skips even with no topic cache", () => {
+    const d = decideDocsFirst("websearch", { query: "best gyro ball I can get in SG" }, null);
+    expect(d).toEqual({ block: false, via: "non-technical" });
+  });
+
+  test("shopping verbs are non-technical", () => {
+    const d = decideDocsFirst("websearch", { query: "where to buy a wrist exercise ball" }, topics);
+    expect(d).toEqual({ block: false, via: "non-technical" });
+  });
+
+  test("technical query with no topic match is allowed silently", () => {
+    const d = decideDocsFirst("websearch", { query: "how do gyroscopic bearings work" }, topics);
+    expect(d).toEqual({ block: false, via: "no-topic" });
+  });
+
+  test("technical query matching a docs topic blocks with the topic named", () => {
+    const d = decideDocsFirst("websearch", { query: "keycloak SAML logout loop" }, topics);
+    expect(d).toEqual({ block: true, matchedTopic: "keycloak" });
+  });
+
+  test("cache unavailable falls back to block-once with no topic", () => {
+    const d = decideDocsFirst("websearch", { query: "obscure technical thing" }, null);
+    expect(d).toEqual({ block: true, matchedTopic: null });
+  });
+
+  test("non-technical check wins over a topic match (pricing is not in docs)", () => {
+    const d = decideDocsFirst("websearch", { query: "supabase pricing tiers" }, topics);
+    expect(d).toEqual({ block: false, via: "non-technical" });
   });
 });
 

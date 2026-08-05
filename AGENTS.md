@@ -227,7 +227,8 @@ tests in /tmp/ that drive the real `execute()` via the SDK preload mock.
 ## Where things DON'T live
 
 - Live `auth.json`, `sessions/`, `session-fts.db*`, `bg-tasks/`, `todos/`,
-  `memories.json` — runtime state under `~/.pi/agent/`, NOT tracked.
+  `memories.json`, `.docs-topics.json` (tool-guard's docs-topic cache) -
+  runtime state under `~/.pi/agent/`, NOT tracked.
 - `node_modules/`, `bun.lock`, `package-lock.json` under any subtree —
   see `.stow-local-ignore`.
 
