@@ -44,6 +44,7 @@ import {
 } from "../extensions/write-stream.ts";
 import { parseImage, versionCompare } from "../extensions/oci-tags.ts";
 import {
+  isExternalMedia,
   resolveMediaPath,
   suggestFormat,
   bundleCacheKey,
@@ -3879,6 +3880,18 @@ describe("video-review / suggestFormat", () => {
   });
   test("empty map -> null", () => {
     expect(suggestFormat(per([]), 0)).toBeNull();
+  });
+});
+
+describe("video-review / isExternalMedia", () => {
+  test("yt-dlp download tmp dir -> external (no call advisories)", () => {
+    expect(isExternalMedia("/tmp/yt-dlp-y1j216qj/1AAITyg5BYQ.wav")).toBe(true);
+  });
+  test("server /media recording -> not external", () => {
+    expect(isExternalMedia("/media/2026-06-19 14-00-39.mkv")).toBe(false);
+  });
+  test("uploaded file -> not external (could be a call)", () => {
+    expect(isExternalMedia("/tmp/upload-abcd/call.mp3")).toBe(false);
   });
 });
 

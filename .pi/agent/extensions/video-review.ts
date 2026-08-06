@@ -213,6 +213,16 @@ export function suggestNames(bundle: Bundle): NameSuggestion[] {
   return out.sort((a, b) => a.at - b.at);
 }
 
+/**
+ * True for sources that are NOT call recordings - YouTube/web downloads via
+ * /api/yt-download land under /tmp/yt-dlp-<id>/. Call-specific advisories
+ * (owner mic-routing warning, format-tag nudge) are meaningless for external
+ * media, so the extract summary gates them on this.
+ */
+export function isExternalMedia(file: string): boolean {
+  return /\/tmp\/yt-dlp-/.test(file);
+}
+
 // ── call-format heuristic (pure) ──────────────────────────────────────────
 
 /**
@@ -1381,9 +1391,10 @@ const videoExtract = defineTool({
       // Owner presence: if the enrolled owner is near-silent in a long
       // recording, the mic was probably not routed into the recording (or
       // they genuinely never spoke - the human decides which).
+      const external = isExternalMedia(bundle.file);
       const enrolled = new Set((await listVoiceprints(signal).catch(() => [] as { name: string; count: number }[])).map((v) => v.name));
       const owner = process.env.VIDEO_REVIEW_OWNER ?? "Erfi";
-      if (enrolled.has(owner) && bundle.duration >= 600) {
+      if (!external && enrolled.has(owner) && bundle.duration >= 600) {
         const ownerSec = per.get(owner) ?? 0;
         if (ownerSec < 60) {
           lines.push("");
@@ -1392,7 +1403,7 @@ const videoExtract = defineTool({
       }
       // Format heuristic: untagged calls don't accumulate longitudinal
       // baselines, so nudge towards the most likely tag.
-      if (!bundle.params?.format) {
+      if (!external && !bundle.params?.format) {
         const guess = suggestFormat(per, activeSec);
         if (guess) lines.push(`format: untagged - heuristic suggests "${guess}" (tag via video_metrics format=${guess} to build a baseline)`);
       }
