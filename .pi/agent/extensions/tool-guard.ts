@@ -28,21 +28,23 @@
  *
  * Research-stack routing (decision + reinforcement, two tiers):
  *
- *   research_route (hard) - the user explicitly said "use the research
- *     tools/stack" (or named searxng/crawler). The input listener arms a
- *     per-session flag AND appends a routing note to the user message
- *     (decision aid). While armed, websearch / webfetch / web_research in
- *     default mode are BLOCKED with the exact SearXNG + crawler curl
- *     recipe (reinforcement: the block reason is the lesson). A call that
- *     hits the research stack (bash curl to searxng.erfi.io /
- *     crawler.erfi.io, or web_research mode local/fresh/crosscheck)
- *     disarms the guard. Lifts after 2 blocks (stack may be down) and at
- *     agent_end (does not leak into later turns).
+ *   research_route (hard - the ONLY hard block among the search guards) -
+ *     the user explicitly said "use the research tools/stack" (or named
+ *     the searxng.erfi.io / crawler.erfi.io hosts). The input listener
+ *     arms a per-session flag AND appends a routing note to the user
+ *     message (decision aid). While armed, websearch / webfetch /
+ *     web_research in default mode are BLOCKED with the exact SearXNG +
+ *     crawler curl recipe. Hard here because it enforces the user's own
+ *     explicit instruction (audited: weak models ignore it otherwise).
+ *     A call that hits the research stack disarms the guard. Lifts after
+ *     2 blocks (stack may be down) and at agent_end.
  *
- *   research_route_soft (one-time) - a bare Exa websearch on a
- *     non-technical / local query (shopping, SG-local, reviews) gets a
- *     single self-exempting block per session nudging toward web_research
- *     mode local/fresh or SearXNG directly. Re-issuing proceeds with Exa.
+ *   research_route_soft, docs_first, reformulation_loop (ADVISORY) -
+ *     heuristic search guards attach a note to the triggering call's
+ *     tool result; the model sees the suggestion next to the results
+ *     and makes the decision. Heuristics misfire (a topic-word false
+ *     match, breadth-first shopping research misread as a rewording
+ *     loop), so they inform rather than override.
  *
  * Soft guards (warn but allow - used for patterns where the LLM may have
  * legitimate reasons):
@@ -122,7 +124,7 @@ const LOOP_THRESHOLD = 3;
 const WRITE_TOO_LARGE_BYTES = 75_000;
 
 type LoopState = {
-  recentSearches: Array<{ tool: string; ts: number }>;
+  recentSearches: Array<{ tool: string; ts: number; tokens?: Set<string> }>;
   lastDrillInTs: number;
 };
 const loopStates = new Map<string, LoopState>();
@@ -196,19 +198,15 @@ const NON_TECHNICAL_QUERY = new RegExp(
   "i",
 );
 
-// Words that appear in docs source names but carry no topic signal.
-const TOPIC_STOPLIST = new Set([
-  "api", "apis", "docs", "doc", "guide", "guides", "cli", "sdk", "ref",
-  "reference", "overview", "dev", "www",
-]);
-
-// Derive matchable topic words from docs source names. "supabase-auth-api"
-// yields {supabase-auth-api, supabase-auth, supabase, auth}. Components
-// shorter than 3 chars ("go", "r") are dropped -- too many English-word
-// collisions ("how do I go about X"). A missing topic just means the
-// docs-first block never fires for that source, not that docs go unchecked
-// (the AGENTS.md docs-first rules still apply); a false-positive topic only
-// costs one self-exempting block per session, so this trades toward recall.
+// Derive matchable topic words from docs source names: the full slug plus
+// its -api-stripped form ("supabase-auth-api" -> {supabase-auth-api,
+// supabase-auth}). Slug components are NOT split out: multi-word slugs like
+// "use-the-index-luke" contributed common English words ("the", "use",
+// "step", "modern") that matched virtually every query and killed the
+// no-topic allow path (observed 2026-08-05: a sofa-bed shopping query
+// blocked with 'docs.erfi.io has a "use" source'). Slugs shorter than 3
+// chars ("go") are dropped. A missed topic just means the docs-first
+// advisory doesn't fire for that source - pre-guard behaviour, low harm.
 // Exported for unit tests.
 export function extractTopics(sources: string[]): string[] {
   const topics = new Set<string>();
@@ -216,8 +214,8 @@ export function extractTopics(sources: string[]): string[] {
     const name = raw.trim().toLowerCase();
     if (!name) continue;
     const noApi = name.replace(/-api$/, "");
-    for (const cand of [name, noApi, ...noApi.split("-")]) {
-      if (cand.length >= 3 && !TOPIC_STOPLIST.has(cand)) topics.add(cand);
+    for (const cand of [name, noApi]) {
+      if (cand.length >= 3) topics.add(cand);
     }
   }
   return [...topics];
@@ -341,24 +339,20 @@ function refreshTopicsInBackground(): void {
   });
 }
 
-function docsFirstBlockReason(toolName: string, matchedTopic: string | null): string {
-  const reopen =
-    `Then re-issue the \`${toolName}\` call -- the gate is now open for the rest of this session.`;
+function docsFirstAdvisoryNote(matchedTopic: string | null): string {
   const nonTechNote =
-    `If the query is actually non-technical (shopping, local business, news, weather), ` +
-    `skip docs entirely and re-issue immediately -- prefer \`web_research\` with mode:"local"/"fresh" ` +
-    `or the research stack's SearXNG (:8888) for those; docs.erfi.io only holds technical documentation.`;
+    `If the query is non-technical (shopping, local business, news, weather), ignore this - ` +
+    `prefer \`web_research\` with mode:"local"/"fresh" or the research stack's SearXNG (:8888) for those; ` +
+    `docs.erfi.io only holds technical documentation.`;
   if (matchedTopic) {
     return (
       `tool-guard[docs_first]: this looks technical and docs.erfi.io has a "${matchedTopic}" source that may cover it. ` +
-      `Check docs first: \`docs_search query=\"<keywords>\" source=\"${matchedTopic}\"\`, then docs_read / docs_grep the hits. ` +
-      `If docs comes up empty, ${reopen} ${nonTechNote}`
+      `Consider \`docs_search query=\"<keywords>\" source=\"${matchedTopic}\"\`, then docs_read / docs_grep the hits. ${nonTechNote}`
     );
   }
   return (
     `tool-guard[docs_first]: docs.erfi.io has ~158 indexed technical sources; coverage for this query is unknown ` +
-    `(topic cache not warmed yet). Follow the docs-first chain: (1) \`docs_sources <filter>\` to check coverage; ` +
-    `(2) if >=1 file -> use docs_search / docs_read / docs_grep; (3) if 0 files -> ${reopen} ${nonTechNote}`
+    `(topic cache not warmed yet). Consider \`docs_sources <filter>\` to check coverage. ${nonTechNote}`
   );
 }
 
@@ -651,7 +645,48 @@ export function splitSegments(command: string): string[] {
   return command.split(/&&|\|\||;|\|/);
 }
 
-export function checkReformulationLoop(toolName: string, sessionKey: string): string | null {
+// English function words - NOT a domain keyword list. Reformulation is
+// detected by computing content-word similarity between consecutive
+// searches, never by classifying the query into a lane.
+const QUERY_FUNCTION_WORDS = new Set([
+  "a", "an", "the", "of", "for", "to", "in", "on", "and", "or", "vs",
+  "is", "are", "was", "were", "do", "does", "did", "i", "me", "my",
+  "we", "you", "your", "it", "its", "this", "that", "these", "those",
+  "with", "from", "at", "by", "be", "as", "so", "if", "not", "no",
+  "can", "could", "should", "would", "how", "what", "which", "when",
+  "where", "who",
+]);
+
+// Content-word tokenizer: lowercase, split on non-alphanumerics, drop
+// function words, strip a trailing plural -s, normalise the sg/singapore
+// alias. Rewordings of the same query score high containment; a new facet
+// (different store/brand/sub-topic) scores low. Exported for unit tests.
+export function queryTokens(query: string): Set<string> {
+  const out = new Set<string>();
+  for (let tok of query.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (tok.length < 2) continue;
+    if (tok === "sg") tok = "singapore";
+    if (tok.length > 3 && tok.endsWith("s")) tok = tok.slice(0, -1);
+    if (QUERY_FUNCTION_WORDS.has(tok)) continue;
+    out.add(tok);
+  }
+  return out;
+}
+
+// |A n B| / min(|A|, |B|). Exported for unit tests.
+export function tokenContainment(a: Set<string>, b: Set<string>): number {
+  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+  if (small.size === 0) return 0;
+  let n = 0;
+  for (const t of small) if (large.has(t)) n++;
+  return n / small.size;
+}
+
+// Below this containment vs the previous counted search, the new search is
+// new territory (breadth-first facet research), not a rewording.
+const REFORMULATION_CONTAINMENT = 0.7;
+
+export function checkReformulationLoop(toolName: string, sessionKey: string, query?: string): string | null {
   const now = Date.now();
   const state = stateFor(sessionKey);
 
@@ -666,7 +701,24 @@ export function checkReformulationLoop(toolName: string, sessionKey: string): st
   state.recentSearches = state.recentSearches.filter(
     (s) => s.ts > state.lastDrillInTs,
   );
-  state.recentSearches.push({ tool: toolName, ts: now });
+
+  // Facet vs rewording: a query sharing few content words with the previous
+  // counted search is new territory (breadth-first research - one query per
+  // store/brand/sub-topic), not a reformulation. Reset the window instead
+  // of counting it. Observed 2026-08-05: four brand-enumeration websearches
+  // for sofa beds (koala / castlery / King Living / IKEA) hard-blocked with
+  // drill-in advice that does not fit shopping research.
+  const tokens = query ? queryTokens(query) : undefined;
+  const prev = state.recentSearches[state.recentSearches.length - 1];
+  if (
+    tokens && tokens.size > 0 &&
+    prev?.tokens && prev.tokens.size > 0 &&
+    tokenContainment(tokens, prev.tokens) < REFORMULATION_CONTAINMENT
+  ) {
+    state.recentSearches = [];
+  }
+
+  state.recentSearches.push({ tool: toolName, ts: now, tokens });
 
   if (state.recentSearches.length >= LOOP_THRESHOLD + 1) {
     const counts = new Map<string, number>();
@@ -675,7 +727,8 @@ export function checkReformulationLoop(toolName: string, sessionKey: string): st
     }
     const total = state.recentSearches.length;
     const breakdown = [...counts.entries()].map(([t, n]) => `${t}×${n}`).join(", ");
-    return `Reformulation loop detected: ${total} search calls (${breakdown}) since the last drill-in. STOP rewording. Open the most likely result with the appropriate drill-in tool: docs_search → docs_read (or docs_grep path=/docs/<source>/ to escalate after a zero-results docs_search), websearch → webfetch or web_research, codesearch → read on the linked file, context7_resolve → context7_query_docs. If results genuinely don't fit your need, ask the user to clarify rather than searching again.`;
+    state.recentSearches = []; // advisory fired - start a fresh window
+    return `Reformulation loop detected: ${total} similar search calls (${breakdown}) since the last drill-in. If you are rewording the same query, open the most likely result instead: docs_search → docs_read (or docs_grep path=/docs/<source>/ to escalate after a zero-results docs_search), websearch → webfetch or web_research, codesearch → read on the linked file, context7_resolve → context7_query_docs. If these are genuinely distinct facets, ignore this note; if results don't fit your need, ask the user to clarify rather than searching again.`;
   }
 
   return null;
@@ -698,13 +751,22 @@ export function checkReformulationLoop(toolName: string, sessionKey: string): st
 //
 // "use ... research tools/stack" is required - bare mentions of the stack
 // ("the research stack is down") are meta-discussion, not a request. The
-// searxng/crawler host alternatives fire regardless of phrasing because
-// naming the host IS the intent.
+// host alternatives require the full hostname: the bare product name
+// ("SearXNG") appears in prose too often (observed 2026-08-06: a pasted
+// session transcript quoting guard output re-armed the guard).
 export const RESEARCH_INTENT_RE =
-  /\buse\s+(?:the\s+|my\s+)?research\s+(?:tools?|stack)\b|\bsearxng(?:\.erfi\.io)?\b|\bcrawler\.erfi\.io\b/i;
+  /\buse\s+(?:the\s+|my\s+)?research\s+(?:tools?|stack)\b|\bsearxng\.erfi\.io\b|\bcrawler\.erfi\.io\b/i;
+
+// Quoted / code spans are stripped before matching: quoting the trigger
+// phrase or the guard's own output (pasted transcripts, the routing note's
+// curl recipe) is discussion ABOUT the guard, not a request. An apostrophe
+// in prose can swallow a real ask into a false quoted span - a miss just
+// means no arming (pre-guard behaviour), which is the safe direction.
+const QUOTED_SPAN_RE = /`[^`\n]*`|"[^"\n]*"|'[^'\n]*'/g;
 
 export function detectResearchIntent(text: string): boolean {
-  return RESEARCH_INTENT_RE.test(text ?? "");
+  if (!text) return false;
+  return RESEARCH_INTENT_RE.test(text.replace(QUOTED_SPAN_RE, " "));
 }
 
 // web_research modes that route through the research stack (crawler fetches
@@ -779,15 +841,34 @@ export function decideResearchRouteSoft(
   );
 }
 
-const RESEARCH_ROUTE_SOFT_REASON =
+const RESEARCH_ROUTE_SOFT_NOTE =
   "tool-guard[research_route_soft]: non-technical/local research query - bare Exa websearch is the weakest path here (SG-local, shopping, long-tail). " +
-  "Prefer the research stack: web_research with mode:\"local\" (crawler-backed fetches) or mode:\"fresh\" (SearXNG cross-check), " +
-  "or SearXNG directly: bash curl -s 'https://searxng.erfi.io/search?q=<urlencoded>&format=json'. " +
-  "Re-issue the same call to proceed with Exa anyway (fires once per session).";
+  "Consider the research stack for follow-ups: web_research with mode:\"local\" (crawler-backed fetches) or mode:\"fresh\" (SearXNG cross-check), " +
+  "or SearXNG directly: bash curl -s 'https://searxng.erfi.io/search?q=<urlencoded>&format=json'.";
 
 type ResearchRouteState = { armed: boolean; blocks: number };
 const researchRouteStates = new Map<string, ResearchRouteState>();
 const researchSoftFired = new Set<string>();
+
+// Advisory notes from the heuristic search guards (docs_first,
+// reformulation_loop, research_route_soft), attached to the triggering
+// call's tool result: sessionKey -> toolCallId -> note.
+const pendingAdvisories = new Map<string, Map<string, string>>();
+
+function addAdvisory(sessionKey: string, toolCallId: string | undefined, note: string): void {
+  if (!toolCallId) return;
+  let byCall = pendingAdvisories.get(sessionKey);
+  if (!byCall) {
+    byCall = new Map();
+    pendingAdvisories.set(sessionKey, byCall);
+  }
+  byCall.set(toolCallId, note);
+}
+
+interface ToolResultContent {
+  type: string;
+  text?: string;
+}
 
 function sessionKeyOf(ctx: {
   sessionManager?: { getSessionFile?: () => string };
@@ -831,6 +912,7 @@ export default function (pi: ExtensionAPI) {
       docsFirstSessions.delete(key);
       researchRouteStates.delete(key);
       researchSoftFired.delete(key);
+      pendingAdvisories.delete(key);
     } catch { /* ignore */ }
   });
 
@@ -875,10 +957,19 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Reformulation-loop guard runs on every tool call (search families only)
+    // Reformulation-loop guard: advisory. Runs on every tool call (search
+    // families only) so the counters stay accurate; the note attaches to
+    // the result and the model decides whether it applies.
     if (!DISABLED.has("reformulation_loop")) {
-      const loopMsg = checkReformulationLoop(event.toolName, sessionKey);
-      if (loopMsg) return { block: true, reason: `tool-guard[reformulation_loop]: ${loopMsg}` };
+      const loopInput = event.input as { query?: string; libraryName?: string };
+      const loopMsg = checkReformulationLoop(
+        event.toolName,
+        sessionKey,
+        loopInput.query ?? loopInput.libraryName,
+      );
+      if (loopMsg) {
+        addAdvisory(sessionKey, event.toolCallId, `tool-guard[reformulation_loop]: ${loopMsg}`);
+      }
     }
 
     // Docs-first chain: mark docs check — any docs_* call opens the gate
@@ -887,10 +978,10 @@ export default function (pi: ExtensionAPI) {
       // fall through — never block docs_* tools
     }
 
-    // Docs-first chain: redirect websearch / web_research only when the
+    // Docs-first chain: advise on websearch / web_research only when the
     // query plausibly intersects docs.erfi.io coverage (decideDocsFirst).
-    // Silent allows do NOT open the gate -- a later technical query in the
-    // same session still gets the one-time reminder.
+    // Silent allows do NOT consume the one-shot -- a later technical query
+    // in the same session still gets the one-time advisory.
     if (!DISABLED.has("docs_first") && WEB_SEARCH_TOOLS.has(event.toolName)) {
       if (!docsFirstSessions.has(sessionKey)) {
         const decision = decideDocsFirst(
@@ -899,24 +990,21 @@ export default function (pi: ExtensionAPI) {
           loadTopics(),
         );
         if (decision.block) {
-          docsFirstSessions.add(sessionKey); // one block per session
-          return {
-            block: true,
-            reason: docsFirstBlockReason(event.toolName, decision.matchedTopic),
-          };
+          docsFirstSessions.add(sessionKey); // one advisory per session
+          addAdvisory(sessionKey, event.toolCallId, docsFirstAdvisoryNote(decision.matchedTopic));
         }
       }
     }
 
-    // Research-stack routing (heuristic soft tier): nudge a bare Exa
-    // websearch on a non-technical query toward the stack, once per session.
+    // Research-stack routing (heuristic soft tier): advisory nudge on a
+    // bare Exa websearch with a non-technical query, once per session.
     if (
       !DISABLED.has("research_route_soft") &&
       !researchSoftFired.has(sessionKey) &&
       decideResearchRouteSoft(event.toolName, event.input as { query?: string })
     ) {
       researchSoftFired.add(sessionKey);
-      return { block: true, reason: RESEARCH_ROUTE_SOFT_REASON };
+      addAdvisory(sessionKey, event.toolCallId, RESEARCH_ROUTE_SOFT_NOTE);
     }
 
     // bash anti-patterns
@@ -1011,5 +1099,22 @@ export default function (pi: ExtensionAPI) {
     }
 
     return undefined;
+  });
+
+  // Append any pending advisory note to the triggering call's result. The
+  // tool already ran - the model sees the suggestion next to the results
+  // and decides whether it applies.
+  pi.on("tool_result", async (event, ctx) => {
+    let sessionKey = "default";
+    try { sessionKey = ctx.sessionManager.getSessionFile?.() ?? "default"; } catch { /* ignore */ }
+    const byCall = pendingAdvisories.get(sessionKey);
+    const note = byCall?.get(event.toolCallId);
+    if (!byCall || !note) return undefined;
+    byCall.delete(event.toolCallId);
+    if (byCall.size === 0) pendingAdvisories.delete(sessionKey);
+    const content: ToolResultContent[] = Array.isArray(event.content)
+      ? (event.content as ToolResultContent[])
+      : [{ type: "text", text: String(event.content ?? "") }];
+    return { content: [...content, { type: "text", text: `\n\n${note}` }] };
   });
 }

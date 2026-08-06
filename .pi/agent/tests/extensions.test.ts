@@ -23,6 +23,8 @@ import {
   detectResearchIntent,
   decideResearchRoute,
   decideResearchRouteSoft,
+  queryTokens,
+  tokenContainment,
 } from "../extensions/tool-guard.ts";
 import {
   matchIntent,
@@ -318,6 +320,56 @@ describe("tool-guard.checkReformulationLoop", () => {
     expect(checkReformulationLoop("bash", k)).toBeNull();
     expect(checkReformulationLoop("edit", k)).toBeNull();
   });
+
+  test("breadth-first facet searches (dissimilar queries) do NOT fire", () => {
+    // Observed 2026-08-05: brand-enumeration shopping research (one query
+    // per store/brand) hard-blocked as a "reformulation loop".
+    const k = freshKey();
+    expect(checkReformulationLoop("websearch", k, "koala sofa bed singapore price")).toBeNull();
+    expect(checkReformulationLoop("websearch", k, "castlery sofa bed review")).toBeNull();
+    expect(checkReformulationLoop("websearch", k, "king living sofa bed showroom singapore")).toBeNull();
+    expect(checkReformulationLoop("websearch", k, "ikea lindakra sofa bed washable cover")).toBeNull();
+  });
+
+  test("rewordings of the SAME query (high containment) still fire", () => {
+    const k = freshKey();
+    expect(checkReformulationLoop("websearch", k, "best sofa bed sg")).toBeNull();
+    expect(checkReformulationLoop("websearch", k, "top rated sofa beds singapore")).toBeNull();
+    expect(checkReformulationLoop("websearch", k, "sofa beds in sg reviews")).toBeNull();
+    expect(checkReformulationLoop("websearch", k, "sg sofa bed reviews")).toMatch(/Reformulation loop/);
+  });
+
+  test("a facet hop resets the window for the following rewordings", () => {
+    const k = freshKey();
+    checkReformulationLoop("websearch", k, "best sofa bed sg");
+    checkReformulationLoop("websearch", k, "top rated sofa beds singapore");
+    // Facet hop: resets, so the next two rewordings only reach count 3.
+    checkReformulationLoop("websearch", k, "tatami mat igusa foldable");
+    expect(checkReformulationLoop("websearch", k, "tatami mat igusa price")).toBeNull();
+    expect(checkReformulationLoop("websearch", k, "tatami mat igusa review")).toBeNull();
+  });
+});
+
+describe("tool-guard.queryTokens / tokenContainment", () => {
+  test("drops function words, strips plurals, normalises sg", () => {
+    const t = queryTokens("What are the best sofa beds in SG?");
+    expect(t).toEqual(new Set(["best", "sofa", "bed", "singapore"]));
+  });
+  test("rewording has high containment, facet hop has low", () => {
+    const reword = tokenContainment(
+      queryTokens("best sofa bed sg"),
+      queryTokens("top rated sofa beds singapore"),
+    );
+    const facet = tokenContainment(
+      queryTokens("koala sofa bed singapore price"),
+      queryTokens("castlery sofa bed review"),
+    );
+    expect(reword).toBeGreaterThanOrEqual(0.7);
+    expect(facet).toBeLessThan(0.7);
+  });
+  test("empty set has zero containment", () => {
+    expect(tokenContainment(new Set(), new Set(["a"]))).toBe(0);
+  });
 });
 
 // ── tool-guard: docs_first topic awareness ────────────────────────────────
@@ -330,19 +382,31 @@ describe("tool-guard.extractTopics", () => {
     expect(topics).not.toContain("api");
   });
 
-  test("splits hyphenated names into components", () => {
+  test("does NOT split multi-word slugs into components", () => {
+    // Component splitting leaked common English words ("the", "use") into
+    // the topic list, which then matched virtually every query.
     const topics = extractTopics(["supabase-auth-api"]);
-    expect(topics).toContain("supabase");
-    expect(topics).toContain("auth");
+    expect(topics).toContain("supabase-auth-api");
     expect(topics).toContain("supabase-auth");
+    expect(topics).not.toContain("supabase");
+    expect(topics).not.toContain("auth");
   });
 
-  test("drops stoplist words and sub-3-char components", () => {
+  test("drops sub-3-char names", () => {
     const topics = extractTopics(["aws-api", "go", "k3s"]);
     expect(topics).toContain("aws");
     expect(topics).toContain("k3s");
     expect(topics).not.toContain("go"); // too short: English-word collisions
-    expect(topics).not.toContain("api");
+  });
+
+  test("use-the-index-luke yields no English-word topics (regression)", () => {
+    // Observed 2026-08-05: a sofa-bed shopping query was blocked with
+    // 'docs.erfi.io has a "use" source' because this slug split into
+    // use/the/index/luke and "the" matched nearly every English query.
+    const topics = extractTopics(["use-the-index-luke"]);
+    expect(topics).toEqual(["use-the-index-luke"]);
+    expect(matchDocsTopic("sofa bed for everyday permanent sleeping nightly use review", topics)).toBeNull();
+    expect(matchDocsTopic("the best way to index a table", topics)).toBeNull();
   });
 });
 
@@ -420,8 +484,21 @@ describe("tool-guard.detectResearchIntent", () => {
   test("'use my research stack' arms", () => {
     expect(detectResearchIntent("use my research stack for this")).toBe(true);
   });
-  test("naming searxng arms regardless of phrasing", () => {
-    expect(detectResearchIntent("check searxng for this")).toBe(true);
+  test("naming the searxng HOST arms regardless of phrasing", () => {
+    expect(detectResearchIntent("search searxng.erfi.io for this")).toBe(true);
+  });
+  test("bare product name in prose does not arm", () => {
+    // "SearXNG" appears in ordinary prose (e.g. pasted guard output:
+    // "or SearXNG directly: ...") - only the hostname is intent.
+    expect(detectResearchIntent("check searxng for this")).toBe(false);
+    expect(detectResearchIntent("or SearXNG directly: bash curl")).toBe(false);
+  });
+  test("quoted trigger phrase does not arm (pasted transcript)", () => {
+    // Observed 2026-08-06: a user pasting a session transcript that quoted
+    // the routing note re-armed the guard on the quote.
+    expect(detectResearchIntent('the prompt says "use the research tools/stack" here')).toBe(false);
+    expect(detectResearchIntent("see 'https://searxng.erfi.io/search?q=x' in the note")).toBe(false);
+    expect(detectResearchIntent("run `bash curl searxng.erfi.io/search` next")).toBe(false);
   });
   test("meta-discussion without 'use' does not arm", () => {
     expect(detectResearchIntent("the research stack is down again")).toBe(false);
