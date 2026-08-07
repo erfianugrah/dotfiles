@@ -88,7 +88,21 @@ zinit snippet OMZ::lib/termsupport.zsh
 zinit snippet OMZ::lib/theme-and-appearance.zsh
 zinit snippet OMZ::lib/vcs_info.zsh
 
-autoload -Uz compinit && compinit
+# Cache the completion dump: compinit re-scans every fpath dir (~500ms/shell)
+# even when the dump is consistent; -C skips the scan (~10ms). Re-verify once
+# a day so newly installed completions get picked up; the touch resets the 24h
+# clock (compinit only rewrites the dump when the file count changes, so mtime
+# alone can't be trusted to freshen).
+# Anonymous fn scopes extendedglob (off at this point in the rc) for (#q...).
+autoload -Uz compinit
+() {
+  setopt localoptions extendedglob
+  if [[ -n ~/.zcompdump(#qN.mh+24) ]]; then
+    compinit && touch ~/.zcompdump
+  else
+    compinit -C
+  fi
+}
 zinit cdreplay -q
 
 # ---------------------------------------------------------------------------
