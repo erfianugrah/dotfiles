@@ -1,11 +1,11 @@
 ---
 name: souin
-description: Operate and configure the edge HTTP cache (caddyserver/cache-handler, Souin core via the erfianugrah fork, nuts/nutsdb on-disk storage) in ~/ergo/caddy-compose. Use when adding cache to a site on the edge Caddyfile, debugging cache misses / non-persistence / Cache-Status anomalies, changing nuts storage options (EntryIdxMode, SegmentSize, MergeInterval), purging or reclaiming cache storage, or extending the test/cache harness. Fires on "souin", "cache-handler", "nuts", "edge cache", "Cache-Status", "stale-if-error", "cache purge". Covers the three storage bugs verified 2026-07-31 (provider-inheritance race, nuts.Factory Dir-drop, harness blind spot), the REQUIRED per-site nuts config pattern, the cachectl ops tool, and the 7 documented behavioral quirks. Sibling to `caddy` (the wider Caddy/WAF stack) and `composer` (deploy path).
+description: Operate and configure the edge HTTP cache (caddyserver/cache-handler, Souin core via the erfianugrah fork, nuts/nutsdb on-disk storage) in ~/infra/ergo/caddy-compose. Use when adding cache to a site on the edge Caddyfile, debugging cache misses / non-persistence / Cache-Status anomalies, changing nuts storage options (EntryIdxMode, SegmentSize, MergeInterval), purging or reclaiming cache storage, or extending the test/cache harness. Fires on "souin", "cache-handler", "nuts", "edge cache", "Cache-Status", "stale-if-error", "cache purge". Covers the three storage bugs verified 2026-07-31 (provider-inheritance race, nuts.Factory Dir-drop, harness blind spot), the REQUIRED per-site nuts config pattern, the cachectl ops tool, and the 7 documented behavioral quirks. Sibling to `caddy` (the wider Caddy/WAF stack) and `composer` (deploy path).
 ---
 
 # souin - edge HTTP cache operations
 
-**Project truth: `~/ergo/caddy-compose/test/cache/README.md`** - the verified
+**Project truth: `~/infra/ergo/caddy-compose/test/cache/README.md`** - the verified
 quirk catalogue (7 behavioral quirks + the 2026-07-31 storage incident),
 each with source references into the pinned module versions. Read it before
 asserting ANY souin behavior. The harness is `make test-cache` (71 tests).
@@ -69,7 +69,7 @@ sends `max-stale` (browsers never do).
 ## Ops tool - tools/cachectl (Go CLI in caddy-compose, stdlib only)
 
 ```bash
-cd ~/ergo/caddy-compose/tools/cachectl
+cd ~/infra/ergo/caddy-compose/tools/cachectl
 go run . status           # per-site DB sizes, fallback count, tmpfs check, RAM
 go run . verify           # hard asserts: 0 fallbacks, DBs at configured Dirs, no /tmp/souin-nuts
 go run . probe <url>      # request twice via edge IP, print Cache-Status both times
@@ -132,5 +132,5 @@ go run . purge <site|all> # rm /data/cache/nuts/<site> + docker restart caddy
 - `caddy` skill - the full Caddy/WAF stack, deploy gotchas, module pins.
 - `composer` skill - the edge-services deploy API.
 - `test/cache/README.md` - quirk catalogue with source line references.
-- Fork repo: `~/ergo/souin` (the two patches live in
+- Fork repo: `~/infra/ergo/souin` (the two patches live in
   `pkg/middleware/middleware.go`).

@@ -162,6 +162,6 @@ enable_bucket = true
 
 ## Related
 
-- Service repo: `~/llm-compose`
-- MCP wrapper: `~/llm-compose/mcp/train-server.py`
+- Service repo: `~/infra/ai/llm-compose`
+- MCP wrapper: `~/infra/ai/llm-compose/mcp/train-server.py`
 - Training data: `~/docker-volumes/training-data/`

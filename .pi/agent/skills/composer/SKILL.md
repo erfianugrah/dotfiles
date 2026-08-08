@@ -1,6 +1,6 @@
 ---
 name: composer
-description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/composer/`, instance at `composer.erfi.io` on the MS-01 router, moved off servarr 2026-07). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~119 endpoints under /api/v1 (incl. multi-host docker-hosts registry + self-upgrade), auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
+description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/infra/composer/`, instance at `composer.erfi.io` on the MS-01 router, moved off servarr 2026-07). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~119 endpoints under /api/v1 (incl. multi-host docker-hosts registry + self-upgrade), auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
 ---
 
 # composer skill
@@ -10,7 +10,7 @@ Self-hosted compose-mgmt platform. Go + Astro. REST API only — no end-user CLI
 ## When this skill does NOT apply
 
 Composer (on the **MS-01 NixOS router**, ssh alias `nixos`, public URL `https://composer.erfi.io`; moved off servarr 2026-07) manages stacks across TWO docker daemons: the MS-01 local socket AND servarr's daemon via the drawbridge mTLS proxy (see the multi-host section). It does NOT see:
-- Local dev compose stacks (`~/llm-compose/`, `~/composer/deploy/`, `~/knot-fly/`, any compose file the user is editing on the dev box).
+- Local dev compose stacks (`~/infra/ai/llm-compose/`, `~/infra/composer/deploy/`, `~/knot-fly/`, any compose file the user is editing on the dev box).
 - Stacks on other servers not registered in the docker-hosts registry.
 - Anything reached via plain `docker ...` on the dev machine.
 - drawbridge itself - deliberately NOT composer-managed (composer reaches servarr's docker THROUGH drawbridge; composer managing it would be a self-dependency loop). See the drawbridge skill.

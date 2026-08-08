@@ -817,7 +817,7 @@ rationale.
 | `ci-workflows` | GitHub + Gitea Actions YAML — verified-current action pins, language setup, Docker build+push, pages deploy |
 | `gh` | gh CLI ops: PR/issue/release lifecycle, Actions runs + cache, repo + auth, gh extensions — token-efficient `--json` + `--jq` patterns |
 | `gh-search` | Cross-repo GitHub code/issue/PR search via `gh` CLI |
-| `caddy` | Custom Caddy build + WAF stack at `~/ergo/caddy-compose` - xcaddy plugin set, snippet idiom, wafctl dashboard, TSIG/rfc2136 chain to Knot |
+| `caddy` | Custom Caddy build + WAF stack at `~/infra/ergo/caddy-compose` - xcaddy plugin set, snippet idiom, wafctl dashboard, TSIG/rfc2136 chain to Knot |
 | `knotctl` | `knotctl` CLI for live DNS edits (TSIG RFC 2136 over TCP) against the merged knotea authority |
 | `gloryhole` | Self-built DNS resolver `glory-hole` (Go + embedded Unbound + loopback knotd + dashboard); also authoritative NS for the zones post-cutover |
 | `tailscale-homelab` | SSH into + operate the tailscale-routed homelab (servarr etc.) - per-host identity convention, subnet routing, the `ssh servarr docker ...` operator idiom |

@@ -65,7 +65,7 @@ ssh servarr 'mkdir -p /mnt/user/data/<svc>/<dir>'
 ssh servarr 'cat /mnt/user/data/<svc>/<file>'
 
 # Composer-managed restart (decrypts SOPS) — for stacks that have SOPS env
-make -C ~/ergo/<svc>-compose restart                  # NOT restart-<svc>
+make -C ~/infra/ergo/<svc>-compose restart                  # NOT restart-<svc>
 ```
 
 The `make restart` vs `restart-<svc>` distinction is critical and lives in the `caddy` and `composer` skills. Don't recreate-via-`docker restart` a container whose `.env` is SOPS-managed unless you know its env is already plaintext in memory.
@@ -149,7 +149,7 @@ When `ssh <alias>` itself fails, work cheapest probes first:
 6. **Permission denied (publickey) with the right key?** Permissions: `ls -la ~/.ssh/id_<role>` must be `0600`. If just rotated (`_2` suffix), the new pubkey may not be in `authorized_keys` yet — escalate to PiKVM for OOB recovery.
 7. **Primary LAN path dead?** Try the `10.68.x.x` alias listed in the same Host block — that's the cross-site IPsec backup.
 8. **Tailnet partition?** `tailscale ping $HOST` — if it can't establish even a relay path, suspect the control plane (`login.tailscale.com`) or a firewall blocking DERP. `tailscale netcheck` for local diagnosis.
-9. **Servarr-only: ssh works but `docker ps` hangs?** Unraid host is in a bad state — reboot via PiKVM is the standard escalation. Check `~/servarr-compose/AGENTS.md` for the last hang post-mortem before doing anything destructive.
+9. **Servarr-only: ssh works but `docker ps` hangs?** Unraid host is in a bad state — reboot via PiKVM is the standard escalation. Check `~/infra/servarr-compose/AGENTS.md` for the last hang post-mortem before doing anything destructive.
 
 Order matters: 1-2 are local, 3-4 are tailnet API, 5-6 require touching the remote host, 7-8 escalate to network plumbing, 9 is hardware. Don't skip ahead.
 
@@ -177,5 +177,5 @@ Order matters: 1-2 are local, 3-4 are tailnet API, 5-6 require touching the remo
 
 - `~/.ssh/config` — host inventory + identity-file mapping (authoritative)
 - `tailscale status` / `tailscale status --json | jq` — live tailnet state
-- `~/servarr-compose/AGENTS.md` — Unraid host conventions
+- `~/infra/servarr-compose/AGENTS.md` — Unraid host conventions
 - Tailscale docs (kb): troubleshooting guide, subnet routers, MagicDNS, route filtering with `via`, ACL grants

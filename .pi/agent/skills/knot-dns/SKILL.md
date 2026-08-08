@@ -282,7 +282,7 @@ SOA serial defaults to `$(date +%s)`. **Once committed, the semantic-check at `z
 
 ## Caddy RFC 2136 — the ACME path
 
-Add the provider to your Caddy build (`~/ergo/caddy-compose/Dockerfile`):
+Add the provider to your Caddy build (`~/infra/ergo/caddy-compose/Dockerfile`):
 
 ```dockerfile
 --with github.com/caddy-dns/cloudflare@v0.2.3 \
@@ -502,7 +502,7 @@ ssh servarr "rm $CERT_DIR/$HOST.crt $CERT_DIR/$HOST.key $CERT_DIR/$HOST.json"
 # unchanged and short-circuits; in-memory cert cache stays populated even
 # after files are gone. Use `docker restart` to flush the cache, NOT
 # `make restart-caddy` — the latter force-recreates and re-reads the
-# SOPS-encrypted .env which can crash. See ~/ergo/caddy-compose/AGENTS.md.
+# SOPS-encrypted .env which can crash. See ~/infra/ergo/caddy-compose/AGENTS.md.
 ssh servarr "docker restart caddy"
 
 ssh servarr "docker logs --since 1m caddy 2>&1 | grep -iE '$HOST|acme'"
@@ -588,7 +588,7 @@ Distilled from `~/knotea/authority/AGENTS.md`. Each is a real failure mode with 
 13. **`update-owner-match: sub-or-equal` does NOT match ACME challenges.** `_acme-challenge` is the leftmost label, not a parent. Use `pattern` with explicit per-depth entries (see ACL section above).
 14. **`caddy-dns/rfc2136` validates `key` at parse time.** Empty `{$TSIG_*}` crashes startup with `rfc2136: missing key`. Other CF / route53 providers defer; rfc2136 doesn't.
 15. **CF's documented NOTIFY source IPs are WRONG.** Use the full anycast list from `api.cloudflare.com/client/v4/ips` + Fly internal CIDRs. TSIG is the actual gate.
-16. **Adding a TSIG-driven Caddy site is a three-edit change** across `~/.<your-knot-app>.env` (operator-only, 0600), `~/ergo/caddy-compose/.env` (SOPS), and the Caddyfile site block.
+16. **Adding a TSIG-driven Caddy site is a three-edit change** across `~/.<your-knot-app>.env` (operator-only, 0600), `~/infra/ergo/caddy-compose/.env` (SOPS), and the Caddyfile site block.
 17. **`knotc conf-set` requires a two-step protocol for new identifiers.** Bare ID first, attributes second. Skipping yields `error: (invalid identifier)`.
 18. **`knotc zone-commit` semantic-check is NOT controlled by `semantic-checks: off`.** Some hard consistency rule always fires. Last-resort recovery: `zone-flush` → `zone-purge +journal +kaspdb +catalog +expired` → re-add zone → re-import records. Drops journal history.
 19. **`dig +short @<tld-ns> NS <zone>` returns EMPTY.** TLD delegation lives in AUTHORITY + ADDITIONAL, not ANSWER. Use `dig +noall +authority +additional`.
@@ -606,7 +606,7 @@ Two regions for HA doubles VM cost. Volumes are regional — each region needs i
 
 - **`fly`** — platform mechanics (volumes, anycast IPs, `fly ssh console -C` quirks, `auto_stop_machines`). DNS apps should NOT auto-stop — first-query cold start breaks resolution.
 - **`cloudflare`** — CF Secondary DNS API endpoints (`/secondary_dns/tsigs`, `/secondary_dns/peers`, `/secondary_dns/outgoing`) used by `cf-axfr-setup.sh`. CF anycast IP list at `api.cloudflare.com/client/v4/ips`.
-- **`infrastructure-stack`** — the Caddy stack in `~/ergo/caddy-compose/` is the consumer of the TSIG path. Three-edits-at-once rule for adding a TSIG-driven site is in that stack's `AGENTS.md`.
+- **`infrastructure-stack`** — the Caddy stack in `~/infra/ergo/caddy-compose/` is the consumer of the TSIG path. Three-edits-at-once rule for adding a TSIG-driven site is in that stack's `AGENTS.md`.
 - **`terraform`** — if you ever want to IaC the registrar bits; Namecheap glue + NS records can be managed by `namecheap/namecheap` provider.
 - **`~/knotea/authority/AGENTS.md`** — the authoritative gotcha list and live-system state.
 - **`~/knotea/authority/docs/runbooks/cf-to-knot-migration.md`** — the full operator playbook with rollback procedures.

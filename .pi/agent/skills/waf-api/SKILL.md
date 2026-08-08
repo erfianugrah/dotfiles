@@ -1,17 +1,17 @@
 ---
 name: waf-api
-description: Use when working with the wafctl WAF management API or waf-dashboard UI in ~/ergo/caddy-compose - querying or adding HTTP endpoints, exporting events, debugging rule/config changes that don't take effect (store-vs-deploy split), adding an event type / rule type / condition field / summary counter end-to-end, editing dashboard pages or the src/lib/api mapping layer, or checking wafctl env vars, auth, ports, stores, or the deploy pipeline.
+description: Use when working with the wafctl WAF management API or waf-dashboard UI in ~/infra/ergo/caddy-compose - querying or adding HTTP endpoints, exporting events, debugging rule/config changes that don't take effect (store-vs-deploy split), adding an event type / rule type / condition field / summary counter end-to-end, editing dashboard pages or the src/lib/api mapping layer, or checking wafctl env vars, auth, ports, stores, or the deploy pipeline.
 ---
 
 # waf-api - wafctl API + waf-dashboard reference
 
 ## Overview
 
-wafctl (`~/ergo/caddy-compose/wafctl/`, Go stdlib-only, single `package main`) is the
+wafctl (`~/infra/ergo/caddy-compose/wafctl/`, Go stdlib-only, single `package main`) is the
 management plane for the custom Caddy WAF. It tails the Caddy access log, stores
 events/rules/config in JSON files, and serves ~94 JSON API routes on `:8080` plus the
 waf-dashboard static build (Astro 6 MPA + React 19 islands in
-`~/ergo/caddy-compose/waf-dashboard/`). The policy-engine Caddy plugin is the data
+`~/infra/ergo/caddy-compose/waf-dashboard/`). The policy-engine Caddy plugin is the data
 plane; wafctl never touches traffic directly.
 
 **Mental model - three invariants that explain most bugs:**
@@ -65,7 +65,7 @@ by `deployMu`. `POST /api/config/generate` is preview-only. None reload Caddy.
 
 ## Adding things end-to-end
 
-The authoritative per-layer checklists live in `~/ergo/caddy-compose/AGENTS.md`
+The authoritative per-layer checklists live in `~/infra/ergo/caddy-compose/AGENTS.md`
 ("Adding a New Event Type", "Adding a New Rule Type", "Adding a New Condition Field") -
 follow them; every layer missed = feature invisible somewhere. Summary-counter-only
 additions (no new event type) touch: `models.go` HourCount + SummaryResponse ->
@@ -112,4 +112,4 @@ Load these on demand - they are the complete ground truth:
 - Using `make restart-caddy` for .env-affecting changes (SOPS bypass - see the `caddy`
   skill); unrelated to wafctl API but the #1 stack-level footgun.
 
-Related: `caddy` skill (stack deploy, Caddyfile snippets, SOPS), `~/ergo/caddy-compose/AGENTS.md` (code style + add-feature checklists).
+Related: `caddy` skill (stack deploy, Caddyfile snippets, SOPS), `~/infra/ergo/caddy-compose/AGENTS.md` (code style + add-feature checklists).

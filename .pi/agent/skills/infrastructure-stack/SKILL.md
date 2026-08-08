@@ -12,7 +12,7 @@ The user runs ~12 self-hosted services as discrete Docker Compose stacks. Every 
 1. **One stack per service** under `~/<svc>-compose/` with `docker-compose.yml` + `AGENTS.md` + optional `MIGRATION_*.md` planning docs.
 2. **Each stack gets a dedicated bridge network** with a `/24` subnet (or `/28` for small stacks) and **static `ipv4_address` assignments** per container.
 3. **No port publishing for backend services** — use `expose: <port>` only. Public exposure happens at Caddy in another stack.
-4. **Caddy runs in `network_mode: host`** in `~/ergo/caddy-compose/` and reverse-proxies to the bridge static IPs via kernel routing.
+4. **Caddy runs in `network_mode: host`** in `~/infra/ergo/caddy-compose/` and reverse-proxies to the bridge static IPs via kernel routing.
 5. **Caddyfile pins to static IPs**, not service hostnames (e.g. `reverse_proxy 172.19.X.Y:7878`).
 6. **Bind-mounts over named volumes** for bulk data; absolute host paths only.
 7. **PUID/PGID/UMASK = 1000/100/0002** on LinuxServer.io images. Containers that don't honour them use `user: 1000:100`.
@@ -23,7 +23,7 @@ The user runs ~12 self-hosted services as discrete Docker Compose stacks. Every 
 
 ## Subnet allocation
 
-The user allocates one `/24` per stack under the `172.19.0.0/16` block. **When adding a new stack, pick a free `/24` and document the allocation in that stack's `AGENTS.md`.** Don't hard-code the full allocation map in a public file — grep the live stacks' `compose.yaml` (`rg 'subnet:' ~/*-compose ~/ergo/*-compose 2>/dev/null`) when you need a current view.
+The user allocates one `/24` per stack under the `172.19.0.0/16` block. **When adding a new stack, pick a free `/24` and document the allocation in that stack's `AGENTS.md`.** Don't hard-code the full allocation map in a public file — grep the live stacks' `compose.yaml` (`rg 'subnet:' ~/*-compose ~/infra/ergo/*-compose 2>/dev/null`) when you need a current view.
 
 Rules of thumb:
 - `172.19.X.0/24` per stack, X picked from whatever is documented as free.
@@ -106,7 +106,7 @@ networks:
 
 ## Caddyfile entry
 
-In `~/ergo/caddy-compose/Caddyfile`, add a virtual host pointing to the static IP:
+In `~/infra/ergo/caddy-compose/Caddyfile`, add a virtual host pointing to the static IP:
 
 ```caddyfile
 myservice.<your-zone> {
@@ -119,7 +119,7 @@ myservice.<your-zone> {
 }
 ```
 
-Reload Caddy after editing (composer auto-sync handles this; or `docker compose -f ~/ergo/caddy-compose/compose.yaml exec caddy caddy reload`).
+Reload Caddy after editing (composer auto-sync handles this; or `docker compose -f ~/infra/ergo/caddy-compose/compose.yaml exec caddy caddy reload`).
 
 ## Per-stack AGENTS.md template
 
@@ -137,7 +137,7 @@ Every compose stack has its own `AGENTS.md` documenting the conventions. Copy th
 | `myservice` | `172.19.X.0/24` | Main service network |
 | `myservice_backend` | `172.19.X+1.0/24` | DB + cache (internal: true) |
 
-Caddy entry: `~/ergo/caddy-compose/Caddyfile` → `myservice.<your-zone>` → `172.19.X.2:8080`.
+Caddy entry: `~/infra/ergo/caddy-compose/Caddyfile` → `myservice.<your-zone>` → `172.19.X.2:8080`.
 
 ## Static IP allocation in `myservice` (172.19.X.0/24)
 
@@ -204,7 +204,7 @@ Single-binary, lightweight k8s. Install via `curl -sfL https://get.k3s.io | sh -
 Manifest layout convention (when migrating compose → k3s):
 
 ```
-~/k3s-myservice/
+~/infra/k3s-myservice/
 ├── kustomization.yaml         # references base/ and overlays/
 ├── base/
 │   ├── deployment.yaml        # replaces docker-compose.yml service
@@ -246,4 +246,4 @@ The user's pattern (from servarr `MIGRATION_PLAN_ZFS.md`):
 - `supabase` — when the project uses Supabase instead of self-hosted Postgres
 - `ci-workflows` — to deploy this stack via CI
 - **Docs sources**: `docker`, `kubernetes`, `k3s`, `caddy`, `traefik`, `cloudflare`, `ansible`, `terraform`, `helm`
-- **User's reference repos**: `~/ergo/caddy-compose/AGENTS.md`, `~/servarr-compose/AGENTS.md`, `~/keycloak-compose/`, `~/vaultwarden-compose/`, `~/gitea-compose/`, `~/immich-compose/` — read these for canonical examples
+- **User's reference repos**: `~/infra/ergo/caddy-compose/AGENTS.md`, `~/infra/servarr-compose/AGENTS.md`, `~/keycloak-compose/`, `~/vaultwarden-compose/`, `~/gitea-compose/`, `~/immich-compose/` — read these for canonical examples

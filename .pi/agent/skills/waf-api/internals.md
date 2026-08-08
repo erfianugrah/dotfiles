@@ -1,6 +1,6 @@
 # wafctl internals reference
 
-Package `main`, stdlib-only, Go 1.26+, under `~/ergo/caddy-compose/wafctl/`.
+Package `main`, stdlib-only, Go 1.26+, under `~/infra/ergo/caddy-compose/wafctl/`.
 Verified against source 2026-06.
 
 ## Data pipeline - access log ingestion

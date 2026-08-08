@@ -1,6 +1,6 @@
 # waf-dashboard frontend reference
 
-Root: `~/ergo/caddy-compose/waf-dashboard/` - Astro 6 static MPA (`output:
+Root: `~/infra/ergo/caddy-compose/waf-dashboard/` - Astro 6 static MPA (`output:
 "static"`, `base: "/"`), React 19 islands (`client:load` per page), TS strict
 (`astro/tsconfigs/strict`), shadcn/ui (Radix) + Tailwind CSS 4 (`@tailwindcss/vite`,
 no tailwind.config), Recharts, lucide-react, dnd-kit. Verified against source

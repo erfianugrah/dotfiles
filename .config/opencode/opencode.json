@@ -64,7 +64,7 @@
       "type": "local",
       "command": [
         "python3",
-        "/home/erfi/llm-compose/mcp/whisper-server.py"
+        "/home/erfi/infra/ai/llm-compose/mcp/whisper-server.py"
       ],
       "environment": {
         "WHISPER_URL": "http://localhost:7860"
@@ -76,7 +76,7 @@
       "type": "local",
       "command": [
         "python3",
-        "/home/erfi/llm-compose/mcp/comfyui-server.py"
+        "/home/erfi/infra/ai/llm-compose/mcp/comfyui-server.py"
       ],
       "environment": {
         "COMFYUI_PROXY_URL": "http://localhost:11434",
@@ -89,7 +89,7 @@
       "type": "local",
       "command": [
         "python3",
-        "/home/erfi/llm-compose/mcp/train-server.py"
+        "/home/erfi/infra/ai/llm-compose/mcp/train-server.py"
       ],
       "environment": {
         "TRAIN_PROXY_URL": "http://localhost:11434",

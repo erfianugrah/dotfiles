@@ -241,7 +241,7 @@ curl -sS https://<host>.example.com/v1/health
 flyctl certs remove <host>.example.com --app <app>
 ```
 
-Caddy parallel: in your self-hosted compose pattern you terminate TLS at `~/ergo/caddy-compose/`. Fly handles cert + TLS at the edge for you; if you ever front Fly with Caddy too (anti-pattern but sometimes useful for unified routing), set `force_https = false` in the inner `[[services]]` and let Caddy do TLS termination.
+Caddy parallel: in your self-hosted compose pattern you terminate TLS at `~/infra/ergo/caddy-compose/`. Fly handles cert + TLS at the edge for you; if you ever front Fly with Caddy too (anti-pattern but sometimes useful for unified routing), set `force_https = false` in the inner `[[services]]` and let Caddy do TLS termination.
 
 ## Machines vs Apps (mental model)
 

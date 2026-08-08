@@ -1,5 +1,5 @@
 {
-  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open — no restart needed. Source of truth for llm-compose model list: ~/llm-compose/models/*.toml",
+  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open — no restart needed. Source of truth for llm-compose model list: ~/infra/ai/llm-compose/models/*.toml",
   "providers": {
     "llama-server": {
       "$comment": "llm-compose proxy on localhost:11434 — auto-swaps GPU between llama.cpp and ComfyUI. Models are llama.cpp via OpenAI-compatible API. apiKey ignored by proxy but Pi requires the field.",

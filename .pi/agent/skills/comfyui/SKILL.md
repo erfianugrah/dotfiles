@@ -104,6 +104,6 @@ curl -s http://localhost:11434/comfyui/history | jq -r '
 
 ## Related
 
-- Service repo: `~/llm-compose` (ComfyUI service: see `comfyui.Dockerfile`)
-- MCP wrapper: `~/llm-compose/mcp/comfyui-server.py`
+- Service repo: `~/infra/ai/llm-compose` (ComfyUI service: see `comfyui.Dockerfile`)
+- MCP wrapper: `~/infra/ai/llm-compose/mcp/comfyui-server.py`
 - Models: `~/docker-volumes/comfyui/models/`

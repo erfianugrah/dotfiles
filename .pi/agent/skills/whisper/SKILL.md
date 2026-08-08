@@ -6,7 +6,7 @@ description: Transcribe audio/video via the whisper-transcribe HTTP API on local
 # Whisper Transcription
 
 WhisperX-backed transcription service. The MCP wrapper at
-`~/llm-compose/mcp/whisper-server.py` is the canonical Python client. This
+`~/infra/ai/llm-compose/mcp/whisper-server.py` is the canonical Python client. This
 skill documents the same HTTP API for direct invocation when running outside
 opencode (e.g. Pi, scripts, ad-hoc curl).
 
@@ -333,6 +333,6 @@ diarization needed. New OBS recordings should enable this.
 ## Related docs
 
 - Extension: `~/dotfiles/.pi/agent/extensions/video-review.ts` (unit tests in `~/dotfiles/.pi/agent/tests/extensions.test.ts`)
-- Service repo: `~/whisper-transcribe`
-- MCP wrapper (Python): `~/llm-compose/mcp/whisper-server.py`
-- Compose definitions: `~/llm-compose/compose.yaml` (whisper + bot services)
+- Service repo: `~/infra/ai/whisper-transcribe`
+- MCP wrapper (Python): `~/infra/ai/llm-compose/mcp/whisper-server.py`
+- Compose definitions: `~/infra/ai/llm-compose/compose.yaml` (whisper + bot services)
