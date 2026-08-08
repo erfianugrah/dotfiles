@@ -21,11 +21,19 @@
 
 set -euo pipefail
 
+# Chrome lives somewhere different on every OS, and on macOS it is inside an
+# .app bundle that no PATH lookup will ever find. Linux paths first (this is
+# where the deck is authored), then the macOS bundles, then PATH as a
+# backstop for anything installed unusually.
 CHROME=""
 for c in /usr/sbin/chromium /usr/bin/chromium /usr/sbin/google-chrome-stable \
-         /usr/bin/google-chrome-stable; do
+         /usr/bin/google-chrome-stable \
+         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+         "/Applications/Chromium.app/Contents/MacOS/Chromium" \
+         "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do
   [ -x "$c" ] && { CHROME="$c"; break; }
 done
+[ -n "$CHROME" ] || CHROME="$(command -v chromium || command -v google-chrome-stable || command -v google-chrome || true)"
 
 usage() {
   sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
