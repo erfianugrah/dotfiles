@@ -9,7 +9,7 @@ Switch: SKS8300-12E2T2X at `10.0.69.4`, firmware V1.04.B09, PRODUCTION
 (carries the servarr trunk). Tool repo: `~/infra/xikectl`
 (single Go module). **Read `~/infra/xikectl/AGENTS.md` first when working
 in the repo** - it has the full gotcha list. Design + live facts:
-`~/servarr-compose/incident-2026-05/edge-nixos/xikectl-plan.md`.
+`~/infra/xikectl/docs/xikectl-plan.md`.
 
 ## Quick reference
 
