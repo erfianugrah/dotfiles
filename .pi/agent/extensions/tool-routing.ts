@@ -17,10 +17,19 @@
  *     websearch/bash/grep from habit and bypasses APPEND_SYSTEM rules.
  *     Prepending with hard framing is what opencode does and it works.
  *
- * Source: ~/.pi/agent/AGENTS.md (everything BEFORE the `## Documentation`
- * heading). Same convention as opencode's `output-rules.ts` plugin
+ * Source: ~/.config/opencode/AGENTS.md (everything ABOVE the
+ * `<!-- tool-routing:end -->` marker; falls back to the historical
+ * `## Documentation` boundary, then to the whole file). Same convention
+ * as opencode's `output-rules.ts` plugin
  * (.config/opencode/plugins/output-rules.ts) so both agents read from a
  * single source of truth.
+ *
+ * Until 2026-08-09 this read ~/.pi/agent/AGENTS.md, a manual symlink to
+ * the same file - but pi ALSO loaded that path natively as global
+ * project instructions, so ~17.7KB rode every turn twice. The symlink
+ * is deleted; this extension is now the only channel for the rules,
+ * and the file's Documentation / General-computer-use sections moved to
+ * APPEND_SYSTEM.md.
  *
  * Cached at module load — restart pi or `/reload` after editing AGENTS.md.
  *
@@ -32,8 +41,9 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
-const AGENTS_PATH = join(homedir(), ".pi/agent/AGENTS.md");
-const DOC_MARKER = "\n## Documentation";
+const AGENTS_PATH = join(homedir(), ".config/opencode/AGENTS.md");
+const END_MARKER = "<!-- tool-routing:end";
+const LEGACY_DOC_MARKER = "\n## Documentation";
 const HEADER =
   "CRITICAL MANDATORY INSTRUCTION — OVERRIDE DEFAULT TOOL INTUITION:";
 const FOOTER =
@@ -50,8 +60,9 @@ function loadRules(): string | null {
   }
   try {
     const content = readFileSync(AGENTS_PATH, "utf-8");
-    const docIdx = content.indexOf(DOC_MARKER);
-    const slice = docIdx > 0 ? content.slice(0, docIdx).trim() : "";
+    let end = content.indexOf(END_MARKER);
+    if (end < 0) end = content.indexOf(LEGACY_DOC_MARKER);
+    const slice = (end > 0 ? content.slice(0, end) : content).trim();
     cachedRules = slice || null;
   } catch {
     cachedRules = null;

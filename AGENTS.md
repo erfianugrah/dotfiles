@@ -1,8 +1,11 @@
 # dotfiles repo — agent notes
 
 Project-specific guidance for an agent working in `~/dotfiles`. The global
-agent rules live in `.config/opencode/AGENTS.md` (which `~/.pi/agent/AGENTS.md`
-symlinks to); the notes here are repo-shape only.
+agent rules live in `.config/opencode/AGENTS.md`; pi receives them via the
+`tool-routing.ts` extension's prepend (the old `~/.pi/agent/AGENTS.md`
+symlink was retired 2026-08-09 because pi loaded it natively AND the
+extension prepended it - a 17.7KB/turn double injection). The notes here
+are repo-shape only.
 
 ## What's running here (pi vs opencode disambiguation)
 
@@ -172,9 +175,11 @@ Since pi 0.79.0, pi gates **project-local** inputs behind a trust decision.
 This is mostly transparent here, but know the model:
 
 - **Global config is never gated.** Everything under `~/.pi/agent/`
-  (all extensions, skills, prompts, the global `AGENTS.md`, `tool-routing`)
+  (all extensions, skills, prompts, `tool-routing`)
   is user/global and loads on every startup. Since the whole repo is
   stow-symlinked into `~/.pi/agent/`, all our mods are always loaded.
+  (There is deliberately no `~/.pi/agent/AGENTS.md` - see the header
+  note for why.)
 - **Trust gates `<cwd>/.pi/` + `<cwd>/AGENTS.md` only.** In `~/dotfiles`
   that's effectively just `~/dotfiles/AGENTS.md` (pi reads project
   resources from `<cwd>/.pi/`, not `<cwd>/.pi/agent/`, so our source tree
@@ -231,10 +236,13 @@ tests in /tmp/ that drive the real `execute()` via the SDK preload mock.
 
 ## Prompts (system-prompt fragments)
 
-- `.pi/agent/APPEND_SYSTEM.md` — gets appended to the system prompt every
-  turn. Project-wide rules go here.
-- `.pi/agent/prompts/tool-routing.md` — referenced from APPEND_SYSTEM.md;
-  loaded by the `tool-routing.ts` extension.
+- `.pi/agent/APPEND_SYSTEM.md` - gets appended to the system prompt every
+  turn. Project-wide rules go here. Also carries the `## Documentation` and
+  `## General computer use` sections (moved out of
+  `.config/opencode/AGENTS.md` in the 2026-08-09 double-injection fix).
+- `.config/opencode/AGENTS.md` - the tool-routing rules themselves. pi gets
+  them ONLY via `tool-routing.ts`, which prepends everything above the
+  `<!-- tool-routing:end -->` marker each turn.
 - `.pi/agent/prompts/local-model-rules.md` — appended only when a local
   llama-server model is in use.
 - Other `prompts/*.md` files are slash-command templates.
