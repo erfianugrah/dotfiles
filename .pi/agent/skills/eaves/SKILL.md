@@ -1,6 +1,6 @@
 ---
 name: eaves
-description: Drive the user's `eaves` CLI - a read-only Juniper/VyOS-style operational shell for the NixOS edge router (ssh alias `nixos`). Use when answering operational questions about the edge router (DHCP leases/pools, NAT translations, conntrack count, nftables ruleset, interfaces/routes/neighbors, vnstat bandwidth, kea journal), running the 13-check `doctor` health/regression suite, checking config drift with `show system drift` after a router.nix rebuild, answering router questions OFFLINE via the committed fixtures (EAVES_FIXTURE_DIR, no ssh needed), re-capturing/sanitizing fixtures, or extending the CLI itself. Fires on "eaves", "show dhcp leases", "who is 10.0.x.x", "router health", "edge router status", "is NAT working". NOT for config changes - eaves has no configure mode by design; config is router.nix + nixos-rebuild. Sibling to `tailscale-homelab` (ssh), `knotctl`, `caddy`. Repo `~/eaves` (private GitHub erfianugrah/eaves), stdlib-only Go, CI green.
+description: Drive the user's `eaves` CLI - a read-only Juniper/VyOS-style operational shell for the NixOS edge router (ssh alias `nixos`). Use when answering operational questions about the edge router (DHCP leases/pools, NAT translations, conntrack count, nftables ruleset, interfaces/routes/neighbors, vnstat bandwidth, kea journal), running the 13-check `doctor` health/regression suite, checking config drift with `show system drift` after a router.nix rebuild, answering router questions OFFLINE via the committed fixtures (EAVES_FIXTURE_DIR, no ssh needed), re-capturing/sanitizing fixtures, or extending the CLI itself. Fires on "eaves", "show dhcp leases", "who is 10.0.x.x", "router health", "edge router status", "is NAT working". NOT for config changes - eaves has no configure mode by design; config is router.nix + nixos-rebuild. Sibling to `tailscale-homelab` (ssh), `knotctl`, `caddy`. Repo `~/infra/eaves` (private GitHub erfianugrah/eaves), stdlib-only Go, CI green.
 ---
 
 # eaves - read-only operational CLI for the edge router
@@ -10,37 +10,37 @@ description: Drive the user's `eaves` CLI - a read-only Juniper/VyOS-style opera
 (`eaves sh int`), `--json` on everything, exit 0/1/2. Zero mutation
 capability - no `configure` mode exists by design.
 
-**Config control plane (since 2026-08-01): `~/router`** - private
+**Config control plane (since 2026-08-01): `~/infra/router`** - private
 GitHub `erfianugrah/router`, flake-based, SINGLE configuration.nix (the
 old configuration.nix/router.nix manual-mirror workflow is dead).
 `/etc/nixos` on the router is a read-only checkout; NEVER edit files
-on the router. All changes: edit in `~/router`, commit, `make deploy`
+on the router. All changes: edit in `~/infra/router`, commit, `make deploy`
 (push -> router fast-forwards -> `nixos-rebuild switch --flake
 .#nixos` -> `eaves doctor` gate). `make diff` = dry-build. nixpkgs
 and eaves are rev-pinned in flake.nix; bump deliberately. The router
-authenticates with read-only deploy keys (see ~/router/README.md).
+authenticates with read-only deploy keys (see ~/infra/router/README.md).
 
-Full command reference + doctor check table: `~/eaves/README.md`.
-Implementation plan + fixture contract: `~/eaves/docs/plans/2026-07-24-eaves-cli.md`.
+Full command reference + doctor check table: `~/infra/eaves/README.md`.
+Implementation plan + fixture contract: `~/infra/eaves/docs/plans/2026-07-24-eaves-cli.md`.
 
 ## When to reach for what
 
 | Want to ... | Reach for |
 |---|---|
-| Answer a router question WITHOUT touching the router | `cd ~/eaves && EAVES_FIXTURE_DIR=testdata/fixtures go run . <cmd>` (fixtures are a sanitized snapshot) |
+| Answer a router question WITHOUT touching the router | `cd ~/infra/eaves && EAVES_FIXTURE_DIR=testdata/fixtures go run . <cmd>` (fixtures are a sanitized snapshot) |
 | Live answer (leases, conntrack, NAT, ruleset) | `ssh nixos 'sudo -n eaves <cmd>'` (eaves is on PATH) |
 | Post-rebuild regression gate ("did I break the router?") | `eaves doctor` - 13 assertions (12 GOTCHAS.md + nixos-checkout drift) |
 | Verify the flake / test a change end-to-end | `go test ./...` + `bash scripts/smoke-fixtures.sh` (offline) |
-| Change firewall/DHCP/VLAN config | `~/router` + `make deploy` - NEVER eaves (it can't), NEVER edit /etc/nixos on the router |
+| Change firewall/DHCP/VLAN config | `~/infra/router` + `make deploy` - NEVER eaves (it can't), NEVER edit /etc/nixos on the router |
 | Raw packet forensics eaves doesn't cover | `ssh nixos` + tcpdump/conntrack by hand (`tailscale-homelab` skill) |
 
 ## Binary availability (ADOPTED 2026-08-01)
 
 eaves IS on the router's PATH (`/run/current-system/sw/bin/eaves`),
-installed via the `~/router` flake input (`eaves.nixosModules.default`
+installed via the `~/infra/router` flake input (`eaves.nixosModules.default`
 = systemPackages). The old rsync + /tmp/nix-build pattern is RETIRED.
 Run: `ssh nixos 'sudo -n eaves doctor'`. Rolling out a NEW eaves rev:
-bump the `?rev=` pin in `~/router/flake.nix`, `make deploy` - the pin
+bump the `?rev=` pin in `~/infra/router/flake.nix`, `make deploy` - the pin
 means a broken eaves main never reaches the router by accident.
 Most commands need root (conntrack/nft) - run via `sudo -n`
 (passwordless sudo is already configured for the `nixos` ssh user, so
@@ -69,7 +69,7 @@ fixtures - this is how you answer "who has DHCP leases right now"-class
 questions in a session without ssh'ing anywhere:
 
 ```bash
-cd ~/eaves
+cd ~/infra/eaves
 EAVES_FIXTURE_DIR=testdata/fixtures go run . show dhcp server leases
 EAVES_FIXTURE_DIR=testdata/fixtures go run . doctor
 ```
@@ -81,8 +81,8 @@ fixture snapshot". Fixture filenames map 1:1 to arg vectors
 (`nft_-j_list_ruleset.json` == `nft -j list ruleset`).
 
 **Check fixture freshness before answering anything time-sensitive**:
-`cat ~/eaves/testdata/fixtures/CAPTURED_AT` (written by the capture
-script) or `git -C ~/eaves log -1 --format=%ci -- testdata/fixtures`.
+`cat ~/infra/eaves/testdata/fixtures/CAPTURED_AT` (written by the capture
+script) or `git -C ~/infra/eaves log -1 --format=%ci -- testdata/fixtures`.
 If the fixtures predate the event being asked about (a rebuild, a
 topology change), say so - fixture answers describe the OLD state, and
 the honest path is one read-only ssh (or a re-capture) before answering.
@@ -91,7 +91,7 @@ There is no offline path to live truth.
 Re-capture when topology changes (read-only ssh, re-sanitizes):
 
 ```bash
-~/eaves/scripts/capture-fixtures.sh   # then update count assertions in tests
+~/infra/eaves/scripts/capture-fixtures.sh   # then update count assertions in tests
 ```
 
 ## Gotchas (all learned the hard way)
@@ -119,7 +119,7 @@ Re-capture when topology changes (read-only ssh, re-sanitizes):
 
 ## Extending eaves
 
-Repo `~/eaves`, stdlib-only Go (go.mod zero requires - keep it that way;
+Repo `~/infra/eaves`, stdlib-only Go (go.mod zero requires - keep it that way;
 `vendorHash = null` in flake.nix depends on it). Command tree in
 `internal/show/show.go`; parsers pure in `internal/parse/`; new data
 sources go through the runner allowlist (`internal/runner/runner.go`) -

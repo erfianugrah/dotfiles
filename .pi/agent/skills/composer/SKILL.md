@@ -97,7 +97,7 @@ The old servarr instance is RETIRED (phase 3c, 2026-07-30): container removed, `
 
 ### Upgrade policy (NixOS-pinned, NOT self-upgrade)
 
-The image tag lives in `~/router/configuration.nix` (the flake control plane since 2026-08-01 - the old two-copy router.nix dance is dead). Bump it there, then `make deploy` (push -> router fast-forwards -> rebuild -> eaves doctor). NEVER edit /etc/nixos on the box - the next deploy silently reverts to the repo-pinned tag (real 2026-07-30 incident in the old workflow: reverted 0.20.0 -> 0.16.4, dropped the /certs mount, re-armed the pre-0.18.1 local-daemon webhook bug). Also `sed -i` with no match is a silent no-op - grep-verify after every sed. Self-upgrade via the `_system` stack does NOT apply here (oci-containers unit races the helper; rebuilds revert to the pinned tag).
+The image tag lives in `~/infra/router/configuration.nix` (the flake control plane since 2026-08-01 - the old two-copy router.nix dance is dead). Bump it there, then `make deploy` (push -> router fast-forwards -> rebuild -> eaves doctor). NEVER edit /etc/nixos on the box - the next deploy silently reverts to the repo-pinned tag (real 2026-07-30 incident in the old workflow: reverted 0.20.0 -> 0.16.4, dropped the /certs mount, re-armed the pre-0.18.1 local-daemon webhook bug). Also `sed -i` with no match is a silent no-op - grep-verify after every sed. Self-upgrade via the `_system` stack does NOT apply here (oci-containers unit races the helper; rebuilds revert to the pinned tag).
 
 **Router-local access**: API also at `localhost:8080` on the router:
 
