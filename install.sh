@@ -57,6 +57,29 @@ do_stow() {
   (cd ~ && run stow -d "$DOTFILES" -t "$HOME" -v .)
 }
 
+# Tools in bin/ that must be on PATH. ~/bin itself is a folded stow link but
+# NOT on PATH on all machines - link the select tools into ~/.local/bin which
+# is. Idempotent (ln -sf). stow-drift is a Go binary: build it if go is
+# available and the binary is missing, else skip with a note.
+do_local_bin() {
+  echo ">> linking PATH tools into ~/.local/bin"
+  run mkdir -p "$HOME/.local/bin"
+  local tools=(mdclip)
+  if [ ! -x "$DOTFILES/bin/stow-drift" ]; then
+    if command -v go >/dev/null 2>&1; then
+      echo ">> building stow-drift (go found, binary missing)"
+      (cd "$DOTFILES/bin" && run go build -ldflags="-s -w" -o stow-drift .)
+    else
+      echo "!! no go toolchain - skipping stow-drift build (install go, rerun)" >&2
+    fi
+  fi
+  [ -x "$DOTFILES/bin/stow-drift" ] && tools+=(stow-drift)
+  local t
+  for t in "${tools[@]}"; do
+    run ln -sf "$DOTFILES/bin/$t" "$HOME/.local/bin/$t"
+  done
+}
+
 OS="$(detect_os)"
 echo ">> detected OS: $OS (dotfiles: $DOTFILES)"
 
@@ -103,5 +126,7 @@ case "$OS" in
     do_stow
     ;;
 esac
+
+do_local_bin
 
 echo ">> done."
