@@ -29,7 +29,7 @@ Implementation plan + fixture contract: `~/infra/eaves/docs/plans/2026-07-24-eav
 |---|---|
 | Answer a router question WITHOUT touching the router | `cd ~/infra/eaves && EAVES_FIXTURE_DIR=testdata/fixtures go run . <cmd>` (fixtures are a sanitized snapshot) |
 | Live answer (leases, conntrack, NAT, ruleset) | `ssh nixos 'sudo -n eaves <cmd>'` (eaves is on PATH) |
-| Post-rebuild regression gate ("did I break the router?") | `eaves doctor` - 13 assertions (12 GOTCHAS.md + nixos-checkout drift) |
+| Post-rebuild regression gate ("did I break the router?") | `eaves doctor` - full suite: kea/nft/NAT/conntrack + nixos-checkout drift + trunk NIC health (trunk-errors WARNs on nonzero counters - a static value after a tcpdump session is the i40e promisc-toggle artifact, not hardware) |
 | Verify the flake / test a change end-to-end | `go test ./...` + `bash scripts/smoke-fixtures.sh` (offline) |
 | Change firewall/DHCP/VLAN config | `~/infra/router` + `make deploy` - NEVER eaves (it can't), NEVER edit /etc/nixos on the router |
 | Raw packet forensics eaves doesn't cover | `ssh nixos` + tcpdump/conntrack by hand (`tailscale-homelab` skill) |
