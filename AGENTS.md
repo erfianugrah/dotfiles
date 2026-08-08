@@ -71,7 +71,22 @@ cd ~ && stow -d ~/dotfiles -t ~ -n -v .       # dry run, shows what would link
 `.stow-local-ignore` (at repo root) excludes files that live in the repo
 but should NOT be linked to `$HOME` - `.git`, `README.md`, `AGENTS.md`,
 the root `package.json`, package lists, nested config dirs already managed
-elsewhere.
+elsewhere. It is also where DELIBERATE real-file exceptions are documented:
+`.config/opencode/opencode.json` is a real file by design (pi-mcp-bridge
+reads it; not stow-linked), with a comment in the ignore file saying so.
+
+**Drift check:** `stow-drift` (in `bin/`, Go) walks the repo and flags any
+`$HOME` target that is a real file instead of a symlink into the repo -
+the failure mode where edits to one side silently diverge. Run it after any
+manual `~/.config` or `~/.ssh` edit; exit 1 means drift. Known-good state is
+`0 drifted` (opencode.json is exempted via the ignore file, everything else
+must link).
+
+**PATH tools:** `~/bin` is a folded stow link but NOT on PATH. Tools that
+need to be runnable by name (`mdclip`, `stow-drift`) are additionally
+linked into `~/.local/bin` by the `do_local_bin` step in `install.sh`
+(which also builds the stow-drift Go binary when it's missing and a go
+toolchain is present). New PATH tools: add to the `tools=(...)` list there.
 
 **Rule of thumb:** edit the source at `~/dotfiles/<path>`, NEVER the live
 symlink target. Changes propagate instantly through the symlink.
