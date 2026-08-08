@@ -7,7 +7,7 @@ description: System-level design decisions for backend services and full-stack a
 
 `superpowers` covers the *process* (brainstorm → plan → TDD → review). `frontend-stack` and `supabase` cover *framework choices*. This skill covers the **system shape** between them: how modules talk, how the API is laid out, how data flows, how you observe failures.
 
-Grounded in the user's established Go pattern (`~/bonkled/`, `~/infra/ergo/wafctl/`). Reads as opinionated defaults; deviate when justified.
+Grounded in the user's established Go pattern (`~/bonkled/`, `~/infra/ergo/caddy-compose/wafctl/`). Reads as opinionated defaults; deviate when justified.
 
 ## Bounded contexts (DDD-lite, not enterprise DDD)
 
