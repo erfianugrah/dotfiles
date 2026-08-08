@@ -1,20 +1,20 @@
 ---
 name: xikectl
-description: Drive the user's `xikectl` CLI - the operator tool for the XikeStor SKS8300-12E2T2X switch at 10.0.69.4 (edge switch between the MS-01 router and the servarr box). Use when reading switch state (VLANs, interfaces, MAC table, MTU/jumbo, port stats, STP, LLDP, ARP, CPU/memory/fan), running the live smoke or verify suites, adding a show resource, probing switch CLI commands, saving/backing up switch config, or planning the switch write lane (set/apply/restore) or reboot. Fires on "xikectl", "XikeStor", "SKS8300", "the switch", "switch VLANs/ports", "jumbo MTU on the switch", "display vlan", "trunk port". NOT for router/DHCP/NAT/firewall (that's `eaves` on the NixOS router), DNS (`knotctl`/`gloryhole`), or the arr media stack (`arr-stack`). Sibling to `eaves`, `tailscale-homelab`, `caddy`. Repo `~/servarr-compose/tools/xikectl`, Go, 162 unit tests + live smoke green.
+description: Drive the user's `xikectl` CLI - the operator tool for the XikeStor SKS8300-12E2T2X switch at 10.0.69.4 (edge switch between the MS-01 router and the servarr box). Use when reading switch state (VLANs, interfaces, MAC table, MTU/jumbo, port stats, STP, LLDP, ARP, CPU/memory/fan), running the live smoke or verify suites, adding a show resource, probing switch CLI commands, saving/backing up switch config, or planning the switch write lane (set/apply/restore) or reboot. Fires on "xikectl", "XikeStor", "SKS8300", "the switch", "switch VLANs/ports", "jumbo MTU on the switch", "display vlan", "trunk port". NOT for router/DHCP/NAT/firewall (that's `eaves` on the NixOS router), DNS (`knotctl`/`gloryhole`), or the arr media stack (`arr-stack`). Sibling to `eaves`, `tailscale-homelab`, `caddy`. Repo `~/infra/xikectl`, Go, 162 unit tests + live smoke green.
 ---
 
 # xikectl - operator CLI for the XikeStor switch
 
 Switch: SKS8300-12E2T2X at `10.0.69.4`, firmware V1.04.B09, PRODUCTION
-(carries the servarr trunk). Tool repo: `~/servarr-compose/tools/xikectl`
-(single Go module). **Read `tools/xikectl/AGENTS.md` first when working
+(carries the servarr trunk). Tool repo: `~/infra/xikectl`
+(single Go module). **Read `~/infra/xikectl/AGENTS.md` first when working
 in the repo** - it has the full gotcha list. Design + live facts:
-`incident-2026-05/edge-nixos/xikectl-plan.md`.
+`~/servarr-compose/incident-2026-05/edge-nixos/xikectl-plan.md`.
 
 ## Quick reference
 
 ```bash
-cd ~/servarr-compose/tools/xikectl && go build -o xikectl ./cmd/xikectl
+cd ~/infra/xikectl && go build -o xikectl ./cmd/xikectl
 export XIKE_USER=admin XIKE_PASS=admin          # XIKE_HOST defaults to 10.0.69.4
 
 ./xikectl show vlan|interfaces|mac|mtu|...      # 27 resources, --json available
