@@ -17,3 +17,5 @@ package.json
 bun.lock
 node_modules
 .pi/harness.json
+# opencode.json: pi-mcp-bridge-managed, real file by design (drift-checked manually)
+.config/opencode/opencode.json
