@@ -3533,6 +3533,19 @@ describe("session-ledger.isReadOnlySql", () => {
 });
 
 describe("session-ledger.serializeEntriesForSummary", () => {
+  test("real session-entry shape ({type:'message', message:{role,content}}) is extracted", () => {
+    // Regression: the shutdown-capture path silently died because pi session
+    // entries nest content under .message, and the old code read e.content
+    // (always undefined) - zero rows were ever captured on quit.
+    const out = serializeEntriesForSummary([
+      { type: "session", id: "abc" } as never,
+      { type: "model_change", modelId: "x" } as never,
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "fix the bug" }] } } as never,
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "done" }] } } as never,
+      { type: "message", message: { role: "assistant", content: [{ type: "thinking", thinking: "hmm" }] } } as never,
+    ]);
+    expect(out).toBe("[user] fix the bug\n[assistant] done");
+  });
   test("role-tags and skips empty entries", () => {
     const out = serializeEntriesForSummary([
       { role: "user", content: "hello" },

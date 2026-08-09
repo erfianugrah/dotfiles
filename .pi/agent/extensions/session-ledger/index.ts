@@ -173,19 +173,37 @@ export function isReadOnlySql(sql: string): { ok: boolean; reason?: string } {
 	return { ok: true };
 }
 
+/**
+ * pi session entries (from ctx.sessionManager.getEntries() and the .jsonl
+ * on disk) are WRAPPED: { type: "message", message: { role, content } }.
+ * Bare { role, content } objects (tests, synthesized entries) are also
+ * accepted. Reading e.content directly on a wrapped entry yields undefined -
+ * that bug silently killed shutdown capture from 2026-06-18 to 2026-08-09.
+ */
+type AnyEntry = { type?: string; role?: string; content?: unknown; message?: { role?: string; content?: unknown } };
+
+/** Content payload of a session entry, wrapped or bare. */
+export function entryContent(e: AnyEntry): unknown {
+	return e.message?.content ?? e.content;
+}
+
+/** Role label of a session entry (message role, else bare role, else type). */
+export function entryRole(e: AnyEntry): string {
+	return e.message?.role ?? e.role ?? e.type ?? "msg";
+}
+
 /** Serialize session entries to a bounded role-tagged transcript for summarisation. */
 export function serializeEntriesForSummary(
-	entries: Array<{ type?: string; role?: string; content?: unknown }>,
+	entries: AnyEntry[],
 	opts: { maxPerEntry?: number; maxTotal?: number } = {},
 ): string {
 	const maxPerEntry = opts.maxPerEntry ?? RAW_PER_ENTRY;
 	const maxTotal = opts.maxTotal ?? RAW_MAX_BYTES;
 	const parts: string[] = [];
 	for (const e of entries) {
-		const text = extractText(e.content).trim();
+		const text = extractText(entryContent(e)).trim();
 		if (!text) continue;
-		const label = e.role || e.type || "msg";
-		parts.push(`[${label}] ${text.slice(0, maxPerEntry)}`);
+		parts.push(`[${entryRole(e)}] ${text.slice(0, maxPerEntry)}`);
 	}
 	const joined = parts.join("\n");
 	// Keep the most recent content if over budget (tail matters most).
@@ -410,35 +428,49 @@ let injectRows: LedgerRow[] = [];
 // design - one line per session, capped. Fails silent when off-tailnet.
 let memledgerBlock: Promise<string> | null = null;
 
+interface BriefRow {
+	source: string;
+	project: string | null;
+	title: string | null;
+	started_at: string | null;
+	message_count: number;
+}
+
+async function fetchBriefRows(filter: string): Promise<BriefRow[]> {
+	// skip tiny sessions (one-shot probes) and anything started in the
+	// last 30min (that's likely THIS session)
+	const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+	const url =
+		"https://memledger.erfi.io/sessions?" + filter +
+		`&message_count=gte.8&started_at=lt.${encodeURIComponent(cutoff)}` +
+		"&order=started_at.desc.nullslast&limit=4&select=source,project,title,started_at,message_count";
+	const resp = await fetch(url, { signal: AbortSignal.timeout(1500) });
+	if (!resp.ok) return [];
+	return (await resp.json()) as BriefRow[];
+}
+
 async function fetchMemledgerBrief(project: string): Promise<string> {
-	if (!project) return "";
 	project = project.split("/").filter(Boolean).pop() ?? project; // memledger stores basename
 	try {
-		// skip tiny sessions (one-shot probes) and anything started in the
-		// last 30min (that's likely THIS session)
-		const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-		const url =
-			`https://memledger.erfi.io/sessions?project=eq.${encodeURIComponent(project)}` +
-			`&message_count=gte.8&started_at=lt.${encodeURIComponent(cutoff)}` +
-			"&order=started_at.desc.nullslast&limit=4&select=source,title,started_at,message_count";
-		const resp = await fetch(url, { signal: AbortSignal.timeout(1500) });
-		if (!resp.ok) return "";
-		const rows = (await resp.json()) as Array<{
-			source: string;
-			title: string | null;
-			started_at: string | null;
-			message_count: number;
-		}>;
+		// project-scoped first; fall back to a GLOBAL recent-work brief so a
+		// session opened in a random directory still starts informed
+		let rows = project ? await fetchBriefRows(`project=eq.${encodeURIComponent(project)}`) : [];
+		let scope = "in this project";
+		if (rows.length === 0) {
+			rows = await fetchBriefRows("");
+			scope = "across all projects";
+		}
 		if (!rows.length) return "";
 		const lines = rows.map((r) => {
 			const date = (r.started_at ?? "").slice(0, 10);
 			const title = (r.title ?? "").trim().slice(0, 80) || "(untitled)";
-			return `- ${date} · ${r.source} · ${title} · ${r.message_count} msgs`;
+			const proj = scope === "across all projects" ? ` · ${r.project ?? "?"}` : "";
+			return `- ${date} · ${r.source}${proj} · ${title} · ${r.message_count} msgs`;
 		});
 		return (
-			"## Recent sessions in this project (all clients, via memledger)\n" +
+			`## Recent sessions ${scope} (all clients, via memledger)\n` +
 			lines.join("\n") +
-			"\nSearch their full content with the memledger_search or session_search tools."
+			"\nSearch their full content with the memledger_search or session_search tools - do NOT ls/grep session files by hand."
 		);
 	} catch {
 		return "";
@@ -637,13 +669,13 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (event: { reason?: string }, ctx: ExtensionContext) => {
 		if (capturedThisSession) return;
 		if (event.reason === "reload") return; // /reload churns; don't dup
-		let entries: Array<{ type?: string; role?: string; content?: unknown }>;
+		let entries: AnyEntry[];
 		try {
-			entries = ctx.sessionManager.getEntries() as typeof entries;
+			entries = ctx.sessionManager.getEntries() as AnyEntry[];
 		} catch {
 			return;
 		}
-		const msgEntries = entries.filter((e) => extractText(e.content).trim().length > 0);
+		const msgEntries = entries.filter((e) => extractText(entryContent(e)).trim().length > 0);
 		if (msgEntries.length < SHUTDOWN_MIN_ENTRIES) return;
 		const raw = serializeEntriesForSummary(msgEntries);
 		if (!raw.trim()) return;
