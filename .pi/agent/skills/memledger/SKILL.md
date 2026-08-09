@@ -14,6 +14,8 @@ description: Drive the user's memledger system - the centralised, client-agnosti
 - **Prune**: `memledger prune` (daily 04:30 timer) deletes local logs >30d old ONLY after DB-count verification + raw archive to MinIO `s3://memledger/archive/`. `--dry-run` first when testing.
 - **Backups**: daily pg_dump sidecar -> MinIO `s3://memledger/pg-dumps/`, 30-day prune.
 - **pi tool**: `memledger_search` extension (dotfiles `.pi/agent/extensions/memledger.ts`) - the canonical search for cross-client or >30d-old history. pi's built-in `session_search` also falls back to memledger automatically.
+- **pi MCP tools**: pi ALSO gets the 5 MCP tools (search_messages, semantic_search, search_ledger, search_memories, list_sessions) in-session via pi-mcp-bridge + an `mcp-remote` stdio shim configured in `~/.pi/agent/mcp-bridge.json` (server `memledger`, bearer from `~/.config/memledger/env`; file is chmod 600). The bridge is stdio-only, so the shim fronts the remote endpoint; verified e2e 2026-08-09 (`pi mcp list` is the no-LLM acceptance test; delete the memledger entry in `~/.pi/agent/mcp-bridge.cache.json` to force re-discovery after the tool schema changes).
+- **claude.ai corpus**: the claude.ai web history is seeded (2026-08-09, 1673 conversations / ~23k messages, from the account data export zip in Windows Downloads) as source=claude host=claude.ai via `memledger import-claude-ai <export.zip|conversations.json>` (one-shot, idempotent; re-import newer exports to top up). Distinct from Claude Code's ~/.claude/projects jsonl (barely used, 1 session).
 - **UI**: `https://memledger.erfi.io/ui/` - Astro static app (search/sessions/transcript/stats), bonkled-style theme (cream/ink/hairline/plex-mono/accent-red, three-state dark toggle). Built on the router by the one-shot `ui-build` service into /var/lib/memledger/ui-dist; the edge caddy serves it. REBUILD GOTCHA: `docker start memledger-ui-build` reuses the container rootfs - the build command `rm -rf /tmp/web` first or it builds stale code.
 
 ## Querying (any client, reads are LAN/tailnet-open)
@@ -21,6 +23,7 @@ description: Drive the user's memledger system - the centralised, client-agnosti
 ```bash
 curl -s "https://memledger.erfi.io/rpc/search_messages?q=<terms>&lim=10" | jq   # FTS, ranked headlines
 curl -s "https://memledger.erfi.io/rpc/search_messages?q=X&src=opencode" | jq   # per-client filter
+curl -s "https://memledger.erfi.io/semantic/search?q=X&kind=messages&source=claude" | jq  # semantic, all kinds support source
 curl -s "https://memledger.erfi.io/rpc/search_ledger?q=X" | jq                  # work-ledger summaries
 curl -s "https://memledger.erfi.io/sessions?project=eq.<p>&order=started_at.desc" | jq
 ```
@@ -34,6 +37,7 @@ Writes need `Authorization: Bearer $MEMLEDGER_TOKEN` (Vaultwarden item `memledge
 - `offset` is a reserved word - the checkpoint column is `byte_offset`.
 - PG timestamptz is microsecond precision - checkpoint mtimes must be truncated to micros or whole-file sources re-sync every run.
 - A failing source file must not abort the whole sync - per-file errors are logged and skipped.
+- `search_ledger` (RPC + MCP) indexes the `summary` column ONLY, not project/cwd - a query for a project NAME (e.g. "composer") returns empty even when the row's project is /home/erfi/composer. True negative, not a sync gap: cross-check with `sqlite3 ~/.pi/agent/ledger.db 'select count(*) from ledger'` before suspecting the ingester.
 
 ## Ops
 

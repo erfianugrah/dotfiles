@@ -44,7 +44,8 @@ const memledgerSearchTool = defineTool({
     // semantic goes to the embedder service (embeds the query + cosine
     // similarity over pgvector), not a PostgREST RPC.
     if (kind === "semantic") {
-      const url = `${baseUrl()}/semantic/search?q=${encodeURIComponent(params.q)}&kind=messages&limit=${limit}`;
+      const srcParam = params.source ? `&source=${encodeURIComponent(params.source)}` : "";
+      const url = `${baseUrl()}/semantic/search?q=${encodeURIComponent(params.q)}&kind=messages&limit=${limit}${srcParam}`;
       const resp = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) }).catch((e) => ({ err: String(e) }));
       if ("err" in resp) {
         return { content: [{ type: "text", text: `memledger semantic unreachable: ${resp.err}` }], details: { url } };
