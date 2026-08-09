@@ -25,3 +25,4 @@ bun.lock
 # vim session state - never commit (has held CF analytics token before)
 .viminfo
 bin/stow-drift
+bin/memledger
