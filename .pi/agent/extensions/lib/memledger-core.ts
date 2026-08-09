@@ -11,6 +11,18 @@ export function baseUrl(): string {
   return (typeof process !== "undefined" && process.env?.MEMLEDGER_URL) || DEFAULT_BASE;
 }
 
+/**
+ * Postgres websearch_to_tsquery understands quoted phrases, OR, and
+ * -negation, but NOT the FTS5-style AND/NOT operators - pass user queries
+ * through toOrQuery first so multi-word searches keep auto-OR semantics.
+ */
+export function toOrQuery(input: string): string {
+  const trimmed = input.trim();
+  if (/\b(OR|AND|NOT)\b|[*"-]/.test(trimmed)) return trimmed;
+  const tokens = trimmed.split(/[\s\-_./\\:]+/).filter(Boolean);
+  return Array.from(new Set(tokens)).join(" OR ");
+}
+
 /** PostgREST filter values can't contain these without breaking the query syntax. */
 export function sanitizeFilter(q: string): string {
   return q.replace(/[,()]+/g, " ").replace(/\s+/g, " ").trim();
@@ -39,6 +51,34 @@ export function stripMarks(s: string): string {
 function oneLine(s: string, max: number): string {
   const flat = s.replace(/\s+/g, " ").trim();
   return flat.length > max ? flat.slice(0, max - 3) + "..." : flat;
+}
+
+export interface MessageHit {
+  session_key: string;
+  ordinal: number;
+  source: string;
+  role: string;
+  ts: string;
+  rank: number;
+  headline: string;
+}
+
+/**
+ * Fetch helper shared by extensions that need memledger message search
+ * (the memledger_search tool and session_search's deep-history path).
+ * Throws on network/HTTP errors so callers can fall back.
+ */
+export async function searchMessages(
+  q: string,
+  source: string | undefined,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<MessageHit[]> {
+  const url = buildUrl(baseUrl(), "messages", q, source, limit);
+  const resp = await fetch(url, { signal: signal ?? AbortSignal.timeout(10_000) });
+  if (!resp.ok) throw new Error(`memledger HTTP ${resp.status}`);
+  const rows = (await resp.json()) as MessageHit[];
+  return rows.map((r) => ({ ...r, headline: stripMarks(r.headline ?? "") }));
 }
 
 export function formatRows(kind: SearchKind, rows: Record<string, unknown>[]): string[] {

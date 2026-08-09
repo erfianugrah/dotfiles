@@ -1,11 +1,12 @@
 /**
  * session-search — full-text search across past Pi sessions.
  *
- * Two backends in priority order:
+ * Three backends in priority order:
  *   1. SQLite FTS5 (via session-fts-index) — fast, stemming, persistent.
- *      Falls back if the index has no rows for the query.
- *   2. ripgrep streaming scan — catches files not yet indexed (the FTS5
- *      indexer fills in newest-first over many session starts).
+ *   2. memledger (Postgres FTS over ALL synced sessions) — the only place
+ *      pruned sessions (>30d local retention) can still be found.
+ *   3. ripgrep streaming scan — catches files neither indexed nor synced
+ *      yet (a session from minutes ago).
  *
  * The FTS5 path returns results in <50ms even on this user's 18GB / 15K-file
  * session corpus. The rg path remains so newly-typed queries against
@@ -22,6 +23,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { searchFts, indexStats } from "./session-fts";
+import { searchMessages, toOrQuery } from "./lib/memledger-core.ts";
 
 type Hit = {
 	sessionPath: string;
@@ -287,9 +289,28 @@ const sessionSearchTool = defineTool({
 			hits = [];
 		}
 
-		// ── path 2: ripgrep fallback ───────────────────────────────────────
-		// Trigger when FTS5 has 0 hits AND there are still pending files to
-		// index. Avoids the slow rg path once the index is hot.
+		// —— path 2: memledger (central store) ————————————
+		// Covers sessions pruned from local disk (>30d retention). Network
+		// errors fall through to the rg path silently.
+		if (hits.length === 0) {
+			try {
+				const ml = await searchMessages(toOrQuery(params.query), "pi", limit, signal);
+				if (ml.length > 0) {
+					hits = ml.map((m) => ({
+						sessionPath: `${m.session_key}#${m.ordinal}`,
+						date: m.ts ? m.ts.slice(0, 10) : "?",
+						role: m.role ?? "?",
+						snippet: m.headline.replace(/\s+/g, " ").trim(),
+					}));
+					backend = "memledger";
+				}
+			} catch { /* memledger unreachable — try rg */ }
+		}
+
+		// —— path 3: ripgrep fallback ——————
+		// Trigger when both FTS5 and memledger have 0 hits AND there are
+		// still pending files to index. Avoids the slow rg path once the
+		// index is hot.
 		if (hits.length === 0) {
 			let pendingFiles = 0;
 			try {

@@ -257,7 +257,7 @@ function countSessionFiles(): number {
   return total;
 }
 
-export function indexStats(): { totalRows: number; totalFiles: number; pendingFiles: number; workerBusy: boolean; lastCommand: string | null } {
+export function indexStats(): { totalRows: number; totalFiles: number; pendingFiles: number; staleFiles: number; workerBusy: boolean; lastCommand: string | null } {
   const d = openReadDb();
   // Tables may not exist yet on first launch if the schema-init above lost
   // the write-lock race — tolerate that and report zeros.
@@ -269,14 +269,18 @@ export function indexStats(): { totalRows: number; totalFiles: number; pendingFi
   // call — cache the FS walk for PENDING_CACHE_TTL_MS.
   const now = Date.now();
   let pendingFiles = 0;
+  let onDisk = 0;
   if (pendingCache && now - pendingCache.ts < PENDING_CACHE_TTL_MS) {
-    pendingFiles = Math.max(0, pendingCache.count - totalFiles);
+    onDisk = pendingCache.count;
   } else {
-    const total = countSessionFiles();
-    pendingCache = { ts: now, count: total };
-    pendingFiles = Math.max(0, total - totalFiles);
+    onDisk = countSessionFiles();
+    pendingCache = { ts: now, count: onDisk };
   }
-  return { totalRows, totalFiles, pendingFiles, workerBusy, lastCommand };
+  pendingFiles = Math.max(0, onDisk - totalFiles);
+  // staleFiles: indexed rows whose files were deleted from disk (e.g. by
+  // the memledger prune flow). Drives the auto-gc below.
+  const staleFiles = Math.max(0, totalFiles - onDisk);
+  return { totalRows, totalFiles, pendingFiles, staleFiles, workerBusy, lastCommand };
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -296,6 +300,36 @@ export default function (pi: ExtensionAPI) {
             ctx.ui.setStatus?.("session-fts", `indexing +${msg.files}f ${msg.entries}m`);
           } else if (msg.type === "done") {
             workerBusy = false;
+            // Auto-gc: if the index holds rows for files the memledger prune
+            // flow has deleted, drop them so search stops returning hits for
+            // gone sessions. Threshold avoids churn on small drift.
+            try {
+              const s = indexStats();
+              // FTS5 has no index on session_path, so per-file gc DELETEs
+              // full-scan a 1.3M-row table - fine for small drift, hopeless
+              // for bulk (measured: 13k stale files made no progress in
+              // 5min). Large drift => rebuild instead (reindexes the ~1K
+              // surviving files from scratch, minutes off-thread).
+              if (s.staleFiles > 500) {
+                sendWorkerCmd("rebuild", {}, (rbMsg) => {
+                  if (rbMsg.type === "done") {
+                    workerBusy = false;
+                    ctx.ui.notify(`session-index rebuild after prune: ${rbMsg.files} files, ${rbMsg.entries} messages`, "info");
+                  } else if (rbMsg.type === "error") {
+                    workerBusy = false;
+                  }
+                });
+              } else if (s.staleFiles > 50) {
+                sendWorkerCmd("gc", {}, (gcMsg) => {
+                  if (gcMsg.type === "done") {
+                    workerBusy = false;
+                    ctx.ui.notify(`session-index gc: removed ${gcMsg.files} stale entries`, "info");
+                  } else if (gcMsg.type === "error") {
+                    workerBusy = false;
+                  }
+                });
+              }
+            } catch { /* best-effort */ }
             if (msg.files > 0) {
               ctx.ui.setStatus?.("session-fts", `+${msg.files}f ${msg.entries}m`);
               setTimeout(() => { try { ctx.ui.setStatus?.("session-fts", ""); } catch { /* ignore */ } }, 5000);
