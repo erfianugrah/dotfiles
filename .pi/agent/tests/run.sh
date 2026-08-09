@@ -15,8 +15,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE/../../.."
 
-# Unit suite (filter passes through as "$@").
-bun test --preload "$HERE/preload.ts" "$HERE/extensions.test.ts" "$@"
+# Unit suite (filter passes through as "$@"). The loop-*.test.ts files are
+# the task.ts streaming / tool-activity contracts born from the 2026-08-09
+# self-correcting-loop run; they ride the same preload as the unit suite.
+bun test --preload "$HERE/preload.ts" "$HERE/extensions.test.ts" "$HERE/loop-task.test.ts" "$HERE/loop-activity.test.ts" "$@"
 
 # Integration suite (self-mocked; no preload). Always run in full.
 bun test "$HERE/integration/"
