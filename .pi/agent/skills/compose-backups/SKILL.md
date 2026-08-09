@@ -94,6 +94,11 @@ that the backup container also mounts:
    for safety.
 7. **Alpine/busybox**: no GNU date in these images - use epoch math
    (`date -d @$(( $(date +%s) - 2592000 ))`), not `date -d '30 days ago'`.
+8. **servarr_lan macvlan IPs**: before assigning a static IP to a new sidecar,
+   list occupancy first -
+   `ssh servarr 'docker network inspect servarr_lan --format "{{range .Containers}}{{.Name}} {{.IPv4Address}} {{end}}"'`.
+   Guessing collides (10.0.71.58 was revista; gitea_backup landed on .61).
+   MAC convention is `02:42:0a:00:47:<last-octet-in-hex>`.
 
 ## Storage policy (user's, 2026-08-09)
 
