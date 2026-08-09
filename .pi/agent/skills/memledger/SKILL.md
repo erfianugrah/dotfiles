@@ -38,6 +38,8 @@ Writes need `Authorization: Bearer $MEMLEDGER_TOKEN` (Vaultwarden item `memledge
 - PG timestamptz is microsecond precision - checkpoint mtimes must be truncated to micros or whole-file sources re-sync every run.
 - A failing source file must not abort the whole sync - per-file errors are logged and skipped.
 - `search_ledger` (RPC + MCP) indexes the `summary` column ONLY, not project/cwd - a query for a project NAME (e.g. "composer") returns empty even when the row's project is /home/erfi/composer. True negative, not a sync gap: cross-check with `sqlite3 ~/.pi/agent/ledger.db 'select count(*) from ledger'` before suspecting the ingester.
+- pgvector HNSW + selective WHERE filter = silently EMPTY results: the approximate index gathers candidates table-wide and post-filters, so `source=claude` (3 embedded rows in 635k) returned 0 while unfiltered worked. `_semantic_query` materializes the filtered subset (CTE) and runs exact cosine when `source` is given; unfiltered keeps the index path. Never trust "0 rows" from a filtered ANN query without checking `enable_indexscan=off`.
+- Semantic search parity (2026-08-09): `/semantic/search` and MCP `semantic_search` both take `kind` (messages|memories|ledger_entries) + `source`; the web UI semantic mode passes its src filter through; pi's `memledger_search` extension forwards `source` for kind=semantic. New claude.ai rows embed newest-first in the background backfill - old-imported rows (2024-2025 ts) are embedded LAST, so semantic-over-claude is sparse until the backlog drains (~1 day for 600k).
 
 ## Ops
 
