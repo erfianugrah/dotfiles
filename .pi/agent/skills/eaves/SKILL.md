@@ -8,7 +8,9 @@ description: Drive the user's `eaves` CLI - a read-only Juniper/VyOS-style opera
 `eaves` is the observational half of a VyOS CLI for the NixOS edge router:
 `show` / `monitor` / `doctor`, Juniper-style unique-prefix matching
 (`eaves sh int`), `--json` on everything, exit 0/1/2. Zero mutation
-capability - no `configure` mode exists by design.
+capability - no `configure` mode exists by design. `-h` / `--help` (any
+position) or `help <path>` prints that sub-tree's commands instead of
+erroring.
 
 **Config control plane (since 2026-08-01): `~/infra/router`** - private
 GitHub `erfianugrah/router`, flake-based, SINGLE configuration.nix (the
