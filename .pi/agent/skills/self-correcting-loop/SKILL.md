@@ -720,6 +720,13 @@ projects:
 - If a sensor reports STUCK, EITHER the check is broken OR the canary plants
   the wrong thing. Diagnose before editing - the first real STUCK found in
   this repo was a broken sensor, and the fix was a different scanner mode.
+- **`! rg ...` is STUCK-by-construction over not-yet-existing files.** An
+  absence guard like `! rg 'pattern' a.ts b.ts` silently passes forever when
+  one of the files does not exist at baseline: rg exits 2 (error) for the
+  missing operand, and 2 outranks a match - so even with the fault planted
+  the negated command exits 0. Found by `verify-sensors` on 2026-08-09 on a
+  no-stubs guard spanning files the feature itself would create. Assert on
+  output, not exit code: `test -z "$(rg --no-messages 'pattern' a.ts b.ts)"`.
 - A canary that cannot be expressed is a smell: it usually means the sensor
   asserts something too vague to fault deliberately.
 
@@ -808,6 +815,17 @@ reads as "the loop went silent", and the run itself is completely fine.
 The loop now warns when it detects this (printed *before* the checkpoint, so
 the warning survives the revert it describes), and `.pi/**` is exempt from the
 scope guard so the manifest and report can never be clobbered the same way.
+
+That exemption has a hole when `.pi/harness.json` is TRACKED in the target
+repo: the AGENT can clobber the manifest and the scope guard will not revert
+it. Observed 2026-08-09 (dotfiles run): the repo had an old harness manifest
+committed from a previous task, and the iteration-2 agent - trying to please
+the judge's diff-hygiene complaint - restored `.pi/harness.json` to HEAD
+mid-run. The tell was the between-iterations hot-reload line reporting
+`0 rule(s)`: the reload read HEAD's stale manifest, and every standing rule
+silently dropped out of later prompts. Belt and suspenders: add a rule
+forbidding the agent from touching `.pi/harness*`, and tell the judge in the
+spec that harness files are loop machinery, not part of the change.
 
 Diagnosis note, because this one cost hours: the symptom looks exactly like a
 buffering or file-descriptor bug, and it is neither. It reproduces with `>`,
@@ -1017,6 +1035,13 @@ SECOND `pi -p`, and exits on the model's `VERDICT: PASS/FAIL`. Use it well:
 
 - **Put it LAST** (keep quality left): it is the expensive, probabilistic tier -
   it should only run once the cheap computational gates are green.
+- **`--allow-dirty` + judge = pre-existing dirt in the diff.** The judge
+  collects `git diff HEAD`, which includes uncommitted work that predates the
+  run - and a reviewer will reject a modified tracked binary as "unverifiable
+  scope creep" no matter what the code looks like (two consecutive rejections
+  on 2026-08-09 while the actual change was spec-complete). Either start the
+  run on a clean tree, or put a SCOPE NOTE in the judge spec naming the
+  pre-existing paths to ignore.
 - **Use a DIFFERENT / stronger model** than the one writing the code (`--model`).
   A judge that is the same model that wrote the diff is a closed loop, same as
   self-graded tests.
