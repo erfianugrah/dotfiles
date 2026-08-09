@@ -3,7 +3,7 @@
  * No pi imports here so bun tests can load this file directly.
  */
 
-export type SearchKind = "messages" | "ledger" | "memories" | "sessions";
+export type SearchKind = "messages" | "ledger" | "memories" | "sessions" | "semantic";
 
 const DEFAULT_BASE = "https://memledger.erfi.io";
 

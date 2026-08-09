@@ -13,7 +13,8 @@ description: Drive the user's memledger system - the centralised, client-agnosti
 - **Ingester**: `memledger sync` (Go, `~/bin/memledger`) on the dev box, systemd user timer every 5 min. Parses pi/opencode/claude session logs + pi ledger.db + memories.json; checkpoints per file in the `ingest_state` table so it's stateless locally.
 - **Prune**: `memledger prune` (daily 04:30 timer) deletes local logs >30d old ONLY after DB-count verification + raw archive to MinIO `s3://memledger/archive/`. `--dry-run` first when testing.
 - **Backups**: daily pg_dump sidecar -> MinIO `s3://memledger/pg-dumps/`, 30-day prune.
-- **pi tool**: `memledger_search` extension (dotfiles `.pi/agent/extensions/memledger.ts`) - the canonical search for cross-client or >30d-old history.
+- **pi tool**: `memledger_search` extension (dotfiles `.pi/agent/extensions/memledger.ts`) - the canonical search for cross-client or >30d-old history. pi's built-in `session_search` also falls back to memledger automatically.
+- **UI**: `https://memledger.erfi.io/ui/` - Astro static app (search/sessions/transcript/stats), bonkled-style theme (cream/ink/hairline/plex-mono/accent-red, three-state dark toggle). Built on the router by the one-shot `ui-build` service into /var/lib/memledger/ui-dist; the edge caddy serves it. REBUILD GOTCHA: `docker start memledger-ui-build` reuses the container rootfs - the build command `rm -rf /tmp/web` first or it builds stale code.
 
 ## Querying (any client, reads are LAN/tailnet-open)
 
@@ -39,4 +40,5 @@ Writes need `Authorization: Bearer $MEMLEDGER_TOKEN` (Vaultwarden item `memledge
 - Deploy: `make deploy` in the repo (push + composer sync), or the composer API. Stack changes: the router's `dockerBridges` whitelist is already set for memledger0/memledgerb0 - don't rename the bridges.
 - Timers: `systemctl --user list-timers 'memledger*'`; logs `journalctl --user -u memledger-sync.service`.
 - Secrets: Vaultwarden item `memledger` (POSTGRES_PASSWORD, POSTGREST_PASSWORD, MEMLEDGER_TOKEN, MINIO_*); SOPS .env in the repo; dev-box env at `~/.config/memledger/env`.
-- Verification: `make test` + `make test-e2e` (throwaway PG+PostgREST in docker). The repo has a `.pi/harness.json` self-correcting-loop manifest - all 7 sensors are canary-verified.
+- Verification: `make test` + `make test-e2e` (throwaway PG+PostgREST in docker); web: `cd web && bunx biome check src && bun test src && bun run check && bun run build`. The repo's `.pi/harness.json` self-correcting-loop manifest covers all of it - 12 sensors, canary-verified.
+- PostgREST caches the schema: new views/RPCs in a migration need `docker restart memledger-postgrest` (or NOTIFY pgrst) or they 404.

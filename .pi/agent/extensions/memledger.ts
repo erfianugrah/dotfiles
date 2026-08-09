@@ -18,7 +18,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { baseUrl, buildUrl, formatRows, type SearchKind } from "./lib/memledger-core.ts";
 
-const KINDS: SearchKind[] = ["messages", "ledger", "memories", "sessions"];
+const KINDS: SearchKind[] = ["messages", "ledger", "memories", "sessions", "semantic"];
 
 const memledgerSearchTool = defineTool({
   name: "memledger_search",
@@ -32,7 +32,7 @@ const memledgerSearchTool = defineTool({
     ),
     kind: Type.Optional(
       Type.String({
-        description: "What to search: messages (default) | ledger | memories | sessions",
+        description: "What to search: messages (default FTS) | semantic (pgvector similarity) | ledger | memories | sessions",
       }),
     ),
     limit: Type.Optional(Type.Number({ description: "Max rows (default 10, max 50)" })),
@@ -41,7 +41,28 @@ const memledgerSearchTool = defineTool({
   async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
     const kind = (KINDS as string[]).includes(params.kind ?? "") ? (params.kind as SearchKind) : "messages";
     const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
-    const url = buildUrl(baseUrl(), kind, params.q, params.source, limit);
+    // semantic goes to the embedder service (embeds the query + cosine
+    // similarity over pgvector), not a PostgREST RPC.
+    if (kind === "semantic") {
+      const url = `${baseUrl()}/semantic/search?q=${encodeURIComponent(params.q)}&kind=messages&limit=${limit}`;
+      const resp = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) }).catch((e) => ({ err: String(e) }));
+      if ("err" in resp) {
+        return { content: [{ type: "text", text: `memledger semantic unreachable: ${resp.err}` }], details: { url } };
+      }
+      if (!(resp as Response).ok) {
+        return { content: [{ type: "text", text: `memledger semantic HTTP ${(resp as Response).status}` }], details: { url } };
+      }
+      const data = (await (resp as Response).json()) as { results: { session_key: string; ordinal: number; text: string; similarity: number }[] };
+      const lines = data.results.map(
+        (r) => `${r.similarity.toFixed(3)} | ${r.session_key}#${r.ordinal} | ${r.text.replace(/\s+/g, " ").slice(0, 200)}`,
+      );
+      return {
+        content: [{ type: "text", text: lines.length ? lines.join("\n") : `no semantic matches for "${params.q}" (backfill may still be running - check /semantic/stats)` }],
+        details: { url, count: lines.length },
+      };
+    }
+
+    const url = buildUrl(baseUrl(), kind as Exclude<SearchKind, "semantic">, params.q, params.source, limit);
 
     const resp = await fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }).catch(
       (e) => new Error(String(e)) as Error | Response,
