@@ -302,7 +302,7 @@ bg_kill({ name: "pi-bg-flyctl-cert-wait-1748056290" })
 
 | Pattern | Use this | Why |
 |---|---|---|
-| Read-only deep dive into another part of the codebase, context isolation matters | `task subagent_type=explore` | Spawns `pi -p --no-extensions --no-skills` + `-e docs.ts`. Cheap, fast, parent waits for result. |
+| Read-only deep dive into another part of the codebase, context isolation matters | `task subagent_type=explore` | Spawns `pi -p --no-extensions --no-skills` + `-e docs.ts`. Cheap, fast, parent waits for result - but no longer silently: the tool box streams the subagent's live progress (elapsed, tool count, last tool, nested-subagent relay) via `onUpdate`, and Esc now actually kills the subprocess. |
 | Big multi-step task expected to take >5 min that benefits from another LLM brain | `bg_task` | Spawns detached `pi -p`, parent moves on, check later via `bg_list`. |
 | Long bash work — polling, build, migration, download, slow test suite | `bg_bash` | Spawns detached `bash <tempfile>`, no LLM involved. Pi keeps working. |
 | Small task that needs result inline | regular pi tool calls | No subprocess overhead. |

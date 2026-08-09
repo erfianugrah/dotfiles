@@ -13,7 +13,7 @@ locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
 ├── APPEND_SYSTEM.md   → ~/dotfiles/.pi/agent/APPEND_SYSTEM.md (commit/safety rules)
 ├── models.json        → ~/dotfiles/.pi/agent/models.json (llama-server + 8 local models)
 ├── skills/            → ~/.config/opencode/skills (zero-copy: 38 top-level + 14 superpowers subskills)
-├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (52 single-file + lsp/ + session-fts/)
+├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (57 single-file + lsp/ + session-fts/ dirs + lib/ shared helpers)
 ├── tests/             → ~/dotfiles/.pi/agent/tests/ (bun unit tests for pure helpers)
 ├── settings.json      → ~/dotfiles/.pi/agent/settings.json (defaultProvider/Model + theme)
 ├── prompts/           → ~/dotfiles/.pi/agent/prompts/ (8 prompt files: 7 slash commands + docs-reference)
@@ -70,7 +70,7 @@ the loader without deleting it.
 | `question.ts` | Interactive question prompts during execution (skill-compatible). |
 | `render-diagram.ts` | Render mermaid/d2 source to SVG/PNG via local CLIs. Validates syntax. |
 | `session-search.ts` | Full-text search past sessions via SQLite FTS5 (worker-indexed) with ripgrep fallback. |
-| `task.ts` | Spawn a `pi -p` subagent in isolated context. `explore` preset boots minimal (`--no-extensions --no-skills --no-prompt-templates` + `-e docs.ts`) for cheap read-only deep-dives. |
+| `task.ts` | Spawn a `pi -p` subagent in isolated context. `explore` preset boots minimal (`--no-extensions --no-skills --no-prompt-templates` + `-e docs.ts`) for cheap read-only deep-dives. Streams live progress to the TUI via throttled `onUpdate` (elapsed, tool count, last tool, nested-subagent relay) parsed incrementally from the child's `--mode json` stream; AbortSignal kills the subprocess. |
 | `todowrite.ts` | TodoWrite tool surface; persists per-session JSON + status indicator. |
 | `web-research.ts` | Exa search + auto-fetch top pages with Playwright fallback. Modes: default / local / fresh / crosscheck. |
 | `webfetch.ts` | Fetch URL → markdown/text/html (5MB cap). Auto-escalates to crawler `:8889/extract` with `force_js:true` on SPA-shell responses (<500 visible chars). |
@@ -120,6 +120,7 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `slash-typo-guard.ts` | Catches typo'd slash commands (`/comapct`, `/qauit`) before they hit the LLM. |
 | `style-toggle.ts` | `/style` command for terse ↔ socratic output style; injects style prompt via `context` event. |
 | `superpowers.ts` | Intent-gated injection of obra/superpowers methodology. `SUPERPOWERS_OFF=1` to disable. |
+| `tool-activity.ts` | Live working message while any tool executes: `Working... <tool> <key-arg> · <elapsed>` updated 1/s via `ctx.ui.setWorkingMessage`, longest-running tool named + `+N more` when parallel; restores pi's default on idle / `agent_settled` / `session_shutdown`. Ends the multi-minute silent-spinner blackout on long tool calls. Tracker + label helpers (`lib/tool-label.ts`) unit-tested; born from the 2026-08-09 self-correcting-loop run. |
 | `tool-guard.ts` | Block-with-reason on common anti-patterns (`bash ls /docs/`, `webfetch <docs.erfi.io>`, etc) + per-session reformulation-loop detection. **Also inspects apply\_patch envelopes** so .env / lockfiles / .git / node\_modules can't be bypassed. |
 | `tool-output-prune.ts` | opencode-style surgical tool-output pruning to reclaim context from large tool results. |
 | `tool-routing.ts` | Prepend AGENTS.md tool-routing rules to the system prompt with hard "CRITICAL MANDATORY" framing. |
@@ -260,11 +261,12 @@ Unit tests for the pure parsers in each extension:
 - session-search + session-fts query tokenizers
 - osv-scan / secret-scan (gitleaks + noseyparker) / hurl-test / go-test / bench parsers
 - bg-tasks duration formatter + slug generator
+- task.ts subagent-event parser + progress tracker + fake-`pi` streaming/abort integration, tool-activity tracker + `lib/tool-label.ts` (the `loop-*.test.ts` contract files)
 - ascii-punctuation-guard + confidential-write-guard payload scanners
 - tool-output-prune pruner + write-stream chunk assembler
 
 ```bash
-~/dotfiles/.pi/agent/tests/run.sh        # all (408 unit + 23 integration)
+~/dotfiles/.pi/agent/tests/run.sh        # all (598 unit + 59 integration + 7 manifest)
 ~/dotfiles/.pi/agent/tests/run.sh -t "tool-guard"   # filter
 ```
 
