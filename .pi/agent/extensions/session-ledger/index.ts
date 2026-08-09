@@ -404,6 +404,46 @@ let sessionBranch: string | null = null;
 let sessionFile: string | null = null;
 let capturedThisSession = false;
 let injectRows: LedgerRow[] = [];
+
+// memledger cross-client briefing: recent sessions in this project from ANY
+// client (pi/opencode/claude), fetched async at session_start. Lean by
+// design - one line per session, capped. Fails silent when off-tailnet.
+let memledgerBlock: Promise<string> | null = null;
+
+async function fetchMemledgerBrief(project: string): Promise<string> {
+	if (!project) return "";
+	project = project.split("/").filter(Boolean).pop() ?? project; // memledger stores basename
+	try {
+		// skip tiny sessions (one-shot probes) and anything started in the
+		// last 30min (that's likely THIS session)
+		const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+		const url =
+			`https://memledger.erfi.io/sessions?project=eq.${encodeURIComponent(project)}` +
+			`&message_count=gte.8&started_at=lt.${encodeURIComponent(cutoff)}` +
+			"&order=started_at.desc.nullslast&limit=4&select=source,title,started_at,message_count";
+		const resp = await fetch(url, { signal: AbortSignal.timeout(1500) });
+		if (!resp.ok) return "";
+		const rows = (await resp.json()) as Array<{
+			source: string;
+			title: string | null;
+			started_at: string | null;
+			message_count: number;
+		}>;
+		if (!rows.length) return "";
+		const lines = rows.map((r) => {
+			const date = (r.started_at ?? "").slice(0, 10);
+			const title = (r.title ?? "").trim().slice(0, 80) || "(untitled)";
+			return `- ${date} · ${r.source} · ${title} · ${r.message_count} msgs`;
+		});
+		return (
+			"## Recent sessions in this project (all clients, via memledger)\n" +
+			lines.join("\n") +
+			"\nSearch their full content with the memledger_search or session_search tools."
+		);
+	} catch {
+		return "";
+	}
+}
 let injectionEnabled = process.env.LEDGER_OFF !== "1";
 
 function gitBranch(cwd: string): string | null {
@@ -545,11 +585,12 @@ export default function (pi: ExtensionAPI) {
 			/* best effort */
 		}
 		injectRows = injectionEnabled ? latestProjectSummaries(sessionProject, INJECT_MAX_ROWS, INJECT_MAX_AGE_DAYS) : [];
+		memledgerBlock = injectionEnabled ? fetchMemledgerBrief(sessionProject) : null;
 	});
 
 	// ── context: prepend cached system block with recent project summaries
 	pi.on("context", async (event: { messages: Array<{ role: string; content: unknown }> }) => {
-		if (!injectionEnabled || injectRows.length === 0) return undefined;
+		if (!injectionEnabled || (injectRows.length === 0 && !memledgerBlock)) return undefined;
 		const first = event.messages[0];
 		if (
 			first?.role === "system" &&
@@ -558,7 +599,11 @@ export default function (pi: ExtensionAPI) {
 		) {
 			return undefined;
 		}
-		const block = buildInjectionBlock(injectRows);
+		let block = buildInjectionBlock(injectRows);
+		if (memledgerBlock) {
+			const brief = await Promise.race([memledgerBlock, new Promise<string>((r) => setTimeout(() => r(""), 600))]);
+			if (brief) block = block ? `${block}\n${brief}` : `# Recent work in this project (from past sessions)\n${brief}`;
+		}
 		if (!block) return undefined;
 		return { messages: [{ role: "system" as const, content: block }, ...event.messages] };
 	});
