@@ -1,6 +1,13 @@
 ---
 name: relocating-repos
-description: Use when moving, renaming, or consolidating directories or git repos on a machine - "move X into Y", merging dirs into a parent, "these should live together", "tidy up this directory tree". Covers the pre-move entanglement survey, the cross-tree reference sweep, and post-move verification. Prevents the classic failures: stale path references in configs/docs, lost git worktrees, dirty-tree data loss, symlinked-vs-real config copy drift. NOT for single-file moves inside one repo (plain mv is fine) or cross-machine transfers.
+description: >-
+  Use when moving, renaming, or consolidating directories or git repos on a
+  machine - "move X into Y", merging dirs into a parent, "these should live
+  together", "tidy up this directory tree". Covers the pre-move entanglement
+  survey, the cross-tree reference sweep, and post-move verification. Prevents
+  the classic failures - stale path references in configs/docs, lost git
+  worktrees, dirty-tree data loss, symlinked-vs-real config copy drift. NOT for
+  single-file moves inside one repo (plain mv is fine) or cross-machine transfers.
 ---
 
 # Relocating Repos
