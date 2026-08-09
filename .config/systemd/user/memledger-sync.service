@@ -1,0 +1,9 @@
+[Unit]
+Description=memledger session-store sync
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/memledger/env
+ExecStart=%h/bin/memledger
+Nice=19
+IOSchedulingClass=idle

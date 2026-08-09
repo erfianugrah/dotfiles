@@ -1,0 +1,9 @@
+[Unit]
+Description=memledger prune - archive aged session logs to R2, delete local copies
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/memledger/env
+ExecStart=%h/bin/memledger prune
+Nice=19
+IOSchedulingClass=idle

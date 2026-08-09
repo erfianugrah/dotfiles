@@ -30,6 +30,39 @@ Rules of thumb:
 - Reserve a high-X range for Caddy's WAF / forward-auth bridges so the host-mode Caddy can `extra_hosts` route to them deterministically.
 - A small handful of historical stacks use `/28` instead of `/24` — keep them as-is, don't replicate.
 
+## Router-local stacks (MS-01 / ssh `nixos`) - different rules than servarr
+
+Composer-managed stacks ON the router itself (atuin, joplin, docs, knotea,
+edge-services, memledger) live under extra constraints the servarr pattern
+doesn't have. memledger (2026-08-09) hit every one of these:
+
+1. **Subnets**: router uses `172.31.x` (edge-* nets) and `172.20.x`
+   (composer-managed local stacks; atuin=172.20.1, memledger=172.20.2/3).
+   svcnet is 10.68.50.0/24. Pick a free 172.20.x `/24`; check with
+   `ssh nixos 'docker network inspect $(docker network ls -q) --format "{{.Name}} {{range .IPAM.Config}}{{.Subnet}}{{end}}"'`.
+2. **Bridge names MUST be pinned** (`driver_opts:
+   com.docker.network.bridge.name: <stack>0`) AND added to `dockerBridges` in
+   `~/infra/router/configuration.nix`, then `make deploy` on the router repo.
+   The router's nftables forward chain is policy-drop; unlisted bridges get
+   NO inter-container traffic (symptom: `connection timed out` between
+   containers while the containers themselves are healthy). Compose will NOT
+   recreate existing networks when you add driver_opts - `down`, delete the
+   networks, `up`.
+3. **Bridge->LAN (10.0.0.0/8) is also dropped.** A bridge-attached container
+   cannot reach servarr services (e.g. MinIO at 10.0.71.x). Host-originated
+   traffic always works, and the host CAN hairpin its own WAN IP - so a
+   container that needs LAN egress should use `network_mode: host` (like the
+   memledger backup sidecar) and reach bridge-IP services via their static
+   IP.
+4. **Bind mounts must be absolute router-host paths**
+   (`/var/lib/composer/stacks/<name>/...`), never `./relative` - composerd's
+   container view (`/opt/stacks/...`) is not the daemon's view.
+5. **postgres:18+ images**: mount the data volume at `/var/lib/postgresql`,
+   NOT `/var/lib/postgresql/data` (pg18 image convention; PGDATA lands in a
+   `data/docker` subdir).
+6. **alpine shells are busybox**: no GNU date (`date -d '30 days ago'`
+   fails) - use epoch math: `date -d @$(( $(date +%s) - 2592000 )) +%Y%m%d`.
+
 ## docker-compose.yml template
 
 Copy this and rename. Replace `myservice`, `172.19.X` subnet, and image.

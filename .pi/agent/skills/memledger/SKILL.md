@@ -1,0 +1,42 @@
+---
+name: memledger
+description: Drive the user's memledger system - the centralised, client-agnostic store for agent session memories (pi + opencode + claude session logs, pi work ledger, pi memories) in Postgres behind PostgREST at memledger.erfi.io. Use when searching past sessions across clients (or anything older than the 30-day local retention, where the prune flow has deleted local logs and memledger is the ONLY copy), when working on the ingester/prune CLI or the compose stack, debugging sync/checkpoint issues, changing the schema/migrations, or touching the edge Caddy gate. Fires on "memledger", "search all my sessions", "session history across clients", "prune old sessions", "session store". NOT for pi's built-in session_search (recent pi-only, local SQLite fast path) or the work ledger alone (ledger_search). Repo `~/infra/memledger` (private GitHub erfianugrah/memledger), project truth in its AGENTS.md. Sibling to `infrastructure-stack` (router-local stack rules), `composer` (deploy), `caddy` (edge gate).
+---
+
+# memledger - central agent session memory
+
+**Project truth: `~/infra/memledger/AGENTS.md`** - read it first. This skill is the pattern layer.
+
+## Shape
+
+- **Store**: Postgres 18 + PostgREST v16, composer stack `memledger` on the MS-01 router (ssh `nixos`). DB on internal bridge; only exposure is `https://memledger.erfi.io` via edge Caddy.
+- **Ingester**: `memledger sync` (Go, `~/bin/memledger`) on the dev box, systemd user timer every 5 min. Parses pi/opencode/claude session logs + pi ledger.db + memories.json; checkpoints per file in the `ingest_state` table so it's stateless locally.
+- **Prune**: `memledger prune` (daily 04:30 timer) deletes local logs >30d old ONLY after DB-count verification + raw archive to MinIO `s3://memledger/archive/`. `--dry-run` first when testing.
+- **Backups**: daily pg_dump sidecar -> MinIO `s3://memledger/pg-dumps/`, 30-day prune.
+- **pi tool**: `memledger_search` extension (dotfiles `.pi/agent/extensions/memledger.ts`) - the canonical search for cross-client or >30d-old history.
+
+## Querying (any client, reads are LAN/tailnet-open)
+
+```bash
+curl -s "https://memledger.erfi.io/rpc/search_messages?q=<terms>&lim=10" | jq   # FTS, ranked headlines
+curl -s "https://memledger.erfi.io/rpc/search_messages?q=X&src=opencode" | jq   # per-client filter
+curl -s "https://memledger.erfi.io/rpc/search_ledger?q=X" | jq                  # work-ledger summaries
+curl -s "https://memledger.erfi.io/sessions?project=eq.<p>&order=started_at.desc" | jq
+```
+
+Writes need `Authorization: Bearer $MEMLEDGER_TOKEN` (Vaultwarden item `memledger`).
+
+## The bugs this system already taught us (don't reintroduce)
+
+- pi session jsonl: event-level `timestamp` is RFC3339 string, `message.timestamp` is EPOCH MILLIS - the parser needs FlexTime for both. Fixtures must be sampled from real files, never invented.
+- Postgres `text` rejects NUL bytes (22P05) - session logs have them; content is sanitized on ingest.
+- `offset` is a reserved word - the checkpoint column is `byte_offset`.
+- PG timestamptz is microsecond precision - checkpoint mtimes must be truncated to micros or whole-file sources re-sync every run.
+- A failing source file must not abort the whole sync - per-file errors are logged and skipped.
+
+## Ops
+
+- Deploy: `make deploy` in the repo (push + composer sync), or the composer API. Stack changes: the router's `dockerBridges` whitelist is already set for memledger0/memledgerb0 - don't rename the bridges.
+- Timers: `systemctl --user list-timers 'memledger*'`; logs `journalctl --user -u memledger-sync.service`.
+- Secrets: Vaultwarden item `memledger` (POSTGRES_PASSWORD, POSTGREST_PASSWORD, MEMLEDGER_TOKEN, MINIO_*); SOPS .env in the repo; dev-box env at `~/.config/memledger/env`.
+- Verification: `make test` + `make test-e2e` (throwaway PG+PostgREST in docker). The repo has a `.pi/harness.json` self-correcting-loop manifest - all 7 sensors are canary-verified.
