@@ -1,14 +1,62 @@
 {
-  "task": "Make exactly two small edits for pi 0.82.0 constrained sampling. Do not change anything else.\n\nEDIT 1 - .pi/agent/extensions/apply-patch.ts (two sub-edits, both inside the defineTool call):\n(a) Find the parameters block:\n    parameters: Type.Object({\n      patchText: Type.String({\n        description: \"Full patch text within the *** Begin Patch / *** End Patch envelope\",\n      }),\n    }),\n    Add a second argument to Type.Object so it ends with:\n      }, { additionalProperties: false }),\n    (i.e. Type.Object({ patchText: ... }, { additionalProperties: false }))\n(b) Immediately AFTER that parameters property (same object level as parameters), add this sibling property:\n      constrainedSampling: { type: \"grammar\", variants: { openai_lark: \"start: /.+/s\" } },\n    Do NOT modify execute(), parsePatch, renderApplyDiffs, or any test file. Do NOT add imports.\n\nEDIT 2 - .pi/agent/models.json:\nIn .providers[\"llama-server\"].compat, add one new key: \"supportsStrictMode\": false\nKeep the existing $comment, supportsDeveloperRole, supportsReasoningEffort keys untouched. The file must stay valid JSON.\n\nVERIFY before finishing: jq empty .pi/agent/models.json && ./.pi/agent/tests/run.sh - both must pass.",
-  "maxIterations": 6,
-  "models": ["opencode/glm-5.2", "opencode/deepseek-v4-pro"],
-  "stallPatience": 2,
-  "tools": ["read", "edit", "write", "bash"],
-  "writeScope": [".pi/agent/extensions/apply-patch.ts", ".pi/agent/models.json"],
+  "task": "Fix pi's long-running-tool UX blackout in this dotfiles repo. Two deliverables, both specified by FAILING test files you must make green WITHOUT editing them: (1) Rework .pi/agent/extensions/task.ts so it parses the `pi -p --mode json` subprocess stdout INCREMENTALLY (line-buffered, not buffer-until-close) and streams throttled onUpdate progress (first update promptly, then >=1s apart, plus a final flush if updates were suppressed). The status line shows: task \"<description>\", elapsed time, tool-call count, last tool label; when the child emits tool_execution_update for toolName \"task\" (a nested subagent), relay the child's partialResult text as a \" |-> <line>\" suffix. Wire the AbortSignal so abort kills the subprocess (SIGTERM) and execute() resolves promptly. Pass PI_TASK_DEPTH through the child env incremented by 1 and include \"depth N\" in the status line when N>0. KEEP the existing final-result behavior identical: last assistant text wins across message/message_end/message_update/turn_end/agent_end events, the stderr-fallback messages, the session-id capture, and the <task_result> wrapper. Export parseSubagentEventLine, createTaskProgress, and taskTool. (2) Create .pi/agent/extensions/tool-activity.ts: a pi extension that listens to tool_execution_start/tool_execution_end, tracks active tools, and while any tool is active updates ctx.ui.setWorkingMessage() once per second to \"Working... <summaryLine>\" using the tracker; when no tools are active, and on agent_settled and session_shutdown, restore pi's default with ctx.ui.setWorkingMessage() (no args) and stop the timer. Guard every UI call with ctx.hasUI. Export createToolActivity. Shared helpers go in .pi/agent/extensions/lib/tool-label.ts (exports: summarizeToolArgs, formatElapsed) - NEVER a loose top-level .ts helper, pi requires a default factory from every top-level extension file. The exact API contracts and formats are defined by the tests: .pi/agent/tests/loop-task.test.ts and .pi/agent/tests/loop-activity.test.ts. Read them first; they are the spec.",
+  "maxIterations": 8,
+  "models": ["openrouter/deepseek/deepseek-v4-pro"],
+  "stallPatience": 3,
+  "tools": ["read", "edit", "write", "bash", "grep", "glob"],
+  "writeScope": [
+    ".pi/agent/extensions/task.ts",
+    ".pi/agent/extensions/tool-activity.ts",
+    ".pi/agent/extensions/lib/**"
+  ],
+  "timeoutMs": 600000,
+  "agentTimeoutMs": 1800000,
+  "guide": [
+    "AGENTS.md",
+    ".pi/agent/extensions/compaction-progress.ts",
+    ".pi/agent/tests/preload.ts"
+  ],
+  "rules": [
+    "Do NOT edit anything under .pi/agent/tests/ - the test files are the contract. Make them pass as written.",
+    "NEVER move, edit, restore, or delete .pi/harness.json or any .pi/harness-* file. They are loop machinery. If a reviewer complains about them in the diff, that is a reviewer problem, not yours - the judge has been told to ignore them.",
+    "bin/memledger is a pre-existing uncommitted binary rebuild that predates this task. Do NOT touch it, unstage it, restore it, or try to remove it from any diff.",
+    "No new dependencies. node/bun stdlib only.",
+    "Match existing extension style: tabs for indentation, double quotes, JSDoc header comment explaining the why.",
+    "Do not run git commit, git reset, git stash, git checkout, git update-index, or any other git ref/index mutation.",
+    "A check satisfied by a stub is a FAILED iteration: no `throw new Error(\"not implemented\")`, no empty function bodies, no hard-coded test answers.",
+    "task.ts currently ignores its `_signal` and `_onUpdate` parameters - using them is the point of this task. Keep runSubagent's stderr-fallback and '[subagent produced no output]' paths working.",
+    "If you need a paragraph-long comment to justify why a workaround is OK, the code is wrong - fix the code."
+  ],
   "sensors": [
-    { "name": "models-json", "cmd": "jq empty .pi/agent/models.json", "hint": "models.json must be valid JSON - check commas around the new supportsStrictMode key" },
-    { "name": "grammar-applied", "cmd": "rg -q \"constrainedSampling\" .pi/agent/extensions/apply-patch.ts && rg -q \"additionalProperties: false\" .pi/agent/extensions/apply-patch.ts", "hint": "apply-patch.ts must carry the constrainedSampling grammar property AND additionalProperties: false on its Type.Object - see the task EDIT 1" },
-    { "name": "strictmode-flag", "cmd": "jq -e '.providers[\"llama-server\"].compat.supportsStrictMode == false' .pi/agent/models.json", "hint": "models.json llama-server compat must contain \"supportsStrictMode\": false - see the task EDIT 2" },
-    { "name": "tests", "cmd": "./.pi/agent/tests/run.sh", "hint": "extension unit+integration suites must pass; do not edit tests, fix the extension source" }
+    {
+      "name": "no-stubs",
+      "cmd": "test -z \"$(rg -n --no-messages 'throw new Error\\(\"not implemented|TODO: implement me' .pi/agent/extensions/task.ts .pi/agent/extensions/tool-activity.ts .pi/agent/extensions/lib/tool-label.ts 2>/dev/null)\"",
+      "hint": "a stub was left behind - implement the function for real",
+      "canary": "printf '\\nthrow new Error(\"not implemented\")\\n' >> .pi/agent/extensions/task.ts"
+    },
+    {
+      "name": "existing-suite",
+      "cmd": "./.pi/agent/tests/run.sh",
+      "timeoutMs": 300000,
+      "hint": "you broke a pre-existing test - run the suite and read which; the pre-existing helpers and exports must keep working",
+      "canary": "printf '\\nexport const __canary: = 1\\n' >> .pi/agent/extensions/tool-guard.ts"
+    },
+    {
+      "name": "loop-tests-task",
+      "cmd": "bun test --preload ./.pi/agent/tests/preload.ts ./.pi/agent/tests/loop-task.test.ts",
+      "timeoutMs": 120000,
+      "hint": "the file header documents the exact export + onUpdate/abort contract. The integration tests put a fake `pi` script on PATH; your execute() must stream onUpdate from incremental stdout parsing and must kill the child on abort."
+    },
+    {
+      "name": "loop-tests-activity",
+      "cmd": "bun test --preload ./.pi/agent/tests/preload.ts ./.pi/agent/tests/loop-activity.test.ts",
+      "timeoutMs": 120000,
+      "hint": "the file header documents the exact tracker/label/elapsed contract. Shared helpers belong in .pi/agent/extensions/lib/tool-label.ts, the tracker in .pi/agent/extensions/tool-activity.ts."
+    },
+    {
+      "name": "judge",
+      "after": ["no-stubs", "existing-suite", "loop-tests-task", "loop-tests-activity"],
+      "cmd": "judge --base HEAD --spec 'Two pi extension changes in this dotfiles repo. (1) .pi/agent/extensions/task.ts streams subagent progress: incremental line-buffered parsing of the `pi -p --mode json` stdout, throttled onUpdate calls (~1/sec) carrying a status line with description, elapsed time, tool count, last tool label; nested task progress relayed via tool_execution_update partialResult as a |-> suffix; AbortSignal kills the subprocess; PI_TASK_DEPTH env incremented into the child and surfaced when >0; final-result parsing (last assistant text wins, stderr fallback, session id, <task_result> wrapper) unchanged. (2) New .pi/agent/extensions/tool-activity.ts: tracks active tools via tool_execution_start/end, updates ctx.ui.setWorkingMessage every second while any tool runs, restores the default working message (no-args call) when idle and on agent_settled/session_shutdown, guards UI calls with ctx.hasUI. Shared helpers in .pi/agent/extensions/lib/tool-label.ts. Style: tabs, no new deps, JSDoc headers. REJECT if: updates are unthrottled or missing, abort does not kill the child, the working message is never restored, helpers live in a loose top-level .ts file, or the pre-existing task.ts result parsing regressed. SCOPE NOTE: `bin/memledger` (a tracked compiled binary) was already modified in the working tree BEFORE this task began and is intentionally not part of the change - do not weigh it. `.pi/harness.json` and `.pi/harness-*` files are loop machinery, not part of the change - ignore them as well.' --model openrouter/moonshotai/kimi-k3"
+    }
   ]
 }
