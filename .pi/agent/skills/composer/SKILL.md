@@ -239,8 +239,9 @@ Two paths, easy to confuse:
 
 | Path | What it is |
 |---|---|
-| `/mnt/user/composer/stacks/<name>/` | **PRE-MOVE (servarr) layout** - host source-of-truth on the old servarr instance. Post-move the stacks dir lives on the router; verify with `ssh nixos 'docker inspect composer ...'` before assuming any host path. |
-| `/opt/stacks/<name>/` | **In-container view** — composer's container bind-mounts `/mnt/user/composer/stacks` to `/opt/stacks` (`COMPOSER_STACKS_DIR=/opt/stacks` inside). The API's stack-object `path` field reports this in-container path. |
+| `/var/lib/composer/stacks/<name>/` | **Router (post-move) layout** - host source-of-truth on the MS-01 router (`ssh nixos`). |
+| `/mnt/user/composer/stacks/<name>/` | **PRE-MOVE (servarr) layout** - retired with the old servarr instance. Do not use. |
+| `/opt/stacks/<name>/` | **In-container view** - composer's container bind-mounts `/var/lib/composer/stacks` to `/opt/stacks` (`COMPOSER_STACKS_DIR=/opt/stacks` inside). The API's stack-object `path` field reports this in-container path. |
 | `/mnt/user/appdata/<name>/` | **NOT used.** That's a generic Unraid template-app convention; composer doesn't write here. Don't go looking. |
 
 Verify the bind-mount on the current (router) deployment: `ssh nixos 'docker inspect composer --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}"'`.
@@ -250,7 +251,8 @@ Verify the bind-mount on the current (router) deployment: `ssh nixos 'docker ins
 Most stacks here are git-backed. The pattern (verified end-to-end against discord-wipe deployment):
 
 ```bash
-# 1. POST /stacks/git — composer clones into /mnt/user/composer/stacks/<name>/
+# 1. POST /stacks/git - composer clones into /var/lib/composer/stacks/<name>/
+#    on the router (container view /opt/stacks/<name>/)
 curl -sf -X POST -H "X-API-Key: $COMPOSER_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -264,7 +266,7 @@ curl -sf -X POST -H "X-API-Key: $COMPOSER_API_KEY" \
   "$BASE/stacks/git"
 
 # 2. (optional) rsync runtime data into a gitignored subdir before bringing up
-rsync -a ./local-data/ servarr:/mnt/user/composer/stacks/<name>/runtime-data/
+rsync -a ./local-data/ servarr:/mnt/user/appdata/<name>/runtime-data/
 
 # 3. PUT /stacks/{name}/env  — .env is stored in composer's encrypted DB,
 #    materialized next to compose.yaml on every reconcile.
@@ -281,7 +283,9 @@ curl -sf -X POST -H "X-API-Key: $COMPOSER_API_KEY" \
   "$BASE/stacks/<name>/up?async=true" | jq .job_id
 ```
 
-The `.env` is **gitignored in the repo by design** — it lives in composer's encrypted DB and is materialized to disk only at reconcile time. Don't try to commit it; don't try to scp it next to compose.yaml.
+The `.env` is **gitignored in the repo by design** - it lives in composer's encrypted DB and is materialized to disk only at reconcile time. Don't try to commit it; don't try to scp it next to compose.yaml.
+
+**Exception + footgun (hit 2026-08-09 on discord-wipe):** a stack whose `.env` is NOT in composer's DB (stack created without `env_path` content, so the on-disk `.env` is the ONLY copy) loses that file on the next composer `pull`/`up` - those ops git-sync the checkout to `origin/main` AND git-clean untracked files. The sync also means the checkout is NOT manually-managed: hand edits to `compose.yaml` on disk are silently reverted to `origin/main` on the next op, so change the repo and push instead. If the `.env` was wiped, `up` fails with `env file /opt/stacks/<name>/.env not found` while the running container keeps working (env baked at create time) - recreate the `.env` (extract from the running container's env, never print it) immediately before the `up`.
 
 ### `rg` not on servarr
 
