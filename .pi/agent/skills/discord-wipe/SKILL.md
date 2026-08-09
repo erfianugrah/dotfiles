@@ -15,7 +15,7 @@ Drive the user's self-bot bulk deleter: repo `~/discord-wipe-go` (cobra CLI, ima
 - **Only-my-messages is load-bearing** (author-filtered search, export-only-own, 403 terminal). Never add a code path enumerating others' messages.
 - **`DELETE_DELAY` >= 0.3s floor** - account-level abuse heuristics, not just buckets.
 - **Dry-run first**, then real run with a FRESH state file: dry-run still `Mark()`s, so reusing its state file makes the real run's no-progress guard exit having deleted nothing.
-- **purge `--retention-days` defaults to 0 = delete EVERYTHING in scope** regardless of age. `run` defaults 14 (prod .env: 7).
+- **purge `--retention-days` defaults to 0 = delete EVERYTHING in scope** regardless of age. `run` defaults 14 (prod compose.yaml sets 7; the stack `.env` holds ONLY `DISCORD_TOKEN`).
 
 ## Purge a scope (one-shot)
 
