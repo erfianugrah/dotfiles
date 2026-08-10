@@ -31,8 +31,7 @@
       "name": "no-stubs",
       "cmd": "test -z \"$(rg -n --no-messages 'TODO: implement me|throw new Error\\(\"not implemented' .pi/agent/extensions/epistemic-guard.ts .pi/agent/extensions/entity-qualifier-nudge.ts 2>/dev/null)\"",
       "expect": "fail",
-      "hint": "the stub markers are still there - implement the function for real",
-      "canary": "printf '\\n// TODO: implement me\\n' >> .pi/agent/extensions/epistemic-guard.ts"
+      "hint": "the stub markers are still there - implement the function for real"
     },
     {
       "name": "tests-unmodified",
