@@ -99,6 +99,15 @@ that the backup container also mounts:
    `ssh servarr 'docker network inspect servarr_lan --format "{{range .Containers}}{{.Name}} {{.IPv4Address}} {{end}}"'`.
    Guessing collides (10.0.71.58 was revista; gitea_backup landed on .61).
    MAC convention is `02:42:0a:00:47:<last-octet-in-hex>`.
+9. **`cap_drop: ALL` breaks reads of non-root-owned data** (hit on gitea
+   2026-08-10): capability-less root has CapEff=0, so the tar walk gets EACCES
+   on uid-1000-owned 0770/0600 files (rootless-image data dirs on Unraid,
+   e.g. `open /backup/config: permission denied`). If you harden the sidecar
+   with `cap_drop: ALL`, also add `cap_add: [DAC_READ_SEARCH]` - read/search
+   bypass only, no write (mounts are `:ro` anyway). Verify after rollout with
+   `docker exec <stack>_backup ls /backup/<each-mount>`; the walk error only
+   names the FIRST unreadable dir, siblings fail too. vaultwarden never hit
+   this because its sidecar has no cap_drop at all.
 
 ## Storage policy (user's, 2026-08-09)
 
