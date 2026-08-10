@@ -97,6 +97,13 @@ export interface Claim {
   key: string;
   /** as it appeared, for the message */
   raw: string;
+  /**
+   * The number sits in a because-clause: it was REASONED to, not read.
+   * A derived number is not safer than a recalled one - it is a recalled
+   * RULE applied without checking its preconditions - and it needs a
+   * different correction (state the mechanism) than "go verify the literal".
+   */
+  derived?: boolean;
 }
 
 /**
@@ -114,6 +121,26 @@ const HEDGE_RE =
 export function hedgedNear(text: string, at: number): boolean {
   return HEDGE_RE.test(
     text.slice(Math.max(0, at - HEDGE_WINDOW), Math.min(text.length, at + HEDGE_WINDOW)),
+  );
+}
+
+/**
+ * Causal / capacity-mechanism vocabulary. A number wrapped in this is being
+ * DERIVED from a rule ("shares one link, so it caps at ..."), which is the
+ * failure the corpus check cannot see: the literal is absent from the corpus
+ * because nothing measured it, and "go verify" is the wrong instruction when
+ * what actually broke is an unchecked precondition.
+ */
+const MECHANISM_RE =
+  /\b(because|since|so it|so you|therefore|which means|that means|caps? (?:at|out)|capped|ceiling|bottleneck|limited by|shares?|shared|split between|halv(?:e|es|ed|ing)|hairpins?|saturat\w*|contend\w*|divided|per-flow|aggregate|effectively|works out to|leaving|at best|no more than)\b/i;
+
+/** Narrower than HEDGE_WINDOW: the because-clause is adjacent, not paragraphs away. */
+const MECHANISM_WINDOW = 120;
+
+/** Is this number embedded in reasoning rather than reported from a measurement? */
+export function derivedNear(text: string, at: number): boolean {
+  return MECHANISM_RE.test(
+    text.slice(Math.max(0, at - MECHANISM_WINDOW), Math.min(text.length, at + MECHANISM_WINDOW)),
   );
 }
 
@@ -345,7 +372,10 @@ function pushUnique(out: Claim[], seen: Set<string>, c: Claim, text: string, at:
   if (seen.has(id)) return;
   if (hedgedNear(text, at)) return;
   seen.add(id);
-  out.push(c);
+  // Only perf numbers get the derived treatment. A version or a path in a
+  // because-clause is still just a recalled literal; a THROUGHPUT in one is a
+  // conclusion, and conclusions fail differently.
+  out.push(c.cls === "perf" && derivedNear(text, at) ? { ...c, derived: true } : c);
 }
 
 export interface Segment {
@@ -514,7 +544,11 @@ const MAX_REPORTED = 5;
 
 export function blockReason(claims: Claim[], where: string): string {
   const shown = claims.slice(0, MAX_REPORTED);
-  const lines = shown.map((c) => `  - \`${c.raw}\` (${c.cls}) -> ${VERIFY_HINT[c.cls]}`);
+  const lines = shown.map(
+    (c) =>
+      `  - \`${c.raw}\` (${c.cls}${c.derived ? ", derived" : ""}) -> ` +
+      (c.derived ? DERIVED_HINT : VERIFY_HINT[c.cls]),
+  );
   const more = claims.length > shown.length ? `\n  ... and ${claims.length - shown.length} more` : "";
   const one = claims.length === 1;
   return (
@@ -533,10 +567,21 @@ export function blockReason(claims: Claim[], where: string): string {
 
 export function footerLine(claims: Claim[]): string {
   const shown = claims.slice(0, MAX_REPORTED);
-  const list = shown.map((c) => `\`${c.raw}\` (${c.cls})`).join(", ");
+  const list = shown.map((c) => `\`${c.raw}\` (${c.cls}${c.derived ? ", derived" : ""})`).join(", ");
   const more = claims.length > shown.length ? `, +${claims.length - shown.length} more` : "";
-  return `epistemic-guard: recalled, not verified this session - ${list}${more}.`;
+  const base = `epistemic-guard: recalled, not verified this session - ${list}${more}.`;
+  return claims.some((c) => c.derived) ? `${base}\n${DERIVED_NOTE}` : base;
 }
+
+const DERIVED_HINT =
+  "this number sits in a because-clause, so it was reasoned to, not measured - " +
+  "state the mechanism and the precondition you checked, or measure it";
+
+const DERIVED_NOTE =
+  "  A derived number (one you reasoned to, not read) is a recalled RULE applied " +
+  "without checking its preconditions. Name the mechanism in one clause and one " +
+  "condition that would make it false - full-duplex vs shared, per-flow vs aggregate, " +
+  "which layer, sequential vs parallel, warm vs cold, per-core vs total.";
 
 // ── provenance harvesting from session entries ──────────────────────────────
 

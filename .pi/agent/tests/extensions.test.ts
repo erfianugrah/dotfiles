@@ -104,11 +104,18 @@ import { levenshtein, closestCommand } from "../extensions/slash-typo-guard.ts";
 import { matchHints, matchHintsDetailed, applyOncePerSession, renderHint, HINTS } from "../extensions/bash-error-hints.ts";
 import { findLastUserEntryId } from "../extensions/session-undo.ts";
 import {
+  asksForOwnInfraFact,
+  LOOKUP_TOOLS,
+} from "../extensions/lookup-before-ask.ts";
+import {
   extractClaims,
   unprovenanced,
   provenanceText,
   assistantAnswerText,
   hedgedNear,
+  derivedNear,
+  footerLine as egFooterLine,
+  blockReason as egBlockReason,
   isMessagePersist,
   commitMessageText,
   patchAddedText,
@@ -4556,6 +4563,123 @@ describe("epistemic-guard.provenance", () => {
     const t = "unverified" + " ".repeat(400) + "2.11.4";
     expect(hedgedNear(t, 0)).toBe(true);
     expect(hedgedNear(t, t.length - 1)).toBe(false);
+  });
+});
+
+// The 2026-08-10 miss: "routed traffic shares one trunk, so it caps near
+// 5 Gbps" - a number produced by applying a half-remembered rule without
+// checking that Ethernet is full duplex. The corpus check alone cannot catch
+// this (nothing measured it, so it is absent by construction) and "go verify
+// the literal" is the wrong correction.
+describe("epistemic-guard.derived claims", () => {
+  test("derivedNear fires on causal/capacity language near the number", () => {
+    const t = "that flow shares one 10G trunk, so it caps near 5 Gbps";
+    expect(derivedNear(t, t.indexOf("5 Gbps"))).toBe(true);
+  });
+
+  test("derivedNear is proximity-scoped, not whole-document", () => {
+    const t = "the link is shared." + " ".repeat(400) + "measured 9.39 Gbps";
+    expect(derivedNear(t, t.length - 1)).toBe(false);
+  });
+
+  test("a reported measurement is NOT derived", () => {
+    const t = "iperf3 reported 9.10 Gbps single stream";
+    expect(derivedNear(t, t.indexOf("9.10 Gbps"))).toBe(false);
+  });
+
+  test("extractClaims marks a perf number in a because-clause as derived", () => {
+    const claims = extractClaims("it hairpins on one trunk so it caps at 5 Gbps", "prose");
+    const perf = claims.find((c) => c.cls === "perf");
+    expect(perf?.derived).toBe(true);
+  });
+
+  test("a measured perf number carries no derived marker", () => {
+    const claims = extractClaims("iperf3 gave 9.39 Gbps across 4 streams", "prose");
+    expect(claims.find((c) => c.cls === "perf")?.derived).toBeUndefined();
+  });
+
+  test("only perf claims are treated as derived - a version in a because-clause is not", () => {
+    const claims = extractClaims("because the pin is stale it shipped 2.11.4", "prose");
+    expect(claims.find((c) => c.cls === "version")?.derived).toBeUndefined();
+  });
+
+  test("footerLine appends the mechanism note only when something is derived", () => {
+    const derived = extractClaims("shares one trunk so it caps at 5 Gbps", "prose");
+    expect(egFooterLine(derived)).toContain("derived");
+    expect(egFooterLine(derived)).toContain("precondition");
+
+    const plain = extractClaims("iperf3 gave 9.39 Gbps", "prose");
+    expect(egFooterLine(plain)).not.toContain("precondition");
+  });
+
+  test("blockReason routes derived claims to the mechanism hint, not the measure-it hint", () => {
+    const derived = extractClaims("shares one trunk so it caps at 5 Gbps", "prose");
+    const msg = egBlockReason(derived, "write");
+    expect(msg).toContain("reasoned to, not measured");
+  });
+});
+
+// Same 2026-08-10 session: the agent asked the user to re-record iperf
+// numbers that memledger already held, and invented a test date from
+// "I've tested it". The lookup tools are pull-only, so nothing fires them
+// when the AGENT is the one with the gap.
+describe("lookup-before-ask", () => {
+  // VERBATIM from the session that motivated this. Both lack any possessive -
+  // ownership is carried by context alone - which is exactly what an earlier
+  // draft anchored on "your" missed while its synthetic tests passed.
+  test("fires on the real asks that motivated it", () => {
+    expect(
+      asksForOwnInfraFact(
+        "So: which is it - is the PC now in the same room as the rack, and roughly how long is that run?",
+      ),
+    ).toBe(true);
+    expect(
+      asksForOwnInfraFact(
+        "Worth recording the specifics if still to hand (negotiated link speed at both ends, iperf3 sustained throughput).",
+      ),
+    ).toBe(true);
+  });
+
+  test("fires on possessive-anchored fact asks too", () => {
+    expect(asksForOwnInfraFact("What's the model of your switch, and how long is your run?")).toBe(
+      true,
+    );
+    expect(
+      asksForOwnInfraFact("Worth recording the iperf numbers if you still have your output."),
+    ).toBe(true);
+  });
+
+  test("does NOT fire on preference or design questions - the user is the only source", () => {
+    expect(asksForOwnInfraFact("Option A or Option B - which way do you want to go?")).toBe(false);
+    expect(asksForOwnInfraFact("Do you want me to write the plan to a file?")).toBe(false);
+    expect(asksForOwnInfraFact("Shall I commit this?")).toBe(false);
+  });
+
+  // "run" here is a verb, not the user's cable run - the determiner gate is
+  // what keeps ambiguous nouns from turning every vendor question into a nudge.
+  test("does NOT fire on a fact question about a third-party system", () => {
+    expect(asksForOwnInfraFact("Which version of Postgres does Supabase run by default?")).toBe(
+      false,
+    );
+    expect(asksForOwnInfraFact("What port does the Supabase pooler listen on by default?")).toBe(
+      false,
+    );
+  });
+
+  test("does NOT fire on a statement that merely mentions specs", () => {
+    expect(asksForOwnInfraFact("Your switch has two 10G ports and the run is 5m.")).toBe(false);
+  });
+
+  test("empty and whitespace answers are not asks", () => {
+    expect(asksForOwnInfraFact("")).toBe(false);
+    expect(asksForOwnInfraFact("   \n ")).toBe(false);
+  });
+
+  test("the disarm set covers every store that could answer", () => {
+    for (const t of ["memledger_search", "search_ledger", "session_search", "ledger_search"]) {
+      expect(LOOKUP_TOOLS.has(t)).toBe(true);
+    }
+    expect(LOOKUP_TOOLS.has("websearch")).toBe(false);
   });
 });
 
