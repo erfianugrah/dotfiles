@@ -26,3 +26,8 @@ bun.lock
 .viminfo
 bin/stow-drift
 bin/memledger
+
+# self-correcting-loop run artifacts - local traces, regenerated every run
+.pi/harness-run.log
+.pi/harness-report.json
+.pi/harness-prompts/

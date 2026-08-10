@@ -13,11 +13,19 @@
  */
 import { describe, expect, test, mock, beforeEach } from "bun:test";
 
+// NOTE: mock.module() is process-global in Bun and the first stub registered
+// for a specifier is what later-loading test files link against. This stub
+// must stay a superset of what any extension imports from pi-ai (Type,
+// complete, getModel) or session-ledger.e2e fails with "Export named
+// 'complete' not found" when this file happens to load first (CI, cb0e7de).
 mock.module("@earendil-works/pi-ai", () => ({
   Type: new Proxy({}, { get: () => () => ({}) }),
+  complete: async () => ({ content: [{ type: "text", text: "" }] }),
+  getModel: () => ({ id: "stub", provider: "stub" }),
 }));
 mock.module("@earendil-works/pi-coding-agent", () => ({
   defineTool: (def: unknown) => def,
+  getAgentDir: () => "/tmp/pi-memledger-e2e",
 }));
 
 const tools = new Map<string, any>();
