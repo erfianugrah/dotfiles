@@ -72,8 +72,12 @@ Using it as a lane is how you ship a wrong version pin.
 | A URL you are about to cite | `webfetch` it. A 404 citation is worse than no citation |
 | CVE id, severity, affected range | `osint_cve`, `osv_scan` |
 | Latency / throughput / "N% faster" | measure (`bench`, `gocurl`, `pgbench`) and quote the output |
+| A number you REASONED to (a ceiling, a limit, a cost) | not the same as one you read - see "Derived claims" below |
+| A date: when something shipped, broke, was tested or decided | `memledger_search` / `search_ledger` / `session_search`, or `git log`. Never infer a date from "I did that already" |
+| Which interface / host / container a past incident was about | re-read the record and match the identifier, not the label - see "Entity identity" below |
 | Current events, prices, "latest" anything | `web_research` (mode `fresh`) |
-| What a past session did / decided | `session_search`, `ledger_search` |
+| What a past session did / decided | `session_search`, `ledger_search`, `memledger_search` (older than ~30d or cross-client) |
+| Any fact about the USER's own machines | search the stores FIRST; asking them costs a turn on something already recorded |
 | Something in the user's docs corpus | `docs_search` -> `docs_summary` -> `docs_read`, and cite the path |
 | External system's runtime behaviour | -> `validating-empirically` (run it, do not cite docs) |
 | Your own code works | -> `verification-before-completion` (run it, quote the output) |
@@ -167,9 +171,50 @@ any unverified specifics left standing in the last answer.
   without looking it up.
 - The urge to agree because the user pushed, before re-reading the source.
 
+## Derived claims: a number you reasoned to is not safer than one you recalled
+
+A throughput ceiling, capacity limit, cost or duration that you PRODUCED rather
+than read is a recalled RULE applied without checking its preconditions. The
+tell is a confident number with a because-clause and no stated precondition.
+
+Before asserting one, state the mechanism in one clause and name one condition
+that would make it false. Preconditions worth checking by name: full-duplex vs
+shared medium, per-flow vs aggregate, which layer, sequential vs parallel, warm
+vs cold, per-core vs total.
+
+Worked failure: "inter-VLAN routed traffic hairpins on one trunk, so it caps
+near half the link rate." Ethernet is full duplex - ingress and egress use
+independent directions - and the halving folklore applies to AGGREGATE
+capacity, never to a single flow. The number was wrong, the shape of the rule
+was right, and no amount of verifying the LITERAL would have caught it. The
+fix is to measure it or to state the mechanism, not to go looking up "5 Gbps".
+
+`epistemic-guard` marks perf numbers sitting in a because-clause as `derived`
+and routes them to this correction instead of the verify-the-literal one.
+
+## Entity identity: confirm what the evidence is about
+
+When you cite a past incident, measurement or log as evidence for a present
+decision, confirm it concerns the SAME entity - the same interface, host,
+container, service, table, environment. Match on the identifier in the record,
+never on a familiar label.
+
+`eth0` on one box is a 1G onboard NIC and on another a 10G card. Citing the
+first one's fault history to argue about the second one's hardware produces a
+fabricated argument built from an entirely real fact - the worst kind, because
+every component checks out individually. The record usually HAS the qualifier;
+the failure is dropping it in the retelling.
+
+`entity-qualifier-nudge` asks for the host when a device identifier is cited
+with incident vocabulary and no host named. A date does not qualify: "eth0
+flapped on 2026-08-08" says when, not which box.
+
 ## Related
 
 `verification-before-completion` (own work), `validating-empirically` (external
 runtime behaviour), `systematic-debugging` (root cause after a failed fix),
 `research` / `docs_*` / `lsp` / `oci_tags` (the verifiers themselves).
-Extension: `~/.pi/agent/extensions/epistemic-guard.ts`.
+Extensions: `~/.pi/agent/extensions/epistemic-guard.ts` (provenance +
+derived-number marking), `lookup-before-ask.ts` (search the stores before
+asking the user about their own kit), `entity-qualifier-nudge.ts` (name the
+host before citing a device as evidence).
