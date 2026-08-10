@@ -29,6 +29,10 @@ export XIKE_USER=admin XIKE_PASS=admin          # XIKE_HOST defaults to 10.0.69.
                                                # needs XIKE_ENABLE_PASS since 2026-07-31 (vaultwarden)
 ./xikectl set "interface eth0/0/5" "description foo"   # full write pattern:
                                                # apply + before/after config diff + save + proof
+./xikectl cfg "interface eth0/1/1" "shutdown" "undo shutdown"  # PORT BOUNCE
+                                               # (servarr flap recovery; verified 2026-08-10,
+                                               # runbook: repo PORT-RESET.md; cfg not set -
+                                               # transient, no flash save)
 ./xikectl apply [--prune] [--dry-run] [--i-know]       # declarative reconcile live->fixture.yaml
                                                # (additive default; guards: mgmt/session-port)
 ./xikectl restore <file> [--dry-run]           # validate config file (strict section grammar),
@@ -73,7 +77,8 @@ cannot enter config mode.
 - `enable` is password-gated (needs `user privilege-auth always`, not
   the bare command) and `login-acl` is restricted to 10.0.69.0/24
   (snmp/web/telnet) - both fired 2026-07-31; enable password in
-  vaultwarden, pass via XIKE_ENABLE_PASS. Both DO show in
+  vaultwarden (item XIKESTOR_ENABLE_PASSWORD, in the NOTES field -
+  login.password is null), pass via XIKE_ENABLE_PASS. Both DO show in
   `display current-config` (!!!OAM); the enable password sits there in
   CLEARTEXT - treat every config scrape as a secret (backup warns).
   `?` help on an already-valid command EXECUTES it (help redraws the
@@ -108,4 +113,6 @@ cannot enter config mode.
   (validate + web upload, BOOT config) all live-fired 2026-07-31.
 - Ops runbooks in the repo: FACTORY-RESET.md (systemReset=3 wipe +
   rebuild), PASSWORD-RESET.md (enable password rotation via interact;
-  login password immutable - broken user mgmt).
+  login password immutable - broken user mgmt), PORT-RESET.md (remote
+  port bounce shutdown/undo shutdown - servarr flap recovery; never
+  bounce the trunk eth0/1/4 from a session that rides it).
