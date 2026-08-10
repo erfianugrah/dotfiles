@@ -4675,6 +4675,20 @@ describe("lookup-before-ask", () => {
     expect(asksForOwnInfraFact("   \n ")).toBe(false);
   });
 
+  // Fired live on a message that was DISCUSSING how to detect asks: the three
+  // signals appeared in three unrelated paragraphs. ANDing across a whole
+  // message is a vacuous conjunction on any long answer.
+  test("signals must co-occur in ONE sentence, not across the message", () => {
+    const scattered =
+      "Which way do you want to go?\n\n" +
+      "The switch has two 10G ports and the run is about 5m.\n\n" +
+      "Your rack is on the other side of the wall.";
+    expect(asksForOwnInfraFact(scattered)).toBe(false);
+
+    const together = "How long is that run, and what model is the switch?";
+    expect(asksForOwnInfraFact(together)).toBe(true);
+  });
+
   test("the disarm set covers every store that could answer", () => {
     for (const t of ["memledger_search", "search_ledger", "session_search", "ledger_search"]) {
       expect(LOOKUP_TOOLS.has(t)).toBe(true);

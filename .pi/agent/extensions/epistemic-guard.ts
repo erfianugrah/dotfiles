@@ -89,7 +89,7 @@ import * as path from "node:path";
 
 // ── claim model ─────────────────────────────────────────────────────────────
 
-export type ClaimClass = "version" | "url" | "cve" | "perf" | "flag" | "syspath";
+export type ClaimClass = "version" | "url" | "cve" | "perf" | "flag" | "syspath" | "date";
 
 export interface Claim {
   cls: ClaimClass;
@@ -151,6 +151,7 @@ export interface Corpus {
   perf: Set<string>;
   flag: Set<string>;
   syspath: Set<string>;
+  date: Set<string>;
 }
 
 export function newCorpus(): Corpus {
@@ -161,6 +162,7 @@ export function newCorpus(): Corpus {
     perf: new Set(),
     flag: new Set(),
     syspath: new Set(),
+    date: new Set(),
   };
 }
 
@@ -173,6 +175,9 @@ const VERIFY_HINT: Record<ClaimClass, string> = {
   perf: "quote the tool output you measured (bench, gocurl, pgbench) or drop the number",
   flag: "`<tool> --help` / docs_grep the source - flags are the top hallucination class",
   syspath: "`ls`/`stat` it, or read it - a path you never opened is a guess",
+  date:
+    "memledger_search / search_ledger / session_search - a date about the user's own history " +
+    "lives in the session stores, not in your head",
 };
 
 // ── regex sources (built fresh per use; /g + lastIndex is a footgun) ────────
@@ -202,6 +207,38 @@ const RE_PERF_UNIT = String.raw`(?<![\w.])(\d+(?:\.\d+)?)\s?(ms|µs|us|ns|rps|qp
 const RE_PERF_FACTOR = String.raw`(?<![\w.])(\d+(?:\.\d+)?)\s?x\s+(faster|slower|speedup|throughput)`;
 const RE_FLAG = String.raw`(?<![\w-])--([a-z][a-z0-9-]{2,})(?![\w-])`;
 const RE_SYSPATH = String.raw`(?<![\w])(~/[\w.\-/]{3,}|/(?:etc|usr|opt|var|srv|proc|sys|boot|lib|lib64|run)/[\w.\-/]{2,})`;
+
+// ISO date. The trailing `\b` is the whole trick for excluding timestamps:
+// in `2026-08-10T04:03:48Z` both the last digit and the following `T` are
+// word characters, so there is no boundary there and the pattern simply does
+// not match inside a longer datetime - no separate exclusion needed.
+const RE_DATE_ISO = String.raw`\b(\d{4}-\d{2}-\d{2})\b`;
+
+const MONTHS =
+  "January|February|March|April|May|June|July|August|September|October|November|December";
+// Day Month Year: "10 August 2026".
+const RE_DATE_DMY = String.raw`\b\d{1,2}\s+(?:${MONTHS})\s+\d{4}\b`;
+// Month Day[,] Year: "August 10, 2026".
+const RE_DATE_MDY = String.raw`\b(?:${MONTHS})\s+\d{1,2},?\s+\d{4}\b`;
+// [qualifier] Month Year: "August 2026", "late July 2026". The optional
+// early/mid/late prefix is a vagueness qualifier on the SAME claim, not a
+// separate fact - normalizeWordedDateKey drops it.
+const RE_DATE_MY = String.raw`\b(?:(?:early|mid|late)\s+)?(?:${MONTHS})\s+\d{4}\b`;
+
+const MONTH_INDEX: Record<string, string> = {
+  january: "01",
+  february: "02",
+  march: "03",
+  april: "04",
+  may: "05",
+  june: "06",
+  july: "07",
+  august: "08",
+  september: "09",
+  october: "10",
+  november: "11",
+  december: "12",
+};
 
 /**
  * Words that make a following number an ordinal/reference, not a version.
@@ -300,6 +337,73 @@ function add(set: Set<string>, v: string): void {
   if (v && set.size < CORPUS_SET_CAP) set.add(v);
 }
 
+/**
+ * Normalize a worded date to a comparison key: lowercased, commas stripped,
+ * whitespace collapsed, and any leading vagueness qualifier (early/mid/late)
+ * dropped - the month is the claim, the qualifier is not a separate fact.
+ * Applied uniformly to every worded form (D-M-Y, M-D-Y, M-Y) rather than
+ * threading per-pattern capture groups through.
+ */
+export function normalizeWordedDateKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/,/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(early|mid|late)\s+/, "");
+}
+
+interface DateCandidate {
+  start: number;
+  end: number;
+  key: string;
+  raw: string;
+}
+
+/**
+ * All worded-date matches in `text`, longest-and-earliest-wins so a DMY match
+ * ("10 August 2026") does not ALSO yield the shorter MY match nested inside it
+ * ("August 2026") as a second, spurious claim.
+ */
+export function wordedDateCandidates(text: string): DateCandidate[] {
+  const raw: DateCandidate[] = [];
+  for (const re of [RE_DATE_DMY, RE_DATE_MDY, RE_DATE_MY]) {
+    for (const m of all(text, re, "gi")) {
+      raw.push({
+        start: m.index,
+        end: m.index + m[0].length,
+        key: normalizeWordedDateKey(m[0]),
+        raw: m[0],
+      });
+    }
+  }
+  raw.sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start));
+  const out: DateCandidate[] = [];
+  let lastEnd = -1;
+  for (const c of raw) {
+    if (c.start < lastEnd) continue;
+    out.push(c);
+    lastEnd = c.end;
+  }
+  return out;
+}
+
+/**
+ * "yyyy-mm" for either an ISO date/timestamp key or a normalized worded date
+ * key, or null when the key has no recognisable month. This is what lets an
+ * ISO claim and a worded claim about the SAME month cross-match in
+ * `hasProvenance` without ever rewriting one form's key into the other -
+ * cross-matching is a provenance-time concern, extraction keeps what the
+ * model actually wrote.
+ */
+export function dateMonthKey(key: string): string | null {
+  const iso = key.match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+  const worded = key.match(/\b([a-z]+)\b.*?\b(\d{4})\b/);
+  if (worded && MONTH_INDEX[worded[1]]) return `${worded[2]}-${MONTH_INDEX[worded[1]]}`;
+  return null;
+}
+
 /** Fold every literal in `text` into the corpus as provenance. */
 export function absorb(corpus: Corpus, text: string): void {
   if (!text) return;
@@ -313,10 +417,14 @@ export function absorb(corpus: Corpus, text: string): void {
   for (const m of all(t, RE_PERF_FACTOR)) add(corpus.perf, `${m[1]}x`);
   for (const m of all(t, RE_FLAG)) add(corpus.flag, `--${m[1]}`);
   for (const m of all(t, RE_SYSPATH)) add(corpus.syspath, trimTrailingPunct(m[1]).replace(/\/+$/, ""));
+  for (const m of all(t, RE_DATE_ISO)) add(corpus.date, m[1]);
+  for (const c of wordedDateCandidates(t)) add(corpus.date, c.key);
 }
 
 export function corpusSize(c: Corpus): number {
-  return c.version.size + c.url.size + c.cve.size + c.perf.size + c.flag.size + c.syspath.size;
+  return (
+    c.version.size + c.url.size + c.cve.size + c.perf.size + c.flag.size + c.syspath.size + c.date.size
+  );
 }
 
 // ── claim side: STRICT extraction, scoped by payload kind ───────────────────
@@ -365,6 +473,20 @@ function isVersionBookkeeping(line: string): boolean {
 /** 10.0.69.2 is an address, not a release. */
 function isIpv4(key: string): boolean {
   return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(key);
+}
+
+/**
+ * Lines that are date BOOKKEEPING rather than a claim about the user's
+ * history: a changelog/markdown heading, or a `field: value` line (a
+ * frontmatter-style `date:`/`Date:`/`Last updated:` field). The agent
+ * stamping a heading with the date it's writing is correct behaviour, not a
+ * fabrication - there is nothing to verify because nothing is being asserted.
+ */
+function isDateBookkeeping(line: string): boolean {
+  return (
+    /^\s{0,3}#{1,6}\s/.test(line) ||
+    /^\s*[A-Za-z][\w -]*:\s*\d{4}-\d{2}-\d{2}\s*$/.test(line)
+  );
 }
 
 function pushUnique(out: Claim[], seen: Set<string>, c: Claim, text: string, at: number): void {
@@ -482,6 +604,12 @@ function extractInto(
   for (const m of all(text, RE_PERF_FACTOR)) {
     pushUnique(out, seen, { cls: "perf", key: `${m[1]}x`, raw: `${m[1]}x ${m[2]}` }, text, m.index);
   }
+  const addDate = (key: string, raw: string, at: number) => {
+    if (isDateBookkeeping(lineOf(at))) return;
+    pushUnique(out, seen, { cls: "date", key, raw }, text, at);
+  };
+  for (const m of all(text, RE_DATE_ISO)) addDate(m[1], m[1], m.index);
+  for (const c of wordedDateCandidates(text)) addDate(c.key, c.raw, c.start);
   for (const m of all(text, RE_FLAG)) {
     const key = `--${m[1]}`;
     if (UBIQUITOUS_FLAG.has(key)) continue;
@@ -516,6 +644,19 @@ export function hasProvenance(corpus: Corpus, c: Claim): boolean {
       return hasPrefixMatch(corpus.url, c.key);
     case "syspath":
       return hasPrefixMatch(corpus.syspath, c.key);
+    case "date": {
+      if (corpus.date.has(c.key)) return true;
+      // ISO <-> worded cross-match: same month, different spelling, is the
+      // same fact. This is a provenance-time comparison only - the claim's
+      // own key is never rewritten, so the block message still quotes
+      // exactly what the model wrote.
+      const monthKey = dateMonthKey(c.key);
+      if (!monthKey) return false;
+      for (const v of corpus.date) {
+        if (dateMonthKey(v) === monthKey) return true;
+      }
+      return false;
+    }
   }
 }
 

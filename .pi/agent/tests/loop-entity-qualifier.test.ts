@@ -85,6 +85,43 @@ describe("entity-qualifier-nudge / stays quiet", () => {
   });
 });
 
+// Found by an adversarial pass AFTER the loop went green on the spec above.
+// Every one of these is a gap in the original contract, not a loop failure -
+// the implementation matched what was written.
+describe("entity-qualifier-nudge / adversarial", () => {
+  test("three-letter words are not block devices", () => {
+    expect(needsHostQualifier("the SDK errors last week were unrelated")).toBe(false);
+    expect(needsHostQualifier("our sdk dropped support back in June")).toBe(false);
+    // ...but a real one still counts
+    expect(needsHostQualifier("sda1 errors last week")).toBe(true);
+  });
+
+  test("a hostname directly before the interface qualifies", () => {
+    expect(needsHostQualifier("servarr eth0 flapped last week")).toBe(false);
+    expect(needsHostQualifier("nixos enp2s0f0np0 dropped packets last week")).toBe(false);
+  });
+
+  test("a verb before the interface is not a hostname", () => {
+    expect(needsHostQualifier("we saw eth0 flap last week")).toBe(true);
+    expect(needsHostQualifier("you had eth0 drop packets")).toBe(true);
+  });
+
+  test("a possessive determiner does not name a box", () => {
+    expect(needsHostQualifier("I saw errors on my br0 bridge last week")).toBe(true);
+    expect(needsHostQualifier("errors on your eth0 last week")).toBe(true);
+  });
+
+  test("signals must co-occur in ONE sentence, not across the message", () => {
+    const scattered =
+      "The trunk is enp2s0f0np0 and it carries five VLANs.\n\n" +
+      "Separately, there was an outage last week that we never root-caused.";
+    expect(needsHostQualifier(scattered)).toBe(false);
+
+    const together = "Separately, enp2s0f0np0 had an outage last week.";
+    expect(needsHostQualifier(together)).toBe(true);
+  });
+});
+
 describe("entity-qualifier-nudge / message", () => {
   test("the nudge names the failure and the fix", () => {
     expect(ENTITY_NUDGE).toMatch(/host/i);

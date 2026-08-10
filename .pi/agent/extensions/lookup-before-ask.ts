@@ -37,6 +37,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { anySentence } from "./lib/sentences.ts";
 
 /** Tools that would have answered the question. Any one call disarms. */
 export const LOOKUP_TOOLS = new Set([
@@ -104,8 +105,16 @@ function anchoredToOwnEstate(text: string): boolean {
  * Pure so the decision is unit-testable without a session.
  */
 export function asksForOwnInfraFact(text: string): boolean {
-  if (!text.trim()) return false;
-  return ASK_RE.test(text) && FACT_RE.test(text) && anchoredToOwnEstate(text);
+  // Per SENTENCE, not per message. Matched across a whole answer the
+  // conjunction is vacuous - any long message has a question mark somewhere,
+  // a spec noun somewhere and a possessive somewhere. This fired live on a
+  // message that was merely DISCUSSING how to detect asks.
+  return anySentence(
+    text,
+    (s) => ASK_RE.test(s),
+    (s) => FACT_RE.test(s),
+    anchoredToOwnEstate,
+  );
 }
 
 export const NUDGE_LINE =
