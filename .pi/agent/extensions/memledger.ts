@@ -22,7 +22,7 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { baseUrl, buildUrl, formatRows, type SearchKind } from "./lib/memledger-core.ts";
+import { baseUrl, buildUrl, formatRows, searchMessages, type SearchKind } from "./lib/memledger-core.ts";
 
 const KINDS: SearchKind[] = ["messages", "ledger", "memories", "sessions", "semantic"];
 
