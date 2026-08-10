@@ -1,62 +1,70 @@
 {
-  "task": "Fix pi's long-running-tool UX blackout in this dotfiles repo. Two deliverables, both specified by FAILING test files you must make green WITHOUT editing them: (1) Rework .pi/agent/extensions/task.ts so it parses the `pi -p --mode json` subprocess stdout INCREMENTALLY (line-buffered, not buffer-until-close) and streams throttled onUpdate progress (first update promptly, then >=1s apart, plus a final flush if updates were suppressed). The status line shows: task \"<description>\", elapsed time, tool-call count, last tool label; when the child emits tool_execution_update for toolName \"task\" (a nested subagent), relay the child's partialResult text as a \" |-> <line>\" suffix. Wire the AbortSignal so abort kills the subprocess (SIGTERM) and execute() resolves promptly. Pass PI_TASK_DEPTH through the child env incremented by 1 and include \"depth N\" in the status line when N>0. KEEP the existing final-result behavior identical: last assistant text wins across message/message_end/message_update/turn_end/agent_end events, the stderr-fallback messages, the session-id capture, and the <task_result> wrapper. Export parseSubagentEventLine, createTaskProgress, and taskTool. (2) Create .pi/agent/extensions/tool-activity.ts: a pi extension that listens to tool_execution_start/tool_execution_end, tracks active tools, and while any tool is active updates ctx.ui.setWorkingMessage() once per second to \"Working... <summaryLine>\" using the tracker; when no tools are active, and on agent_settled and session_shutdown, restore pi's default with ctx.ui.setWorkingMessage() (no args) and stop the timer. Guard every UI call with ctx.hasUI. Export createToolActivity. Shared helpers go in .pi/agent/extensions/lib/tool-label.ts (exports: summarizeToolArgs, formatElapsed) - NEVER a loose top-level .ts helper, pi requires a default factory from every top-level extension file. The exact API contracts and formats are defined by the tests: .pi/agent/tests/loop-task.test.ts and .pi/agent/tests/loop-activity.test.ts. Read them first; they are the spec.",
+  "task": "Two additions to this dotfiles repo's pi extensions, both specified by FAILING test files you must make green WITHOUT editing them. Read the test files first - their header comments are the contract and explain why each rule exists. (1) Add a `date` claim class to .pi/agent/extensions/epistemic-guard.ts. Today its ClaimClass union is version|url|cve|perf|flag|syspath, so a fabricated date sails through: the agent wrote `tested 2026-08-10` into a doc from a user message that contained no date at all. Extend ClaimClass with \"date\", add extraction for ISO and worded forms, normalise worded keys, make ISO and worded forms of the same month cross-match for provenance, skip bookkeeping (changelog headings, `date:` field lines, ISO timestamps) and fenced blocks, and add a VERIFY_HINT entry routing dates to the session stores (memledger / ledger / session_search) because that is where a date about the user's own history lives. Reuse the existing corpus/provenance/hedge/footer plumbing - do not build a parallel path. Spec: .pi/agent/tests/loop-date-class.test.ts. (2) Implement .pi/agent/extensions/entity-qualifier-nudge.ts, currently a stub. It nudges when a device identifier (eth0, enp2s0f0np0, br0, nvme0n1, sda1, switch ports like eth0/1/1) is cited as EVIDENCE - incident/evidential vocabulary nearby - with no host qualifier naming which box it belongs to. Critically, a DATE is not a qualifier: `eth0 flapped on 2026-08-08` must still fire, because that exact sentence shipped a wrong argument built from a real fact about a different interface. Export needsHostQualifier and NUDGE_LINE, and wire a message_end hook that appends NUDGE_LINE once per session to assistant messages, skipping when ctx.hasUI is false, with kill switch PI_ENTITY_NUDGE_OFF=1 and a session_shutdown cleanup - mirror the structure of .pi/agent/extensions/lookup-before-ask.ts, which solves the same shape of problem. Spec: .pi/agent/tests/loop-entity-qualifier.test.ts.",
   "maxIterations": 8,
-  "models": ["openrouter/deepseek/deepseek-v4-pro"],
+  "models": ["anthropic/claude-sonnet-5", "anthropic/claude-opus-4-8"],
   "stallPatience": 3,
   "tools": ["read", "edit", "write", "bash", "grep", "glob"],
   "writeScope": [
-    ".pi/agent/extensions/task.ts",
-    ".pi/agent/extensions/tool-activity.ts",
-    ".pi/agent/extensions/lib/**"
+    ".pi/agent/extensions/epistemic-guard.ts",
+    ".pi/agent/extensions/entity-qualifier-nudge.ts"
   ],
   "timeoutMs": 600000,
   "agentTimeoutMs": 1800000,
   "guide": [
-    "AGENTS.md",
-    ".pi/agent/extensions/compaction-progress.ts",
+    ".pi/agent/extensions/lookup-before-ask.ts",
     ".pi/agent/tests/preload.ts"
   ],
   "rules": [
     "Do NOT edit anything under .pi/agent/tests/ - the test files are the contract. Make them pass as written.",
-    "NEVER move, edit, restore, or delete .pi/harness.json or any .pi/harness-* file. They are loop machinery. If a reviewer complains about them in the diff, that is a reviewer problem, not yours - the judge has been told to ignore them.",
-    "bin/memledger is a pre-existing uncommitted binary rebuild that predates this task. Do NOT touch it, unstage it, restore it, or try to remove it from any diff.",
+    "NEVER move, edit, restore or delete .pi/harness.json or any .pi/harness-* file. They are loop machinery and the judge has been told to ignore them.",
+    ".pi/agent/settings.json was already modified in the working tree before this task began. Do not touch it, unstage it, or try to remove it from any diff.",
     "No new dependencies. node/bun stdlib only.",
-    "Match existing extension style: tabs for indentation, double quotes, JSDoc header comment explaining the why.",
+    "Match existing extension style in this repo: two-space indentation, double quotes, a JSDoc header explaining WHY the thing exists, and section comments. Read epistemic-guard.ts and lookup-before-ask.ts before writing.",
     "Do not run git commit, git reset, git stash, git checkout, git update-index, or any other git ref/index mutation.",
-    "A check satisfied by a stub is a FAILED iteration: no `throw new Error(\"not implemented\")`, no empty function bodies, no hard-coded test answers.",
-    "task.ts currently ignores its `_signal` and `_onUpdate` parameters - using them is the point of this task. Keep runSubagent's stderr-fallback and '[subagent produced no output]' paths working.",
+    "A check satisfied by a stub is a FAILED iteration: no `throw new Error(\"not implemented\")`, no empty function bodies, no hard-coded test answers, no returning a canned value for a specific input string.",
+    "The date class must go THROUGH the existing pipeline: extractClaims segments, pushUnique (so hedgedNear and dedupe apply for free), Corpus, hasProvenance. A special-case branch that bypasses them is wrong even if the tests pass.",
+    "Cross-matching ISO and worded dates is a provenance-time concern, not an extraction-time one: do not rewrite a worded claim's key into ISO, or the block message stops quoting what the model actually wrote.",
     "If you need a paragraph-long comment to justify why a workaround is OK, the code is wrong - fix the code."
   ],
   "sensors": [
     {
       "name": "no-stubs",
-      "cmd": "test -z \"$(rg -n --no-messages 'throw new Error\\(\"not implemented|TODO: implement me' .pi/agent/extensions/task.ts .pi/agent/extensions/tool-activity.ts .pi/agent/extensions/lib/tool-label.ts 2>/dev/null)\"",
-      "hint": "a stub was left behind - implement the function for real",
-      "canary": "printf '\\nthrow new Error(\"not implemented\")\\n' >> .pi/agent/extensions/task.ts"
+      "cmd": "test -z \"$(rg -n --no-messages 'TODO: implement me|throw new Error\\(\"not implemented' .pi/agent/extensions/epistemic-guard.ts .pi/agent/extensions/entity-qualifier-nudge.ts 2>/dev/null)\"",
+      "expect": "fail",
+      "hint": "the stub markers are still there - implement the function for real",
+      "canary": "printf '\\n// TODO: implement me\\n' >> .pi/agent/extensions/epistemic-guard.ts"
+    },
+    {
+      "name": "tests-unmodified",
+      "cmd": "git diff --quiet HEAD -- .pi/agent/tests/",
+      "hint": "the test files are the contract and must not change - revert them and fix the implementation instead",
+      "canary": "printf '\\n// canary\\n' >> .pi/agent/tests/loop-date-class.test.ts"
     },
     {
       "name": "existing-suite",
       "cmd": "./.pi/agent/tests/run.sh",
       "timeoutMs": 300000,
-      "hint": "you broke a pre-existing test - run the suite and read which; the pre-existing helpers and exports must keep working",
+      "hint": "you broke a pre-existing test - run the suite and read which. The existing claim classes, provenance semantics and the derived-perf marking must keep working exactly as they do now.",
       "canary": "printf '\\nexport const __canary: = 1\\n' >> .pi/agent/extensions/tool-guard.ts"
     },
     {
-      "name": "loop-tests-task",
-      "cmd": "bun test --preload ./.pi/agent/tests/preload.ts ./.pi/agent/tests/loop-task.test.ts",
+      "name": "feature-date-class",
+      "expect": "fail",
+      "cmd": "bun test --preload ./.pi/agent/tests/preload.ts ./.pi/agent/tests/loop-date-class.test.ts",
       "timeoutMs": 120000,
-      "hint": "the file header documents the exact export + onUpdate/abort contract. The integration tests put a fake `pi` script on PATH; your execute() must stream onUpdate from incremental stdout parsing and must kill the child on abort."
+      "hint": "the header of loop-date-class.test.ts is the spec: ISO + worded forms, normalised keys, qualifier stripping, ISO<->worded provenance cross-match, bookkeeping and fenced-block exclusions, and a date entry in VERIFY_HINT."
     },
     {
-      "name": "loop-tests-activity",
-      "cmd": "bun test --preload ./.pi/agent/tests/preload.ts ./.pi/agent/tests/loop-activity.test.ts",
+      "name": "feature-entity-qualifier",
+      "expect": "fail",
+      "cmd": "bun test --preload ./.pi/agent/tests/preload.ts ./.pi/agent/tests/loop-entity-qualifier.test.ts",
       "timeoutMs": 120000,
-      "hint": "the file header documents the exact tracker/label/elapsed contract. Shared helpers belong in .pi/agent/extensions/lib/tool-label.ts, the tracker in .pi/agent/extensions/tool-activity.ts."
+      "hint": "the header of loop-entity-qualifier.test.ts is the spec. The hard case: a date must NOT count as a host qualifier, while `servarr's eth0` and `on servarr` must."
     },
     {
       "name": "judge",
-      "after": ["no-stubs", "existing-suite", "loop-tests-task", "loop-tests-activity"],
-      "cmd": "judge --base HEAD --spec 'Two pi extension changes in this dotfiles repo. (1) .pi/agent/extensions/task.ts streams subagent progress: incremental line-buffered parsing of the `pi -p --mode json` stdout, throttled onUpdate calls (~1/sec) carrying a status line with description, elapsed time, tool count, last tool label; nested task progress relayed via tool_execution_update partialResult as a |-> suffix; AbortSignal kills the subprocess; PI_TASK_DEPTH env incremented into the child and surfaced when >0; final-result parsing (last assistant text wins, stderr fallback, session id, <task_result> wrapper) unchanged. (2) New .pi/agent/extensions/tool-activity.ts: tracks active tools via tool_execution_start/end, updates ctx.ui.setWorkingMessage every second while any tool runs, restores the default working message (no-args call) when idle and on agent_settled/session_shutdown, guards UI calls with ctx.hasUI. Shared helpers in .pi/agent/extensions/lib/tool-label.ts. Style: tabs, no new deps, JSDoc headers. REJECT if: updates are unthrottled or missing, abort does not kill the child, the working message is never restored, helpers live in a loose top-level .ts file, or the pre-existing task.ts result parsing regressed. SCOPE NOTE: `bin/memledger` (a tracked compiled binary) was already modified in the working tree BEFORE this task began and is intentionally not part of the change - do not weigh it. `.pi/harness.json` and `.pi/harness-*` files are loop machinery, not part of the change - ignore them as well.' --model openrouter/moonshotai/kimi-k3"
+      "after": ["no-stubs", "tests-unmodified", "existing-suite", "feature-date-class", "feature-entity-qualifier"],
+      "cmd": "judge --base HEAD --spec 'Two pi-extension changes in a dotfiles repo. (1) epistemic-guard.ts gains a date claim class: ISO and worded dates become claims, worded keys are normalised (lowercased, commas stripped, early/mid/late qualifier dropped), ISO and worded forms of the same month cross-match during the provenance check, changelog headings / `date:` field lines / ISO timestamps / fenced code yield nothing, and VERIFY_HINT routes dates to the session stores. It must reuse the existing extraction segments, pushUnique, Corpus and hasProvenance rather than a parallel code path, and must not disturb the existing version/url/cve/perf/flag/syspath behaviour or the derived-perf marking added earlier. (2) entity-qualifier-nudge.ts is implemented from a stub: needsHostQualifier is true when a device identifier is cited with evidential/incident vocabulary and no host qualifier, where a date explicitly does NOT qualify; the extension appends NUDGE_LINE once per session on message_end, skips when ctx.hasUI is false, honours PI_ENTITY_NUDGE_OFF=1 and cleans up on session_shutdown. REJECT if: a test-specific string is special-cased, the date class bypasses the shared pipeline, worded keys are rewritten to ISO at extraction time, the nudge can fire more than once per session or in headless runs, or the JSDoc headers do not explain why the rule exists. SCOPE NOTE: .pi/agent/settings.json was already modified before this task and .pi/harness.json plus any .pi/harness-* files are loop machinery - ignore all of them.' --model anthropic/claude-opus-4-8"
     }
   ]
 }
