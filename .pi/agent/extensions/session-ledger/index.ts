@@ -51,6 +51,7 @@ import { mkdirSync } from "node:fs";
 // is NOT resolvable in the Homebrew packaging and crashes pi at launch.
 import { complete, Type } from "@earendil-works/pi-ai";
 import { defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { searchLedger, toOrQuery } from "../lib/memledger-core.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Constants
@@ -521,14 +522,33 @@ const searchTool = defineTool({
 		} catch (err) {
 			return { content: [{ type: "text", text: `Search failed: ${(err as Error).message}` }] };
 		}
-		if (rows.length === 0) return { content: [{ type: "text", text: `No ledger entries for "${params.query}".` }] };
+		// Local sqlite is the fast path but not the complete one: the central
+		// store holds entries this machine no longer has (59 there against 55
+		// here when this was added). Only consulted when local finds nothing,
+		// and network failure falls through to the empty answer.
+		if (rows.length === 0) {
+			try {
+				const ml = await searchLedger(toOrQuery(params.query), limit);
+				const filtered = params.project ? ml.filter((r) => r.project === params.project) : ml;
+				if (filtered.length > 0) {
+					const text = filtered
+						.map((r) => `### ${String(r.created_at).slice(0, 10)} · ${r.kind} · ${r.project}\n${r.summary}`)
+						.join("\n\n---\n\n");
+					return {
+						content: [{ type: "text", text: `_(from memledger - not in the local ledger)_\n\n${text}` }],
+						details: { count: filtered.length, backend: "memledger" },
+					};
+				}
+			} catch { /* memledger unreachable - answer from local only */ }
+			return { content: [{ type: "text", text: `No ledger entries for "${params.query}".` }] };
+		}
 		const out = rows
 			.map((r) => {
 				const date = new Date(r.created_at).toISOString().slice(0, 10);
 				return `### ${date} · ${r.kind} · ${r.project}${r.git_branch ? ` (${r.git_branch})` : ""}\n${r.summary}`;
 			})
 			.join("\n\n---\n\n");
-		return { content: [{ type: "text", text: out }], details: { count: rows.length } };
+		return { content: [{ type: "text", text: out }], details: { count: rows.length, backend: "sqlite" } };
 	},
 });
 

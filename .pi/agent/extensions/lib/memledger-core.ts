@@ -81,6 +81,32 @@ export async function searchMessages(
   return rows.map((r) => ({ ...r, headline: stripMarks(r.headline ?? "") }));
 }
 
+export interface LedgerHit {
+  id: string | number;
+  created_at: string;
+  kind: string;
+  project: string;
+  rank: number;
+  summary: string;
+}
+
+/**
+ * Ledger-summary search against the central store, for ledger_search's
+ * deep-history path. Note the shape differs from the local sqlite ledger:
+ * created_at is an ISO string rather than epoch ms, and there is no
+ * git_branch column. Throws on network/HTTP errors so callers can fall back.
+ */
+export async function searchLedger(
+  q: string,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<LedgerHit[]> {
+  const url = buildUrl(baseUrl(), "ledger", q, undefined, limit);
+  const resp = await fetch(url, { signal: signal ?? AbortSignal.timeout(10_000) });
+  if (!resp.ok) throw new Error(`memledger HTTP ${resp.status}`);
+  return (await resp.json()) as LedgerHit[];
+}
+
 export function formatRows(kind: SearchKind, rows: Record<string, unknown>[]): string[] {
   switch (kind) {
     case "messages":
