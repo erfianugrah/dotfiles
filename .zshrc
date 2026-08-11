@@ -118,6 +118,11 @@ bindkey '^[w' kill-region
 bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
 
+# Navigation: bare directory name cds into it (covers `..`)
+setopt autocd
+alias ...='cd ../..'
+alias ....='cd ../../..'
+
 # History
 HISTSIZE=10000000
 HISTFILE=~/.zsh_history
