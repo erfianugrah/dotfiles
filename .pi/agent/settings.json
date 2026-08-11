@@ -24,5 +24,6 @@
   "hideThinkingBlock": true,
   "packages": [
     "git:github.com/erfianugrah/pi-mcp-bridge"
-  ]
+  ],
+  "quietStartup": false
 }
