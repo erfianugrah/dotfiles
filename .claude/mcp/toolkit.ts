@@ -15,6 +15,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { queryOciTags } from "../../.pi/agent/extensions/lib/oci-tags-core.ts";
 import { scanOsv } from "../../.pi/agent/extensions/lib/osv-core.ts";
+import { scanSecrets } from "../../.pi/agent/extensions/lib/secret-scan-core.ts";
 
 export const server = new McpServer({ name: "erfi-toolkit", version: "0.1.0" });
 
@@ -64,6 +65,28 @@ server.registerTool(
       lockfileOnly: lockfile_only,
       includeDev: include_dev,
     });
+    return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
+  },
+);
+
+// -- secret_scan -------------------------------------------------------------
+server.registerTool(
+  "secret_scan",
+  {
+    title: "Secret Scan",
+    description:
+      "Scan a directory for leaked secrets via gitleaks (default) or noseyparker. Returns findings " +
+      "(rule, file, line, secret PREFIX only - first 12 chars + length, never the full secret, commit " +
+      "if scanning history). Run before commits / during PR review. Requires the gitleaks or " +
+      "noseyparker binary on PATH.",
+    inputSchema: {
+      path: z.string().optional().describe("Directory or repo path to scan (default: server cwd)."),
+      backend: z.enum(["gitleaks", "noseyparker"]).optional().describe("Scanner. Default gitleaks (fast, regex); noseyparker is entropy+provenance."),
+      scan_history: z.boolean().optional().describe("Scan git history too (gitleaks only). Default false = working tree."),
+    },
+  },
+  async ({ path, backend, scan_history }) => {
+    const { text, isError } = await scanSecrets({ path, cwd: process.cwd(), backend, scanHistory: scan_history });
     return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
   },
 );
