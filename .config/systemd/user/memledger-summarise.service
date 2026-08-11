@@ -1,0 +1,9 @@
+[Unit]
+Description=memledger ledger summary drain (LLM summarisation of pending rows)
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/memledger/env
+ExecStart=%h/bin/memledger summarise
+Nice=19
+IOSchedulingClass=idle

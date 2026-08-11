@@ -1,0 +1,12 @@
+[Unit]
+Description=memledger restore drill - prove the MinIO dump chain still restores
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/memledger/env
+# Needs the repo (the script) and docker (a throwaway pgvector container).
+# Measured 8m37s end to end: 91s to fetch the 1GB dump, ~7 min to restore it.
+ExecStart=/usr/bin/env bash %h/infra/memledger/scripts/restore-drill.sh
+TimeoutStartSec=45min
+Nice=19
+IOSchedulingClass=idle
