@@ -19,6 +19,7 @@ import { scanSecrets } from "../../.pi/agent/extensions/lib/secret-scan-core.ts"
 import { runHurlTest } from "../../.pi/agent/extensions/lib/hurl-core.ts";
 import { runGoTests } from "../../.pi/agent/extensions/lib/go-test-core.ts";
 import { runBench } from "../../.pi/agent/extensions/lib/bench-core.ts";
+import { runPgAnalyser, type PgAction, type PgParams } from "../../.pi/agent/extensions/lib/pg-analyser-core.ts";
 
 export const server = new McpServer({ name: "erfi-toolkit", version: "0.1.0" });
 
@@ -159,6 +160,65 @@ server.registerTool(
   },
   async ({ commands, warmup, runs, shell_none, prepare, cwd }) => {
     const { text, isError } = await runBench({ commands, warmup, runs, shellNone: shell_none, prepare, cwd: cwd ?? process.cwd() });
+    return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
+  },
+);
+
+// -- pg_analyser -------------------------------------------------------------
+server.registerTool(
+  "pg_analyser",
+  {
+    title: "pg-analyser",
+    description:
+      "Run the pg-analyser Postgres performance analyzer. Actions: analyze/full (collect + render a " +
+      "project - PAT, or no-PAT via dbUrl/profile), snapshot (append to trend history), " +
+      "report/pdf/summary (re-render a dir), import_trends/export_prometheus/scrape_init (trend " +
+      "plumbing), narrate_prompt (get the grounded exec-summary prompt so YOU write it in-session) + " +
+      "narrate_import (embed it back, then report narrative=true), bench + bench_list/show/compare. " +
+      "Resolves $PG_ANALYSER_BIN -> pg-analyser on PATH -> bun run $PG_ANALYSER_REPO/src/index.ts.",
+    inputSchema: {
+      action: z
+        .enum([
+          "analyze", "full", "snapshot", "report", "pdf", "summary",
+          "import_trends", "export_prometheus", "scrape_init",
+          "narrate_prompt", "narrate_import", "bench", "bench_list", "bench_show", "bench_compare",
+        ])
+        .describe("What to do."),
+      ref: z.string().optional().describe("Project ref (analyze/full/snapshot/scrape_init); comma/space list allowed."),
+      dir: z.string().optional().describe("Report dir with analysis.json (report/pdf/summary/import_trends/export_prometheus/narrate_*)."),
+      out: z.string().optional().describe("Output dir override (analyze/full)."),
+      all: z.boolean().optional().describe("full: audit every project (needs a PAT)."),
+      dbUrl: z.string().optional().describe("Superuser Postgres connstring (secret; sole source in no-PAT mode)."),
+      profile: z.string().optional().describe("full: path to a --profile JSON."),
+      noPat: z.boolean().optional().describe("Force no-PAT mode."),
+      interval: z.string().optional().describe("Analytics timeframe: 15min|30min|1hr|3hr|1day|3day|7day."),
+      trendDays: z.number().optional().describe("Trend query window in days (default 30)."),
+      brand: z.string().optional().describe("White-label branding JSON (render paths)."),
+      overlay: z.string().optional().describe("Per-project review overlay JSON (render paths)."),
+      store: z.string().optional().describe("History SQLite file (snapshot/export_prometheus)."),
+      files: z.array(z.string()).optional().describe("import_trends: CSV/JSON series files."),
+      narrative: z.boolean().optional().describe("report/pdf: embed the narrative (run narrate_import first)."),
+      summary: z.string().optional().describe("narrate_import: the executive-summary markdown to embed."),
+      scripts: z.array(z.string()).optional().describe("bench: custom pgbench script file(s)."),
+      builtin: z.string().optional().describe("bench: builtin script tpcb-like|simple-update|select-only."),
+      scale: z.number().optional().describe("bench: scale factor (default 1)."),
+      init: z.boolean().optional().describe("bench: run pgbench -i first (DROPS pgbench_* tables; needs yes)."),
+      clients: z.number().optional().describe("bench: connections (default 4)."),
+      threads: z.number().optional().describe("bench: worker threads."),
+      timeS: z.number().optional().describe("bench: seconds per run (default 60)."),
+      warmup: z.number().optional().describe("bench: warmup seconds (default 10)."),
+      runs: z.number().optional().describe("bench: measured repetitions (default 3)."),
+      protocol: z.string().optional().describe("bench: simple|extended|prepared."),
+      rate: z.number().optional().describe("bench: target TPS (pgbench -R)."),
+      resetStats: z.boolean().optional().describe("bench: pg_stat_statements_reset() first."),
+      name: z.string().optional().describe("bench: label stored with the run."),
+      yes: z.boolean().optional().describe("bench: skip confirmations."),
+      showId: z.number().optional().describe("bench_show: stored run id."),
+      compareIds: z.array(z.number()).optional().describe("bench_compare: [idA, idB]."),
+    },
+  },
+  async ({ action, ...rest }) => {
+    const { text, isError } = await runPgAnalyser(action as PgAction, rest as PgParams);
     return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
   },
 );
