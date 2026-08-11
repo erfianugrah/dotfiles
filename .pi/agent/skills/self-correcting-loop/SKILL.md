@@ -415,11 +415,31 @@ manifest/usage error.
     `~/knotea/.pi/harness.json` uses
     `["opencode/deepseek-v4-pro", "opencode/glm-5.2", "anthropic/claude-sonnet-5"]`.
   - **Gotcha: Kimi K3 is NOT a cheap rung.** It matches Opus 4.8 on quality (AA
-    Intelligence Index ~57) but is frontier-priced (~$3/$15 per M) and is not in
-    the opencode-zen catalog anyway. For a Kimi rung use `opencode/kimi-k2.5`
+    Intelligence Index ~57) but is frontier-priced (~$3/$15 per M). It IS in
+    the opencode-zen catalog (`opencode/kimi-k3`). For a Kimi rung use `opencode/kimi-k2.5`
     (cheapest) / `kimi-k2.6` / `kimi-k2.7-code` (coding-tuned). Re-verify all ids
     before relying on them - gateway catalogs drift, and exact prices rot faster
     than the ladder strategy does.
+  - **OpenRouter fallback ladder.** When the opencode-zen gateway returns 401
+    `CreditsError` (balance exhausted), the `openrouter` provider is a working
+    fallback - pi reads the same `~/.pi/agent/auth.json` and routes to
+    OpenRouter instead. Worker rung: `deepseek/deepseek-v4-pro`. Judge rung:
+    `moonshotai/kimi-k3`. OpenRouter's low-balance signature is HTTP 402 with a
+    `lower max_tokens / prompt size` message; a native Anthropic rung
+    (`anthropic/claude-sonnet-5`) completed the 2026-08-11 memledger run after
+    both gateways hit their balance limits. Add these ids to the ladder so the
+    loop automatically traverses gateways when one is drained.
+  - **Judge-idiom evidence.** In the 2026-08-11 memledger-summarise loop the
+    `moonshotai/kimi-k3` judge caught a degenerate-filter threshold drift (40
+    -> 27) plus a fabricated `the contract test pins this` justification
+    comment that every deterministic sensor (build, test, lint, vuln, secrets)
+    passed green. The judge sensor earns its cost - it catches plausible-looking
+    incorrectness that deterministic sensors are structurally blind to.
+  - **Contract-fixture distance rule.** Keep contract-test fixture values far
+    from any threshold you intend to freeze. A 27-character fake-LLM summary
+    fixture silently pinned the summarise-filter threshold below the intended
+    40 in the 2026-08-11 run, forcing the implementation to drift. The agent
+    correctly adapted to the test - the test was simply wrong.
 - `stallPatience` - consecutive no-progress iterations before climbing a rung.
 - `timeoutMs` / `agentTimeoutMs` - wall-clock budgets in ms (defaults 600000 /
   1800000). A sensor may override with its own `timeoutMs`; give the slow tier
