@@ -1,14 +1,14 @@
 /**
- * sbperf pi extension - drive the sbperf CLI from pi as a single tool.
+ * pg-analyser pi extension - drive the pg-analyser CLI from pi as a single tool.
  *
  * This repo file is the source of truth; sync it into your pi env after edits:
- *   cp ~/sbperf/extensions/sbperf.pi.ts ~/.pi/agent/extensions/sbperf.pi.ts
- *   # (or symlink it). Restart pi. The `sbperf` tool then appears.
+ *   cp ~/work/pg-analyser/extensions/pg-analyser.pi.ts ~/.pi/agent/extensions/pg-analyser.pi.ts
+ *   # (or symlink it). Restart pi. The `pg-analyser` tool then appears.
  *
  * Binary resolution (first that works):
- *   1. $SBPERF_BIN                       (explicit path to the compiled binary)
- *   2. `sbperf` on $PATH                 (after `bun run build && mv sbperf ~/.local/bin`)
- *   3. `bun run $SBPERF_REPO/src/index.ts`  ($SBPERF_REPO or ~/sbperf)
+ *   1. $PG_ANALYSER_BIN                       (explicit path to the compiled binary)
+ *   2. `pg-analyser` on $PATH                 (after `bun run build && mv pg-analyser ~/.local/bin`)
+ *   3. `bun run $PG_ANALYSER_REPO/src/index.ts`  ($PG_ANALYSER_REPO or ~/work/pg-analyser)
  *
  * The interesting bit is the copy-paste narrate round-trip WITHOUT any LLM
  * endpoint: pi itself is the model.
@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const REPO = process.env.SBPERF_REPO ?? join(homedir(), "sbperf");
+const REPO = process.env.PG_ANALYSER_REPO ?? join(homedir(), "work", "pg-analyser");
 
 /** Run a command, feeding optional stdin, capturing output (no throw on exit>0). */
 function spawn(
@@ -47,21 +47,21 @@ function spawn(
   });
 }
 
-/** Invoke sbperf: explicit $SBPERF_BIN, else `sbperf` on PATH, else bun+source. */
+/** Invoke pg-analyser: explicit $PG_ANALYSER_BIN, else `pg-analyser` on PATH, else bun+source. */
 async function run(args: string[], stdin?: string): Promise<{ stdout: string; stderr: string }> {
-  if (process.env.SBPERF_BIN) return spawn(process.env.SBPERF_BIN, args, stdin);
+  if (process.env.PG_ANALYSER_BIN) return spawn(process.env.PG_ANALYSER_BIN, args, stdin);
   try {
-    return await spawn("sbperf", args, stdin);
+    return await spawn("pg-analyser", args, stdin);
   } catch {
     return spawn("bun", ["run", join(REPO, "src/index.ts"), ...args], stdin);
   }
 }
 
-const sbperfTool = defineTool({
-  name: "sbperf",
-  label: "sbperf",
+const pgAnalyserTool = defineTool({
+  name: "pg-analyser",
+  label: "pg-analyser",
   description:
-    "Run the sbperf Supabase performance auditor. Actions: analyze/full (collect + render a project - PAT, or no-PAT via db_url/profile), snapshot (append to the trend history store), report/pdf/summary (re-render a dir), import_trends/export_prometheus/scrape_init (trend plumbing), narrate_prompt (get the grounded executive-summary prompt so YOU can write it in-session), narrate_import (embed a summary you wrote back). Then report with narrative=true. bench (pgbench with methodology guardrails against one db_url -> run history), bench_list/bench_show/bench_compare (read the stored runs; compare shows the perf delta + pg_settings diff).",
+    "Run the pg-analyser Postgres performance analyzer (pg-analyser, formerly sbperf). Actions: analyze/full (collect + render a project - PAT, or no-PAT via db_url/profile), snapshot (append to the trend history store), report/pdf/summary (re-render a dir), import_trends/export_prometheus/scrape_init (trend plumbing), narrate_prompt (get the grounded executive-summary prompt so YOU can write it in-session), narrate_import (embed a summary you wrote back). Then report with narrative=true. bench (pgbench with methodology guardrails against one db_url -> run history), bench_list/bench_show/bench_compare (read the stored runs; compare shows the perf delta + pg_settings diff).",
   parameters: Type.Object({
     action: Type.Union(
       [
@@ -135,7 +135,7 @@ const sbperfTool = defineTool({
     store: Type.Optional(
       Type.String({
         description:
-          "History SQLite file (snapshot/export_prometheus; default ~/.sbperf/history.db).",
+          "History SQLite file (snapshot/export_prometheus; default ~/.pg-analyser/history.db).",
       }),
     ),
     files: Type.Optional(
@@ -336,7 +336,7 @@ const sbperfTool = defineTool({
               type: "text",
               text:
                 "Grounded executive-summary prompt below. Write the summary per its rules, " +
-                "then call sbperf(action:'narrate_import', dir, summary:<your markdown>).\n\n" +
+                "then call pg-analyser(action:'narrate_import', dir, summary:<your markdown>).\n\n" +
                 prompt,
             },
           ],
@@ -350,14 +350,14 @@ const sbperfTool = defineTool({
         content: [
           {
             type: "text",
-            text: `${stderr.trim()}\n> render: sbperf(action:'report', dir, narrative:true)`,
+            text: `${stderr.trim()}\n> render: pg-analyser(action:'report', dir, narrative:true)`,
           },
         ],
       };
     } catch (err) {
       return {
         content: [
-          { type: "text", text: `sbperf failed: ${err instanceof Error ? err.message : err}` },
+          { type: "text", text: `pg-analyser failed: ${err instanceof Error ? err.message : err}` },
         ],
       };
     }
@@ -365,5 +365,5 @@ const sbperfTool = defineTool({
 });
 
 export default function (pi: ExtensionAPI): void {
-  pi.registerTool(sbperfTool);
+  pi.registerTool(pgAnalyserTool);
 }
