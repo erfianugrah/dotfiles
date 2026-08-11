@@ -17,7 +17,7 @@ Repo: `~/infra/ergo/caddy-compose/`. Deployed to the **MS-01 NixOS router** (ssh
 
 ## Caddyfile patterns — the snippet idiom
 
-All snippets are defined inline at the top of the same Caddyfile (no external file resolution — `(name) { ... }` blocks expand at parse time).
+All snippets are defined inline at the top of the same Caddyfile (no external file resolution — `(name) { ... }` blocks expand at parse time). The adapter resolves snippets TOP-DOWN: importing a snippet defined LATER in the file crash-loops Caddy (`File to import not found`). Most snippets sit at the top, but `(lan_only)` / `(research_auth)` / `(memledger_auth)` are defined mid-file (~line 820) - site blocks importing them MUST go below that point (learned the crash-loop way 2026-08-11).
 
 | Snippet | Purpose |
 |---|---|
@@ -156,8 +156,9 @@ For a **stuck cert state** (deleted on disk but Caddy still serves cached), use 
 9. **Edge HTTP cache (edge variant only).** Souin core is OUR FORK (`github.com/erfianugrah/souin@v1.7.7-erfi.1`) with two patches (born-stale Store() fix; revalidation double-store fix). `order cache after policy_engine` so WAF blocks never enter the cache. Enabled on docs.erfi.io (whole-site, `disable_query`), jellyfin (`/Items/*/Images/*` only), navidrome (`/rest/getCoverArt*` only), erfianugrah.com + revista.erfi.io (whole-site static Astro, response-CC-governed, `disable_query`). `stale-if-error` in the site `default_cache_control` is REQUIRED for origin-down insurance (else origin-down past TTL = 502). **No working purge**: the souin admin API permanently returns `[]` and admin PURGE is a no-op; reclaim = `scripts/cachectl.sh purge <site>` (deletes the site's nuts dir + `docker restart caddy`). Storage layout is load-bearing (2026-07-31 incident): per-site `nuts { configuration { Dir /data/cache/nuts/<site>; EntryIdxMode HintKeyAndRAMIdxMode } }` - NEVER a global nuts block (registration race -> silent in-memory fallback) and `Dir` must sit inside `configuration` (else `nuts.Factory` drops the path -> tmpfs `/tmp/souin-nuts`, wiped per restart). Full quirks + evidence: `test/cache/README.md`; harness `make test-cache`; ops + config pattern: the `souin` skill; live checks `scripts/cachectl.sh status|verify|probe`.
 10. **Version-tag drift** - see above.
 11. **wafctl <-> Caddy admin routing**: `extra_hosts: caddy:<bridge-gateway>` required (Docker inter-network isolation blocks docker0). Talk to the proxy port, not `:2019`.
-12. **Pre-commit hook** blocks unencrypted `.env` / `.tfvars` / `.tfstate` (looks for `ENC[AES256_GCM,` or `sops_*` markers). Override per-path via `.allow-unencrypted-paths`.
-13. **wafctl event-store retention** - bounded by `WAF_EVENT_MAX_AGE` / `WAF_GENERAL_LOG_MAX_AGE`. Size on disk scales with traffic; check AGENTS.md for current envelopes before sizing a new deploy.
+12. **Snippet import order** - see the snippet-idiom section: top-down resolution, forward reference = crash loop. `(research_auth)` and friends live ~line 820, not the top.
+13. **Pre-commit hook** blocks unencrypted `.env` / `.tfvars` / `.tfstate` (looks for `ENC[AES256_GCM,` or `sops_*` markers). Override per-path via `.allow-unencrypted-paths`.
+14. **wafctl event-store retention** - bounded by `WAF_EVENT_MAX_AGE` / `WAF_GENERAL_LOG_MAX_AGE`. Size on disk scales with traffic; check AGENTS.md for current envelopes before sizing a new deploy.
 
 ## Subdirectory map
 
