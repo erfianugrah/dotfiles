@@ -276,7 +276,8 @@ Smallest set that exercises MCP + hook + shared core + stow, all at once.
 - [x] osv-scan -> lib/osv-core.ts (parseOsvJson/buildOsvArgs/renderOsv/runOsvScanner/scanOsv); pi adapter re-exports parseOsvJson; osv_scan added to toolkit.ts. Sensors: osv-core 8 pass, toolkit smoke asserts both tools, pi suite 589 pass. Live osv-scanner run [blocked: needs binary].
 - [x] secret-scan -> lib/secret-scan-core.ts (parseGitleaksJson/parseNoseyparkerJsonl with 12-char truncation baked in via truncateSecret; runGitleaks/runNoseyparker; renderSecrets; scanSecrets). pi adapter re-exports both parsers; secret_scan added to toolkit.ts. Sensors: secret-core 6 pass (incl. "full secret never survives"), toolkit smoke 3 tools, pi suite 589 pass. Live gitleaks/noseyparker run [blocked: needs binary].
 - [x] hurl-test -> lib/hurl-core.ts (parseHurlJson/renderHurl/normalizeVars/runHurlTest); pi adapter re-exports parseHurlJson; hurl_test added to toolkit. Sensors: hurl-core 9 pass, toolkit smoke 4 tools, pi suite 589. Live hurl run [blocked: needs binary].
-- [ ] go-test / bench -> cores + tools + tests.
+- [x] go-test -> lib/go-test-core.ts (parseGoTestJson/buildGoTestArgs/renderGoTest/runGoTests); pi adapter re-exports parseGoTestJson; go_test added to toolkit. Sensors: go-test-core 8 pass, toolkit smoke 5 tools, pi suite 589. Live go run [blocked: needs binary].
+- [ ] bench -> core + tool + test.
 - [ ] oci-tags already done in Phase 1; pg-analyser tool.
 
 **Phase 3 - the guard hooks.**
