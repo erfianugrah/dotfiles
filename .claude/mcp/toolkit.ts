@@ -17,6 +17,7 @@ import { queryOciTags } from "../../.pi/agent/extensions/lib/oci-tags-core.ts";
 import { scanOsv } from "../../.pi/agent/extensions/lib/osv-core.ts";
 import { scanSecrets } from "../../.pi/agent/extensions/lib/secret-scan-core.ts";
 import { runHurlTest } from "../../.pi/agent/extensions/lib/hurl-core.ts";
+import { runGoTests } from "../../.pi/agent/extensions/lib/go-test-core.ts";
 
 export const server = new McpServer({ name: "erfi-toolkit", version: "0.1.0" });
 
@@ -108,6 +109,31 @@ server.registerTool(
   },
   async ({ file, variables }) => {
     const { text, isError } = await runHurlTest({ file, cwd: process.cwd(), variables });
+    return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
+  },
+);
+
+// -- go_test -----------------------------------------------------------------
+server.registerTool(
+  "go_test",
+  {
+    title: "Go Test",
+    description:
+      "Run `go test -json <pattern>` and return ONLY failures + summary (total/passed/failed/skipped, " +
+      "each failure with the last 30 output lines, build errors). Narrow with pattern and the run " +
+      "regex. Requires the go toolchain on PATH.",
+    inputSchema: {
+      pattern: z.string().optional().describe("Package pattern, default './...'."),
+      run: z.string().optional().describe("Regex for `go test -run` (filter by test name)."),
+      timeout: z.string().optional().describe("Per-test timeout (go test -timeout). Default '5m'."),
+      race: z.boolean().optional().describe("Pass -race. Default false."),
+      count: z.number().optional().describe("Run each test N times (-count=N). Default 1."),
+      short: z.boolean().optional().describe("Pass -short. Default false."),
+      cwd: z.string().optional().describe("Working directory (default: server cwd)."),
+    },
+  },
+  async ({ pattern, run, timeout, race, count, short, cwd }) => {
+    const { text, isError } = await runGoTests({ pattern, run, timeout, race, count, short, cwd: cwd ?? process.cwd() });
     return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
   },
 );
