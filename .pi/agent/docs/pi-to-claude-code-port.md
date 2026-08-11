@@ -278,7 +278,9 @@ Smallest set that exercises MCP + hook + shared core + stow, all at once.
 - [x] hurl-test -> lib/hurl-core.ts (parseHurlJson/renderHurl/normalizeVars/runHurlTest); pi adapter re-exports parseHurlJson; hurl_test added to toolkit. Sensors: hurl-core 9 pass, toolkit smoke 4 tools, pi suite 589. Live hurl run [blocked: needs binary].
 - [x] go-test -> lib/go-test-core.ts (parseGoTestJson/buildGoTestArgs/renderGoTest/runGoTests); pi adapter re-exports parseGoTestJson; go_test added to toolkit. Sensors: go-test-core 8 pass, toolkit smoke 5 tools, pi suite 589. Live go run [blocked: needs binary].
 - [x] bench -> lib/bench-core.ts (parseHyperfineJson/fmtSeconds/buildBenchArgs/renderBench/runBench); pi adapter re-exports parseHyperfineJson; bench added to toolkit. Sensors: bench-core 7 pass, toolkit smoke 6 tools, pi suite 589. Live hyperfine run [blocked: needs binary].
-- [ ] pg-analyser tool (source is pg-analyser.pi.ts) - LAST Phase 2 item, paused before starting.
+- [x] pg-analyser -> lib/pg-analyser-core.ts (validatePgAction/buildPgArgs/findReportDir/runPg/runPgAnalyser); thin pi adapter (no test re-exports needed); pg_analyser added to toolkit. Sensors: pg-analyser-core 9 pass, toolkit smoke 7 tools, pi suite 589. Live pg-analyser run [blocked: needs binary].
+
+**PHASE 2 COMPLETE.** Toolkit MCP exposes 7 tools: oci_tags, osv_scan, secret_scan, hurl_test, go_test, bench, pg_analyser - each over a shared dependency-free lib/*-core.ts with a pure unit test, all asserted by the SDK-client smoke test. pi suite held at 589 pass throughout.
 
 **Phase 3 - the guard hooks.**
 - [ ] confidential-write-guard -> core + PreToolUse deny hook + test.
