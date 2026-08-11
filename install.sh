@@ -80,6 +80,58 @@ do_local_bin() {
   done
 }
 
+# Claude Code dual-harness wiring. stow already links .claude/ (skills, hooks,
+# mcp scripts, CLAUDE.md) into ~/.claude, but two CC integration points live in
+# files stow must NOT own because they are live CC state:
+#   1. MCP servers  -> registered in ~/.claude.json via `claude mcp add`.
+#   2. hooks        -> merged into ~/.claude/settings.json (.claude/settings.json
+#                      is stow-ignored; see .stow-local-ignore).
+# Both steps are idempotent and no-op cleanly when claude/bun/jq are absent.
+do_claude() {
+  local ccdir="$DOTFILES/.claude"
+  [ -d "$ccdir" ] || return 0
+  echo ">> wiring Claude Code (MCP + hooks)"
+
+  # 1. MCP toolkit server: install its deps in the repo checkout, register once.
+  if command -v claude >/dev/null 2>&1 && command -v bun >/dev/null 2>&1; then
+    if [ -f "$ccdir/mcp/package.json" ]; then
+      (cd "$ccdir/mcp" && run bun install --silent)
+    fi
+    if claude mcp list 2>/dev/null | grep -q 'erfi-toolkit'; then
+      echo ">> MCP erfi-toolkit already registered"
+    else
+      run claude mcp add --scope user erfi-toolkit -- bun "$ccdir/mcp/toolkit.ts"
+    fi
+  else
+    echo "!! claude or bun missing - skipping MCP registration"
+  fi
+
+  # 2. Hooks: deep-merge .claude/settings.json's hooks into ~/.claude/settings.json,
+  #    concatenating per-event arrays and de-duping so re-runs are idempotent.
+  local src="$ccdir/settings.json" dst="$HOME/.claude/settings.json"
+  if [ -f "$src" ]; then
+    if command -v jq >/dev/null 2>&1; then
+      run mkdir -p "$HOME/.claude"
+      if [ "$DRY_RUN" = 1 ]; then
+        echo "+ jq-merge $src hooks -> $dst"
+      else
+        [ -f "$dst" ] || echo '{}' > "$dst"
+        local tmp; tmp="$(mktemp)"
+        jq -s '
+          .[0] as $dst | .[1] as $src |
+          $dst * { hooks:
+            ( ($dst.hooks // {}) as $dh | ($src.hooks // {}) as $sh |
+              reduce ($sh | keys[]) as $k ($dh;
+                .[$k] = (((.[$k] // []) + $sh[$k]) | unique_by(tojson))) )
+          }' "$dst" "$src" > "$tmp" && mv "$tmp" "$dst"
+        echo ">> merged CC hooks into $dst"
+      fi
+    else
+      echo "!! jq not found - skipping CC hooks merge (install jq, rerun)"
+    fi
+  fi
+}
+
 OS="$(detect_os)"
 echo ">> detected OS: $OS (dotfiles: $DOTFILES)"
 
@@ -128,5 +180,6 @@ case "$OS" in
 esac
 
 do_local_bin
+do_claude
 
 echo ">> done."

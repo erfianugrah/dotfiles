@@ -269,8 +269,8 @@ Smallest set that exercises MCP + hook + shared core + stow, all at once.
 - [x] `.mcp.json` (tracked, project scope) registering it via `${CLAUDE_PROJECT_DIR}/.claude/mcp/toolkit.ts`. [blocked: needs live CC] `claude mcp list` shows it + live tool call (env-var expansion in `.mcp.json` args also needs live-CC confirmation).
 - [x] Extract `lib/ascii-core.ts` (scan/isProsePath/WRITE_BASH/reason + new `foldToAscii`); re-point pi adapter (re-exports); ascii-core 48 pass (every code point) + pi suite/e2e 600 pass.
 - [x] `.claude/hooks/ascii-guard.ts` (PreToolUse Write|Edit|MultiEdit|Bash) + `.claude/settings.json` fragment. Emits `permissionDecision: deny` + the exact ASCII-folded form (guaranteed one-shot fix). Hook smoke test 4 pass. NOTE: true auto-rewrite via `updatedInput` is a [blocked: needs live CC] enhancement - deny-with-folded-form is the verified-correct baseline.
-- [ ] Wire `install.sh` (jq-merge `.claude/settings.json` hooks into `~/.claude/settings.json`; `bun install` + `claude mcp add` for the MCP server) - stow CANNOT own `~/.claude/settings.json`/`~/.claude.json` (live state), so add `.claude/settings.json` to `.stow-local-ignore` and merge in install.sh.
-- [ ] Commit; this slice is the reference pattern for every later item. [DONE for oci/ascii - install.sh wiring pending]
+- [x] Wire `install.sh` `do_claude()`: `bun install` + idempotent `claude mcp add --scope user erfi-toolkit`; deep jq-merge of `.claude/settings.json` hooks into `~/.claude/settings.json` (per-event array concat + `unique_by(tojson)` so re-runs are idempotent). `.claude/settings.json` added to `.stow-local-ignore`. Verified: `bash -n` OK, standalone jq-merge idempotent (theme preserved, count stays 1), `do_claude` dry-run emits the right commands with no side effects.
+- [x] Commit; this slice is the reference pattern for every later item. THE DUAL-HARNESS FOUNDATION IS COMPLETE: shared core + pi adapter + CC MCP tool + CC guard hook + automatic install, all verified without a `claude` binary. Remaining phases are BREADTH (more tools/guards) over this proven pattern.
 
 **Phase 2 - widen MCP (toolkit server, CLI wrappers).**
 - [ ] osv-scan  -> core + toolkit tool + test.
@@ -292,12 +292,10 @@ Smallest set that exercises MCP + hook + shared core + stow, all at once.
 
 **Phase 5 - packaging + docs.**
 - [ ] Decide distribution (open question 1): stow'd `.claude/` (default) vs CC plugin.
-- [ ] Global MCP registration: stow CANNOT safely write `~/.claude.json` (it is
-      live CC state, not a dotfile). So a tracked repo-root `.mcp.json` only
-      applies at PROJECT scope (cwd = that project). For global availability,
-      add an idempotent `claude mcp add --scope user erfi-toolkit -- bun
-      $HOME/.claude/mcp/toolkit.ts` line to `install.sh` (guarded by `command
-      -v claude`). Hooks/commands/skills DO stow globally via `~/.claude/`.
+- [x] Global MCP registration: DONE in `install.sh do_claude()` (idempotent
+      `claude mcp add --scope user`, guarded by `command -v claude/bun`). The
+      tracked `.mcp.json` additionally gives PROJECT scope when cwd = the repo.
+      Hooks/commands/skills stow globally via `~/.claude/`.
 - [ ] README: add a CC section mirroring the pi one; note the shared-core rule.
 - [ ] Merge `cc-port` -> `main` per phase once tests pass.
 
