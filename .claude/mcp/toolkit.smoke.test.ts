@@ -27,6 +27,7 @@ describe("erfi-toolkit MCP server", () => {
       expect(names).toContain("oci_tags");
       expect(names).toContain("osv_scan");
       expect(names).toContain("secret_scan");
+      expect(names).toContain("hurl_test");
 
       const osv = tools.find((t) => t.name === "osv_scan");
       expect(osv).toBeDefined();
