@@ -147,6 +147,31 @@
             "text",
             "image"
           ]
+        },
+        "openrouter/auto": {
+          "$comment": "OpenRouter prices its router pseudo-models at -1 ('variable, depends on routed model'). Pi multiplies it straight through, so every auto turn subtracts its token count from session cost (footer showed $-150685 on 2026-08-11). Zero it: unknown is honest, negative is wrong. Same -1 sentinel on auto-beta and fusion.",
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        "openrouter/auto-beta": {
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        "openrouter/fusion": {
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
         }
       }
     }
