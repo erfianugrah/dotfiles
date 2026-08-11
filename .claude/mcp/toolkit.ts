@@ -18,6 +18,7 @@ import { scanOsv } from "../../.pi/agent/extensions/lib/osv-core.ts";
 import { scanSecrets } from "../../.pi/agent/extensions/lib/secret-scan-core.ts";
 import { runHurlTest } from "../../.pi/agent/extensions/lib/hurl-core.ts";
 import { runGoTests } from "../../.pi/agent/extensions/lib/go-test-core.ts";
+import { runBench } from "../../.pi/agent/extensions/lib/bench-core.ts";
 
 export const server = new McpServer({ name: "erfi-toolkit", version: "0.1.0" });
 
@@ -134,6 +135,30 @@ server.registerTool(
   },
   async ({ pattern, run, timeout, race, count, short, cwd }) => {
     const { text, isError } = await runGoTests({ pattern, run, timeout, race, count, short, cwd: cwd ?? process.cwd() });
+    return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
+  },
+);
+
+// -- bench -------------------------------------------------------------------
+server.registerTool(
+  "bench",
+  {
+    title: "Bench",
+    description:
+      "Benchmark one or more commands with hyperfine and return a compact comparison: per-command " +
+      "mean/stddev/min/max/median + winner + speedup factor. Use for statistical confidence that X " +
+      "is faster than Y. Requires the hyperfine binary on PATH.",
+    inputSchema: {
+      commands: z.array(z.string()).describe("Commands to benchmark (2+ for comparison)."),
+      warmup: z.number().optional().describe("Warmup runs. Default 3."),
+      runs: z.number().optional().describe("Measured runs per command. Default 10."),
+      shell_none: z.boolean().optional().describe("Use --shell=none (default true). Set false for pipes/globs."),
+      prepare: z.string().optional().describe("Shell command run before each measured run (--prepare)."),
+      cwd: z.string().optional().describe("Working directory (default: server cwd)."),
+    },
+  },
+  async ({ commands, warmup, runs, shell_none, prepare, cwd }) => {
+    const { text, isError } = await runBench({ commands, warmup, runs, shellNone: shell_none, prepare, cwd: cwd ?? process.cwd() });
     return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
   },
 );
