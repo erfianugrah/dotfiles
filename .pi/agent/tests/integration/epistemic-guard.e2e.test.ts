@@ -10,7 +10,7 @@
  *
  * Run: ./.pi/agent/tests/run.sh   (separate bun process from the unit suite)
  */
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 // ExtensionAPI is a type-only import in the extension; node:path is the only
 // runtime dependency, so no SDK mock is needed.
@@ -77,6 +77,16 @@ beforeEach(() => {
   delete process.env.PI_EPISTEMIC_GUARD_OFF;
   delete process.env.PI_EPISTEMIC_FOOTER_OFF;
   guard(pi);
+});
+
+// bun runs every integration file in ONE process, so an env var set by a test
+// here is still set when the next file's tests execute (2026-08-11 CI red:
+// the GUARD_OFF test below left the var set and message-nudges.e2e then saw
+// the guard register zero hooks). Scrub all three knobs after every test.
+afterEach(() => {
+  delete process.env.PI_EPISTEMIC_GUARD_OFF;
+  delete process.env.PI_EPISTEMIC_FOOTER_OFF;
+  delete process.env.PI_EPISTEMIC_MAX_BLOCKS;
 });
 
 describe("epistemic-guard e2e / write gate", () => {
