@@ -16,6 +16,7 @@ import { z } from "zod";
 import { queryOciTags } from "../../.pi/agent/extensions/lib/oci-tags-core.ts";
 import { scanOsv } from "../../.pi/agent/extensions/lib/osv-core.ts";
 import { scanSecrets } from "../../.pi/agent/extensions/lib/secret-scan-core.ts";
+import { runHurlTest } from "../../.pi/agent/extensions/lib/hurl-core.ts";
 
 export const server = new McpServer({ name: "erfi-toolkit", version: "0.1.0" });
 
@@ -87,6 +88,26 @@ server.registerTool(
   },
   async ({ path, backend, scan_history }) => {
     const { text, isError } = await scanSecrets({ path, cwd: process.cwd(), backend, scanHistory: scan_history });
+    return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
+  },
+);
+
+// -- hurl_test ---------------------------------------------------------------
+server.registerTool(
+  "hurl_test",
+  {
+    title: "Hurl Test",
+    description:
+      "Execute a .hurl HTTP test file and return only what matters: on success a '{passed}/{total} " +
+      "entries passed' line; on failure a per-entry breakdown (method/URL/status + failing asserts). " +
+      "Pass variables to substitute {{ name }} placeholders. Requires the hurl binary on PATH.",
+    inputSchema: {
+      file: z.string().describe("Path to the .hurl file (relative to server cwd or absolute)."),
+      variables: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe("Variables substituted into {{ name }} in the file."),
+    },
+  },
+  async ({ file, variables }) => {
+    const { text, isError } = await runHurlTest({ file, cwd: process.cwd(), variables });
     return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
   },
 );
