@@ -14,6 +14,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { queryOciTags } from "../../.pi/agent/extensions/lib/oci-tags-core.ts";
+import { scanOsv } from "../../.pi/agent/extensions/lib/osv-core.ts";
 
 export const server = new McpServer({ name: "erfi-toolkit", version: "0.1.0" });
 
@@ -37,6 +38,33 @@ server.registerTool(
   async ({ image, semver, current, limit }) => {
     const { text } = await queryOciTags(image, { semver, current, limit });
     return { content: [{ type: "text", text }] };
+  },
+);
+
+// -- osv_scan ----------------------------------------------------------------
+server.registerTool(
+  "osv_scan",
+  {
+    title: "OSV Scan",
+    description:
+      "Run osv-scanner against a directory or lockfile and return a flattened list of " +
+      "vulnerabilities (one per package+id): package, version, ecosystem, id (GHSA/CVE/GO), " +
+      "aliases, severity, fixed version, summary. Use before deploys / dep bumps. Requires the " +
+      "osv-scanner binary on PATH.",
+    inputSchema: {
+      path: z.string().optional().describe("Directory or lockfile to scan (default: server cwd). Relative paths resolved against cwd."),
+      lockfile_only: z.boolean().optional().describe("Treat `path` as a single lockfile via -L. Default: recursive directory scan via -r."),
+      include_dev: z.boolean().optional().describe("Include dev dependencies (--include-dev). Default false."),
+    },
+  },
+  async ({ path, lockfile_only, include_dev }) => {
+    const { text, isError } = await scanOsv({
+      path,
+      cwd: process.cwd(),
+      lockfileOnly: lockfile_only,
+      includeDev: include_dev,
+    });
+    return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
   },
 );
 
