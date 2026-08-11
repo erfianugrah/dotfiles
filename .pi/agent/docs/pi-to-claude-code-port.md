@@ -240,6 +240,37 @@ verbatim. Note CC already ships `/init`, `/review`, `/pr`-like flows; only port
 the ones whose behaviour you specifically want (e.g. the commit template that
 enforces the no-AI-attribution rule).
 
+## Live verification (2026-08-12, real Claude Code 2.1.228)
+
+The `[blocked: needs live CC]` foundation items are now VERIFIED end-to-end
+against a real `claude` binary:
+
+- **MCP server**: `claude mcp add --scope local erfi-toolkit -- bun <abs>/toolkit.ts`
+  then `claude mcp list` -> `erfi-toolkit ... ✔ Connected`. A headless
+  `claude -p "call oci_tags image=nginx limit=3"` returned real registry tags
+  (`trixie, trixie-otel, trixie-perl`) - real CC -> MCP client -> official-SDK
+  server -> shared oci-tags-core -> Docker Hub -> back. All 7 tools present.
+- **ascii-guard hook**: verified at USER scope. A `claude -p` Write of `«hi»`
+  was DENIED and the model echoed the verbatim hook reason
+  (`guillemet (U+00AB/BB/2039/203A) ... ASCII-folded form to resubmit: "hi"`) -
+  text that only ascii-core/reason() produces.
+
+Findings that shape the design (all now reflected in install.sh + docs):
+
+1. **Auto-updater self-clobber**: invoking the npm-global `claude` triggers a
+   self-update that re-drops the stub binary, breaking the NEXT invocation.
+   `DISABLE_AUTOUPDATER=1` (env) stops it. Durable fix remains migrating to the
+   native installer. The stopgap is `node .../install.cjs`.
+2. **Project-scope hooks are NOT applied by headless `claude -p`** (untrusted
+   project). Hooks must live in `~/.claude/settings.json` (user scope) to fire -
+   exactly what `install.sh do_claude()` merges them into. Verified there.
+3. **`${CLAUDE_PROJECT_DIR}` in `.mcp.json`** raised a "Missing environment
+   variable" warning in the `claude mcp list` health-check context. So the
+   RELIABLE registration path is `do_claude()`'s user-scope `claude mcp add`
+   with an absolute `$HOME/dotfiles/.claude/mcp/toolkit.ts` (verified ✔
+   Connected). The tracked `.mcp.json` stays as a project-scope convenience
+   (pending-approval + the cosmetic warning).
+
 ## Phased checklist (loop-consumable)
 
 Loop protocol: each iteration does the FIRST unchecked item, verifies with the
@@ -256,17 +287,17 @@ are broken shell-snapshot functions. So NO live-CC verification is possible
 from the loop's Bash env; these items are all owner-run in a working CC
 session. The loop verifies everything else with `bun test` + headless
 JSON-RPC smoke tests (no `claude` binary needed).
-- [blocked: needs live CC] `claude --version`; `/hooks` to list events the build supports.
-- [blocked: needs live CC] Throwaway `PreToolUse` hook echoing stdin - capture payload shape.
-- [blocked: needs live CC] Throwaway hook returning `updatedInput` - confirm rewrite applies.
-- [blocked: needs live CC] Confirm `UserPromptSubmit` injection (exit-0 stdout vs decision).
-- [ ] Record findings here under a "CC contract, verified" section (after owner runs the above).
+- [x] `claude --version` -> 2.1.228. PreToolUse hook fires with `{tool_name, tool_input}` payload (verified live: ascii-guard read tool_input.content and denied).
+- [x] PreToolUse `permissionDecision: deny` + `permissionDecisionReason` honored by CC (verified: the guillemet Write was blocked, reason surfaced to the model).
+- [ ] `updatedInput` auto-rewrite: NOT yet tested (ascii-guard uses the deny path). Still the future enhancement for auto-fold.
+- [ ] `UserPromptSubmit` injection: NOT yet tested (no UserPromptSubmit hook until Phase 3 skill-guard).
+- [x] Findings recorded above under "Live verification (2026-08-12)".
 
 **Phase 1 - vertical slice (proves the whole architecture end to end).**
 Smallest set that exercises MCP + hook + shared core + stow, all at once.
 - [x] Extract `lib/oci-tags-core.ts` from `oci-tags.ts`; re-point pi adapter (re-exports helpers); core test 13 pass + pi suite 589 pass.
 - [x] `.claude/mcp/toolkit.ts` (bun stdio MCP, official `@modelcontextprotocol/sdk@1.30`) exposing `oci_tags` via the core. Headless smoke test (`toolkit.smoke.test.ts`, real SDK client over stdio) 1 pass: handshake + tools/list + schema.
-- [x] `.mcp.json` (tracked, project scope) registering it via `${CLAUDE_PROJECT_DIR}/.claude/mcp/toolkit.ts`. [blocked: needs live CC] `claude mcp list` shows it + live tool call (env-var expansion in `.mcp.json` args also needs live-CC confirmation).
+- [x] `.mcp.json` (tracked, project scope). Live-verified: user-scope `claude mcp add` (absolute path) -> `✔ Connected` + live `oci_tags` call returned real tags. Caveat found: `${CLAUDE_PROJECT_DIR}` warns "missing env var" in the health-check context, so `do_claude()`'s absolute-path user-scope registration is the reliable primary; `.mcp.json` is the project-scope convenience.
 - [x] Extract `lib/ascii-core.ts` (scan/isProsePath/WRITE_BASH/reason + new `foldToAscii`); re-point pi adapter (re-exports); ascii-core 48 pass (every code point) + pi suite/e2e 600 pass.
 - [x] `.claude/hooks/ascii-guard.ts` (PreToolUse Write|Edit|MultiEdit|Bash) + `.claude/settings.json` fragment. Emits `permissionDecision: deny` + the exact ASCII-folded form (guaranteed one-shot fix). Hook smoke test 4 pass. NOTE: true auto-rewrite via `updatedInput` is a [blocked: needs live CC] enhancement - deny-with-folded-form is the verified-correct baseline.
 - [x] Wire `install.sh` `do_claude()`: `bun install` + idempotent `claude mcp add --scope user erfi-toolkit`; deep jq-merge of `.claude/settings.json` hooks into `~/.claude/settings.json` (per-event array concat + `unique_by(tojson)` so re-runs are idempotent). `.claude/settings.json` added to `.stow-local-ignore`. Verified: `bash -n` OK, standalone jq-merge idempotent (theme preserved, count stays 1), `do_claude` dry-run emits the right commands with no side effects.
