@@ -172,11 +172,19 @@ an MCP server before being folded into pi.
 | `session-search.ts` | MCP or SKIP | SQLite FTS5 of pi sessions | indexes *pi* sessions; only useful in CC if pointed at a shared corpus. Prefer `memledger` (cross-client) for CC. |
 
 Design: **two stdio MCP servers** rather than one monolith, so context cost is
-opt-in per project:
-- `cc/mcp/toolkit.ts` - the CLI wrappers (osv/secret/hurl/go-test/bench/oci/pg-analyser).
-- `cc/mcp/research.ts` - the service clients (docs/exa/osint/memledger/video-review).
+opt-in per project. Built on the official `@modelcontextprotocol/sdk` (v1.30,
+`McpServer` + `registerTool` + `StdioServerTransport`, Zod raw-shape schemas):
+- `.claude/mcp/toolkit.ts` - CLI wrappers (oci [done], osv/secret/hurl/go-test/bench/pg-analyser).
+- `.claude/mcp/research.ts` - service clients (docs/exa/osint/memledger/video-review).
 
-Register per-project via `.mcp.json` or globally via `claude mcp add --scope user`.
+Dependency model: deps in `.claude/mcp/{package.json,node_modules}`
+(node_modules + bun.lock git/stow-ignored via the repo's bare regexes). Because
+there is a real dep, the server runs from the REPO checkout (so both the SDK
+and the `../../.pi/agent` cores resolve), NOT the stow symlink. Register
+per-project via tracked `.mcp.json`, or globally via `install.sh` -> `bun
+install` + `claude mcp add --scope user erfi-toolkit -- bun
+$HOME/dotfiles/.claude/mcp/toolkit.ts`. Sensor: a headless smoke test drives
+the server with the SDK's own stdio client - no `claude` binary needed.
 
 ### Bucket 3 - port as hooks (guards / behavior)
 
@@ -257,8 +265,8 @@ JSON-RPC smoke tests (no `claude` binary needed).
 **Phase 1 - vertical slice (proves the whole architecture end to end).**
 Smallest set that exercises MCP + hook + shared core + stow, all at once.
 - [x] Extract `lib/oci-tags-core.ts` from `oci-tags.ts`; re-point pi adapter (re-exports helpers); core test 13 pass + pi suite 589 pass.
-- [ ] `.claude/mcp/toolkit.ts` (bun stdio MCP) exposing `oci_tags` via the core.
-- [ ] `.mcp.json` (tracked) registering it at project scope; `claude mcp list` shows it, tool runs.
+- [x] `.claude/mcp/toolkit.ts` (bun stdio MCP, official `@modelcontextprotocol/sdk@1.30`) exposing `oci_tags` via the core. Headless smoke test (`toolkit.smoke.test.ts`, real SDK client over stdio) 1 pass: handshake + tools/list + schema.
+- [x] `.mcp.json` (tracked, project scope) registering it via `${CLAUDE_PROJECT_DIR}/.claude/mcp/toolkit.ts`. [blocked: needs live CC] `claude mcp list` shows it + live tool call (env-var expansion in `.mcp.json` args also needs live-CC confirmation).
 - [ ] Extract `lib/ascii-core.ts` (move `scan`/`isProsePath`/`WRITE_BASH`); re-point pi adapter; `bun test` green.
 - [ ] `.claude/hooks/ascii-guard.ts` (PreToolUse, auto-rewrite via `updatedInput`) + tracked `.claude/settings.json`.
 - [ ] `install.sh --dry-run --links-only` shows the new files would stow cleanly.
