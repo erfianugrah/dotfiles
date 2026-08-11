@@ -271,6 +271,84 @@ Findings that shape the design (all now reflected in install.sh + docs):
    Connected). The tracked `.mcp.json` stays as a project-scope convenience
    (pending-approval + the cosmetic warning).
 
+## Full-parity ledger (all 60 extensions)
+
+"Full feature parity" = every extension is either PORTED to CC, satisfied by a
+CC NATIVE, or consciously SKIPPED as pi-runtime-internal (no CC meaning). This
+table is the authoritative finish line - nothing is silently dropped.
+
+Legend: DONE = ported+verified · MCP/HOOK/CMD = to-port (bucket) · NATIVE = CC
+already provides it · SKIP = pi TUI/session internals, no CC analogue.
+
+| Extension | Status | Notes |
+|---|---|---|
+| oci-tags | DONE (MCP) | oci_tags |
+| osv-scan | DONE (MCP) | osv_scan |
+| secret-scan | DONE (MCP) | secret_scan |
+| hurl-test | DONE (MCP) | hurl_test |
+| go-test | DONE (MCP) | go_test |
+| bench | DONE (MCP) | bench |
+| pg-analyser.pi | DONE (MCP) | pg_analyser |
+| ascii-punctuation-guard | DONE (HOOK) | PreToolUse, live-verified |
+| memledger | TO-PORT (MCP) | memledger-core.ts ALREADY exists - near-trivial |
+| docs | TO-PORT (MCP) | docs.erfi.io over SSH; 6 sub-tools |
+| exa | TO-PORT (MCP) | websearch/codesearch (+ web-research folds in here) |
+| osint | TO-PORT (MCP) | osint.erfi.io; 9 sub-tools |
+| video-review | TO-PORT (MCP) | whisper service client |
+| render-diagram | TO-PORT (MCP) | mermaid/d2 CLIs |
+| pdf | TO-PORT (MCP) | pdftotext/tesseract/pdfplumber |
+| context7 | TO-PORT (MCP) | or register upstream context7 MCP directly |
+| build-favicon-set | TO-PORT (MCP) | niche |
+| web-research | FOLD -> exa | overlaps exa; expose one |
+| confidential-write-guard | TO-PORT (HOOK) | PreToolUse deny |
+| git-gh-gate | TO-PORT (HOOK) | PreToolUse Bash deny |
+| tool-guard | TO-PORT (HOOK) | PreToolUse anti-patterns |
+| bash-error-hints | TO-PORT (HOOK) | PostToolUse additionalContext |
+| entity-qualifier-nudge | TO-PORT (HOOK) | PreToolUse nudge |
+| skill-guard | TO-PORT (HOOK) | UserPromptSubmit/PreToolUse (high value) |
+| lookup-before-ask | TO-PORT (HOOK) | PreToolUse on AskUserQuestion; needs memledger MCP |
+| epistemic-guard | TO-PORT (HOOK) | PostToolUse/Stop transcript-provenance (complex) |
+| notify | TO-PORT (HOOK) | Notification/Stop |
+| cd-agents-reload | TO-PORT (HOOK) | SessionStart/CwdChanged (marginal) |
+| superpowers | TO-PORT (CMD) | register superpowers skills in .claude/skills |
+| prompt templates | TO-PORT (CMD) | /commit (AI-attribution ban) etc -> .claude/commands |
+| grep | NATIVE | CC Grep |
+| glob | NATIVE | CC Glob |
+| webfetch | NATIVE | CC WebFetch (SPA-escalation gap acceptable) |
+| apply-patch | NATIVE | CC Edit/Write/MultiEdit |
+| write-stream | NATIVE | CC Write/MultiEdit |
+| memory | NATIVE | CC memory dir + CLAUDE.md (search -> memledger MCP) |
+| task | NATIVE | CC subagents |
+| todowrite | NATIVE | CC TodoWrite |
+| question | NATIVE | CC AskUserQuestion |
+| inline-bash | NATIVE | CC expands ! in prompts |
+| compaction-model | NATIVE | CC compaction |
+| trigger-compact | NATIVE | CC auto-compact + PreCompact |
+| continue-after-error | NATIVE | CC provider-error retry |
+| style-toggle | NATIVE | CC output-styles |
+| tool-routing | NATIVE | put routing rules in CLAUDE.md |
+| cost-guard | NATIVE | CC statusline exposes cost; optional statusline port |
+| session-search | SKIP->memledger | prefer cross-client memledger MCP over pi-local FTS |
+| bg-tasks | SKIP | CC background bash + subagents |
+| bookmark | SKIP | pi TUI |
+| yank | SKIP | pi clipboard TUI |
+| clipboard-image-shrink | SKIP | CC handles paste |
+| compaction-progress | SKIP | CC UI |
+| tool-activity | SKIP | no mid-tool progress hook in CC |
+| tool-output-prune | SKIP | CC context mgmt |
+| session-name | SKIP | pi sessions |
+| session-auto-title | SKIP | pi sessions |
+| session-summary | SKIP | pi sessions |
+| session-undo | SKIP | CC has its own |
+| migrate-sessions | SKIP | pi sessions |
+| slash-typo-guard | SKIP | CC slash handling |
+| local-model-rules | SKIP | pi llama-server only |
+
+**Parity tally:** 8 DONE · ~12 MCP+HOOK ports remaining + 2 CMD groups ·
+~16 NATIVE (parity via CC built-ins) · ~15 SKIP (pi-internal, no CC meaning).
+Full parity = clear the TO-PORT rows; NATIVE/SKIP are parity-satisfied by
+design (documented above so the decision is explicit, not an omission).
+
 ## Phased checklist (loop-consumable)
 
 Loop protocol: each iteration does the FIRST unchecked item, verifies with the
