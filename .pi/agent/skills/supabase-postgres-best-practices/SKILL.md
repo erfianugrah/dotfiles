@@ -132,7 +132,7 @@ A trailing `pg_trgm` GIN index makes `ILIKE '%foo%'` index-driven instead of seq
 - `pg_stat_activity` to find long-running txns + locks (filter `state = 'idle in transaction'`)
 - **pg-cron job health**: `cron.job_run_details` has every run's exit status. Add an external uptime ping or scheduled query that alerts on `status != 'succeeded'` rows in the last hour — pg-cron failures are silent otherwise.
 - **MVCC bloat watch**: `pg_stat_user_tables.n_dead_tup` shows dead tuple count per table. If it climbs faster than autovacuum can clear it, drop the per-table `autovacuum_vacuum_scale_factor` or look for a long-running transaction blocking vacuum.
-- **Benchmark before/after with `pgbench`** to prove a fix under concurrency (not just in EXPLAIN): custom `-f` scripts, skewed `random_zipfian` for hot rows, `-l` logs for p95/p99, extended protocol through Supavisor. Tested guide: `~/sbperf/docs/pgbench.md`.
+- **Benchmark before/after with `pgbench`** to prove a fix under concurrency (not just in EXPLAIN): custom `-f` scripts, skewed `random_zipfian` for hot rows, `-l` logs for p95/p99, extended protocol through Supavisor. Tested guide: `~/work/pg-analyser/docs/pgbench.md`.
 
 ### pg-cron expiry / cleanup jobs (HIGH operational impact)
 

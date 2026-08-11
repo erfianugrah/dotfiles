@@ -91,7 +91,7 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `go-test.ts` | `go test -json ./...` | Filters to failed tests + last 30 output lines per failure. Supports `run`, `race`, `count`, `short`, `timeout`. |
 | `bench.ts` | `hyperfine --export-json` | Statistical benchmark across N commands. Returns mean/stddev/min/max/winner/speedup. |
 | `bg-tasks.ts` (6 tools) | `tmux new-session -d` + `pi -p` / `bash` | Detached parallel work. `bg_task` spawns a pi subprocess, `bg_bash` runs any shell command (polling loops, long builds, slow downloads — anything past pi's 30s bash timeout), `bg_list` enumerates with kind glyphs (π/$), `bg_status` drills in (with persistent `.log` fallback after the 30s tmux grace), `bg_wait` blocks server-side on a regex / exit / timeout, `bg_kill` terminates a runaway task. Plus `/bg-list` and `/bg-kill` slash commands. Skips amux's Claude-Code lock-in. |
-| `sbperf.pi.ts` | `sbperf` CLI | Supabase performance audit (advisors + SQL diagnostics + config + infra metrics -> self-contained HTML/PDF report, windowed trends). Single `sbperf` tool. |
+| `pg-analyser.pi.ts` | `pg-analyser` CLI | Postgres performance audit (formerly sbperf; advisors + SQL diagnostics + config + infra metrics -> self-contained HTML/PDF report, windowed trends). Single `pg-analyser` tool. |
 
 ### Event / behavior extensions (no LLM-visible tool surface)
 
@@ -192,7 +192,7 @@ List loaded at startup; each has its own `SKILL.md` with the actual rules.
 | `paste-formatting` | Get Markdown-drafted prose into rich-text destinations (Gmail / Docs / Slack / Notion) intact via the `mdclip` tool (Markdown -> HTML -> clipboard). |
 | `quarto` | Author / render / publish Quarto docs (`.qmd`, `_quarto.yml`) to HTML/PDF/Revealjs/Word/Typst; project types, code execution, freeze/cache, Reveal.js decks + self-verifying screenshots. |
 | `research` | SearXNG (`:8888`) + Playwright crawler (`:8889`) + OSINT (`:8890`). |
-| `sbperf` | Drive the `sbperf` CLI - Supabase performance auditor (advisors, SQL diagnostics, config, infra metrics -> self-contained HTML+PDF report, windowed trends). PAT-first + no-PAT customer-audit mode. |
+| `pg-analyser` | Drive the `pg-analyser` CLI - Postgres performance auditor (formerly sbperf; advisors, SQL diagnostics, config, infra metrics -> self-contained HTML+PDF report, windowed trends). PAT-first + no-PAT customer-audit mode. |
 | `sbshift` | Drive the `sbshift` CLI - near-zero-downtime Postgres->Postgres migration via logical replication (cross-region / tier / self-hosted moves, cutover gate, checksum reconcile). |
 | `scaffold-new-project` | Orchestrate the concrete-tech skills (frontend-stack, infrastructure-stack, software-architecture, design-utilitarian, ...) to bootstrap a new project with the user's conventions baked in. |
 | `self-correcting-loop` | Sensor-gated autonomous loop driver (`loop` + `browser-assert` bins, `@erfianugrah/pi-loop`). Drives a fresh `pi -p` each iteration until deterministic sensors (build/lint/test/typecheck/structural/mutation/e2e) pass; governor with model-escalation ladder, git checkpoint/rollback, write-scope, per-sensor remediation hints, and freeze mode; dependency-free headless-Chromium behaviour sensor. |

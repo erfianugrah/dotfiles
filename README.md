@@ -828,7 +828,7 @@ rationale.
 |---|---|
 | `supabase` | All Supabase products (db, auth, edge fns, storage, realtime, ssr) |
 | `supabase-postgres-best-practices` | Postgres query/schema/index patterns from Supabase |
-| `sbperf` | `sbperf` CLI - Supabase performance analyzer (advisors + SQL diagnostics + infra metrics) rendering self-contained HTML + PDF reports with windowed trends |
+| `pg-analyser` | `pg-analyser` CLI - Postgres performance analyzer (formerly sbperf; advisors + SQL diagnostics + infra metrics) rendering self-contained HTML + PDF reports with windowed trends |
 | `sbshift` | `sbshift` CLI - near-zero-downtime Postgres to Postgres migration via native logical replication |
 
 **Local services + AI**:
@@ -899,7 +899,7 @@ DB access, session lifecycle hooks).
 | `osv-scan.ts` | `osv-scanner` wrapper - one flattened line per vuln |
 | `secret-scan.ts` | `gitleaks` / `noseyparker` wrapper - secret values truncated out of context |
 | `video-review.ts` | Transcribe + diarize a video, overlap / metrics analysis, evidence bundle (whisper stack) |
-| `sbperf.pi.ts` | Drive the `sbperf` Supabase performance analyzer as a single tool |
+| `pg-analyser.pi.ts` | Drive the `pg-analyser` Postgres performance analyzer as a single tool |
 | `session-ledger/` | Cross-session work ledger - queryable structured summaries of past sessions (`ledger_search` / `ledger_sql`) |
 | `yank.ts` | Copy a code block from the last assistant message to the system clipboard |
 

@@ -98,6 +98,6 @@ test, pair it with the product skill (`supabase`, `cloudflare`, `fly`, `terrafor
 ## Related skills
 
 Pair with the product skill for the technical depth of the thing under test - `supabase`
-(and `sbperf` / `sbshift` for its perf/migration angles), `cloudflare`, `fly`, `terraform`,
+(and `pg-analyser` / `sbshift` for its perf/migration angles), `cloudflare`, `fly`, `terraform`,
 etc. Also `paste-formatting` (mdclip for non-gdocs rich-text targets) and `erfi-voice`
 (customer-facing prose).
