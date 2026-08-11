@@ -25,6 +25,13 @@ describe("erfi-toolkit MCP server", () => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
       expect(names).toContain("oci_tags");
+      expect(names).toContain("osv_scan");
+
+      const osv = tools.find((t) => t.name === "osv_scan");
+      expect(osv).toBeDefined();
+      const osvSchema = osv!.inputSchema as { properties?: Record<string, unknown> };
+      expect(osvSchema.properties?.path).toBeDefined();
+      expect(osvSchema.properties?.lockfile_only).toBeDefined();
 
       const oci = tools.find((t) => t.name === "oci_tags");
       expect(oci).toBeDefined();

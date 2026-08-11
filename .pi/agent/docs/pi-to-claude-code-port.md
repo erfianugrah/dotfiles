@@ -273,7 +273,7 @@ Smallest set that exercises MCP + hook + shared core + stow, all at once.
 - [x] Commit; this slice is the reference pattern for every later item. THE DUAL-HARNESS FOUNDATION IS COMPLETE: shared core + pi adapter + CC MCP tool + CC guard hook + automatic install, all verified without a `claude` binary. Remaining phases are BREADTH (more tools/guards) over this proven pattern.
 
 **Phase 2 - widen MCP (toolkit server, CLI wrappers).**
-- [ ] osv-scan  -> core + toolkit tool + test.
+- [x] osv-scan -> lib/osv-core.ts (parseOsvJson/buildOsvArgs/renderOsv/runOsvScanner/scanOsv); pi adapter re-exports parseOsvJson; osv_scan added to toolkit.ts. Sensors: osv-core 8 pass, toolkit smoke asserts both tools, pi suite 589 pass. Live osv-scanner run [blocked: needs binary].
 - [ ] secret-scan (keep 12-char truncation IN the core) -> core + tool + test.
 - [ ] hurl-test / go-test / bench -> cores + tools + tests.
 - [ ] oci-tags already done in Phase 1; pg-analyser tool.
