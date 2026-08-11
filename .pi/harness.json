@@ -1,69 +1,60 @@
 {
-  "task": "Two additions to this dotfiles repo's pi extensions, both specified by FAILING test files you must make green WITHOUT editing them. Read the test files first - their header comments are the contract and explain why each rule exists. (1) Add a `date` claim class to .pi/agent/extensions/epistemic-guard.ts. Today its ClaimClass union is version|url|cve|perf|flag|syspath, so a fabricated date sails through: the agent wrote `tested 2026-08-10` into a doc from a user message that contained no date at all. Extend ClaimClass with \"date\", add extraction for ISO and worded forms, normalise worded keys, make ISO and worded forms of the same month cross-match for provenance, skip bookkeeping (changelog headings, `date:` field lines, ISO timestamps) and fenced blocks, and add a VERIFY_HINT entry routing dates to the session stores (memledger / ledger / session_search) because that is where a date about the user's own history lives. Reuse the existing corpus/provenance/hedge/footer plumbing - do not build a parallel path. Spec: .pi/agent/tests/loop-date-class.test.ts. (2) Implement .pi/agent/extensions/entity-qualifier-nudge.ts, currently a stub. It nudges when a device identifier (eth0, enp2s0f0np0, br0, nvme0n1, sda1, switch ports like eth0/1/1) is cited as EVIDENCE - incident/evidential vocabulary nearby - with no host qualifier naming which box it belongs to. Critically, a DATE is not a qualifier: `eth0 flapped on 2026-08-08` must still fire, because that exact sentence shipped a wrong argument built from a real fact about a different interface. Export needsHostQualifier and NUDGE_LINE, and wire a message_end hook that appends NUDGE_LINE once per session to assistant messages, skipping when ctx.hasUI is false, with kill switch PI_ENTITY_NUDGE_OFF=1 and a session_shutdown cleanup - mirror the structure of .pi/agent/extensions/lookup-before-ask.ts, which solves the same shape of problem. Spec: .pi/agent/tests/loop-entity-qualifier.test.ts.",
-  "maxIterations": 8,
-  "models": ["anthropic/claude-sonnet-5", "anthropic/claude-opus-4-8"],
-  "stallPatience": 3,
-  "tools": ["read", "edit", "write", "bash", "grep", "glob"],
-  "writeScope": [
-    ".pi/agent/extensions/epistemic-guard.ts",
-    ".pi/agent/extensions/entity-qualifier-nudge.ts"
-  ],
-  "timeoutMs": 600000,
-  "agentTimeoutMs": 1800000,
-  "guide": [
-    ".pi/agent/extensions/lookup-before-ask.ts",
-    ".pi/agent/tests/preload.ts"
-  ],
+  "task": "Surgical documentation update to .pi/agent/skills/self-correcting-loop/SKILL.md (the model-guidance section around lines 405-422, plus small additions elsewhere as noted). Four verified findings from the 2026-08-11 memledger-summarise loop run must be reflected; change NOTHING else. (1) The claim that Kimi K3 'is not in the opencode-zen catalog anyway' is STALE: kimi-k3 IS in the catalog (verified 2026-08-11 via ~/.pi/agent/models-store.json). Remove/correct that clause while KEEPING the frontier-priced warning (~$3/$15 per M, matches Opus 4.8 quality - not a cheap rung, but a good JUDGE). (2) Document the openrouter fallback ladder: when the opencode-zen balance is dry (signature: 401 CreditsError) the openrouter provider is a working fallback - worker deepseek/deepseek-v4-pro, judge moonshotai/kimi-k3 - because pi -p reads the same ~/.pi/agent/auth.json; openrouter's low-balance signature is 402 'lower max_tokens / prompt size', and a native anthropic rung (anthropic/claude-sonnet-5) completed the run after both gateways failed. (3) Record the judge-idiom evidence: in the 2026-08-11 memledger run the kimi-k3 judge caught a degenerate-filter threshold drift (40 -> 27) plus a fabricated 'the contract test pins this' justification comment that EVERY deterministic sensor missed - cite this as the worked example for why the judge sensor earns its cost. (4) Add the contract-authoring gotcha this exposed: keep contract-test fixtures far from any threshold you intend to freeze - a 27-char fake-LLM fixture silently pinned the threshold below the intended 40 and forced the implementation to drift. Surgical edits only; do not restructure the file; do not touch the frontmatter description.",
+  "maxIterations": 4,
+  "models": ["deepseek/deepseek-v4-pro", "anthropic/claude-sonnet-5"],
+  "stallPatience": 2,
+  "tools": ["read", "edit", "write", "grep", "glob"],
+  "writeScope": [".pi/agent/skills/self-correcting-loop/SKILL.md"],
+  "guide": [".pi/agent/skills/self-correcting-loop/SKILL.md"],
   "rules": [
-    "Do NOT edit anything under .pi/agent/tests/ - the test files are the contract. Make them pass as written.",
+    "Surgical edits only - fix the four findings, do not restructure or reformat the file",
     "NEVER move, edit, restore or delete .pi/harness.json or any .pi/harness-* file. They are loop machinery and the judge has been told to ignore them.",
-    ".pi/agent/settings.json was already modified in the working tree before this task began. Do not touch it, unstage it, or try to remove it from any diff.",
-    "No new dependencies. node/bun stdlib only.",
-    "Match existing extension style in this repo: two-space indentation, double quotes, a JSDoc header explaining WHY the thing exists, and section comments. Read epistemic-guard.ts and lookup-before-ask.ts before writing.",
-    "Do not run git commit, git reset, git stash, git checkout, git update-index, or any other git ref/index mutation.",
-    "A check satisfied by a stub is a FAILED iteration: no `throw new Error(\"not implemented\")`, no empty function bodies, no hard-coded test answers, no returning a canned value for a specific input string.",
-    "The date class must go THROUGH the existing pipeline: extractClaims segments, pushUnique (so hedgedNear and dedupe apply for free), Corpus, hasProvenance. A special-case branch that bypasses them is wrong even if the tests pass.",
-    "Cross-matching ISO and worded dates is a provenance-time concern, not an extraction-time one: do not rewrite a worded claim's key into ISO, or the block message stops quoting what the model actually wrote.",
-    "If you need a paragraph-long comment to justify why a workaround is OK, the code is wrong - fix the code."
+    "Do NOT edit anything under .pi/agent/tests/ - the test files are the contract.",
+    "Do not touch the YAML frontmatter description (a lint test caps it at 1024 chars).",
+    "ASCII punctuation only - no em/en dashes, smart quotes, or ellipsis characters (a pre-write guard hard-blocks them anyway).",
+    "Keep the Kimi-K3-is-frontier-priced warning; only the not-in-the-catalog claim is stale.",
+    "Do not run git commit, git reset, git stash, git checkout, or any other git ref/index mutation."
   ],
   "sensors": [
     {
-      "name": "no-stubs",
-      "cmd": "test -z \"$(rg -n --no-messages 'TODO: implement me|throw new Error\\(\"not implemented' .pi/agent/extensions/epistemic-guard.ts .pi/agent/extensions/entity-qualifier-nudge.ts 2>/dev/null)\"",
-      "expect": "fail",
-      "hint": "the stub markers are still there - implement the function for real"
+      "name": "premise-stale-claim-present",
+      "kind": "premise",
+      "cmd": "rg -Uq 'not in\\s+the\\s+opencode-zen\\s+catalog' .pi/agent/skills/self-correcting-loop/SKILL.md"
     },
     {
-      "name": "tests-unmodified",
-      "cmd": "git diff --quiet HEAD -- .pi/agent/tests/",
-      "hint": "the test files are the contract and must not change - revert them and fix the implementation instead",
-      "canary": "printf '\\n// canary\\n' >> .pi/agent/tests/loop-date-class.test.ts"
-    },
-    {
-      "name": "existing-suite",
+      "name": "tests",
       "cmd": "./.pi/agent/tests/run.sh",
-      "timeoutMs": 300000,
-      "hint": "you broke a pre-existing test - run the suite and read which. The existing claim classes, provenance semantics and the derived-perf marking must keep working exactly as they do now.",
-      "canary": "printf '\\nexport const __canary: = 1\\n' >> .pi/agent/extensions/tool-guard.ts"
+      "canary": "sd '^description: .+$' 'description:' .pi/agent/skills/self-correcting-loop/SKILL.md",
+      "hint": "the unit + integration + manifest suites must stay green; the manifest suite lints skill descriptions (non-empty, <=1024 chars)"
     },
     {
-      "name": "feature-date-class",
-      "expect": "fail",
-      "cmd": "bun test --preload ./.pi/agent/tests/preload.ts ./.pi/agent/tests/loop-date-class.test.ts",
-      "timeoutMs": 120000,
-      "hint": "the header of loop-date-class.test.ts is the spec: ISO + worded forms, normalised keys, qualifier stripping, ISO<->worded provenance cross-match, bookkeeping and fenced-block exclusions, and a date entry in VERIFY_HINT."
+      "name": "prose",
+      "cmd": "prose-lint .pi/agent/skills/self-correcting-loop/SKILL.md --max 0.05",
+      "canary": "printf '\\nUnlock seamless synergy: our cutting-edge solution delves into leveraging robust, game-changing paradigms to effortlessly supercharge your workflow journey. Elevate and streamline with this powerful, comprehensive, best-in-class toolkit crafted to empower teams.\\n' >> .pi/agent/skills/self-correcting-loop/SKILL.md",
+      "hint": "marketing/AI-slop voice crept into the doc - rewrite the addition as factual, specific prose (baseline is 0.02/100w)"
     },
     {
-      "name": "feature-entity-qualifier",
+      "name": "openrouter-ids-documented",
       "expect": "fail",
-      "cmd": "bun test --preload ./.pi/agent/tests/preload.ts ./.pi/agent/tests/loop-entity-qualifier.test.ts",
-      "timeoutMs": 120000,
-      "hint": "the header of loop-entity-qualifier.test.ts is the spec. The hard case: a date must NOT count as a host qualifier, while `servarr's eth0` and `on servarr` must."
+      "cmd": "rg -q 'deepseek/deepseek-v4-pro' .pi/agent/skills/self-correcting-loop/SKILL.md",
+      "hint": "finding (2): the openrouter fallback ids (deepseek/deepseek-v4-pro, moonshotai/kimi-k3) must appear in the model guidance"
+    },
+    {
+      "name": "stale-catalog-claim-gone",
+      "expect": "fail",
+      "cmd": "! rg -Uq 'not in\\s+the\\s+opencode-zen\\s+catalog' .pi/agent/skills/self-correcting-loop/SKILL.md",
+      "hint": "finding (1): the stale 'not in the opencode-zen catalog' clause must be removed/corrected - kimi-k3 IS in the catalog"
+    },
+    {
+      "name": "evidence-cited",
+      "expect": "fail",
+      "cmd": "rg -q '2026-08-11' .pi/agent/skills/self-correcting-loop/SKILL.md",
+      "hint": "finding (3): the judge-idiom worked example must cite the 2026-08-11 run (threshold drift 40->27 + fabricated justification comment)"
     },
     {
       "name": "judge",
-      "after": ["no-stubs", "tests-unmodified", "existing-suite", "feature-date-class", "feature-entity-qualifier"],
-      "cmd": "judge --base HEAD --spec 'Two pi-extension changes in a dotfiles repo. (1) epistemic-guard.ts gains a date claim class: ISO and worded dates become claims, worded keys are normalised (lowercased, commas stripped, early/mid/late qualifier dropped), ISO and worded forms of the same month cross-match during the provenance check, changelog headings / `date:` field lines / ISO timestamps / fenced code yield nothing, and VERIFY_HINT routes dates to the session stores. It must reuse the existing extraction segments, pushUnique, Corpus and hasProvenance rather than a parallel code path, and must not disturb the existing version/url/cve/perf/flag/syspath behaviour or the derived-perf marking added earlier. (2) entity-qualifier-nudge.ts is implemented from a stub: needsHostQualifier is true when a device identifier is cited with evidential/incident vocabulary and no host qualifier, where a date explicitly does NOT qualify; the extension appends NUDGE_LINE once per session on message_end, skips when ctx.hasUI is false, honours PI_ENTITY_NUDGE_OFF=1 and cleans up on session_shutdown. REJECT if: a test-specific string is special-cased, the date class bypasses the shared pipeline, worded keys are rewritten to ISO at extraction time, the nudge can fire more than once per session or in headless runs, or the JSDoc headers do not explain why the rule exists. SCOPE NOTE: .pi/agent/settings.json was already modified before this task and .pi/harness.json plus any .pi/harness-* files are loop machinery - ignore all of them.' --model anthropic/claude-opus-4-8"
+      "after": ["tests", "prose", "openrouter-ids-documented", "stale-catalog-claim-gone", "evidence-cited"],
+      "cmd": "judge --base HEAD --spec 'Surgical SKILL.md model-guidance update with exactly four changes: (1) stale Kimi-K3-not-in-zen-catalog claim corrected (kimi-k3 IS in the catalog) while keeping the frontier-priced warning; (2) openrouter fallback ladder documented (deepseek/deepseek-v4-pro worker, moonshotai/kimi-k3 judge, shared auth.json, 401/402 balance signatures); (3) judge-idiom worked example citing the 2026-08-11 memledger run (40->27 threshold drift + fabricated justification comment caught by the judge, missed by deterministic sensors); (4) contract-fixture-vs-threshold gotcha. Reject: restructuring, removed content beyond the stale clause, marketing voice, touched tests/harness files, non-ASCII punctuation.' --model moonshotai/kimi-k3"
     }
   ]
 }
