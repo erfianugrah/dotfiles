@@ -103,7 +103,7 @@
       "type": "local",
       "command": [
         "python3",
-        "/home/erfi/research/mcp/research-server.py"
+        "/home/erfi/infra/research/mcp/research-server.py"
       ],
       "environment": {
         "SEARXNG_URL": "https://searxng.erfi.io",
