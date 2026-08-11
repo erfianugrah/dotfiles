@@ -80,7 +80,6 @@ import {
 	buildInjectionBlock,
 	isReadOnlySql,
 	serializeEntriesForSummary,
-	extractCompletionText,
 } from "../extensions/session-ledger/index.ts";
 import { parseOsvJson } from "../extensions/osv-scan.ts";
 import { parsePdffonts, assessText, chooseStrategy, sortPageFiles } from "../extensions/pdf.ts";
@@ -3566,19 +3565,6 @@ describe("session-ledger.serializeEntriesForSummary", () => {
     const out = serializeEntriesForSummary([{ role: "user", content: big }], { maxPerEntry: 10000, maxTotal: 100 });
     expect(out.length).toBe(100);
     expect(out.endsWith("x")).toBe(true);
-  });
-});
-
-describe("session-ledger.extractCompletionText", () => {
-  test("string content", () => {
-    expect(extractCompletionText({ content: "done" })).toBe("done");
-  });
-  test("array of text parts", () => {
-    expect(extractCompletionText({ content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] })).toBe("ab");
-  });
-  test("defensive on junk", () => {
-    expect(extractCompletionText(null)).toBe("");
-    expect(extractCompletionText({ content: 42 })).toBe("");
   });
 });
 

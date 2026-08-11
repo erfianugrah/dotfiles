@@ -164,24 +164,10 @@ describe("session-ledger e2e", () => {
 		expect(r.content[0].text).toContain('"c": 1');
 	});
 
-	test("next session_start lazily summarises the pending raw row via complete()", async () => {
+	test("session_start leaves pending rows for memledger summarise (no LLM path here)", async () => {
 		await emit("session_start", { reason: "new" }, ctx);
 		const pending = await tools.ledger_sql.execute("6", { sql: "SELECT count(*) c FROM ledger WHERE summary_pending = 1" });
-		expect(pending.content[0].text).toContain('"c": 0'); // cleared
-		const found = await tools.ledger_search.execute("7", { query: "markdown parser refactor" });
-		expect(found.content[0].text).toContain("Lazily summarised");
-	});
-
-	test("lazy-summarise drops a row when the model says SKIP", async () => {
-		const c0 = await tools.ledger_sql.execute("8a", { sql: "SELECT count(*) c FROM ledger" });
-		entries = Array.from({ length: 8 }, (_, i) => ({ role: "user", content: `trivial ${i}` }));
-		await emit("session_shutdown", { reason: "quit" }, ctx); // +1 pending row
-		completeReturn = { content: [{ type: "text", text: "SKIP" }] };
-		await emit("session_start", { reason: "new" }, ctx); // SKIP → row deleted
-		const after = await tools.ledger_sql.execute("9", { sql: "SELECT count(*) c FROM ledger" });
-		const pending = await tools.ledger_sql.execute("9b", { sql: "SELECT count(*) c FROM ledger WHERE summary_pending = 1" });
-		expect(after.content[0].text).toBe(c0.content[0].text); // net zero: SKIP row gone
-		expect(pending.content[0].text).toContain('"c": 0');
+		expect(pending.content[0].text).toContain('"c": 1'); // still pending - `memledger summarise` owns the LLM path now
 	});
 
 	test("/ledger status reports counts", async () => {

@@ -18,10 +18,14 @@
  *       would hang quit). Instead we write the serialized transcript RAW
  *       (synchronous SQLite insert — always lands) marked summary_pending=1.
  *
- *  2. LAZY SUMMARISE
- *     - On the next `session_start` we summarise any pending raw rows via a
- *       one-shot `complete()` call, off the quit path, where there's time
- *       and a model. Same outcome as a shutdown summary, no quit hang.
+ *  2. LAZY SUMMARISE - MOVED OUT (2026-08-11)
+ *     Summarising pending raw rows with an LLM used to happen here on
+ *     `session_start` - awaited, up to 3 rows, on the session's frontier
+ *     model. Measured: 50s vs 7s startup with 2 pending rows. That work now
+ *     belongs to `memledger summarise` (~/infra/memledger), a batch job on a
+ *     systemd timer with a cheap model that drains ALL projects and writes
+ *     back to both this db (incl. ledger_fts) and Postgres. This extension
+ *     only writes pending rows; it never calls an LLM.
  *
  *  3. RETRIEVE (seamless)
  *     - On `session_start` in a project that has ledger rows, the `context`
@@ -49,7 +53,7 @@ import { mkdirSync } from "node:fs";
 // loader aliases root -> compat (a strict superset), so `complete` resolves
 // here on both Linux and the Homebrew Mac build. The explicit /compat subpath
 // is NOT resolvable in the Homebrew packaging and crashes pi at launch.
-import { complete, Type } from "@earendil-works/pi-ai";
+import { Type } from "@earendil-works/pi-ai";
 import { defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { searchLedger, toOrQuery } from "../lib/memledger-core.ts";
 
@@ -63,8 +67,6 @@ const INJECT_MAX_AGE_DAYS = Number(process.env.LEDGER_INJECT_MAX_AGE_DAYS ?? 21)
 const SHUTDOWN_MIN_ENTRIES = 6; // don't capture trivial sessions
 const RAW_MAX_BYTES = 16000; // cap stored transcript
 const RAW_PER_ENTRY = 1500;
-const LAZY_SUMMARISE_PER_START = 3; // bound model calls per session_start
-const SUMMARISE_TIMEOUT_MS = Number(process.env.LEDGER_SUMMARISE_TIMEOUT_MS ?? 30000);
 const INJECT_HEADER = "# Recent work in this project (from past sessions)";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -211,24 +213,6 @@ export function serializeEntriesForSummary(
 	return joined.length > maxTotal ? joined.slice(joined.length - maxTotal) : joined;
 }
 
-const SUMMARISE_PROMPT =
-	"You are summarising a short coding session so a future session can resume it. " +
-	"Produce structured markdown with these sections: ## Goal, ## Key Decisions, " +
-	"## Progress (Done / In Progress), ## Next Steps, ## Critical Context. " +
-	"Be concise. Name specific files touched. If the session did nothing substantive, " +
-	"reply with exactly: SKIP\n\nConversation:\n";
-
-/** Extract text from a complete() response, defensively. */
-export function extractCompletionText(response: unknown): string {
-	if (!response || typeof response !== "object") return "";
-	const content = (response as { content?: unknown }).content;
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.map((c) => (c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text ?? "") : ""))
-		.join("");
-}
-
 // ─────────────────────────────────────────────────────────────────────────
 // DB layer
 
@@ -329,90 +313,9 @@ function latestProjectSummaries(project: string, limit: number, maxAgeDays: numb
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Lazy summarisation of pending raw rows
-
-async function summarisePending(ctx: ExtensionContext, project: string, max: number): Promise<number> {
-	const d = openDb();
-	const pending = d
-		.query(
-			`SELECT id, raw_text FROM ledger WHERE summary_pending = 1 AND project = ? ORDER BY created_at DESC LIMIT ?`,
-		)
-		.all(project, max) as Array<{ id: number; raw_text: string }>;
-	if (pending.length === 0) return 0;
-
-	const model = pickSummaryModel(ctx);
-	if (!model) return 0;
-	let auth: { ok?: boolean; apiKey?: string; headers?: Record<string, string> };
-	try {
-		auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-	} catch {
-		return 0;
-	}
-	if (!auth?.ok || !auth.apiKey) return 0;
-
-	let done = 0;
-	for (const row of pending) {
-		if (!row.raw_text?.trim()) {
-			clearPending(d, row.id, null);
-			continue;
-		}
-		const ac = new AbortController();
-		const timer = setTimeout(() => ac.abort(), SUMMARISE_TIMEOUT_MS);
-		try {
-			const response = await complete(
-				model,
-				{
-					messages: [
-						{
-							role: "user" as const,
-							content: [{ type: "text" as const, text: SUMMARISE_PROMPT + row.raw_text }],
-							timestamp: Date.now(),
-						},
-					],
-				},
-				{ apiKey: auth.apiKey, headers: auth.headers, maxTokens: 4096, signal: ac.signal },
-			);
-			const summary = extractCompletionText(response).trim();
-			if (!summary || summary === "SKIP" || isDegenerateSummary(summary)) {
-				clearPending(d, row.id, null); // drop raw, no useful summary
-			} else {
-				clearPending(d, row.id, summary, project);
-				done++;
-			}
-		} catch {
-			// leave pending — retried next start
-		} finally {
-			clearTimeout(timer);
-		}
-	}
-	return done;
-}
-
-function clearPending(d: Database, id: number, summary: string | null, project?: string): void {
-	if (summary) {
-		d.query("UPDATE ledger SET summary = ?, summary_pending = 0, raw_text = NULL WHERE id = ?").run(summary, id);
-		d.query("INSERT INTO ledger_fts (rowid, summary, project) VALUES (?, ?, ?)").run(id, summary, project ?? "");
-	} else {
-		// No useful summary — delete the row entirely (don't keep raw forever).
-		d.query("DELETE FROM ledger WHERE id = ?").run(id);
-	}
-}
-
-function pickSummaryModel(ctx: ExtensionContext): unknown {
-	const env = process.env.LEDGER_SUMMARY_MODEL;
-	if (env && env.includes("/")) {
-		const idx = env.indexOf("/");
-		const provider = env.slice(0, idx);
-		const id = env.slice(idx + 1);
-		try {
-			const m = ctx.modelRegistry.find(provider, id);
-			if (m) return m;
-		} catch {
-			/* fall through */
-		}
-	}
-	return (ctx as { model?: unknown }).model ?? null;
-}
+// Lazy summarisation of pending raw rows lives in `memledger summarise`
+// (~/infra/memledger) since 2026-08-11 - see the header note. This extension
+// deliberately contains no LLM path.
 
 // ─────────────────────────────────────────────────────────────────────────
 // Module state (per session)
@@ -607,9 +510,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			if (sub === "summarize") {
-				const n = await summarisePending(ctx, sessionProject, 50);
-				injectRows = injectionEnabled ? latestProjectSummaries(sessionProject, INJECT_MAX_ROWS, INJECT_MAX_AGE_DAYS) : [];
-				ctx.ui.notify(`summarised ${n} pending row(s)`, "info");
+				ctx.ui.notify("summarisation moved to `memledger summarise` (systemd timer, drains all projects)", "info");
 				return;
 			}
 			// status
@@ -624,18 +525,13 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// ── session_start: resolve project, lazily summarise pending, load inject rows
+	// ── session_start: resolve project, load inject rows
 	pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
 		sessionCwd = ctx.cwd;
 		sessionProject = gitProject(ctx.cwd);
 		sessionBranch = gitBranch(ctx.cwd);
 		sessionFile = ctx.sessionManager.getSessionFile?.() ?? null;
 		capturedThisSession = false;
-		try {
-			await summarisePending(ctx, sessionProject, LAZY_SUMMARISE_PER_START);
-		} catch {
-			/* best effort */
-		}
 		injectRows = injectionEnabled ? latestProjectSummaries(sessionProject, INJECT_MAX_ROWS, INJECT_MAX_AGE_DAYS) : [];
 		memledgerBlock = injectionEnabled ? fetchMemledgerBrief(sessionProject) : null;
 	});
