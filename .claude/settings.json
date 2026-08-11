@@ -1,0 +1,16 @@
+{
+  "$comment": "Claude Code hooks for the dual-harness port. NOT stowed directly (would clobber the live ~/.claude/settings.json); install.sh jq-merges this into the user settings. See .pi/agent/docs/pi-to-claude-code-port.md.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$HOME/.claude/hooks/ascii-guard.ts\""
+          }
+        ]
+      }
+    ]
+  }
+}

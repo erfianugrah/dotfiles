@@ -267,10 +267,10 @@ Smallest set that exercises MCP + hook + shared core + stow, all at once.
 - [x] Extract `lib/oci-tags-core.ts` from `oci-tags.ts`; re-point pi adapter (re-exports helpers); core test 13 pass + pi suite 589 pass.
 - [x] `.claude/mcp/toolkit.ts` (bun stdio MCP, official `@modelcontextprotocol/sdk@1.30`) exposing `oci_tags` via the core. Headless smoke test (`toolkit.smoke.test.ts`, real SDK client over stdio) 1 pass: handshake + tools/list + schema.
 - [x] `.mcp.json` (tracked, project scope) registering it via `${CLAUDE_PROJECT_DIR}/.claude/mcp/toolkit.ts`. [blocked: needs live CC] `claude mcp list` shows it + live tool call (env-var expansion in `.mcp.json` args also needs live-CC confirmation).
-- [ ] Extract `lib/ascii-core.ts` (move `scan`/`isProsePath`/`WRITE_BASH`); re-point pi adapter; `bun test` green.
-- [ ] `.claude/hooks/ascii-guard.ts` (PreToolUse, auto-rewrite via `updatedInput`) + tracked `.claude/settings.json`.
-- [ ] `install.sh --dry-run --links-only` shows the new files would stow cleanly.
-- [ ] Commit; this slice is the reference pattern for every later item.
+- [x] Extract `lib/ascii-core.ts` (scan/isProsePath/WRITE_BASH/reason + new `foldToAscii`); re-point pi adapter (re-exports); ascii-core 48 pass (every code point) + pi suite/e2e 600 pass.
+- [x] `.claude/hooks/ascii-guard.ts` (PreToolUse Write|Edit|MultiEdit|Bash) + `.claude/settings.json` fragment. Emits `permissionDecision: deny` + the exact ASCII-folded form (guaranteed one-shot fix). Hook smoke test 4 pass. NOTE: true auto-rewrite via `updatedInput` is a [blocked: needs live CC] enhancement - deny-with-folded-form is the verified-correct baseline.
+- [ ] Wire `install.sh` (jq-merge `.claude/settings.json` hooks into `~/.claude/settings.json`; `bun install` + `claude mcp add` for the MCP server) - stow CANNOT own `~/.claude/settings.json`/`~/.claude.json` (live state), so add `.claude/settings.json` to `.stow-local-ignore` and merge in install.sh.
+- [ ] Commit; this slice is the reference pattern for every later item. [DONE for oci/ascii - install.sh wiring pending]
 
 **Phase 2 - widen MCP (toolkit server, CLI wrappers).**
 - [ ] osv-scan  -> core + toolkit tool + test.
