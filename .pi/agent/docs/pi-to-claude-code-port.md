@@ -242,15 +242,21 @@ items unless noted: `bun test` green in the worktree (avoid the shadowed
 1.3.14`, `node`, `/usr/bin/grep` work; `claude` at `/opt/homebrew/bin/claude`.
 
 **Phase 0 - verify the CC contract empirically (no logic yet).**
-- [ ] `claude --version`; `/hooks` to list events the installed build supports.
-- [ ] Throwaway `PreToolUse` hook echoing stdin to a file - capture payload shape.
-- [ ] Throwaway hook returning `updatedInput` - confirm rewrite actually applies.
-- [ ] Confirm `UserPromptSubmit` injection behaviour (exit-0 stdout vs decision).
-- [ ] Record findings in this doc under a new "CC contract, verified" section.
+Environment note (2026-08-11): the `claude` binary in this build env is broken
+(`/opt/homebrew/bin/claude` -> "native binary not installed"), and `rg`/`grep`
+are broken shell-snapshot functions. So NO live-CC verification is possible
+from the loop's Bash env; these items are all owner-run in a working CC
+session. The loop verifies everything else with `bun test` + headless
+JSON-RPC smoke tests (no `claude` binary needed).
+- [blocked: needs live CC] `claude --version`; `/hooks` to list events the build supports.
+- [blocked: needs live CC] Throwaway `PreToolUse` hook echoing stdin - capture payload shape.
+- [blocked: needs live CC] Throwaway hook returning `updatedInput` - confirm rewrite applies.
+- [blocked: needs live CC] Confirm `UserPromptSubmit` injection (exit-0 stdout vs decision).
+- [ ] Record findings here under a "CC contract, verified" section (after owner runs the above).
 
 **Phase 1 - vertical slice (proves the whole architecture end to end).**
 Smallest set that exercises MCP + hook + shared core + stow, all at once.
-- [ ] Extract `lib/oci-tags-core.ts` from `oci-tags.ts` (already exports `parseImage`); re-point pi adapter; `bun test` green.
+- [x] Extract `lib/oci-tags-core.ts` from `oci-tags.ts`; re-point pi adapter (re-exports helpers); core test 13 pass + pi suite 589 pass.
 - [ ] `.claude/mcp/toolkit.ts` (bun stdio MCP) exposing `oci_tags` via the core.
 - [ ] `.mcp.json` (tracked) registering it at project scope; `claude mcp list` shows it, tool runs.
 - [ ] Extract `lib/ascii-core.ts` (move `scan`/`isProsePath`/`WRITE_BASH`); re-point pi adapter; `bun test` green.
@@ -278,6 +284,12 @@ Smallest set that exercises MCP + hook + shared core + stow, all at once.
 
 **Phase 5 - packaging + docs.**
 - [ ] Decide distribution (open question 1): stow'd `.claude/` (default) vs CC plugin.
+- [ ] Global MCP registration: stow CANNOT safely write `~/.claude.json` (it is
+      live CC state, not a dotfile). So a tracked repo-root `.mcp.json` only
+      applies at PROJECT scope (cwd = that project). For global availability,
+      add an idempotent `claude mcp add --scope user erfi-toolkit -- bun
+      $HOME/.claude/mcp/toolkit.ts` line to `install.sh` (guarded by `command
+      -v claude`). Hooks/commands/skills DO stow globally via `~/.claude/`.
 - [ ] README: add a CC section mirroring the pi one; note the shared-core rule.
 - [ ] Merge `cc-port` -> `main` per phase once tests pass.
 
