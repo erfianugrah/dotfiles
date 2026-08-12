@@ -347,7 +347,8 @@ _pkg_install_npm() {
   (( ${#pkgs[@]} )) || return 0
 
   # Never install npm globals into system dirs (/usr/lib/node_modules).
-  # System npm packages (bitwarden-cli, pnpm, yarn) are owned by pacman/brew.
+  # System npm packages (pnpm, yarn) are owned by pacman/brew. (bitwarden-cli
+  # is npm-pinned to 2026.6.0 instead - see npm-globals.txt.)
   # User npm globals go to ~/.npm-global to avoid conflicts on pacman -Syu.
   local npm_prefix
   npm_prefix=$(npm config get prefix 2>/dev/null)
