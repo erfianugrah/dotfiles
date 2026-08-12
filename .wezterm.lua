@@ -206,7 +206,7 @@ config.line_height = 1
 -- macOS: the same 12pt reads small on a Retina MacBook next to native macOS
 -- terminal defaults (Menlo 13, Terminal.app/iTerm ship 13-14); bump on darwin only.
 if wezterm.target_triple:find("apple-darwin") then
-	config.font_size = 16
+	config.font_size = 18
 end
 
 -- Window Close Prompt
