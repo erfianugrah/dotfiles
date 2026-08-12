@@ -5,7 +5,7 @@
 #   nixos    -> home-manager (packages via packages/nix flake) + stow links
 #   steamos  -> home-manager (#deck config) + stow links
 #   arch     -> pacman/paru package lists + stow links
-#   macos    -> brew bundle + stow links
+#   macos    -> brew (formulae + casks) + stow links
 #   other    -> stow links only (universal fallback)
 #
 # Idempotent. Flags:
@@ -261,6 +261,15 @@ case "$OS" in
       # intentional word-splitting; names contain no spaces/globs.
       # shellcheck disable=SC2046
       run brew install $(grep -v '^[[:space:]]*#' "$DOTFILES/packages/brew.txt" | grep -v '^[[:space:]]*$')
+      # Casks (GUI apps), only when the list exists and is non-empty -
+      # save_packages regenerates it from 'brew list --cask' on the mac.
+      _casks="$(grep -v '^[[:space:]]*#' "$DOTFILES/packages/brew-cask.txt" 2>/dev/null | grep -v '^[[:space:]]*$' | tr '\n' ' ')"
+      if [ -n "$_casks" ]; then
+        echo ">> installing casks via brew"
+        # shellcheck disable=SC2086
+        run brew install --cask $_casks
+        unset _casks
+      fi
     fi
     do_stow
     ;;
