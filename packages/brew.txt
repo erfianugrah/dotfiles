@@ -13,6 +13,7 @@ bat
 bat-extras
 bitwarden-cli
 btop
+oven-sh/bun/bun
 caddy
 certbot
 cloudflared
