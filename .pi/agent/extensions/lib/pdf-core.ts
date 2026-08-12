@@ -91,8 +91,11 @@ export function sortPageFiles(names: string[]): string[] {
 /** Pure: build the poppler page-window flags (`-f`/`-l`) shared by pdftotext/pdftoppm. */
 export function pageArgs(first?: number, last?: number): string[] {
   const a: string[] = [];
-  if (first != null) a.push("-f", String(first));
-  if (last != null) a.push("-l", String(last));
+  // poppler pages are 1-based; a 0/negative/float page is invalid and also
+  // disagrees with the pdfplumber path (which treats first>0). Only emit a
+  // valid integer window.
+  if (first != null && first > 0) a.push("-f", String(Math.floor(first)));
+  if (last != null && last > 0) a.push("-l", String(Math.floor(last)));
   return a;
 }
 

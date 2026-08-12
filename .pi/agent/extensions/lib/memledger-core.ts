@@ -141,7 +141,8 @@ export interface SemanticHit {
 export function formatSemanticRows(kind: SemanticKind, results: SemanticHit[]): string[] {
   return results.map((r) => {
     const where = kind === "messages" ? `${r.session_key}#${r.ordinal}` : `#${r.id}`;
-    return `${r.similarity.toFixed(3)} | ${where} | ${oneLine(String(r.text ?? ""), 200)}`;
+    const sim = typeof r.similarity === "number" ? r.similarity.toFixed(3) : "?";
+    return `${sim} | ${where} | ${oneLine(String(r.text ?? ""), 200)}`;
   });
 }
 

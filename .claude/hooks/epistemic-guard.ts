@@ -161,7 +161,9 @@ function annotate(context: string): never {
 }
 
 async function main() {
-  if (process.env[KILL_SWITCH] === "1") process.exit(0);
+  // Honor the pi-named switch too: the shared core's surfaced reason text
+  // advertises PI_EPISTEMIC_GUARD_OFF, so that name must actually work here.
+  if (process.env[KILL_SWITCH] === "1" || process.env.PI_EPISTEMIC_GUARD_OFF === "1") process.exit(0);
 
   const raw = await Bun.stdin.text();
   let payload: {

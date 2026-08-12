@@ -53,7 +53,9 @@ function proseFor(tool: string | undefined, input: Record<string, unknown>): str
 }
 
 async function main() {
-  if (process.env.ENTITY_NUDGE_OFF === "1") process.exit(0);
+  // Honor the pi-named switch too: the shared core's surfaced nudge line
+  // advertises PI_ENTITY_NUDGE_OFF, so that name must actually work here.
+  if (process.env.ENTITY_NUDGE_OFF === "1" || process.env.PI_ENTITY_NUDGE_OFF === "1") process.exit(0);
 
   const raw = await Bun.stdin.text();
   let payload: { tool_name?: string; tool_input?: Record<string, unknown> };

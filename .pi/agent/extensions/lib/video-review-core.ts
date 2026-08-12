@@ -1317,7 +1317,10 @@ async function ensureBundle(
 
   const speakers = [...new Set(segments.map((s) => s.speaker).filter((x): x is string => !!x))].sort();
   const hasWordSpeakers = segments.some((s) => (s.words ?? []).some((w) => !!w.speaker));
-  const duration = segments.length ? Math.max(...segments.map((s) => s.end)) : 0;
+  // Only consider finite segment ends - a segment missing `end` would make
+  // Math.max return NaN and poison every duration-based percentage downstream.
+  const ends = segments.map((s) => s.end).filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+  const duration = ends.length ? Math.max(...ends) : 0;
 
   const bundle: Bundle = {
     file: serverPath,
