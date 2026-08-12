@@ -39,6 +39,7 @@ git
 git-delta
 git-filter-repo
 git-lfs
+gitleaks
 gnupg
 go
 golangci-lint
@@ -48,6 +49,8 @@ gtop
 httpie
 hugo
 hunspell
+hurl
+hyperfine
 imagemagick
 ipcalc
 ipinfo-cli
@@ -65,8 +68,10 @@ neovim
 node
 openapi-generator
 opentofu
+osv-scanner
 pandoc
 pgcli
+poppler
 pgformatter
 pipx
 pnpm
