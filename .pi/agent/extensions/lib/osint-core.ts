@@ -548,8 +548,14 @@ export function formatGeo(inv: Investigation, mode: "summary" | "full" = "summar
   if (geocodes.length) {
     const ex = (geocodes[0].extra ?? {}) as Record<string, unknown>;
     const meta = [ex.type, ex.osm].filter((v) => typeof v === "string" && v);
-    const coord = `Coordinates: ${ex.lat}, ${ex.lon}`;
-    parts.push(meta.length ? `${coord}  (${meta.join(", ")})` : coord);
+    if (ex.lat != null && ex.lon != null) {
+      const coord = `Coordinates: ${ex.lat}, ${ex.lon}`;
+      parts.push(meta.length ? `${coord}  (${meta.join(", ")})` : coord);
+    } else if (meta.length) {
+      parts.push(meta.join(", "));
+    } else {
+      parts.push("Geocode returned without coordinates.");
+    }
   } else if (!pois.length) {
     parts.push("No location data returned.");
   }
