@@ -53,7 +53,7 @@ For decluttarr / recyclarr, `SONARR_API_KEY` / `RADARR_API_KEY` come from the st
 
 6. **SAB on `/mnt/cache/` direct, not `/mnt/user/`** (slamanna pattern, 2026-05-24): keeps unpacks off shfs. `download_free: 200G` MANDATORY — without it, par2/unrar hits ENOSPC mid-write and the queue auto-pauses with `pause_reason: null`.
 
-7. **Composer pipeline `docker_exec` step config field is `cmd`** — not `command`, `argv`, `args`, `Cmd`. Wrong field = silent no-op pipeline run. Reference example: `recyclarr-sync` pipeline (id `pl_18b158c83eeb82a5_f2f0384c`).
+7. **Composer pipeline `docker_exec` step config field is `cmd`** — not `command`, `argv`, `args`, `Cmd`. Wrong field = silent no-op pipeline run. Reference example: `recyclarr-sync` pipeline (id `pl_18c6c25ac2a27ac2_ad83c4f6`).
 
 8. **Bash quoting trap on Prowlarr/arr API payloads**: indexer JSON contains `(` `)` in helpText. Inline `-d "$PAYLOAD"` triggers "syntax error near unexpected token `('`". Always tempfile + `--data-binary @file`.
 
