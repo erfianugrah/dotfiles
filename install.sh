@@ -21,6 +21,7 @@ set -euo pipefail
 DOTFILES="${DOTFILES_DIR:-$HOME/dotfiles}"
 LINKS_ONLY=0
 DRY_RUN=0
+PKG_ERRORS=0   # set to 1 by brew_install_each when any package fails; flagged at the end
 for arg in "$@"; do
   case "$arg" in
     --links-only) LINKS_ONLY=1 ;;
@@ -30,6 +31,34 @@ for arg in "$@"; do
 done
 
 run() { if [ "$DRY_RUN" = 1 ]; then echo "+ $*"; else "$@"; fi; }
+
+# brew_install_each [--cask] name...
+# Install brew formulae/casks ONE AT A TIME. A plain `brew install a b c`
+# resolves every name up front and aborts the whole batch on the first bad one
+# (an unknown/renamed formula, or a link conflict mid-run) - so one bad entry
+# leaves everything after it uninstalled, and under `set -e` kills this script
+# before casks/stow run. Installing per-item contains the blast radius: skip
+# already-installed items, keep going past failures, and flag them loudly.
+# Sets the global PKG_ERRORS=1 if anything failed; never aborts the script.
+brew_install_each() {
+  local list_flag="" mode="formula"
+  if [ "${1:-}" = "--cask" ]; then list_flag="--cask"; mode="cask"; shift; fi
+  local f
+  local -a failed=()
+  for f in "$@"; do
+    # already installed? (brew list handles tap-qualified names too)
+    if brew list $list_flag --versions "$f" >/dev/null 2>&1; then
+      continue
+    fi
+    if [ "$DRY_RUN" = 1 ]; then echo "+ brew install $list_flag $f"; continue; fi
+    # shellcheck disable=SC2086
+    brew install $list_flag "$f" || { echo "!! brew $mode failed: $f" >&2; failed+=("$f"); }
+  done
+  if [ "${#failed[@]}" -gt 0 ]; then
+    echo "!! ${#failed[@]} brew ${mode}(s) FAILED: ${failed[*]}" >&2
+    PKG_ERRORS=1
+  fi
+}
 
 detect_os() {
   if [ -f /etc/os-release ]; then
@@ -256,18 +285,19 @@ case "$OS" in
       # instance_evals the file as Ruby and the parse dies on versioned
       # formulae ('python@3.13' - '@' is a Ruby syntax error), and even plain
       # names raise NoMethodError (only mas/vscode/go/... extensions are
-      # tolerated bare). Filter comments + brew install directly, same as
+      # tolerated bare). Filter comments + install per-formula via
+      # brew_install_each (one bad name can't abort the batch), same as
       # functions.d/packages.zsh _pkg_install_brew. Unquoted expansion is
       # intentional word-splitting; names contain no spaces/globs.
       # shellcheck disable=SC2046
-      run brew install $(grep -v '^[[:space:]]*#' "$DOTFILES/packages/brew.txt" | grep -v '^[[:space:]]*$')
+      brew_install_each $(grep -v '^[[:space:]]*#' "$DOTFILES/packages/brew.txt" | grep -v '^[[:space:]]*$')
       # Casks (GUI apps), only when the list exists and is non-empty -
       # save_packages regenerates it from 'brew list --cask' on the mac.
       _casks="$(grep -v '^[[:space:]]*#' "$DOTFILES/packages/brew-cask.txt" 2>/dev/null | grep -v '^[[:space:]]*$' | tr '\n' ' ')"
       if [ -n "$_casks" ]; then
         echo ">> installing casks via brew"
         # shellcheck disable=SC2086
-        run brew install --cask $_casks
+        brew_install_each --cask $_casks
         unset _casks
       fi
     fi
@@ -281,5 +311,12 @@ esac
 
 do_local_bin
 do_claude
+
+if [ "$PKG_ERRORS" = 1 ]; then
+  echo "!! one or more packages FAILED to install (flagged above)." >&2
+  echo "!! Everything else ran (links, casks, local bin, claude). Fix the failing" >&2
+  echo "!! name(s) in packages/*.txt or resolve the conflict, then re-run install.sh." >&2
+  exit 1
+fi
 
 echo ">> done."

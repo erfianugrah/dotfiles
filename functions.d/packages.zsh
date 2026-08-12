@@ -167,19 +167,37 @@ _pkg_install_brew() {
   print "Updating Homebrew..."
   brew update -q
 
+  # Install ONE AT A TIME, not `brew install a b c`: the batch form resolves
+  # every name up front and aborts on the first bad one (unknown/renamed
+  # formula, or a link conflict mid-run), leaving the rest uninstalled. Per-item
+  # contains the blast radius - skip installed, keep going past failures, and
+  # flag them loudly at the end.
+  local f
+  local -a failed=()
+
   # Filter comments and blank lines
   local -a formulae=("${(@f)$(grep -v '^\s*#' "$list" | grep -v '^\s*$')}")
-  print "Installing ${#formulae[@]} formulae..."
-  brew install "${formulae[@]}" 2>&1 | grep -v 'already installed'
+  print "Installing ${#formulae[@]} formulae (one at a time; failures flagged)..."
+  for f in "${formulae[@]}"; do
+    brew list --versions "$f" &>/dev/null && continue   # already installed
+    brew install "$f" || { print -u2 "!! brew formula failed: $f"; failed+=("$f") }
+  done
 
   if [[ -f "$cask_list" ]]; then
     local -a casks=("${(@f)$(grep -v '^\s*#' "$cask_list" | grep -v '^\s*$')}")
     if (( ${#casks[@]} )); then
-      print "\nInstalling ${#casks[@]} casks..."
-      brew install --cask "${casks[@]}" 2>&1 | grep -v 'already installed'
+      print "\nInstalling ${#casks[@]} casks (one at a time; failures flagged)..."
+      for f in "${casks[@]}"; do
+        brew list --cask --versions "$f" &>/dev/null && continue
+        brew install --cask "$f" || { print -u2 "!! brew cask failed: $f"; failed+=("$f") }
+      done
     fi
   fi
 
+  if (( ${#failed[@]} )); then
+    print -u2 "\n${RED:-}!! ${#failed[@]} brew item(s) FAILED: ${failed[*]}${RESET:-}"
+    return 1
+  fi
   print "\n${GREEN}brew install complete${RESET}"
 }
 
