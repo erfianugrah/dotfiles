@@ -15,6 +15,7 @@ opencode (e.g. Pi, scripts, ad-hoc curl).
 - **Base URL**: `http://localhost:7860` (env: `WHISPER_URL`)
 - **Runs on**: llm-compose stack, `whisper` service (RTX 5090 / 31 GB VRAM)
 - **GPU swap**: starting transcription stops llama-server. Proxy auto-swaps.
+- **Model lock**: if a swap/comfyui/train call 503s with "model lock active", an unattended loop has pinned the LLM preset (`llmc lock`). Do NOT `llmc unlock` without asking - check `curl -s localhost:11434/mode` (lock_owners shows who holds it) and wait or coordinate.
 - **Model default**: turbo (override with `model` param)
 - **Extras**: VLM frame description (`/api/describe`) + OCR (`/api/image`) via
   the `vision` model reported in `/api/status`.

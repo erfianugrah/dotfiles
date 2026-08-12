@@ -8,6 +8,8 @@ description: Train SDXL or Flux LoRAs via the llm-compose lora-train service (HT
 kohya sd-scripts wrapped in an HTTP API. Routes through the llm-compose proxy
 which also handles GPU mode swap (stops llama-server / ComfyUI, starts trainer).
 
+- **Model lock**: if a swap/comfyui/train call 503s with "model lock active", an unattended loop has pinned the LLM preset (`llmc lock`). Do NOT `llmc unlock` without asking - check `curl -s localhost:11434/mode` (lock_owners shows who holds it) and wait or coordinate.
+
 ## Service
 
 - **Base URL**: `http://localhost:11434/train/*` (proxy routes; env: `TRAIN_PROXY_URL`)

@@ -451,11 +451,38 @@ manifest/usage error.
     / 8 min vs `llama-server/qwen36-moe`'s 3 iterations / 15 min - the MoE
     generation-speed and instruction-following edge shows up as wall-clock.
     Two operational requirements, both observed live on 2026-08-12: **lock the
-    preset first** (`llmc lock loop`) or any other client of the proxy (Open
-    WebUI re-POSTs the previously-selected model) evicts the worker's model
-    mid-iteration; and keep the judge on a hosted frontier model - the local
-    rung writes, the frontier judges, so the only cost is a per-iteration
-    review call.
+    preset first** (`llmc lock loop --owner "$PI_SESSION_ID"`) or any other
+    client of the proxy (Open WebUI re-POSTs the previously-selected model)
+    evicts the worker's model mid-iteration; and keep the judge on a hosted
+    frontier model - the local rung writes, the frontier judges, so the only
+    cost is a per-iteration review call.
+  - **Local-rung ceiling + the working-window rules (all measured 2026-08-12,
+    llm-compose concurrency build).** Gemma 4 26B one-shots scoped tasks
+    (single-file, ~3-hunk semantic changes with a contract probe) but stalls
+    on multi-file refactors - pair it with a frontier escalation rung
+    (`["llama-server/loop", "openrouter/moonshotai/kimi-k3"]`) for anything
+    bigger. To make the local rung reliable at all you must size its working
+    window: (1) the loop preset needs a WIDE context (196608) - at 131072 the
+    85% auto-compact threshold (~111K tokens) killed every iteration, because
+    big file reads plus 10K-token thinking traces eat ~15K/turn; (2) pass
+    `PI_COMPACT_FRACTION=0.95` for headroom; (3) bump `agentTimeoutMs` to
+    3600000 - 1800s is too tight for a thinking MoE on multi-file tasks (two
+    iterations died mid-work at the deadline); (4) slice manifests to ~3-hunk
+    scope and put EDIT DISCIPLINE in `rules` (no whole-file rewrites, exact
+    oldText from a fresh read, `python3 -c 'import <module>'` after every
+    edit) - unsliced, the model corrupted proxy.py with syntax errors on 4
+    straight iterations; sliced, it converged in 3; (5) for precise contracts,
+    an operator-owned acceptance probe OUTSIDE writeScope (e.g.
+    `.pi/lock-owners-probe.py`, booting the real handler over HTTP) is the
+    strongest sensor form - the agent cannot edit it, and its named check
+    failures are exactly the feedback a weak model needs.
+  - **Concurrent loops (llm-compose).** The proxy lock is a SHARED lock with
+    named owners: each loop `llmc lock loop --owner <session-id>`, unlock
+    releases only that owner. Concurrent loops must share ONE preset (the
+    `loop` preset runs `parallel_slots = 2`, 2x98K ctx); same-repo loops need
+    a separate git worktree each; and loop sensors must never rebuild/restart
+    the stack that serves them (a proxy restart kills the other loop's
+    in-flight request and clears the in-memory owner set).
   - **Judge-idiom evidence.** In the 2026-08-11 memledger-summarise loop the
     `moonshotai/kimi-k3` judge caught a degenerate-filter threshold drift (40
     -> 27) plus a fabricated `the contract test pins this` justification
@@ -481,6 +508,13 @@ manifest/usage error.
   **Hot-reloaded between iterations** - this is the mid-run steering lever.
 - `canary` (per sensor) - a command planting the fault the sensor catches;
   drives `loop verify-sensors`. Absent = that sensor is reported unverified.
+  Sensor-authoring trap observed 2026-08-12: mind PIPELINE exit codes -
+  `cmd | rg -c x | awk '{exit ($1 >= 3 ? 0 : 1)}'` passes vacuously when the
+  input is empty (awk exits 0 on no lines), so the sensor was green at
+  baseline and the run would have been refused. Prefer
+  `test $(rg -c pat file || echo 0) -ge 3` - explicit zero, explicit compare.
+  `loop run --dry` prints baseline states; check every `expect: fail` sensor
+  is actually red before launching.
 - `guide` - paths to binding convention documents, injected into every prompt
   as "read these first". Also hot-reloaded. Write the guide BEFORE the loop
   runs, and review it as carefully as code - every iteration is judged against

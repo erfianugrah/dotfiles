@@ -26,15 +26,23 @@ export default function (pi: ExtensionAPI) {
   let previousTokens: number | null | undefined;
 
   const trigger = (ctx: ExtensionContext, customInstructions?: string) => {
-    if (ctx.hasUI) ctx.ui.notify("compaction started", "info");
+    // The compact() callbacks fire AFTER the session has been replaced, so
+    // the ctx captured here is stale by then - touching it (even ctx.hasUI)
+    // throws. Uncaught, that kills headless `pi -p` agents (observed: every
+    // self-correcting-loop iteration died at the 85% threshold, 2026-08-12).
+    // Guard every post-compaction ctx touch.
+    const notify = (msg: string, level: "info" | "error") => {
+      try {
+        if (ctx.hasUI) ctx.ui.notify(msg, level);
+      } catch {
+        // session replaced - nowhere to notify
+      }
+    };
+    notify("compaction started", "info");
     ctx.compact({
       customInstructions,
-      onComplete: () => {
-        if (ctx.hasUI) ctx.ui.notify("compaction completed", "info");
-      },
-      onError: (err) => {
-        if (ctx.hasUI) ctx.ui.notify(`compaction failed: ${err.message}`, "error");
-      },
+      onComplete: () => notify("compaction completed", "info"),
+      onError: (err) => notify(`compaction failed: ${err.message}`, "error"),
     });
   };
 
