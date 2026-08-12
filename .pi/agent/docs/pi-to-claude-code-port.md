@@ -344,10 +344,30 @@ already provides it · SKIP = pi TUI/session internals, no CC analogue.
 | slash-typo-guard | SKIP | CC slash handling |
 | local-model-rules | SKIP | pi llama-server only |
 
-**Parity tally:** 8 DONE · ~12 MCP+HOOK ports remaining + 2 CMD groups ·
-~16 NATIVE (parity via CC built-ins) · ~15 SKIP (pi-internal, no CC meaning).
-Full parity = clear the TO-PORT rows; NATIVE/SKIP are parity-satisfied by
-design (documented above so the decision is explicit, not an omission).
+**PARITY ACHIEVED (2026-08-12)** for all MCP + HOOK ports (workflow of 19
+parallel agents + integration). The toolkit MCP now exposes **22 tools**;
+**11 CC hooks** are wired in settings.json. All shared logic lives in
+`lib/*-core.ts`, so pi and CC run identical code.
+
+Verification after integration: pi unit 589 · pi integration 76 · pi manifest 7
+· 30 core tests 665 · 11 hook smokes 68 · toolkit smoke (all 22 tools connect
+via the real SDK client). Zero regressions across 18 refactored pi adapters.
+
+MCP tools added (15): search_messages/semantic_search/search_ledger/
+search_memories/list_sessions (memledger), docs, web_search/code_search (exa),
+osint, render_diagram, pdf, context7_resolve_library_id/context7_query_docs,
+build_favicon_set, video_review - on top of the 7 from Phase 1-2.
+Hooks added (10): confidential-write-guard, git-gh-gate, tool-guard,
+bash-error-hints, entity-qualifier-nudge, skill-guard, lookup-before-ask,
+notify, cd-agents-reload, epistemic-guard - plus ascii-guard.
+
+**Remaining (optional, non-MCP/hook):** the CMD group - `superpowers` (register
+its subskills under `.claude/skills/`) and the prompt templates (`/commit` with
+the AI-attribution ban, etc -> `.claude/commands/`). NATIVE/SKIP rows are
+parity-satisfied by CC built-ins by design (documented above).
+
+Original tally (pre-workflow): 8 DONE · ~12 MCP+HOOK + 2 CMD remaining ·
+~16 NATIVE · ~15 SKIP.
 
 ## Phased checklist (loop-consumable)
 

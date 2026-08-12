@@ -31,6 +31,21 @@ describe("erfi-toolkit MCP server", () => {
       expect(names).toContain("go_test");
       expect(names).toContain("bench");
       expect(names).toContain("pg_analyser");
+      expect(names).toContain("search_messages");
+      expect(names).toContain("semantic_search");
+      expect(names).toContain("search_ledger");
+      expect(names).toContain("search_memories");
+      expect(names).toContain("list_sessions");
+      expect(names).toContain("docs");
+      expect(names).toContain("web_search");
+      expect(names).toContain("code_search");
+      expect(names).toContain("osint");
+      expect(names).toContain("render_diagram");
+      expect(names).toContain("pdf");
+      expect(names).toContain("context7_resolve_library_id");
+      expect(names).toContain("context7_query_docs");
+      expect(names).toContain("build_favicon_set");
+      expect(names).toContain("video_review");
 
       const osv = tools.find((t) => t.name === "osv_scan");
       expect(osv).toBeDefined();

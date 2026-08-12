@@ -16,104 +16,14 @@
  *                 default. Use when looking for API patterns, usage
  *                 examples, or specific framework concepts.
  *
- * URL: https://mcp.exa.ai/mcp[?exaApiKey=<key>]
- * Body: JSON-RPC 2.0 tools/call envelope (matches opencode's wrapper).
- * Response: SSE `data:` lines, parse the first `result.content[0].text`.
+ * Pure logic (envelope + SSE/SearXNG projection + orchestration) lives in
+ * ./lib/exa-core.ts (shared with the Claude Code MCP toolkit); this file is
+ * the thin pi adapter.
  */
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-const BASE_URL = process.env.EXA_API_KEY
-  ? `https://mcp.exa.ai/mcp?exaApiKey=${encodeURIComponent(process.env.EXA_API_KEY)}`
-  : "https://mcp.exa.ai/mcp";
-
-// SearXNG fallback: when Exa returns empty / errors out, hit the SearXNG
-// instance the research skill exposes. Same approach as web-research.ts but
-// only when Exa fails — keeps the primary path unchanged. Production stack
-// lives at https://searxng.erfi.io (Caddy + bearer); local dev at :8888.
-const SEARXNG_URL = process.env.SEARXNG_URL ?? "https://searxng.erfi.io";
-
-function researchAuthHeaders(): Record<string, string> {
-  const tok = process.env.RESEARCH_TOKEN?.trim();
-  return tok ? { authorization: `Bearer ${tok}` } : {};
-}
-
-async function searxngFallback(query: string, timeoutMs = 12_000): Promise<string | undefined> {
-  const params = new URLSearchParams({ q: query, format: "json", safesearch: "0" });
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${SEARXNG_URL}/search?${params}`, {
-      headers: researchAuthHeaders(),
-      signal: ctl.signal,
-    });
-    if (!res.ok) return undefined;
-    const j = (await res.json()) as {
-      results?: Array<{ title: string; url: string; content: string; engine: string }>;
-    };
-    const hits = (j.results ?? []).slice(0, 8);
-    if (hits.length === 0) return undefined;
-    return hits
-      .map(
-        (r, i) =>
-          `${i + 1}. ${r.title} _(via ${r.engine})_\n   ${r.url}\n   ${r.content.slice(0, 240)}`,
-      )
-      .join("\n\n");
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// ── MCP request helper ────────────────────────────────────────────────────
-
-async function exaCall(
-  tool: string,
-  args: Record<string, unknown>,
-  timeoutMs: number,
-): Promise<string | undefined> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(BASE_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: tool, arguments: args },
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Exa HTTP ${res.status}: ${body.slice(0, 200)}`);
-    }
-    const body = await res.text();
-    // Parse SSE — find first `data:` line, JSON-decode, extract content[0].text
-    for (const line of body.split("\n")) {
-      if (!line.startsWith("data: ")) continue;
-      try {
-        const parsed = JSON.parse(line.slice(6)) as {
-          result?: { content?: Array<{ type: string; text: string }> };
-        };
-        const text = parsed.result?.content?.[0]?.text;
-        if (text) return text;
-      } catch {
-        continue;
-      }
-    }
-    return undefined;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+import { codesearch, websearch } from "./lib/exa-core.ts";
 
 // ── websearch ─────────────────────────────────────────────────────────────
 
@@ -145,53 +55,14 @@ const websearchTool = defineTool({
     ),
   }),
   async execute(_id, params) {
-    const args: Record<string, unknown> = {
+    const { text, details, isError } = await websearch({
       query: params.query,
-      type: params.type ?? "auto",
-      numResults: params.numResults ?? 8,
-      livecrawl: params.livecrawl ?? "fallback",
-    };
-    if (params.contextMaxCharacters) args.contextMaxCharacters = params.contextMaxCharacters;
-
-    let text: string | undefined;
-    let exaError: string | undefined;
-    try {
-      text = await exaCall("web_search_exa", args, 25_000);
-    } catch (err) {
-      exaError = (err as Error).message;
-    }
-
-    // Empty or errored Exa response → try SearXNG before giving up. Avoids
-    // the reformulation-loop pattern the tool-guard catches (where the agent
-    // sees "No results" and rewords the query 3 times).
-    if (!text) {
-      const searx = await searxngFallback(params.query);
-      if (searx) {
-        const note = exaError
-          ? `Exa failed (${exaError}); SearXNG fallback results:\n\n`
-          : "Exa returned no results; SearXNG fallback results:\n\n";
-        return {
-          content: [{ type: "text", text: note + searx }],
-          details: { query: params.query, fallback: "searxng", exaError },
-        };
-      }
-      if (exaError) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: `Exa websearch failed: ${exaError} (SearXNG fallback also returned nothing)` }],
-          details: { query: params.query },
-        };
-      }
-      return {
-        content: [{ type: "text", text: "No search results found. Try a different query." }],
-        details: { query: params.query, type: args.type },
-      };
-    }
-
-    return {
-      content: [{ type: "text", text }],
-      details: { query: params.query, type: args.type },
-    };
+      numResults: params.numResults,
+      type: params.type,
+      livecrawl: params.livecrawl,
+      contextMaxCharacters: params.contextMaxCharacters,
+    });
+    return { ...(isError ? { isError: true } : {}), content: [{ type: "text", text }], details };
   },
 });
 
@@ -217,31 +88,11 @@ const codesearchTool = defineTool({
     ),
   }),
   async execute(_id, params) {
-    const tokens = Math.min(Math.max(params.tokensNum ?? 5000, 1000), 50000);
-    try {
-      const text = await exaCall(
-        "get_code_context_exa",
-        { query: params.query, tokensNum: tokens },
-        30_000,
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              text ??
-              "No code snippets or documentation found. Try a more specific query or check spelling of framework names.",
-          },
-        ],
-        details: { query: params.query, tokens },
-      };
-    } catch (err) {
-      return {
-        isError: true,
-        content: [{ type: "text", text: `Exa codesearch failed: ${(err as Error).message}` }],
-        details: { query: params.query },
-      };
-    }
+    const { text, details, isError } = await codesearch({
+      query: params.query,
+      tokensNum: params.tokensNum,
+    });
+    return { ...(isError ? { isError: true } : {}), content: [{ type: "text", text }], details };
   },
 });
 
