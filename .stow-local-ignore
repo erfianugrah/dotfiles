@@ -21,7 +21,7 @@ node_modules
 .config/opencode/opencode.json
 # .claude/settings.json: live CC user state (theme etc). install.sh jq-merges the
 # tracked hooks fragment into ~/.claude/settings.json rather than stow-linking it.
-.claude/settings.json
+.claude/settings.hooks.json
 # .mcp.json: project-scope MCP entry, only meaningful with cwd=~/dotfiles. NOT
 # stowed to ~/.mcp.json - that would make every claude session with cwd=$HOME
 # pick up a pending-approval project server (+ a ${CLAUDE_PROJECT_DIR} warning).

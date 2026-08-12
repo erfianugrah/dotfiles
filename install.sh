@@ -185,7 +185,7 @@ do_claude() {
   #    hooks in array order). Write-back preserves the destination's perms by
   #    overwriting in place (cat > keeps inode+mode); mktemp lands in the dest
   #    dir so the new-file path is a same-fs atomic rename.
-  local src="$ccdir/settings.json" dst="$HOME/.claude/settings.json"
+  local src="$ccdir/settings.hooks.json" dst="$HOME/.claude/settings.json"
   if [ -f "$src" ]; then
     if command -v jq >/dev/null 2>&1; then
       run mkdir -p "$HOME/.claude"
