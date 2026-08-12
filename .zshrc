@@ -184,7 +184,7 @@ source ~/dotfiles/wezterm.sh
 # signing never needs its own prompt either. Later shells just re-export the
 # env vars from the already-running daemon - silent unless something failed.
 # If the first-shell unlock is declined, later shells stay quiet until the
-# next login; run bw_serve_start / load_bw manually whenever.
+# attempt flag lapses (1h); run bw_serve_start / load_bw manually whenever.
 # Fast path first: _bw_env_cache_load sources a tmpfs snapshot stamped with
 # the live bw session, costing ~1ms. Only on a miss (first shell after boot,
 # after bw_serve_start / bw_set invalidated it, or once the TTL lapses) do we
@@ -199,9 +199,21 @@ if [[ -o interactive ]] && (( $+functions[load_bw] )); then
         print -u2 -- "$_bw_out"
       fi
       unset _bw_out
-    elif [[ ! -e "${XDG_RUNTIME_DIR:-/tmp}/bw-load-attempted" ]]; then
-      touch "${XDG_RUNTIME_DIR:-/tmp}/bw-load-attempted"
-      load_bw
+    else
+      # One auto-attempt per flag-file lifetime. The flag stores an epoch and
+      # lapses after an hour: macOS has no XDG_RUNTIME_DIR and its per-user
+      # TMPDIR survives logout (only reboot clears it), so a bare ! -e check
+      # means one declined/failed unlock mutes every later shell until REBOOT
+      # - and if the un-supervised nohup serve daemon dies, no shell ever
+      # retries. Epoch-in-file instead of mtime: no GNU/BSD stat fork needed.
+      local _bw_flag="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/bw-load-attempted" _bw_last=0
+      [[ -f "$_bw_flag" ]] && read -r _bw_last < "$_bw_flag"
+      [[ "$_bw_last" == <-> ]] || _bw_last=0
+      if (( $(date +%s) - _bw_last > 3600 )); then
+        print -r -- "$(date +%s)" >| "$_bw_flag"
+        load_bw
+      fi
+      unset _bw_flag _bw_last
     fi
   fi
 fi

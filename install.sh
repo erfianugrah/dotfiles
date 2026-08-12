@@ -89,9 +89,11 @@ do_local_bin() {
 # via `npm root -g` and branch on writability.
 claude_native_ok() {
   local out
-  out="$(DISABLE_AUTOUPDATER=1 claude --version 2>&1)" && return 0
-  printf '%s' "$out" | grep -q 'native binary not installed' || return 0 # some other failure - not ours to repair
-  return 1
+  out="$(DISABLE_AUTOUPDATER=1 claude --version 2>&1)"
+  # Match the error TEXT, not the exit code: some broken-stub versions print
+  # "native binary not installed" and still exit 0, so an exit-code check
+  # waves them through and the repair never fires (seen on macOS).
+  ! printf '%s' "$out" | grep -q 'native binary not installed'
 }
 
 claude_repair_native() {
@@ -102,6 +104,7 @@ claude_repair_native() {
   local pkg; pkg="$(npm root -g)/@anthropic-ai/claude-code"
   if [ ! -f "$pkg/install.cjs" ]; then
     echo "!! $pkg/install.cjs not found - claude is not an npm-global install (nix/brew?) - repair via its package manager" >&2
+    _claude_native_installer_hint
     return 1
   fi
   echo ">> claude native binary missing - running package postinstall ($pkg/install.cjs)"
@@ -115,7 +118,17 @@ claude_repair_native() {
     echo "!! $pkg is not writable - run: node $pkg/install.cjs" >&2
     return 1
   fi
-  claude_native_ok || echo "!! repair ran but claude still reports the error - reinstall claude" >&2
+  claude_native_ok || {
+    echo "!! repair ran but claude still reports the error (platform optional dep likely missing from the npm install)" >&2
+    _claude_native_installer_hint
+  }
+}
+
+_claude_native_installer_hint() {
+  # The npm package keeps self-clobbering via its autoupdater; the native
+  # installer (~/.local/bin/claude, background auto-update) is the durable fix.
+  echo "!! durable fix - migrate to the native installer:" >&2
+  echo "!!   npm uninstall -g @anthropic-ai/claude-code && curl -fsSL https://claude.ai/install.sh | bash" >&2
 }
 
 # Claude Code dual-harness wiring. stow already links .claude/ (skills, hooks,

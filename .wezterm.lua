@@ -203,6 +203,12 @@ config.font = wezterm.font({ family = "IosevkaTerm NF", weight = "Regular" })
 config.font_size = 12
 config.line_height = 1
 
+-- macOS: the same 12pt reads small next to native macOS terminal defaults
+-- (Menlo 13, Terminal.app/iTerm ship 13-14); bump on darwin only.
+if wezterm.target_triple:find("apple-darwin") then
+	config.font_size = 14
+end
+
 -- Window Close Prompt
 config.window_close_confirmation = "NeverPrompt"
 
