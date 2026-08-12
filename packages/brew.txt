@@ -101,7 +101,6 @@ tre-command
 trivy
 unzip
 vegeta
-vercel-cli
 vim
 wget
 xh
