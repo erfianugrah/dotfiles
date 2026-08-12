@@ -22,10 +22,15 @@ describe("buildUrl", () => {
       "https://m.local/rpc/search_ledger?q=zfs&lim=20",
     );
   });
-  test("sessions strips filter-breaking chars", () => {
-    const url = buildUrl("https://m.local", "sessions", "a,b(c)", undefined, 10);
-    expect(url).toContain("title.ilike.*a%20b%20c*");
-    expect(url).not.toContain("%2C");
+  test("sessions uses the search_sessions RPC", () => {
+    expect(buildUrl("https://m.local", "sessions", "a,b(c)", undefined, 10)).toBe(
+      "https://m.local/rpc/search_sessions?q=a%2Cb(c)&lim=10",
+    );
+  });
+  test("sessions passes source through as src", () => {
+    expect(buildUrl("https://m.local", "sessions", "x", "pi", 5)).toBe(
+      "https://m.local/rpc/search_sessions?q=x&lim=5&src=pi",
+    );
   });
 });
 
@@ -42,6 +47,18 @@ describe("stripMarks", () => {
 });
 
 describe("formatRows", () => {
+  test("sessions render match_kind + hits when present (RPC rows)", () => {
+    const lines = formatRows("sessions", [
+      { source: "pi", project: "p", started_at: "t", title: "hit", message_count: 3, match_kind: "both", hits: 4 },
+    ]);
+    expect(lines[0]).toContain("both hits:4");
+  });
+  test("sessions omit match_kind for plain /sessions rows", () => {
+    const lines = formatRows("sessions", [
+      { source: "pi", project: "p", started_at: "t", title: "hit", message_count: 3 },
+    ]);
+    expect(lines[0]).not.toContain("hits:");
+  });
   test("messages are one line each with source and headline", () => {
     const lines = formatRows("messages", [
       { source: "pi", session_key: "pi:h:1", ordinal: 3, ts: "2026-08-09", headline: "a <b>hit</b>\nover two lines" },

@@ -39,7 +39,9 @@ export function buildUrl(base: string, kind: SearchKind, q: string, source: stri
     case "memories":
       return `${base}/memories?content=ilike.*${sq}*&order=created_at.desc&limit=${limit}`;
     case "sessions":
-      return `${base}/sessions?or=(title.ilike.*${sq}*,project.ilike.*${sq}*,cwd.ilike.*${sq}*)&order=started_at.desc.nullslast&limit=${limit}`;
+      // search_sessions RPC (memledger 009): unions attributed title/project/cwd
+      // matches with message-FTS mentions; match_kind says which leg(s) hit.
+      return `${base}/rpc/search_sessions?q=${eq}&lim=${limit}` + (source ? `&src=${encodeURIComponent(source)}` : "");
   }
 }
 
@@ -120,8 +122,11 @@ export function formatRows(kind: SearchKind, rows: Record<string, unknown>[]): s
     case "memories":
       return rows.map((r) => `${r.id} | ${oneLine(String(r.content ?? ""), 200)}`);
     case "sessions":
-      return rows.map((r) =>
-        `${r.source} | ${r.project ?? "?"} | ${r.started_at ?? "?"} | ${oneLine(String(r.title ?? r.session_key ?? ""), 120)} | msgs:${r.message_count ?? "?"}`,
-      );
+      return rows.map((r) => {
+        const base = `${r.source} | ${r.project ?? "?"} | ${r.started_at ?? "?"} | ${oneLine(String(r.title ?? r.session_key ?? ""), 120)} | msgs:${r.message_count ?? "?"}`;
+        // match_kind/hits only exist on search_sessions RPC rows, not on the
+        // plain /sessions rows list_sessions fetches.
+        return r.match_kind ? `${base} | ${r.match_kind}${r.hits ? ` hits:${r.hits}` : ""}` : base;
+      });
   }
 }

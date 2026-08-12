@@ -38,7 +38,7 @@ const memledgerSearchTool = defineTool({
     ),
     kind: Type.Optional(
       Type.String({
-        description: "What to search: messages (default FTS) | semantic (pgvector similarity) | ledger | memories | sessions",
+        description: "What to search: messages (default FTS) | semantic (pgvector similarity) | ledger | memories | sessions (topic search over sessions: attributed title/project/cwd matches + message-content mentions, with match_kind provenance and hit counts - the answer to 'which sessions touched X')",
       }),
     ),
     limit: Type.Optional(Type.Number({ description: "Max rows (default 10, max 50)" })),
@@ -233,7 +233,7 @@ export default function (pi: ExtensionAPI) {
     defineTool({
       name: "list_sessions",
       label: "memledger sessions",
-      description: "List recent sessions, optionally filtered by project basename and/or client (pi|opencode|claude).",
+      description: "List recent sessions, optionally filtered by project basename and/or client (pi|opencode|claude). NOTE: project is the basename of the session's STARTUP cwd, frozen at session start - sessions that worked on a project from a different cwd are invisible here. For 'sessions about X' use memledger_search with kind=sessions (also searches message content).",
       parameters: Type.Object({
         project: Type.Optional(Type.String({ description: "Project basename filter (ilike)" })),
         source: Type.Optional(Type.String({ description: "pi | opencode | claude" })),

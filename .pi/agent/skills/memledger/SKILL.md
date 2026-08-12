@@ -15,9 +15,16 @@ description: Drive the user's memledger system - the centralised, client-agnosti
 - **Summariser**: `memledger summarise` (15min timer) LLM-summarises pi ledger.db `summary_pending` rows (raw shutdown transcripts): Postgres upsert FIRST, then local write-back incl. the `ledger_fts` index so pi's local `ledger_search` still sees them. OpenRouter `deepseek/deepseek-v4-flash` via `MEMLEDGER_LLM_*` in `~/.config/memledger/env`. Since 2026-08-11 pi's session-ledger extension has NO LLM path - the old summarise-on-session_start was a measured 50s-vs-7s startup tax with 2 pending rows. Upsert payloads MUST include the NOT NULL `source` column - PG checks constraints before the ON CONFLICT arbiter, partial payloads 23502 even when the row exists.
 - **Backups**: daily pg_dump sidecar -> MinIO `s3://memledger/pg-dumps/`, 30-day prune.
 - **pi tool**: `memledger_search` extension (dotfiles `.pi/agent/extensions/memledger.ts`) - the canonical search for cross-client or >30d-old history. pi's built-in `session_search` also falls back to memledger automatically.
-- **pi MCP tools**: pi ALSO gets the 5 MCP tools (search_messages, semantic_search, search_ledger, search_memories, list_sessions) in-session via pi-mcp-bridge + an `mcp-remote` stdio shim configured in `~/.pi/agent/mcp-bridge.json` (server `memledger`, bearer from `~/.config/memledger/env`; file is chmod 600). The bridge is stdio-only, so the shim fronts the remote endpoint; verified e2e 2026-08-09 (`pi mcp list` is the no-LLM acceptance test; delete the memledger entry in `~/.pi/agent/mcp-bridge.cache.json` to force re-discovery after the tool schema changes).
+- **pi MCP tools**: pi ALSO gets the 6 MCP tools (search_messages, semantic_search, search_ledger, search_memories, search_sessions, list_sessions) in-session via pi-mcp-bridge + an `mcp-remote` stdio shim configured in `~/.pi/agent/mcp-bridge.json` (server `memledger`, bearer from `~/.config/memledger/env`; file is chmod 600). The bridge is stdio-only, so the shim fronts the remote endpoint; verified e2e 2026-08-09 (`pi mcp list` is the no-LLM acceptance test; delete the memledger entry in `~/.pi/agent/mcp-bridge.cache.json` to force re-discovery after the tool schema changes).
 - **claude.ai corpus**: the claude.ai web history is seeded (2026-08-09, 1673 conversations / ~23k messages, from the account data export zip in Windows Downloads) as source=claude host=claude.ai via `memledger import-claude-ai <export.zip|conversations.json>` (one-shot, idempotent; re-import newer exports to top up). Distinct from Claude Code's ~/.claude/projects jsonl (barely used, 1 session).
 - **UI**: `https://memledger.erfi.io/ui/` - Astro static app (search/sessions/transcript/stats), bonkled-style theme (cream/ink/hairline/plex-mono/accent-red, three-state dark toggle). Built on the router by the one-shot `ui-build` service into /var/lib/memledger/ui-dist; the edge caddy serves it. REBUILD GOTCHA: `docker start memledger-ui-build` reuses the container rootfs - the build command `rm -rf /tmp/web` first or it builds stale code.
+
+## Project attribution (why project=X misses sessions)
+
+`sessions.project` is `basename(startup cwd)` for every ingester, frozen at session start - pi's jsonl header cwd is never updated on cd. Sessions run from a container dir (`~/infra`) or the wrong repo are filed under THAT project even when all their work touched another (measured 2026-08-12: 27 sessions mentioned `hearth` in content, only 5 had `project='hearth'`). Tool-call args carry absolute paths into `messages.content`, so message FTS is the retroactive topic signal.
+
+- "sessions about X" -> `memledger_search` kind=sessions (the `search_sessions` RPC, migration 009): unions attributed title/project/cwd ILIKE with message-FTS mentions, returns `match_kind` (attributed|mentions|both), `hits`, `last_hit`. The MCP `search_sessions` tool is the same function.
+- `list_sessions` (pi tool: `project=ilike`; MCP tool: EXACT match - semantics differ!) is the narrow attributed-browser only.
 
 ## Querying (any client, reads are LAN/tailnet-open)
 
@@ -26,7 +33,8 @@ curl -s "https://memledger.erfi.io/rpc/search_messages?q=<terms>&lim=10" | jq   
 curl -s "https://memledger.erfi.io/rpc/search_messages?q=X&src=opencode" | jq   # per-client filter
 curl -s "https://memledger.erfi.io/semantic/search?q=X&kind=messages&source=claude" | jq  # semantic, all kinds support source
 curl -s "https://memledger.erfi.io/rpc/search_ledger?q=X" | jq                  # work-ledger summaries
-curl -s "https://memledger.erfi.io/sessions?project=eq.<p>&order=started_at.desc" | jq
+curl -s "https://memledger.erfi.io/rpc/search_sessions?q=X&lim=10" | jq         # sessions by topic (match_kind provenance)
+curl -s "https://memledger.erfi.io/sessions?project=eq.<p>&order=started_at.desc" | jq  # attributed only: startup-cwd basename
 ```
 
 Writes need `Authorization: Bearer $MEMLEDGER_TOKEN` (Vaultwarden item `memledger`).

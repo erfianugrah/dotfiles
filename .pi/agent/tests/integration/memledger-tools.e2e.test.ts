@@ -41,6 +41,7 @@ memledger(pi);
 const CANNED: Record<string, unknown> = {
   "rpc/search_messages": [{ session_key: "k", ordinal: 1, source: "pi", role: "user", ts: "t", rank: 1, headline: "hit" }],
   "rpc/search_ledger": [{ project: "p", created_at: "t", summary: "hit" }],
+  "rpc/search_sessions": [{ session_key: "k", source: "pi", project: "p", started_at: "t", title: "hit", message_count: 1, match_kind: "mentions", hits: 2, last_hit: "t" }],
   "memories?": [{ id: "m1", content: "hit" }],
   "sessions?": [{ session_key: "k", source: "pi", project: "p", started_at: "t", title: "hit", message_count: 1 }],
   "semantic/search": { results: [{ session_key: "k", ordinal: 1, id: 1, text: "hit", similarity: 0.9 }] },
@@ -57,6 +58,7 @@ function fakeFetch(input: unknown): Promise<Response> {
 const CALLS: [string, Record<string, unknown>][] = [
   ["memledger_search", { q: "x" }],
   ["memledger_search", { q: "x", kind: "semantic" }],
+  ["memledger_search", { q: "x", kind: "sessions" }],
   ["search_messages", { q: "x" }],
   ["semantic_search", { q: "x" }],
   ["semantic_search", { q: "x", kind: "ledger_entries" }],
