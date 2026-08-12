@@ -98,8 +98,12 @@ export function splitCommandSegments(command: string): string[] {
     }
     stripped = stripped.replace(pat, " ");
   }
-  // Split the outer command on shell command-chaining operators
-  segments.push(...stripped.split(/&&|\|\||;|\|/));
+  // Split the outer command on shell command-chaining operators, INCLUDING
+  // newline and single `&` (background) - otherwise a mutating git/gh command
+  // on a line after the first, or backgrounded with `&`, escapes the ^-anchored
+  // patterns entirely. Over-splitting (e.g. `2>&1`) is safe for a deny gate: it
+  // only yields more segments to check, never fewer.
+  segments.push(...stripped.split(/&&|\|\||;|\||&|\r?\n/));
   return segments;
 }
 
