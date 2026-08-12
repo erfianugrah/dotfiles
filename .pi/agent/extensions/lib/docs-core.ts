@@ -227,6 +227,15 @@ export function buildSearchCmd(tokens: string[], source?: string): string {
   return `${rgOrChain(tokens, "/docs/_index.tsv")} ${filter}`;
 }
 
+// Coerce a caller-supplied result limit to a bounded positive integer so it can
+// never inject shell metacharacters into `head -N`. Defense-in-depth: the tool
+// schema types maxResults as a number, but the pure builder must be safe even
+// if a non-numeric value reaches it.
+export function safeHeadN(limit: unknown, fallback = 20, max = 1000): number {
+  const n = Math.floor(Number(limit));
+  return Number.isFinite(n) && n > 0 ? Math.min(n, max) : fallback;
+}
+
 export function buildSearchFallbackCmds(
   tokens: string[],
   dir: string,
@@ -234,8 +243,8 @@ export function buildSearchFallbackCmds(
 ): { findCmd: string; contentCmd: string } {
   const inameOr = tokens.map((t) => `-iname '*${sq(t)}*'`).join(" -o ");
   return {
-    findCmd: `find '${dir}' -type f \\( ${inameOr} \\) | head -${limit}`,
-    contentCmd: `${rgFilesOrChain(tokens, dir)} | head -${limit}`,
+    findCmd: `find '${dir}' -type f \\( ${inameOr} \\) | head -${safeHeadN(limit)}`,
+    contentCmd: `${rgFilesOrChain(tokens, dir)} | head -${safeHeadN(limit)}`,
   };
 }
 
@@ -255,7 +264,7 @@ export function buildReadCmd(p: string, opts: { offset?: number; lines?: number 
 }
 
 export function buildFindCmd(dir: string, pattern: string, limit: number): string {
-  return `find '${dir}' -iname '${sq(pattern)}' -type f | head -${limit}`;
+  return `find '${dir}' -iname '${sq(pattern)}' -type f | head -${safeHeadN(limit)}`;
 }
 
 export function buildGrepJsonCmd(p: string, query: string, ctx: number): string {
