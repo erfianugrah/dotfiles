@@ -361,10 +361,16 @@ Hooks added (10): confidential-write-guard, git-gh-gate, tool-guard,
 bash-error-hints, entity-qualifier-nudge, skill-guard, lookup-before-ask,
 notify, cd-agents-reload, epistemic-guard - plus ascii-guard.
 
-**Remaining (optional, non-MCP/hook):** the CMD group - `superpowers` (register
-its subskills under `.claude/skills/`) and the prompt templates (`/commit` with
-the AI-attribution ban, etc -> `.claude/commands/`). NATIVE/SKIP rows are
-parity-satisfied by CC built-ins by design (documented above).
+**CMD group DONE:** 6 ACTIVE superpowers subskills symlinked into
+`.claude/skills/` (the 8 the user disabled in pi via SKILL.md.disabled are
+intentionally NOT exposed); 4 portable prompt templates symlinked into
+`.claude/commands/` (commit, pr, test, rollback). Skipped by design: init/review
+(collide with CC built-in skills), local-model-rules (pi llama-server only),
+docs-reference (a reference doc, not a command). NATIVE/SKIP rows are
+parity-satisfied by CC built-ins.
+
+**PARITY COMPLETE** across MCP tools, hooks, skills, and commands. Only the
+NATIVE (CC built-in) and SKIP (pi-internal) rows remain unported by design.
 
 Original tally (pre-workflow): 8 DONE · ~12 MCP+HOOK + 2 CMD remaining ·
 ~16 NATIVE · ~15 SKIP.
