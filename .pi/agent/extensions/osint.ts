@@ -6,13 +6,17 @@
  * `http://localhost:8890/...` (local dev) with bearer auth from
  * `RESEARCH_TOKEN`. Mirrors the python MCP wrapper at
  * ~/research/mcp/research-server.py + formatters/osint.py but as a single
- * self-contained pi extension — no async job manager (pi tool calls block
- * on fetch directly), no caching, just the 11 tools and terse markdown
- * rendering.
+ * self-contained extension — no async job manager (tool calls block on fetch
+ * directly), no caching, just the 11 tools and terse markdown rendering.
  *
  * URL + auth pattern matches web-research.ts / webfetch.ts:
  *   - OSINT_URL env var overrides the default
  *   - RESEARCH_TOKEN env var attaches `Authorization: Bearer …` header
+ *
+ * Pure request-building / response-projection / rendering lives in
+ * ./lib/osint-core.ts (shared with the Claude Code MCP toolkit); this file is
+ * the thin pi adapter and re-exports `_internals` so existing importers
+ * (tests/extensions.test.ts) keep resolving the formatters here.
  *
  * Tools registered:
  *   osint_domain    — DNS, subdomains, certs (crt.sh), WHOIS
@@ -30,629 +34,28 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-const OSINT_URL = process.env.OSINT_URL ?? "https://osint.erfi.io";
-const OSINT_URL_IS_DEFAULT = process.env.OSINT_URL === undefined;
-
-function authHeaders(): Record<string, string> {
-  const tok = process.env.RESEARCH_TOKEN?.trim();
-  return tok ? { authorization: `Bearer ${tok}` } : {};
-}
-
-// One-shot warning when the default public endpoint is in use but no bearer
-// is set — requests will silently 401. Cheap to fire at module load.
-if (OSINT_URL_IS_DEFAULT && !process.env.RESEARCH_TOKEN?.trim()) {
-  console.warn(
-    `[osint] RESEARCH_TOKEN unset; ${OSINT_URL} will reject requests with 401. ` +
-      `Set RESEARCH_TOKEN or point OSINT_URL at a local instance.`,
-  );
-}
-
-// ── HTTP wrapper ──────────────────────────────────────────────────────────
-
-interface Investigation {
-  entity?: string;
-  entity_kind?: string;
-  findings?: Finding[];
-  info?: string[];
-  errors?: string[];
-  sources_queried?: string[];
-  elapsed_ms?: number;
-}
-
-interface Finding {
-  kind: string;
-  value: string;
-  extra?: Record<string, unknown>;
-}
-
-class OsintError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "OsintError";
-    // Preserve the prototype chain across transpile targets (CJS/ES5) where
-    // `extends Error` would otherwise break `instanceof OsintError`.
-    Object.setPrototypeOf(this, new.target.prototype);
-  }
-}
-
-async function osintCall(
-  path: string,
-  payload: Record<string, unknown>,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<Investigation> {
-  // Combine caller's signal (cancel-from-pi) with our own timeout.
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(new Error("osint timeout")), timeoutMs);
-  const onAbort = () => ctl.abort(signal?.reason);
-  if (signal) {
-    if (signal.aborted) ctl.abort(signal.reason);
-    else signal.addEventListener("abort", onAbort, { once: true });
-  }
-  try {
-    const res = await fetch(`${OSINT_URL}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...authHeaders() },
-      body: JSON.stringify(payload),
-      signal: ctl.signal,
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new OsintError(
-        `OSINT HTTP ${res.status} on ${path}${text ? `: ${text.slice(0, 240)}` : ""}`,
-      );
-    }
-    return (await res.json()) as Investigation;
-  } catch (err) {
-    if (err instanceof OsintError) throw err;
-    const reason =
-      (err as Error)?.name === "AbortError"
-        ? `timed out after ${Math.round(timeoutMs / 1000)}s (or cancelled)`
-        : ((err as Error)?.message ?? String(err));
-    throw new OsintError(`OSINT call to ${path} failed: ${reason}`);
-  } finally {
-    clearTimeout(timer);
-    if (signal) signal.removeEventListener("abort", onAbort);
-  }
-}
-
-// ── shared formatting helpers ─────────────────────────────────────────────
-
-function groupByKind(findings: Finding[] | undefined): Record<string, Finding[]> {
-  const out: Record<string, Finding[]> = {};
-  for (const f of findings ?? []) {
-    (out[f.kind] ??= []).push(f);
-  }
-  return out;
-}
-
-function metaFooter(inv: Investigation, extras: string[] = []): string {
-  const sources = inv.sources_queried ?? [];
-  const errors = inv.errors ?? [];
-  const lines = [`_Sources: ${sources.join(", ") || "(none)"} · ${inv.elapsed_ms ?? 0}ms_`];
-  if (errors.length) lines.push(`_Issues: ${errors.slice(0, 3).join("; ")}_`);
-  for (const ex of extras) lines.push(`_${ex}_`);
-  return lines.join("\n");
-}
-
-function infoLines(inv: Investigation, prefix: string): string[] {
-  return (inv.info ?? []).filter((line) => line.startsWith(prefix));
-}
-
-function asString(v: unknown, fallback = "?"): string {
-  return v === null || v === undefined || v === "" ? fallback : String(v);
-}
-
-function asNumber(v: unknown, fallback = 0): number {
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-  }
-  return fallback;
-}
-
-function capList(items: string[], cap: number): { shown: string[]; truncated: boolean } {
-  if (items.length <= cap) return { shown: items, truncated: false };
-  return { shown: items.slice(0, cap), truncated: true };
-}
-
-// ── per-tool formatters ───────────────────────────────────────────────────
-
-function formatDomain(inv: Investigation, mode: "summary" | "full"): string {
-  const domain = asString(inv.entity);
-  const grouped = groupByKind(inv.findings);
-  const parts: string[] = [`# Domain investigation: ${domain}`];
-
-  // DNS records grouped by type
-  const byType: Record<string, string[]> = {};
-  for (const f of grouped["dns_record"] ?? []) {
-    const t = asString((f.extra ?? {})["type"]);
-    (byType[t] ??= []).push(f.value);
-  }
-  const dnsLines: string[] = [];
-  for (const rtype of ["A", "AAAA", "MX", "NS", "TXT", "CNAME"]) {
-    if (byType[rtype]) {
-      const vals = byType[rtype];
-      const shown = vals.length > 6 ? [...vals.slice(0, 6), `…+${vals.length - 6} more`] : vals;
-      dnsLines.push(`  ${rtype}: ${shown.join(", ")}`);
-    }
-  }
-  if (dnsLines.length) parts.push("## DNS\n" + dnsLines.join("\n"));
-
-  // Subdomains
-  const subs = [...new Set((grouped["subdomain"] ?? []).map((f) => f.value))].sort();
-  if (subs.length) {
-    const cap = mode === "summary" ? 15 : subs.length;
-    const { shown, truncated } = capList(subs, cap);
-    const more = truncated ? `\n_(showing ${cap} of ${subs.length} — pass mode="full" for all)_` : "";
-    parts.push(`## Subdomains (${subs.length} unique)\n${shown.join(", ")}${more}`);
-  }
-
-  // Certificates (crt.sh)
-  const certs = grouped["certificate"] ?? [];
-  if (certs.length) {
-    const ex = (certs[0].extra ?? {}) as Record<string, unknown>;
-    parts.push(
-      "## Certificates (crt.sh)\n" +
-        `Total: ${asString(ex.total_certs)} · Latest issuer: ${asString(ex.issuer).slice(0, 80)}\n` +
-        `Valid ${asString(ex.not_before).slice(0, 10)} → ${asString(ex.not_after).slice(0, 10)}`,
-    );
-  }
-
-  // WHOIS
-  const whois = grouped["whois_field"] ?? [];
-  if (whois.length) {
-    const wmap: Record<string, string> = {};
-    for (const f of whois) {
-      const field = asString((f.extra ?? {})["field"]);
-      if (!(field in wmap)) wmap[field] = f.value;
-    }
-    const wanted = ["registrar", "created", "expires", "dnssec"];
-    const lp = wanted.filter((k) => k in wmap).map((k) => `${k}=${wmap[k]}`);
-    if (lp.length) parts.push("## WHOIS\n" + lp.join(" · "));
-  }
-
-  parts.push(metaFooter(inv));
-  return parts.join("\n\n");
-}
-
-function formatIp(inv: Investigation): string {
-  const ip = asString(inv.entity);
-  const grouped = groupByKind(inv.findings);
-  const parts: string[] = [`# IP investigation: ${ip}`];
-
-  const geo = grouped["geolocation"] ?? [];
-  if (geo.length) {
-    const ex = (geo[0].extra ?? {}) as Record<string, unknown>;
-    const right = ex.org ?? ex.asn;
-    parts.push(
-      "## Geolocation\n" +
-        `${asString(ex.country)} · ${asString(ex.city)} · ${asString(right)}`,
-    );
-  }
-
-  const hostnames = [...new Set((grouped["hostname"] ?? []).map((f) => f.value))].sort();
-  if (hostnames.length) parts.push("## Hostnames\n" + hostnames.slice(0, 8).join(", "));
-
-  const ports = [...new Set(
-    (grouped["open_port"] ?? [])
-      .map((f) => parseInt(f.value, 10))
-      .filter((n) => Number.isFinite(n)),
-  )].sort((a, b) => a - b);
-  if (ports.length) parts.push("## Open ports (Shodan InternetDB)\n" + ports.join(", "));
-
-  const tags = grouped["vuln_tag"] ?? [];
-  const cves = tags.filter((f) => Boolean((f.extra ?? {})["is_cve"]));
-  const plain = tags.filter((f) => !(f.extra ?? {})["is_cve"]);
-  if (plain.length) parts.push("## Tags\n" + plain.map((f) => f.value).join(", "));
-  if (cves.length) parts.push("## CVEs\n" + cves.slice(0, 10).map((f) => f.value).join(", "));
-
-  const shared = [...new Set((grouped["shared_host"] ?? []).map((f) => f.value))].sort();
-  if (shared.length) {
-    const { shown, truncated } = capList(shared, 15);
-    const more = truncated
-      ? `\n_(showing 15 of ${shared.length} — IP may be a shared CDN)_`
-      : "";
-    parts.push(`## Shared hosts (${shared.length} unique)\n${shown.join(", ")}${more}`);
-  }
-
-  parts.push(metaFooter(inv));
-  return parts.join("\n\n");
-}
-
-function formatEmail(inv: Investigation): string {
-  const email = asString(inv.entity);
-  const grouped = groupByKind(inv.findings);
-  const parts: string[] = [`# Email investigation: ${email}`];
-
-  const regs = [...new Set((grouped["platform_registration"] ?? []).map((f) => f.value))].sort();
-  if (regs.length) {
-    parts.push(`## Registered on ${regs.length} services (Holehe)\n${regs.join(", ")}`);
-  } else {
-    parts.push("## Holehe\nNo platform registrations detected.");
-  }
-
-  const breaches = grouped["breach"] ?? [];
-  if (breaches.length) {
-    const lines = breaches.map((b) => {
-      const ex = (b.extra ?? {}) as Record<string, unknown>;
-      const dc = (ex.data_classes as string[] | undefined) ?? [];
-      return (
-        `- **${asString(ex.title, b.value)}** (${asString(ex.breach_date)}) ` +
-        `· ${asString(ex.pwn_count)} accounts · ${dc.slice(0, 5).join(", ")}`
-      );
-    });
-    parts.push(`## Breaches (HIBP) — ${breaches.length} known\n${lines.join("\n")}`);
-  } else if ((inv.sources_queried ?? []).includes("haveibeenpwned")) {
-    parts.push("## Breaches (HIBP)\nNo breaches found.");
-  } else {
-    parts.push("## Breaches (HIBP)\n_API key not set — pass HIBP_API_KEY env to enable._");
-  }
-
-  parts.push(metaFooter(inv, infoLines(inv, "holehe:")));
-  return parts.join("\n\n");
-}
-
-function formatUsername(
-  inv: Investigation,
-  mode: "fast" | "deep",
-  showAll: boolean,
-): string {
-  const username = asString(inv.entity);
-  const grouped = groupByKind(inv.findings);
-  const accounts = grouped["account"] ?? [];
-  const parts: string[] = [`# Username investigation: ${username}  (${mode})`];
-
-  if (!accounts.length) {
-    parts.push("No accounts found.");
-  } else {
-    const cap = showAll ? accounts.length : 30;
-    const shown = accounts.slice(0, cap);
-    const lines = shown.map(
-      (a) => `- **${asString((a.extra ?? {})["platform"])}**: ${a.value}`,
-    );
-    let header = `## Confirmed accounts (${accounts.length} hits)`;
-    if (accounts.length > cap) header += ` — showing top ${cap}, pass show_all=true for the rest`;
-    parts.push(header + "\n" + lines.join("\n"));
-  }
-
-  const tool = mode === "deep" ? "maigret" : "sherlock";
-  const extras = infoLines(inv, `${tool}:`);
-  if (mode !== "deep") {
-    extras.push('Run with mode="deep" for Maigret (~5min, 3000+ sites, recursive pivots).');
-  }
-  parts.push(metaFooter(inv, extras));
-  return parts.join("\n\n");
-}
-
-function formatUrl(inv: Investigation): string {
-  const url = asString(inv.entity);
-  const grouped = groupByKind(inv.findings);
-  const scans = grouped["scan_result"] ?? [];
-  const parts: string[] = [`# URL investigation: ${url}`];
-
-  if (!scans.length) {
-    parts.push(
-      "No urlscan.io scans found for this domain. Pass `submit=true` to scan now.",
-    );
-  } else {
-    const lines = scans.slice(0, 5).map((s) => {
-      const ex = (s.extra ?? {}) as Record<string, unknown>;
-      const verdict = ex.malicious ? "⚠ malicious" : "clean";
-      const asn = asString(ex.asn, "").trim();
-      const asnname = asString(ex.asnname, "").slice(0, 40);
-      const asnStr = `${asn} ${asnname}`.trim() || "?";
-      return (
-        `- ${asString(ex.url).slice(0, 80)}\n` +
-        `  IP: ${asString(ex.ip)} · ${asString(ex.country)} · ${asnStr}\n` +
-        `  ${asString(ex.scan_time)} · ${verdict}`
-      );
-    });
-    parts.push(`## urlscan.io — ${scans.length} recent scans\n${lines.join("\n")}`);
-  }
-
-  parts.push(metaFooter(inv));
-  return parts.join("\n\n");
-}
-
-function formatPhone(inv: Investigation): string {
-  const number = asString(inv.entity);
-  const findings = inv.findings ?? [];
-  const parts: string[] = [`# Phone investigation: ${number}`];
-
-  if (!findings.length) {
-    parts.push("No data returned. Most scanners require API keys; only 'local' is free.");
-  } else {
-    const byScanner: Record<string, Record<string, unknown>> = {};
-    for (const f of findings) {
-      const ex = (f.extra ?? {}) as Record<string, unknown>;
-      const scanner = asString(ex.scanner);
-      const target = (byScanner[scanner] ??= {});
-      for (const [k, v] of Object.entries(ex)) {
-        if (k === "scanner") continue;
-        if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) continue;
-        target[k] = v;
-      }
-    }
-    for (const [scanner, fields] of Object.entries(byScanner)) {
-      const lines = [`## ${scanner}`];
-      for (const [k, v] of Object.entries(fields)) lines.push(`- ${k}: ${JSON.stringify(v)}`);
-      parts.push(lines.join("\n"));
-    }
-  }
-
-  parts.push(metaFooter(inv));
-  return parts.join("\n\n");
-}
-
-function formatThreat(inv: Investigation): string {
-  const target = asString(inv.entity);
-  const kind = asString(inv.entity_kind);
-  const grouped = groupByKind(inv.findings);
-  const rep = grouped["reputation"] ?? [];
-  const detections = grouped["detection"] ?? [];
-  const parts: string[] = [`# Threat lookup: ${target}  (${kind})`];
-
-  if (!rep.length) {
-    const info = inv.info ?? [];
-    const errors = inv.errors ?? [];
-    if (info.some((m) => m.includes("VT_API_KEY"))) {
-      parts.push("VirusTotal lookup unavailable: VT_API_KEY not set in environment.");
-    } else if (info.some((m) => m.includes("could not classify"))) {
-      parts.push(`Could not auto-detect '${target}' as hash/URL/IP/domain.`);
-    } else if (errors.length) {
-      parts.push("Lookup failed — see footer for details.");
-    } else {
-      parts.push("No reputation data available (target not in VT corpus).");
-    }
-  } else {
-    const ex = (rep[0].extra ?? {}) as Record<string, unknown>;
-    const m = asNumber(ex.malicious);
-    const s = asNumber(ex.suspicious);
-    const h = asNumber(ex.harmless);
-    const verdict = m > 0 ? "⚠ malicious" : s > 0 ? "? suspicious" : "clean";
-    parts.push(
-      `## Verdict: ${verdict}\n` +
-        `${m} malicious · ${s} suspicious · ${h} harmless · ${asNumber(ex.undetected)} undetected ` +
-        `(total ${asNumber(ex.total)} engines)`,
-    );
-
-    const facts: string[] = [];
-    for (const [key, label] of [
-      ["magic", "type"],
-      ["size", "size (B)"],
-      ["country", "country"],
-      ["asn", "ASN"],
-      ["as_owner", "AS"],
-      ["registrar", "registrar"],
-      ["reputation", "reputation"],
-    ] as const) {
-      const v = ex[key];
-      if (v !== null && v !== undefined && v !== "" && v !== 0) facts.push(`- ${label}: ${v}`);
-    }
-    if (facts.length) parts.push("## Facts\n" + facts.join("\n"));
-
-    const tags = (ex.tags as string[] | undefined) ?? [];
-    if (tags.length) parts.push("## Tags\n" + tags.slice(0, 10).join(", "));
-
-    if (detections.length) {
-      const lines = detections.map((d) => {
-        const de = (d.extra ?? {}) as Record<string, unknown>;
-        return `- **${d.value}**: ${asString(de.result)} (${asString(de.category)})`;
-      });
-      parts.push(`## Sample flagged engines (top ${detections.length})\n${lines.join("\n")}`);
-    }
-  }
-
-  parts.push(metaFooter(inv));
-  return parts.join("\n\n");
-}
-
-function formatCve(inv: Investigation): string {
-  const cveId = asString(inv.entity);
-  const grouped = groupByKind(inv.findings);
-  const cves = grouped["cve"] ?? [];
-  const parts: string[] = [`# CVE lookup: ${cveId}`];
-
-  if (!cves.length) {
-    const info = inv.info ?? [];
-    const errors = inv.errors ?? [];
-    if (info.some((m) => m.includes("not a valid CVE id"))) {
-      parts.push(`\`${cveId}\` is not a valid CVE id. Expected format: CVE-YYYY-NNNNN.`);
-    } else if (info.some((m) => m.includes("no record"))) {
-      parts.push(`NVD has no record for ${cveId}.`);
-    } else if (errors.length) {
-      parts.push("Lookup failed — see footer for details.");
-    } else {
-      parts.push("No data returned.");
-    }
-    parts.push(metaFooter(inv));
-    return parts.join("\n\n");
-  }
-
-  const ex = (cves[0].extra ?? {}) as Record<string, unknown>;
-  const score = ex.cvss_score;
-  const severity = ex.cvss_severity;
-  const version = ex.cvss_version;
-  const summary: string[] = [`## Summary (${cveId})`];
-  if (score !== undefined && severity) {
-    summary.push(`CVSS v${asString(version)}: **${score} (${severity})**`);
-  } else if (severity) {
-    summary.push(`CVSS v${asString(version)} severity: **${severity}**`);
-  }
-  const pub = asString(ex.published, "").slice(0, 10);
-  const mod = asString(ex.modified, "").slice(0, 10);
-  if (pub) summary.push(`Published: ${pub}` + (mod && mod !== pub ? ` · Modified: ${mod}` : ""));
-  parts.push(summary.join("\n"));
-
-  let desc = asString(ex.description, "").trim();
-  if (desc) {
-    if (desc.length > 700) desc = desc.slice(0, 700).trimEnd() + "…";
-    parts.push("## Description\n" + desc);
-  }
-
-  const cwes = (ex.cwes as string[] | undefined) ?? [];
-  if (cwes.length) parts.push("## Weaknesses\n" + cwes.slice(0, 8).join(", "));
-
-  const vector = ex.cvss_vector;
-  if (vector) parts.push(`## CVSS vector\n\`${vector}\``);
-
-  const refs = (ex.references as string[] | undefined) ?? [];
-  const refTotal = asNumber(ex.ref_total, refs.length);
-  if (refs.length) {
-    const cap = 5;
-    const shown = refs.slice(0, cap).map((u) => `- ${u}`);
-    const more = refTotal > cap ? `\n_(showing ${cap} of ${refTotal} references)_` : "";
-    parts.push(`## References (${refTotal})\n${shown.join("\n")}${more}`);
-  }
-
-  parts.push(metaFooter(inv));
-  return parts.join("\n\n");
-}
-
-function formatHarvest(inv: Investigation): string {
-  const domain = asString(inv.entity);
-  const grouped = groupByKind(inv.findings);
-  const parts: string[] = [`# Harvest: ${domain}`];
-
-  const emails = [...new Set((grouped["harvested_email"] ?? []).map((f) => f.value))].sort();
-  const hosts = [...new Set((grouped["harvested_host"] ?? []).map((f) => f.value))].sort();
-
-  if (emails.length) {
-    const { shown, truncated } = capList(emails, 30);
-    const more = truncated ? `\n_(showing 30 of ${emails.length})_` : "";
-    parts.push(`## Emails (${emails.length})\n${shown.join(", ")}${more}`);
-  }
-  if (hosts.length) {
-    const { shown, truncated } = capList(hosts, 30);
-    const more = truncated ? `\n_(showing 30 of ${hosts.length})_` : "";
-    parts.push(`## Hosts (${hosts.length})\n${shown.join(", ")}${more}`);
-  }
-  if (!emails.length && !hosts.length) parts.push("No emails or hosts harvested.");
-
-  parts.push(metaFooter(inv));
-  return parts.join("\n\n");
-}
-
-// Category tags worth grouping POIs under. Order matters: the first match
-// wins. Transit keys are included because MRT stations carry railway=station
-// with no amenity/shop/leisure tag, and falling through to an arbitrary tag
-// value grouped five of them under "Singapore" (from network=Singapore).
-const POI_CATEGORY_KEYS = [
-  "amenity", "shop", "tourism", "leisure", "railway", "public_transport",
-  "highway", "building",
-] as const;
-
-const POI_CAP = 25;
-
-function poiCategory(tags: Record<string, unknown>): string {
-  for (const key of POI_CATEGORY_KEYS) {
-    const v = tags[key];
-    if (typeof v === "string" && v) return v;
-  }
-  return "other";
-}
-
-function formatGeo(inv: Investigation, mode: "summary" | "full" = "summary"): string {
-  const entity = asString(inv.entity);
-  const grouped = groupByKind(inv.findings);
-  const geocodes = grouped["geocode"] ?? [];
-  const pois = grouped["poi"] ?? [];
-  const parts: string[] = [`# Location: ${entity}`];
-
-  if (geocodes.length) {
-    const ex = (geocodes[0].extra ?? {}) as Record<string, unknown>;
-    const meta = [ex.type, ex.osm].filter((v) => typeof v === "string" && v);
-    const coord = `Coordinates: ${ex.lat}, ${ex.lon}`;
-    parts.push(meta.length ? `${coord}  (${meta.join(", ")})` : coord);
-  } else if (!pois.length) {
-    parts.push("No location data returned.");
-  }
-
-  if (pois.length) {
-    const byCat: Record<string, Finding[]> = {};
-    for (const p of pois) {
-      const tags = ((p.extra ?? {}) as Record<string, unknown>).tags ?? {};
-      (byCat[poiCategory(tags as Record<string, unknown>)] ??= []).push(p);
-    }
-    const dist = (f: Finding) => {
-      const d = ((f.extra ?? {}) as Record<string, unknown>).distance_m;
-      return typeof d === "number" ? d : Number.POSITIVE_INFINITY;
-    };
-    const cap = mode === "full" ? pois.length : POI_CAP;
-    let rendered = 0;
-    const lines: string[] = ["## POI nearby"];
-
-    for (const cat of Object.keys(byCat).sort()) {
-      const items = byCat[cat].sort((a, b) => dist(a) - dist(b));
-      lines.push(`\n### ${cat} (${items.length})`);
-      for (const p of items) {
-        if (rendered >= cap) break;
-        const d = dist(p);
-        const suffix = Number.isFinite(d) ? ` \u00b7 ${Math.round(d)}m` : "";
-        lines.push(`- ${asString(p.value)}${suffix}`);
-        rendered++;
-      }
-      if (rendered >= cap) break;
-    }
-    if (rendered < pois.length) {
-      lines.push(`\n_${pois.length - rendered} more POI not shown - pass mode='full'._`);
-    }
-    parts.push(lines.join("\n"));
-  }
-
-  parts.push(metaFooter(inv));
-  return parts.join("\n\n");
-}
-
-const ARCHIVE_CAP = 20;
-
-function deltaStr(delta: unknown): string {
-  if (typeof delta !== "number") return "";
-  if (delta === 0) return "  (same size)";
-  return `  (${delta > 0 ? "+" : ""}${delta} bytes)`;
-}
-
-function formatArchive(inv: Investigation, mode: "summary" | "full" = "summary"): string {
-  const entity = asString(inv.entity);
-  const snaps = groupByKind(inv.findings)["snapshot"] ?? [];
-  const parts: string[] = [`# Archive history: ${entity}`];
-
-  if (!snaps.length) {
-    const info = (inv.info ?? []) as string[];
-    const errors = (inv.errors ?? []) as string[];
-    parts.push(info.length ? info.join("\n") : errors.length ? errors.join("\n") : "No captures.");
-    parts.push(metaFooter(inv));
-    return parts.join("\n\n");
-  }
-
-  const ts = (f: Finding) => asString(((f.extra ?? {}) as Record<string, unknown>).timestamp);
-  const ordered = [...snaps].sort((a, b) => ts(a).localeCompare(ts(b)));
-  const firstEx = (ordered[0].extra ?? {}) as Record<string, unknown>;
-  const lastEx = (ordered[ordered.length - 1].extra ?? {}) as Record<string, unknown>;
-  let window = `${ordered.length} content changes`;
-  if (firstEx.iso && lastEx.iso && firstEx.iso !== lastEx.iso) {
-    window += ` between ${firstEx.iso} and ${lastEx.iso}`;
-  }
-  parts.push(window);
-
-  const cap = mode === "full" ? ordered.length : ARCHIVE_CAP;
-  const lines: string[] = ["## Changes"];
-  for (const snap of ordered.slice(0, cap)) {
-    const ex = (snap.extra ?? {}) as Record<string, unknown>;
-    const status = ex.status === "200" ? "" : ` [${asString(ex.status)}]`;
-    lines.push(`- ${asString(ex.iso) || asString(snap.value)}${status}${deltaStr(ex.delta_bytes)}\n  ${asString(ex.url)}`);
-  }
-  parts.push(lines.join("\n"));
-  if (ordered.length > cap) {
-    parts.push(`_(showing ${cap} of ${ordered.length} changes - pass mode='full' for all)_`);
-  }
-
-  parts.push(metaFooter(inv));
-  return parts.join("\n\n");
-}
+import {
+  authHeaders,
+  deltaStr,
+  formatArchive,
+  formatCve,
+  formatDomain,
+  formatEmail,
+  formatGeo,
+  formatHarvest,
+  formatIp,
+  formatPhone,
+  formatThreat,
+  formatUrl,
+  formatUsername,
+  groupByKind,
+  metaFooter,
+  OSINT_URL,
+  osintCall,
+  poiCategory,
+  summarise,
+  type Investigation,
+} from "./lib/osint-core.ts";
 
 // ── tool definitions ──────────────────────────────────────────────────────
 
@@ -661,16 +64,6 @@ function makeResult(text: string, details: Record<string, unknown>): {
   details: Record<string, unknown>;
 } {
   return { content: [{ type: "text", text }], details };
-}
-
-function summarise(inv: Investigation): Record<string, unknown> {
-  return {
-    entity: inv.entity,
-    findings: (inv.findings ?? []).length,
-    sources: inv.sources_queried ?? [],
-    elapsed_ms: inv.elapsed_ms ?? 0,
-    errors: inv.errors ?? [],
-  };
 }
 
 const osintDomain = defineTool({
@@ -884,11 +277,11 @@ const osintCve = defineTool({
 const osintGeo = defineTool({
   name: "osint_geo",
   promptSnippet:
-    "osint_geo \u2014 geocode a place name, reverse-geocode a coordinate, and find nearby POI (OpenStreetMap).",
+    "osint_geo — geocode a place name, reverse-geocode a coordinate, and find nearby POI (OpenStreetMap).",
   promptGuidelines: [
     "Pass `query` for a place name, or `lat`+`lon` for reverse geocoding. One or the other.",
     "POI search only runs when `tags` is given, e.g. {\"shop\":\"supermarket\",\"railway\":\"station\"}. Values may be '*' to match any.",
-    "Amenity-density reconnaissance, not brand completeness \u2014 OSM commercial-POI coverage is partial, so treat counts as a floor.",
+    "Amenity-density reconnaissance, not brand completeness — OSM commercial-POI coverage is partial, so treat counts as a floor.",
     "Key-less (Nominatim + Overpass). Overpass rate-limits to 2 concurrent slots and 504s under load; failures are recorded, not raised.",
   ],
   label: "OSINT Geo",
@@ -1000,7 +393,8 @@ const archiveLookup = defineTool({
   },
 });
 
-// Exports for unit tests + extension entry.
+// Exports for unit tests + extension entry. Re-exported from the pure core so
+// existing importers (tests/extensions.test.ts) keep resolving them here.
 export const _internals = {
   groupByKind,
   metaFooter,
@@ -1020,6 +414,8 @@ export const _internals = {
   authHeaders,
   OSINT_URL,
 };
+
+export type { Investigation };
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool(osintDomain);

@@ -57,135 +57,50 @@
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
-import * as fs from "node:fs";
 import * as path from "node:path";
-import { extractCdTargets, expandTilde } from "./cd-agents-reload";
 import {
   COMMIT_NUDGE,
-  findRepoRoot,
   isCommitNudged,
   isCommitPersist,
   markCommitNudged,
   repoHasRemote,
   RERUN_FULL_NOTICE,
 } from "./lib/guard-commit-shared";
+import {
+  blockedTermsFor as coreBlockedTermsFor,
+  collectCommitPayload,
+  dedup,
+  emptyStore,
+  extractMessageFilePaths,
+  extractPatchPaths,
+  findRepoRoot,
+  globalStorePath as coreGlobalStorePath,
+  isProsePath,
+  isStoreFile,
+  readStore,
+  repoStorePath,
+  resolveBashCwd,
+  scanForBlocked,
+  writeStore,
+  type Store,
+} from "./lib/confidential-write-guard-core";
 
-// Re-exported so existing imports (tests) keep working; the canonical home is
-// guard-commit-shared.ts, where cd-agents-reload can absorb the nudge when IT
-// blocks the same compound commit command first (pi short-circuits tool_call
-// handlers on the first block).
-export { isCommitPersist };
+// Re-exported so existing imports (tests) keep working. isCommitPersist's
+// canonical home is guard-commit-shared.ts (cd-agents-reload absorbs the nudge
+// when IT blocks the same compound commit command first); the pure detection /
+// payload helpers live in confidential-write-guard-core.ts, shared with the
+// Claude Code hook.
+export { collectCommitPayload, extractMessageFilePaths, isCommitPersist, resolveBashCwd, scanForBlocked };
 
-// ── store ───────────────────────────────────────────────────────────────────
-
-interface Store {
-  blocked: string[];
-  allowed: string[];
-}
-
-function emptyStore(): Store {
-  return { blocked: [], allowed: [] };
-}
+// ── store (bind the agent-dir-parameterised core helpers) ────────────────────
 
 function globalStorePath(): string {
-  return path.join(getAgentDir(), "confidential-terms.local.json");
-}
-
-function repoStorePath(forPath: string): string | null {
-  const root = findRepoRoot(path.isAbsolute(forPath) ? forPath : path.resolve(forPath));
-  if (!root) return null;
-  const gitDir = path.join(root, ".git");
-  // only the common case (.git is a directory) — worktrees/submodules skip per-repo store
-  try {
-    if (!fs.statSync(gitDir).isDirectory()) return null;
-  } catch {
-    return null;
-  }
-  return path.join(gitDir, "info", "confidential-terms.json");
-}
-
-function readStore(file: string): Store {
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
-    return {
-      blocked: Array.isArray(raw.blocked) ? raw.blocked.map(String) : [],
-      allowed: Array.isArray(raw.allowed) ? raw.allowed.map(String) : [],
-    };
-  } catch {
-    return emptyStore();
-  }
-}
-
-function writeStore(file: string, store: Store): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ blocked: dedup(store.blocked), allowed: dedup(store.allowed) }, null, 2) + "\n");
-}
-
-function dedup(xs: string[]): string[] {
-  return [...new Set(xs.map((x) => x.trim()).filter(Boolean))];
-}
-
-// Bash tool calls spawn a fresh subprocess per invocation, so a `cd <dir> &&`
-// prefix inside the command string changes ONLY that subprocess's directory -
-// pi's own process.cwd() never moves. Blindly using process.cwd() here means
-// `cd ~/other-repo && git commit ...` gets attributed to pi's startup repo,
-// not the repo the commit actually lands in: the wrong per-repo blocked-terms
-// store gets checked (a real enforcement gap, not just a cosmetic message
-// bug), and the COMMIT_NUDGE message names the wrong directory. Resolve the
-// last `cd` target in the command (same heuristic cd-agents-reload.ts already
-// uses) and fall back to process.cwd() when there isn't one.
-export function resolveBashCwd(cmd: string, fallback: string = process.cwd()): string {
-  const targets = extractCdTargets(cmd);
-  if (targets.length === 0) return fallback;
-  const last = targets[targets.length - 1];
-  return path.resolve(fallback, expandTilde(last));
-}
-
-function isStoreFile(p: string): boolean {
-  const b = path.basename(path.resolve(p));
-  return b === "confidential-terms.local.json" || b === "confidential-terms.json";
+  return coreGlobalStorePath(getAgentDir());
 }
 
 /** Merged blocked terms relevant to a target path (global + that path's repo). */
 function blockedTermsFor(targetPath: string): string[] {
-  const out = [...readStore(globalStorePath()).blocked];
-  const rp = repoStorePath(targetPath);
-  if (rp) out.push(...readStore(rp).blocked);
-  return dedup(out);
-}
-
-// ── matching (deterministic, over the user-confirmed list) ──────────────────
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function termRegex(term: string): RegExp {
-  // non-alphanumeric boundaries so "Acme" matches in "Acme/Foo" but not "Acmebot"
-  return new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(term)}(?![A-Za-z0-9])`, "i");
-}
-
-export interface Hit {
-  masked: string;
-}
-
-/** First user-blocked term found in `text`; masks the term in a context snippet. */
-export function scanForBlocked(text: string, blocked: string[]): Hit | null {
-  if (!text) return null;
-  for (const term of blocked) {
-    const m = termRegex(term).exec(text);
-    if (m) {
-      const start = m.index;
-      const end = start + m[0].length;
-      const a = Math.max(0, start - 24);
-      const b = Math.min(text.length, end + 24);
-      const before = text.slice(a, start).replace(/\s+/g, " ");
-      const after = text.slice(end, b).replace(/\s+/g, " ");
-      return { masked: `${a > 0 ? "…" : ""}${before}[REDACTED]${after}${b < text.length ? "…" : ""}` };
-    }
-  }
-  return null;
+  return coreBlockedTermsFor(targetPath, getAgentDir());
 }
 
 // ── nudge tracking (once per remote-backed repo, per process) ───────────────
@@ -197,12 +112,6 @@ export function scanForBlocked(text: string, blocked: string[]): Hit | null {
 // the same compound commit command first - avoids a double-block cascade that
 // swallows the command's side effects (heredoc message file, git add) twice.
 const nudgedRepos = new Set<string>();
-
-const PROSE_EXT = new Set([".md", ".mdx", ".txt", ".rst", ".adoc", ".org", ".markdown"]);
-
-function isProsePath(p: string): boolean {
-  return PROSE_EXT.has(path.extname(p).toLowerCase()) || /(^|\/)docs?\//i.test(p);
-}
 
 const NUDGE = (repoRoot: string, remote: boolean): string =>
   `tool-guard[confidential-write]: first prose/commit write into ${repoRoot}` +
@@ -290,98 +199,14 @@ const confidentialTermsTool = defineTool({
   },
 });
 
-// The COMMIT_PERSIST trigger regex lives in guard-commit-shared.ts (imported
-// above as isCommitPersist) - cd-agents-reload needs the same predicate to
-// know when a command it's blocking is also a commit-persist whose vet nudge
-// it should absorb. It is BOTH the vet-nudge trigger AND the enforcement
-// trigger here: the guard scans the *payload* of these commands (message text
-// + staged diff + message-file contents), never arbitrary bash, so a
-// READ/SEARCH command containing a blocked term as a search pattern can't
-// false-positive.
-
-// Message-file flags whose *contents* are part of the persisted payload:
-//   git commit -F <file> / --file=<file>
-//   git tag    -F <file> / --file=<file>
-//   gh ... --body-file <file>
-// The `-` sentinel (stdin) is excluded - we can't read it here; the heredoc
-// body (if any) is already inline in the command string and gets scanned.
-const MESSAGE_FILE_FLAG =
-  /(?:^|\s)(?:-F|--file|--body-file)(?:=|\s+)(['"]?)([^'"\s]+)\1/g;
-
-/** Paths whose contents form part of a commit/PR payload (excludes stdin `-`). */
-export function extractMessageFilePaths(cmd: string): string[] {
-  const out: string[] = [];
-  MESSAGE_FILE_FLAG.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = MESSAGE_FILE_FLAG.exec(cmd)) !== null) {
-    const p = m[2];
-    if (p && p !== "-") out.push(p);
-  }
-  return out;
-}
-
-// Cap how much staged diff / message-file text we pull into the scan. A blocked
-// identifier appearing anywhere trips the boundary regex, so we don't need the
-// whole thing - just enough to catch the common case without stalling a huge
-// commit. 512 KiB is generous for messages + a normal diff.
-const PAYLOAD_SCAN_CAP = 512 * 1024;
-
-/** Staged diff for a repo (the content half of a `git commit` payload). */
-function stagedDiff(cwd: string): string {
-  try {
-    return execFileSync("git", ["diff", "--cached", "--no-color"], {
-      cwd,
-      encoding: "utf8",
-      timeout: 4000,
-      maxBuffer: 4 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).slice(0, PAYLOAD_SCAN_CAP);
-  } catch {
-    return "";
-  }
-}
-
-/**
- * Assemble the persisted-payload text for a commit/PR/issue bash command:
- *   - the command string itself (captures inline `-m` / `--body` / heredoc)
- *   - the contents of any -F / --body-file message files
- *   - for `git commit`, the staged diff (`git diff --cached`)
- * We scan THIS, not the raw command alone, so an identifier that lands in the
- * staged content or a message file is caught even though it's not in argv.
- */
-export function collectCommitPayload(
-  cmd: string,
-  cwd: string,
-  readFile: (p: string) => string = (p) => {
-    try {
-      return fs.readFileSync(p, "utf8").slice(0, PAYLOAD_SCAN_CAP);
-    } catch {
-      return "";
-    }
-  },
-  diff: (c: string) => string = stagedDiff,
-): string[] {
-  const parts: string[] = [cmd];
-  for (const rel of extractMessageFilePaths(cmd)) {
-    const abs = path.isAbsolute(rel) ? rel : path.resolve(cwd, expandTilde(rel));
-    const body = readFile(abs);
-    if (body) parts.push(body);
-  }
-  if (/\bgit\s+commit\b/.test(cmd)) {
-    const d = diff(cwd);
-    if (d) parts.push(d);
-  }
-  return parts;
-}
-
-function extractPatchPaths(patchText: string): string[] {
-  const out: string[] = [];
-  for (const line of patchText.split(/\r?\n/)) {
-    const m = line.match(/^\*\*\* (?:Add|Update|Delete|Move(?: to)?) File: (.+)$/);
-    if (m) out.push(m[1].trim());
-  }
-  return out;
-}
+// The commit-payload assembly (extractMessageFilePaths / collectCommitPayload /
+// extractPatchPaths) and term scanning live in confidential-write-guard-core.ts,
+// shared with the Claude Code hook. The guard scans the *payload* of commit
+// commands (message text + staged diff + message-file contents), never
+// arbitrary bash, so a READ/SEARCH command containing a blocked term as a
+// search pattern can't false-positive. isCommitPersist (from
+// guard-commit-shared.ts) is BOTH the vet-nudge trigger AND the enforcement
+// trigger; cd-agents-reload needs the same predicate to absorb the nudge.
 
 function blockMsg(masked: string, where: string): string {
   return (

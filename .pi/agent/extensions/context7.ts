@@ -20,17 +20,14 @@
  * fresh code samples from npm packages that aren't in docs.erfi.io.
  * Use docs.erfi.io first for established libs (Postgres, K8s, AWS, etc.);
  * fall back to context7 for newer/niche packages.
+ *
+ * Pure logic lives in ./lib/context7-core.ts (shared with the Claude Code MCP
+ * toolkit); this file is the thin pi adapter.
  */
 
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-const BASE_URL = "https://context7.com/api/v1";
-
-function authHeaders(): Record<string, string> {
-  const key = process.env.CONTEXT7_API_KEY;
-  return key ? { authorization: `Bearer ${key}` } : {};
-}
+import { queryDocs as queryDocsCore, resolveLibraryId as resolveLibraryIdCore } from "./lib/context7-core.ts";
 
 const resolveLibraryId = defineTool({
   name: "context7_resolve_library_id",
@@ -68,41 +65,11 @@ const resolveLibraryId = defineTool({
   }),
 
   async execute(_id, params) {
-    const url = new URL(`${BASE_URL}/search`);
-    url.searchParams.set("query", params.libraryName);
-    if (params.query) url.searchParams.set("topic", params.query);
-    const res = await fetch(url.toString(), { headers: authHeaders() });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return {
-        isError: true,
-        content: [{ type: "text", text: `context7 HTTP ${res.status}: ${body.slice(0, 200)}` }],
-        details: { status: res.status },
-      };
-    }
-    const data = (await res.json()) as { results?: Array<Record<string, unknown>> };
-    const results = data.results ?? [];
-    if (results.length === 0) {
-      return { content: [{ type: "text", text: `No libraries found matching "${params.libraryName}".` }], details: { count: 0 } };
-    }
-    // Format top 10 with the key fields
-    const lines = results.slice(0, 10).map((r) => {
-      const id = r.id ?? "(no id)";
-      const title = r.title ?? "";
-      const desc = (r.description as string | undefined) ?? "";
-      const trust = r.trustScore as number | undefined;
-      const bench = r.benchmarkScore as number | undefined;
-      const snippets = r.totalSnippets as number | undefined;
-      const meta: string[] = [];
-      if (trust !== undefined) meta.push(`trust:${trust}`);
-      if (bench !== undefined) meta.push(`bench:${Math.round(bench)}`);
-      if (snippets !== undefined) meta.push(`snippets:${snippets}`);
-      return `${id}  ${title}  [${meta.join(" ")}]\n  ${desc.slice(0, 200)}`;
+    const { text, details, isError } = await resolveLibraryIdCore({
+      libraryName: params.libraryName,
+      query: params.query,
     });
-    return {
-      content: [{ type: "text", text: lines.join("\n\n") }],
-      details: { count: results.length, returned: Math.min(10, results.length) },
-    };
+    return { ...(isError ? { isError: true } : {}), content: [{ type: "text", text }], details };
   },
 });
 
@@ -143,27 +110,12 @@ const queryDocs = defineTool({
   }),
 
   async execute(_id, params) {
-    // Library ID may start with `/` — strip if so, the API path needs the bare form
-    const libId = params.libraryId.replace(/^\//, "");
-    const tokens = Math.min(Math.max(params.tokensNum ?? 5000, 1000), 50000);
-    const url = new URL(`${BASE_URL}/${libId}`);
-    if (params.query) url.searchParams.set("topic", params.query);
-    url.searchParams.set("tokens", String(tokens));
-
-    const res = await fetch(url.toString(), { headers: authHeaders() });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return {
-        isError: true,
-        content: [{ type: "text", text: `context7 HTTP ${res.status} for ${libId}: ${body.slice(0, 300)}` }],
-        details: { status: res.status, libraryId: params.libraryId },
-      };
-    }
-    const text = await res.text();
-    return {
-      content: [{ type: "text", text }],
-      details: { libraryId: params.libraryId, tokens, bytes: text.length },
-    };
+    const { text, details, isError } = await queryDocsCore({
+      libraryId: params.libraryId,
+      query: params.query,
+      tokensNum: params.tokensNum,
+    });
+    return { ...(isError ? { isError: true } : {}), content: [{ type: "text", text }], details };
   },
 });
 

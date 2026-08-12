@@ -109,6 +109,42 @@ export async function searchLedger(
   return (await resp.json()) as LedgerHit[];
 }
 
+/**
+ * Semantic-search "kind" is a DIFFERENT axis from SearchKind: it selects the
+ * pgvector table on the embedder service (/semantic/search), not a PostgREST
+ * RPC. Valid values: messages | memories | ledger_entries.
+ */
+export type SemanticKind = "messages" | "memories" | "ledger_entries";
+
+export function buildSemanticUrl(base: string, q: string, kind: SemanticKind, source: string | undefined, limit: number): string {
+  const srcParam = source ? `&source=${encodeURIComponent(source)}` : "";
+  return `${base}/semantic/search?q=${encodeURIComponent(q)}&kind=${kind}&limit=${limit}${srcParam}`;
+}
+
+export function buildListSessionsUrl(base: string, project: string | undefined, source: string | undefined, limit: number): string {
+  let url =
+    `${base}/sessions?select=session_key,source,project,title,started_at,message_count` +
+    `&order=started_at.desc.nullslast&limit=${limit}`;
+  if (project) url += `&project=ilike.*${encodeURIComponent(project)}*`;
+  if (source) url += `&source=eq.${encodeURIComponent(source)}`;
+  return url;
+}
+
+export interface SemanticHit {
+  session_key?: string;
+  ordinal?: number;
+  id?: number;
+  text: string;
+  similarity: number;
+}
+
+export function formatSemanticRows(kind: SemanticKind, results: SemanticHit[]): string[] {
+  return results.map((r) => {
+    const where = kind === "messages" ? `${r.session_key}#${r.ordinal}` : `#${r.id}`;
+    return `${r.similarity.toFixed(3)} | ${where} | ${oneLine(String(r.text ?? ""), 200)}`;
+  });
+}
+
 export function formatRows(kind: SearchKind, rows: Record<string, unknown>[]): string[] {
   switch (kind) {
     case "messages":
@@ -128,5 +164,168 @@ export function formatRows(kind: SearchKind, rows: Record<string, unknown>[]): s
         // plain /sessions rows list_sessions fetches.
         return r.match_kind ? `${base} | ${r.match_kind}${r.hits ? ` hits:${r.hits}` : ""}` : base;
       });
+  }
+}
+
+// -- harness-agnostic orchestrators ------------------------------------------
+// Each returns { text, details, isError }, ready for either the pi tool result
+// or the Claude Code MCP { content:[{type:"text",text}], isError } shape.
+
+export interface MemledgerResult {
+  text: string;
+  details: Record<string, unknown>;
+  isError?: boolean;
+}
+
+export function clampLimit(limit: number | undefined, def = 10, max = 50): number {
+  return Math.min(Math.max(limit ?? def, 1), max);
+}
+
+async function fetchJson(url: string, timeoutMs: number, signal?: AbortSignal): Promise<unknown> {
+  const s = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+  const resp = await fetch(url, { signal: s });
+  if (!resp.ok) throw Object.assign(new Error(`HTTP ${resp.status}`), { httpStatus: resp.status });
+  return resp.json();
+}
+
+/** Full-text message search (PostgREST rpc/search_messages). */
+export async function runSearchMessages(
+  params: { q: string; source?: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<MemledgerResult> {
+  const limit = clampLimit(params.limit);
+  const url = buildUrl(baseUrl(), "messages", params.q, params.source, limit);
+  try {
+    const rows = await searchMessages(params.q, params.source, limit, signal);
+    const lines = rows.map(
+      (r) => `${r.source} | ${r.session_key}#${r.ordinal} | ${r.ts ?? "?"} | ${oneLine(r.headline ?? "", 160)}`,
+    );
+    return {
+      text: lines.length ? lines.join("\n") : `no message matches for "${params.q}"`,
+      details: { url, count: lines.length },
+    };
+  } catch (e) {
+    return { isError: true, text: `memledger unreachable: ${e instanceof Error ? e.message : String(e)}`, details: { url } };
+  }
+}
+
+/** Semantic (pgvector) similarity search via the embedder service. */
+export async function runSemanticSearch(
+  params: { q: string; kind?: string; source?: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<MemledgerResult> {
+  const limit = clampLimit(params.limit);
+  const kind: SemanticKind = (["messages", "memories", "ledger_entries"] as string[]).includes(params.kind ?? "")
+    ? (params.kind as SemanticKind)
+    : "messages";
+  const url = buildSemanticUrl(baseUrl(), params.q, kind, params.source, limit);
+  try {
+    const data = (await fetchJson(url, 15_000, signal)) as { results?: SemanticHit[] };
+    const lines = formatSemanticRows(kind, data.results ?? []);
+    return {
+      text: lines.length
+        ? lines.join("\n")
+        : `no semantic matches for "${params.q}" (backfill may still be running - check /semantic/stats)`,
+      details: { url, count: lines.length, kind },
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const httpStatus = (e as { httpStatus?: number })?.httpStatus;
+    return {
+      isError: true,
+      text: httpStatus ? `memledger semantic HTTP ${httpStatus}` : `memledger semantic unreachable: ${msg}`,
+      details: { url },
+    };
+  }
+}
+
+/** Work-ledger summary search (PostgREST rpc/search_ledger). */
+export async function runSearchLedger(
+  params: { q: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<MemledgerResult> {
+  const limit = clampLimit(params.limit);
+  const url = buildUrl(baseUrl(), "ledger", params.q, undefined, limit);
+  try {
+    const rows = (await fetchJson(url, 10_000, signal)) as Record<string, unknown>[];
+    const lines = Array.isArray(rows) ? formatRows("ledger", rows) : [];
+    return {
+      text: lines.length ? lines.join("\n") : `no ledger matches for "${params.q}"`,
+      details: { url, count: lines.length },
+    };
+  } catch (e) {
+    return { isError: true, text: `memledger unreachable: ${e instanceof Error ? e.message : String(e)}`, details: { url } };
+  }
+}
+
+/** Persistent agent-memory search (PostgREST memories ilike). */
+export async function runSearchMemories(
+  params: { q: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<MemledgerResult> {
+  const limit = clampLimit(params.limit);
+  const url = buildUrl(baseUrl(), "memories", params.q, undefined, limit);
+  try {
+    const rows = (await fetchJson(url, 10_000, signal)) as Record<string, unknown>[];
+    const lines = Array.isArray(rows) ? formatRows("memories", rows) : [];
+    return {
+      text: lines.length ? lines.join("\n") : `no memory matches for "${params.q}"`,
+      details: { url, count: lines.length },
+    };
+  } catch (e) {
+    return { isError: true, text: `memledger unreachable: ${e instanceof Error ? e.message : String(e)}`, details: { url } };
+  }
+}
+
+/** List recent sessions, optionally filtered by project basename and/or client. */
+export async function runListSessions(
+  params: { project?: string; source?: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<MemledgerResult> {
+  const limit = clampLimit(params.limit);
+  const url = buildListSessionsUrl(baseUrl(), params.project, params.source, limit);
+  try {
+    const rows = (await fetchJson(url, 10_000, signal)) as Record<string, unknown>[];
+    const lines = Array.isArray(rows) ? formatRows("sessions", rows) : [];
+    return {
+      text: lines.length ? lines.join("\n") : "no sessions found",
+      details: { url, count: lines.length },
+    };
+  } catch (e) {
+    return { isError: true, text: `memledger unreachable: ${e instanceof Error ? e.message : String(e)}`, details: { url } };
+  }
+}
+
+/**
+ * Combined one-call variant (the memledger_search tool). kind selects which
+ * store to hit; semantic routes to the embedder service.
+ */
+export async function runMemledgerSearch(
+  params: { q: string; source?: string; kind?: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<MemledgerResult> {
+  const kind: SearchKind = (["messages", "ledger", "memories", "sessions", "semantic"] as string[]).includes(params.kind ?? "")
+    ? (params.kind as SearchKind)
+    : "messages";
+  if (kind === "semantic") {
+    // semantic over messages only for the combined variant (matches original)
+    return runSemanticSearch({ q: params.q, kind: "messages", source: params.source, limit: params.limit }, signal);
+  }
+  const limit = clampLimit(params.limit);
+  const url = buildUrl(baseUrl(), kind, params.q, params.source, limit);
+  try {
+    const rows = (await fetchJson(url, 10_000, signal)) as Record<string, unknown>[];
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { text: `no ${kind} matches for "${params.q}"`, details: { url, count: 0, kind } };
+    }
+    return { text: formatRows(kind, rows).join("\n"), details: { url, count: rows.length, kind } };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const httpStatus = (e as { httpStatus?: number })?.httpStatus;
+    return {
+      isError: true,
+      text: httpStatus ? `memledger HTTP ${httpStatus} for ${kind} search` : `memledger unreachable: ${msg}`,
+      details: { url },
+    };
   }
 }

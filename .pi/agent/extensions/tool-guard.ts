@@ -1,63 +1,20 @@
 /**
- * tool-guard — intercept common anti-patterns BEFORE they fire and nudge
+ * tool-guard - intercept common anti-patterns BEFORE they fire and nudge
  * the LLM toward the right tool.
  *
- * This is pi-only territory — opencode has no equivalent. Pi's `tool_call`
- * event lets an extension block-with-reason, which the LLM sees in the
- * conversation and corrects on the next turn.
+ * This is the pi adapter: it owns the pi.on() wiring and the per-session
+ * state maps. The pure detection logic (rule tables, decision functions,
+ * bash tokenisation) lives in ./lib/tool-guard-core.ts and is shared with
+ * the Claude Code PreToolUse hook (../../../.claude/hooks/tool-guard.ts).
  *
  * Why a runtime guard instead of just system-prompt rules:
  *   - The LLM ignores prompt rules occasionally (audited: dozens of cases
  *     of `bash find` / `bash ls /docs/` / `webfetch <docs.erfi.io URL>` per
  *     session, even with explicit rules in APPEND_SYSTEM.md).
- *   - A block-with-reason is a hard signal — the model can't pretend it
+ *   - A block-with-reason is a hard signal - the model can't pretend it
  *     didn't see the rule.
  *
- * Guarded patterns (block + suggest correct tool):
- *
- *   bash ls /docs/...          → docs_sources / docs_find
- *   bash find /docs/...        → docs_find / docs_search
- *   bash cat /docs/...         → docs_read
- *   bash grep -r ...           → grep tool
- *   bash find ... -name ...    → glob tool (filename pattern)
- *   bash find ... -path ...    → glob tool
- *   bash rg --files ...        → glob tool (gitignore-aware filename match)
- *   bash curl <search-engine>  → websearch / web_research
- *   webfetch <docs.erfi.io>    → docs_read / docs_grep (the URL's content
- *                                 is on docs.erfi.io, query the source)
- *
- * Research-stack routing (decision + reinforcement, two tiers):
- *
- *   research_route (hard - the ONLY hard block among the search guards) -
- *     the user explicitly said "use the research tools/stack" (or named
- *     the searxng.erfi.io / crawler.erfi.io hosts). The input listener
- *     arms a per-session flag AND appends a routing note to the user
- *     message (decision aid). While armed, websearch / webfetch /
- *     web_research in default mode are BLOCKED with the exact SearXNG +
- *     crawler curl recipe. Hard here because it enforces the user's own
- *     explicit instruction (audited: weak models ignore it otherwise).
- *     A call that hits the research stack disarms the guard. Lifts after
- *     2 blocks (stack may be down) and at agent_end.
- *
- *   research_route_soft, docs_first, reformulation_loop (ADVISORY) -
- *     heuristic search guards attach a note to the triggering call's
- *     tool result; the model sees the suggestion next to the results
- *     and makes the decision. Heuristics misfire (a topic-word false
- *     match, breadth-first shopping research misread as a rewording
- *     loop), so they inform rather than override.
- *
- * Soft guards (warn but allow - used for patterns where the LLM may have
- * legitimate reasons):
- *
- *   bash sed -i ... <big-file>  → suggest sd or ast-grep for >100KB files
- *   bash find <huge-tree>       → suggest rg --files for speed
- *
- * apply_patch envelopes:
- *   Each Add/Update/Delete/Move File: line is extracted and every target
- *   path is checked against WRITE_RULES (so .env / .git / lockfiles /
- *   node_modules can't be bypassed via apply_patch).
- *
- * To disable a specific guard: edit DISABLED below.
+ * Guarded patterns and full design notes: see ./lib/tool-guard-core.ts.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -65,70 +22,54 @@ import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  BASH_RULES,
+  WRITE_RULES,
+  checkReformulationLoop as checkReformulationLoopCore,
+  checkWebfetchDocs,
+  decideDocsFirst,
+  decideResearchRoute,
+  decideResearchRouteSoft,
+  detectResearchIntent,
+  extractPatchPaths,
+  extractTopics,
+  matchDocsTopic,
+  splitSegments,
+  stripAnsiCSpans,
+  queryTokens,
+  tokenContainment,
+  WEB_SEARCH_TOOLS,
+  type DocsFirstInput,
+  type LoopState,
+  type ResearchRouteInput,
+} from "./lib/tool-guard-core.ts";
 
-// Set to e.g. ["docs_path", "find_name"] to suppress specific rules without
-// removing the extension. See rule IDs below.
-// IDs: docs_first, reformulation_loop, ls_docs, find_docs, cat_docs, grep_r,
-//      find_name, find_path, rg_files, curl_search, npm_when_bun, pnpm_in_bun_project,
-//      npx_when_bunx, sed_inplace_large_file, docker_logs_servarr, head_full_file,
-//      unsigned_git_commit, webfetch_docs, write_too_large, edit_dotenv, edit_lockfile,
-//      edit_git_internals, edit_node_modules, research_route, research_route_soft.
+// Re-export the pure helpers the pi test suite imports from this module so
+// ../tests/extensions.test.ts keeps resolving them here.
+export {
+  splitSegments,
+  extractPatchPaths,
+  stripAnsiCSpans,
+  extractTopics,
+  matchDocsTopic,
+  decideDocsFirst,
+  detectResearchIntent,
+  decideResearchRoute,
+  decideResearchRouteSoft,
+  queryTokens,
+  tokenContainment,
+} from "./lib/tool-guard-core.ts";
+
+// Set to e.g. ["docs_path", "find_name"] to suppress specific rules.
 const DISABLED: Set<string> = new Set();
 
-// ---- Reformulation-loop guard ----
-//
-// Audit of past sessions showed 5-19 search calls on the same topic before any
-// drill-in (docs_read / webfetch / hover). Rewording the query is the failure
-// mode — the right move is to open the most likely hit and read it.
-//
-// We track recent search-family calls per-session. If the SAME search tool is
-// called 3+ times in a window with no drill-in tool used between them, the
-// 4th call is blocked with a redirect.
-//
-// State is keyed by session file path so different pi sessions on the same
-// process don't share counters (verified bug — pi /new keeps the extension
-// module loaded, so module-scope state survived across sessions).
-//
-// Search tools (call counts toward the loop):
-const SEARCH_TOOLS = new Set([
-  "websearch",
-  "codesearch",
-  "docs_search",
-  "docs_find",
-  "session_search",
-  "context7_resolve_library_id",
-]);
-// Drill-in tools (call resets the loop counter for that family):
-// NOTE: docs_grep is a drill-in, NOT a search. It returns matched file
-// content with context lines (like docs_read scoped to a regex), and the
-// AGENTS.md zero-results path prescribes it as THE escalation after
-// docs_search returns nothing ("broaden query then docs_grep
-// path=/docs/<source>/ before web fallback"). Counting it as a reformulation
-// blocked exactly that prescribed escalation — see the LINZ Supabase session.
-const DRILL_IN_TOOLS = new Set([
-  "webfetch",
-  "web_research",
-  "docs_read",
-  "docs_grep",
-  "docs_summary",
-  "context7_query_docs",
-  "read",
-  "lsp",
-]);
-const LOOP_THRESHOLD = 3;
-
 // Bedrock / certain Claude proxies return generic 500s once the tool-use
-// input crosses ~80-100 KB. Set the guard 5 KB below the conservative
-// floor so even a chatty surrounding turn stays under. Calibrated to the
-// same numbers used inside write-stream.ts.
+// input crosses ~80-100 KB. Guard 5 KB below the conservative floor.
 const WRITE_TOO_LARGE_BYTES = 75_000;
 
-type LoopState = {
-  recentSearches: Array<{ tool: string; ts: number; tokens?: Set<string> }>;
-  lastDrillInTs: number;
-};
+// ---- reformulation-loop per-session state (owned by this adapter) ----
 const loopStates = new Map<string, LoopState>();
-function stateFor(sessionKey: string): LoopState {
+function loopStateFor(sessionKey: string): LoopState {
   let s = loopStates.get(sessionKey);
   if (!s) {
     s = { recentSearches: [], lastDrillInTs: 0 };
@@ -137,138 +78,29 @@ function stateFor(sessionKey: string): LoopState {
   return s;
 }
 
-// ---- Docs-first chain guard (topic-aware) ----
-//
-// Enforces: check docs.erfi.io BEFORE reaching for websearch / web_research --
-// but ONLY when the query plausibly intersects what docs.erfi.io covers
-// (technical documentation). The original blanket version blocked the first
-// web call of every session, which forced a pointless docs_sources round-trip
-// for shopping / local / news queries ("best gyro ball in SG") that a
-// technical-docs index definitionally cannot answer.
-//
-// Decision chain for websearch / web_research (decideDocsFirst):
-//   1. web_research mode:"local" | "fresh"  -> allow. Those modes ARE the
-//      research stack (SearXNG + Playwright crawler); never docs territory.
-//   2. query matches NON_TECHNICAL_QUERY     -> allow (shopping, local
-//      business, news, weather, travel, ...)
-//   3. topic cache loaded AND no query word matches any docs source topic
-//                                           -> allow (docs provably has no
-//      coverage for this query)
-//   4. otherwise                            -> block once per session with
-//      the docs-first chain. The block message names the matched source and
-//      self-exempts non-technical queries (re-issue immediately).
-//
-// Silent allows do NOT open the gate -- a later genuinely-technical query in
-// the same session still gets the one-time docs-first reminder.
-//
-// The topic cache (~/.pi/agent/.docs-topics.json) holds topic words derived
-// from the docs index's source list, fetched over the same SSH channel
-// docs.ts uses. Refreshed lazily in the background (never inside a blocking
-// tool_call await) at most once per TOPIC_CACHE_TTL_MS. If the cache is
-// unavailable (first-ever session, docs host unreachable) the guard falls
-// back to the old blanket block-once behaviour.
+// Test-facing signature: (toolName, sessionKey, query?). Manages the module
+// state map and delegates the pure decision to the core.
+export function checkReformulationLoop(
+  toolName: string,
+  sessionKey: string,
+  query?: string,
+): string | null {
+  return checkReformulationLoopCore(toolName, loopStateFor(sessionKey), query);
+}
+
+// ---- Docs-first chain guard (topic cache; pi-only side effects) ----
 const DOCS_FIRST_TOOLS = new Set([
   "docs_sources", "docs_search", "docs_grep", "docs_find", "docs_read", "docs_summary",
 ]);
-const WEB_SEARCH_TOOLS = new Set(["websearch", "web_research"]);
-// Sessions where docs_* was called OR the one-time redirect already fired.
-// Either event opens the gate for the rest of the session.
 const docsFirstSessions = new Set<string>();
 
-// Keep in sync with docs.ts (auto-generated; constants are not exported).
 const DOCS_SSH_HOST = "docs@docs.erfi.io";
 const DOCS_SSH_PORT = "2222";
 const TOPIC_CACHE_PATH = join(homedir(), ".pi", "agent", ".docs-topics.json");
 const TOPIC_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-// High-precision non-technical intents: docs.erfi.io holds ONLY technical
-// docs, so any query in these lanes is definitionally a web/research-stack
-// query. Keep this list conservative -- a false negative just means the old
-// block-once path runs (status quo), a false positive silently skips a docs
-// check that might have helped.
-const NON_TECHNICAL_QUERY = new RegExp(
-  [
-    "\\bbuy(ing)?\\b", "\\bpurchase\\b", "\\bshop(ping)?\\b", "\\bcheapest\\b",
-    "\\bdeals?\\b", "\\bprices?\\b", "\\bpricing\\b", "\\bcost of\\b",
-    "\\brestaurants?\\b", "\\bhawker\\b", "\\bcafes?\\b", "\\bfood\\b",
-    "\\bhotels?\\b", "\\bflights?\\b", "\\bweather\\b", "\\bnews\\b",
-    "\\bheadlines?\\b", "\\bmovies?\\b", "\\bshowtimes?\\b",
-    "\\bopening hours\\b", "\\bnear me\\b", "\\bin singapore\\b", "\\bin sg\\b",
-  ].join("|"),
-  "i",
-);
-
-// Derive matchable topic words from docs source names: the full slug plus
-// its -api-stripped form ("supabase-auth-api" -> {supabase-auth-api,
-// supabase-auth}). Slug components are NOT split out: multi-word slugs like
-// "use-the-index-luke" contributed common English words ("the", "use",
-// "step", "modern") that matched virtually every query and killed the
-// no-topic allow path (observed 2026-08-05: a sofa-bed shopping query
-// blocked with 'docs.erfi.io has a "use" source'). Slugs shorter than 3
-// chars ("go") are dropped. A missed topic just means the docs-first
-// advisory doesn't fire for that source - pre-guard behaviour, low harm.
-// Exported for unit tests.
-export function extractTopics(sources: string[]): string[] {
-  const topics = new Set<string>();
-  for (const raw of sources) {
-    const name = raw.trim().toLowerCase();
-    if (!name) continue;
-    const noApi = name.replace(/-api$/, "");
-    for (const cand of [name, noApi]) {
-      if (cand.length >= 3) topics.add(cand);
-    }
-  }
-  return [...topics];
-}
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// First topic that appears as a whole word in the query, else null.
-// Exported for unit tests.
-export function matchDocsTopic(query: string, topics: string[]): string | null {
-  if (!query || topics.length === 0) return null;
-  const q = query.toLowerCase();
-  for (const t of topics) {
-    if (new RegExp(`\\b${escapeRe(t)}\\b`, "i").test(q)) return t;
-  }
-  return null;
-}
-
-export type DocsFirstInput = { query?: string; mode?: string };
-export type DocsFirstDecision =
-  | { block: false; via: "mode" | "non-technical" | "no-topic" }
-  | { block: true; matchedTopic: string | null };
-
-// Pure decision for the docs_first guard. `topics` is the cached docs topic
-// list, or null when the cache is unavailable (falls back to blanket block).
-// Exported for unit tests.
-export function decideDocsFirst(
-  toolName: string,
-  input: DocsFirstInput,
-  topics: string[] | null,
-): DocsFirstDecision {
-  // mode:"local" (maps/reviews/hours) and mode:"fresh" (<1-week news) are
-  // the research stack by definition -- docs.erfi.io can never answer them.
-  if (toolName === "web_research" && (input.mode === "local" || input.mode === "fresh")) {
-    return { block: false, via: "mode" };
-  }
-  const query = (input.query ?? "").trim();
-  if (query && NON_TECHNICAL_QUERY.test(query)) {
-    return { block: false, via: "non-technical" };
-  }
-  if (topics !== null) {
-    const matched = matchDocsTopic(query, topics);
-    if (!matched) return { block: false, via: "no-topic" };
-    return { block: true, matchedTopic: matched };
-  }
-  // Coverage unknown (cache not warmed) -- old behaviour: block once.
-  return { block: true, matchedTopic: null };
-}
-
 type TopicCache = { fetchedAt: number; topics: string[] };
-let topicCache: TopicCache | null | undefined; // undefined = not read from disk yet
+let topicCache: TopicCache | null | undefined;
 let topicRefreshInFlight = false;
 
 function loadTopics(): string[] | null {
@@ -296,16 +128,9 @@ function loadTopics(): string[] | null {
   return topicCache ? topicCache.topics : null;
 }
 
-// Fire-and-forget: fetch the docs source list over the same SSH channel
-// docs.ts uses, derive topics, persist. Never awaited from tool_call.
 function refreshTopicsInBackground(): void {
   if (topicRefreshInFlight) return;
   topicRefreshInFlight = true;
-  // Source-list derivation: split each index line on TAB first (embedded
-  // newlines in summaries produce continuation prose lines), then take the
-  // path's first component, filtered to plausible source names. A bare
-  // `awk -F/ '{print $1}'` over the raw index returns summary prose -
-  // verified against the live index 2026-08.
   const remote =
     "if [ -s /docs/_index.tsv ]; then awk -F'\\t' '{n=split($1,a,\"/\"); if (n>1 && a[1] ~ /^[a-z0-9][a-z0-9._-]*$/) print a[1]}' /docs/_index.tsv | sort -u; " +
     "else ls -1 /docs; fi";
@@ -356,424 +181,10 @@ function docsFirstAdvisoryNote(matchedTopic: string | null): string {
   );
 }
 
-// Hard-block rules: regex on bash command, plus a redirect message.
-type BlockRule = {
-  id: string;
-  pattern: RegExp;
-  reason: string;
-  segment?: boolean; // if true, test against each `&&|;|||` segment, not the whole command
-  // Optional predicate that overrides `pattern` for the match decision. Used
-  // when a bare regex can't express the exemption (e.g. ANSI-C `$'...'` spans).
-  // Receives the segment (or whole command when segment is falsy).
-  test?: (seg: string) => boolean;
-};
-
-// Strip bash ANSI-C quoting spans (`$'...'`) from a command. Inside `$'...'`
-// bash DOES interpret `\uXXXX`, so any escape there is correct usage and must
-// not trip the unicode_escape_in_bash guard. A span runs from `$'` to the next
-// unescaped `'`. Everything else (double-quoted / unquoted text where the
-// escape stays literal) is preserved for the guard to inspect.
-export function stripAnsiCSpans(s: string): string {
-  return s.replace(/\$'(?:[^'\\]|\\.)*'/g, "");
-}
-
-const BASH_RULES: BlockRule[] = [
-  {
-    id: "ls_docs",
-    pattern: /^\s*ls\s+(\S*\s+)*\/docs\b/,
-    reason:
-      "`/docs/` is not local filesystem — it lives on docs.erfi.io and is only reachable via the `docs_*` tools. Use `docs_sources <filter>` to verify a source exists, or `docs_find pattern=<glob>` to list files by name.",
-    segment: true,
-  },
-  {
-    id: "find_docs",
-    pattern: /^\s*find\s+(\S*\s+)*\/docs\b/,
-    reason:
-      "Use `docs_find pattern=<glob>` (filename) or `docs_search query=<keyword> source=<source>` (content) instead of `find /docs/...`. The /docs tree is on docs.erfi.io, not local disk.",
-    segment: true,
-  },
-  {
-    id: "cat_docs",
-    pattern: /^\s*cat\s+\/docs\b/,
-    reason: "Use `docs_read path=/docs/...` instead of `cat /docs/...`. /docs is remote, not local.",
-    segment: true,
-  },
-  {
-    id: "grep_r",
-    pattern: /^\s*grep\s+(-\S*r\S*|--recursive)/,
-    reason:
-      "Prefer the `grep` tool (regex content search, mtime-sorted output, capped at 100 hits) over `grep -r`. Or use `bash rg <pattern>` directly if you need a specific rg flag the tool doesn't expose.",
-    segment: true,
-  },
-  {
-    id: "find_name",
-    pattern: /^\s*find\b[^&;|]*\s-name\b/,
-    reason:
-      "Prefer the `glob` tool for filename matching (e.g. `glob pattern='**/*.ts'`). `find -name` is slower (no gitignore awareness) and harder to read.",
-    segment: true,
-  },
-  {
-    id: "find_path",
-    pattern: /^\s*find\b[^&;|]*\s-path\b/,
-    reason: "Prefer the `glob` tool for path-pattern matching. `find -path` is slower and harder to read.",
-    segment: true,
-  },
-  {
-    id: "rg_files",
-    pattern: /^\s*rg\s+(-\S*\s+)*--files\b/,
-    reason:
-      "Prefer the `glob` tool (wraps `rg --files -g`). It returns mtime-sorted results capped at 100 with a structured truncation footer.",
-    segment: true,
-  },
-  {
-    id: "curl_search",
-    // searxng\.erfi\.io / crawler\.erfi\.io are the user's OWN research
-    // stack - the research_route guard actively forces calls onto them, so
-    // exempting them here is load-bearing (otherwise the two guards
-    // deadlock: one forces curl-to-searxng, the other blocks it).
-    pattern: /^\s*curl\s+[^|&;]*\b(google\.com|bing\.com|duckduckgo\.com|search\.brave|kagi|searxng(?!\.erfi\.io))\b/i,
-    reason:
-      "Never `bash curl` a search engine. Use `websearch` (Exa) for discovery, `web_research` when making a claim (auto-fetches top results), or the `research` skill's SearXNG fallback at :8888. Exempt: the self-hosted stack (searxng.erfi.io, crawler.erfi.io) - curl those freely per the research skill.",
-    segment: true,
-  },
-
-  // ---- patterns observed in user's actual session history ----
-
-  {
-    id: "npm_when_bun",
-    pattern: /^\s*npm\s+(install|i|run|ci|test|exec)\b/,
-    reason:
-      "This user's projects use bun by default (see frontend-stack skill). Use `bun install` / `bun run` / `bun test` / `bunx`. Only fall back to npm if bun-incompatibility is proven for this specific dependency.",
-    segment: true,
-  },
-  {
-    id: "pnpm_in_bun_project",
-    pattern: /^\s*pnpm\s+(install|i|run|exec)\b/,
-    reason:
-      "User's default JS package manager is bun. Use `bun install` / `bun run` / `bunx`. pnpm is reserved for explicit monorepo cases where the user has chosen it (check for pnpm-workspace.yaml first).",
-    segment: true,
-  },
-  {
-    id: "npx_when_bunx",
-    pattern: /^\s*npx\s+/,
-    reason: "Use `bunx <pkg>` instead of `npx <pkg>`. Faster, same semantics in 99% of cases.",
-    segment: true,
-  },
-  {
-    id: "sed_inplace_large_file",
-    // sed -i with a substitution on a path that LOOKS large (any .ts/.tsx/.js/.go/.py file — quick heuristic).
-    // The actual size check happens at runtime; this just nudges toward sd/ast-grep for known-painful targets.
-    pattern: /^\s*sed\s+-i\b[^|&;]*\.(ts|tsx|js|jsx|mjs|cjs|go|py|rs|java|kt|swift|cpp|c|h|hpp)['\"\s]/,
-    reason:
-      "For source-file rewrites, prefer `sd 'pattern' 'replacement' file` (literal, no regex foot-guns) or `ast-grep --rewrite` (AST-precise, won't match strings/comments). `sed -i` regex on source files routinely captures unintended matches.",
-    segment: true,
-  },
-  {
-    id: "docker_logs_servarr",
-    // Composer only manages containers on the user's servarr host. Fire ONLY when the agent is
-    // SSH-tunneling into servarr to read logs (the canonical lookup is then the composer API).
-    // Bare `docker logs` on the dev box targets LOCAL stacks (~/llm-compose, ~/composer/, etc.)
-    // which composer does NOT manage — those must not trip this guard.
-    pattern: /^\s*ssh\s+[\s\S]*?\bservarr\b[\s\S]*?\bdocker\s+logs\b/,
-    reason:
-      "For containers on servarr (composer-managed), prefer the composer API for logs — `curl $COMPOSER/api/v1/services/<id>/logs?tail=...` gives tail + filter + structured response. `ssh servarr docker logs` is fine when you specifically need raw stderr that composer hasn't captured. Local-host docker (this dev box, ~/llm-compose, etc.) is not in composer — bare `docker logs` there is correct.",
-    segment: true,
-  },
-  // dropped (2026-05-23, audit):
-  //   - docker_compose_no_file: fired on canonical `cd ~/stack-dir && docker compose up`,
-  //     which IS the correct invocation. Block message admitted the false-positive.
-  //   - cat_pipe_tool: fired on legitimate `cat file | head/jq/...` quick-look idioms.
-  {
-    id: "head_full_file",
-    // 'head -<huge_number> file' or 'head -n 99999 file' is just cat with extra steps.
-    pattern: /^\s*head\s+(-n\s*)?-?\d{4,}\s+\S/,
-    reason:
-      "For reading whole files, use the `read` tool (gives line numbers + length header). `head -n 99999` is just a slower `cat` and dumps unstructured.",
-    segment: true,
-  },
-  {
-    id: "unsigned_git_commit",
-    // User requires -S signing (memory id 0100MPG0R6JTB7DCA24A30E45767). Default commit.gpgsign=true should handle it,
-    // but explicit '-c commit.gpgsign=false' or '--no-gpg-sign' is a hard error.
-    pattern: /^\s*git\s+(-c\s+commit\.gpg[sS]ign=false\b|.*--no-gpg-sign\b)/,
-    reason:
-      "This user REQUIRES GPG-signed commits (commit.gpgsign=true is set globally, key B9D283E8AE4E56B4). NEVER bypass signing. If the commit failed with 'gpg failed to sign the data', the agent cache is cold - warm it with `zsh -ic 'gpg_unlock'` (bw-seeded, no TTY needed) and retry the SAME command.",
-    segment: true,
-  },
-  {
-    id: "create_tanstack_router_hallucinated",
-    // Specific hallucination from this session — the wrong scaffolder name.
-    pattern: /^\s*(bun|npx|pnpm)\s+(create|dlx)\s+@tanstack\/(router|create-router)\b/,
-    reason:
-      "`@tanstack/router` is not the scaffolder. Use `bun create tsrouter-app@latest <name>` (or `npx create-tsrouter-app@latest <name>`). Supports `--template file-router`, `--framework solid`, `--add-ons shadcn,tanstack-query`, `--toolchain biome`. See the `frontend-stack` skill.",
-    segment: true,
-  },
-  // dropped (2026-05-23, audit): docker_image_latest fired on any bash command
-  // mentioning `image: foo:latest` substring including `echo`, `grep`, and the
-  // agent's own reasoning about a fix. Catches the wrong cases. The pin-rule
-  // lives in the infra-stack skill prose instead.
-  {
-    id: "sudo_systemctl_restart",
-    // The user runs services via docker compose (and composer/k3s/Proxmox). Direct systemctl restart
-    // is rarely the right move on this user's boxes; it's usually a service managed elsewhere.
-    pattern: /^\s*sudo\s+systemctl\s+(restart|stop|start|enable|disable)\s+/,
-    reason:
-      "Direct `systemctl restart` is rarely correct on this user's hosts — services are usually managed by docker compose, composer (gitops), or k3s. Check first: is it a compose stack? (`docker compose -f ~/<svc>-compose/docker-compose.yml restart <svc>`). A k3s deployment? (`kubectl rollout restart deploy/<svc>`). Only fall back to systemctl if it's truly a host-level systemd unit (sshd, networking, etc.).",
-    segment: true,
-  },
-  {
-    id: "kubectl_without_context",
-    // Soft-warn for kubectl since we can't async-check current-context from a tool_call hook.
-    // The block message reminds the agent to verify before issuing destructive ops.
-    pattern: /^\s*kubectl\s+(delete|drain|cordon|uncordon|edit|patch|apply\s+--dry-run=false|rollout\s+(restart|undo))/,
-    reason:
-      "You're about to run a mutating kubectl command. First verify the context: `kubectl config current-context` — confirm it's the cluster you intend (k3s? remote? minikube?). The user has multiple kube-clusters on different hosts. A kubectl delete in the wrong context is one of the worst foot-guns.",
-    segment: true,
-  },
-  {
-    id: "psql_direct_connect",
-    // psql -h host -U user — direct PG connection. When the project has sqlc, prefer that. When it's Supabase,
-    // use the supabase CLI. Direct psql is fine for ad-hoc inspection but the LLM tends to reach for it
-    // when a structured query through the project's data layer is better.
-    pattern: /^\s*psql\s+(-h\s+\S+|--host=\S+|postgres(ql)?:\/\/)/,
-    reason:
-      "Direct `psql` connections are for ad-hoc inspection only. If the project has sqlc / drizzle / supabase CLI, use those for actual queries (they're type-safe and respect schema). If you genuinely need psql for inspection, this command is fine — just confirm you're not bypassing migrations or schema discipline.",
-    segment: true,
-  },
-  {
-    id: "bash_eval_curl",
-    // The classic 'curl | sh' pattern — user might do this manually but the LLM shouldn't suggest it without consent.
-    pattern: /^\s*(curl|wget)\s+[^|&;]*\|\s*(sudo\s+)?(bash|sh|zsh)\b/,
-    reason:
-      "`curl | sh` blindly executes whatever the remote serves. Download first to a file, inspect, then run — OR install via the platform's package manager. Even for trusted installs (nvm, rustup), prefer the manual two-step.",
-    segment: true,
-  },
-  {
-    id: "chmod_777",
-    // chmod 777 is almost always wrong (use 755 / 644 / 600 depending on file type).
-    pattern: /^\s*chmod\s+(-R\s+)?(0?777|a\+rwx)\b/,
-    reason:
-      "`chmod 777` is almost never the right answer — it grants write to everyone. Use 755 (dirs / executables), 644 (regular files), 600 (secrets), 700 (private dirs). If you're hitting a permission error in a container, the fix is usually PUID/PGID env vars (1000/100 on this user's boxes), not 777.",
-    segment: true,
-  },
-  {
-    id: "unicode_escape_in_bash",
-    // Recurring foot-gun: agents write `\u2014` in bash strings expecting JS-style
-    // unicode escape. Bash leaves it as the literal 6 chars unless wrapped in $'...'
-    // (ANSI-C quoting). Most often appears in `git commit -m "... \u2014 ..."` and
-    // ends up in the actual commit message verbatim. We guard the COMMON case
-    // (\uXXXX not preceded by $') and let the rare correct usage through.
-    pattern: /\\u[0-9a-fA-F]{4}/,
-    // Exempt escapes inside `$'...'` ANSI-C spans (bash interprets those
-    // correctly, including multiple escapes in one span like `$'\u2014\u2026'`).
-    // The old `(?<!\$')` lookbehind only spared the FIRST escape after `$'`.
-    test: (seg) => /\\u[0-9a-fA-F]{4}/.test(stripAnsiCSpans(seg)),
-    reason:
-      "Bash doesn't interpret `\\uXXXX` JS-style unicode escapes inside regular quotes — they end up as literal 6-char sequences in your output (most painfully in `git commit -m`). Two correct options: (1) paste the actual character into the string (em-dash —, en-dash –, arrow →, etc.); (2) use bash ANSI-C quoting: `$'\\u2014'`. Recommended: just use the real character.",
-    segment: false,
-  },
-  {
-    id: "force_push_protected",
-    // git push --force on main/master/dev is a common destructive mistake.
-    pattern: /^\s*git\s+push\s+(\S+\s+)*(-f|--force)\b.*\b(main|master|dev|production|prod)\b/,
-    reason:
-      "Force-pushing to main/master/dev/prod can erase teammates' work. Confirm the branch is yours alone and the remote is up to date. If you really need it, use `--force-with-lease` (refuses if the remote moved). Better: open a PR with the force-pushed branch separately.",
-    segment: true,
-  },
-];
-
-// Write-tool guards: catch attempts to write/edit specific files that should
-// go through a different mechanism.
-type WriteRule = {
-  id: string;
-  pattern: RegExp; // matches against the filesystem path
-  reason: string;
-};
-
-const WRITE_RULES: WriteRule[] = [
-  {
-    id: "edit_dotenv",
-    // .env / .env.* files often hold secrets. User's pattern: Vaultwarden is canonical store,
-    // .env is reconstructed from vault. Direct edits drift from vault.
-    pattern: /(^|\/)\.env(\.|$)/,
-    reason:
-      "Direct `.env` edits drift from Vaultwarden (the canonical secret store for this user). Add/change the secret in vault first (`vw_save <field>` from ~/dotfiles bitwarden helpers), then run the project's env-rehydrate step. If this IS a vault-rehydration write, the warning is safe to acknowledge and proceed.",
-  },
-  {
-    id: "edit_lockfile",
-    pattern: /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|poetry\.lock|composer\.lock|go\.sum)$/,
-    reason:
-      "Lockfiles are auto-generated by the package manager. Don't edit them directly — instead change `package.json` / `Cargo.toml` / `pyproject.toml` and run install (bun install / cargo update / etc.). Direct lockfile edits break reproducibility and confuse tooling.",
-  },
-  {
-    id: "edit_git_internals",
-    // Already covered by git-gh-gate.ts but add here for defence in depth
-    pattern: /(^|\/)\.git\/(config|HEAD|refs\/|hooks\/|COMMIT_EDITMSG)/,
-    reason:
-      "`.git/` internals shouldn't be edited directly. Use the corresponding git command: `git config` (for .git/config), `git branch -m` (for HEAD/refs), `git commit --amend` (for COMMIT_EDITMSG). Direct edits can corrupt the repo.",
-  },
-  {
-    id: "edit_node_modules",
-    pattern: /(^|\/)node_modules\//,
-    reason:
-      "Don't edit files in `node_modules/` — changes get blown away on the next `bun install`. If you need to patch a dependency, use `patch-package` (creates a permanent diff in `patches/`).",
-  },
-];
-
-// Detect when webfetch is called with a docs.erfi.io URL — block and
-// suggest docs_read / docs_grep on the equivalent /docs/ path.
-function checkWebfetchDocs(url: string): string | null {
-  try {
-    const u = new URL(url);
-    if (u.hostname === "docs.erfi.io") {
-      // Try to map docs.erfi.io/postgres/foo → /docs/postgres/foo
-      const docsPath = `/docs${u.pathname}`.replace(/\/$/, "");
-      return `webfetch on docs.erfi.io is wasteful — the content is on the docs SSH server and reachable via the docs_* tools. Use \`docs_read path=${docsPath}\` (full file) or \`docs_grep query=<pattern> path=${docsPath}\` (within file/dir). If you don't know the exact path yet, start with \`docs_sources <filter>\` or \`docs_search query=<keyword> source=<source>\`.`;
-    }
-  } catch {
-    /* malformed URL — let webfetch handle it */
-  }
-  return null;
-}
-
-// Exported for unit tests. Splits a bash command into best-effort segments
-// at shell operators — && || ; | — so per-segment rules don't miss patterns
-// hidden behind chaining (e.g. `cd /repo && git commit`). Not a full shell
-// parser; quoted strings containing these operators may be mis-split (false
-// positive, which is acceptable for a deny-confirmation gate).
-export function splitSegments(command: string): string[] {
-  return command.split(/&&|\|\||;|\|/);
-}
-
-// English function words - NOT a domain keyword list. Reformulation is
-// detected by computing content-word similarity between consecutive
-// searches, never by classifying the query into a lane.
-const QUERY_FUNCTION_WORDS = new Set([
-  "a", "an", "the", "of", "for", "to", "in", "on", "and", "or", "vs",
-  "is", "are", "was", "were", "do", "does", "did", "i", "me", "my",
-  "we", "you", "your", "it", "its", "this", "that", "these", "those",
-  "with", "from", "at", "by", "be", "as", "so", "if", "not", "no",
-  "can", "could", "should", "would", "how", "what", "which", "when",
-  "where", "who",
-]);
-
-// Content-word tokenizer: lowercase, split on non-alphanumerics, drop
-// function words, strip a trailing plural -s, normalise the sg/singapore
-// alias. Rewordings of the same query score high containment; a new facet
-// (different store/brand/sub-topic) scores low. Exported for unit tests.
-export function queryTokens(query: string): Set<string> {
-  const out = new Set<string>();
-  for (let tok of query.toLowerCase().split(/[^a-z0-9]+/)) {
-    if (tok.length < 2) continue;
-    if (tok === "sg") tok = "singapore";
-    if (tok.length > 3 && tok.endsWith("s")) tok = tok.slice(0, -1);
-    if (QUERY_FUNCTION_WORDS.has(tok)) continue;
-    out.add(tok);
-  }
-  return out;
-}
-
-// |A n B| / min(|A|, |B|). Exported for unit tests.
-export function tokenContainment(a: Set<string>, b: Set<string>): number {
-  const [small, large] = a.size <= b.size ? [a, b] : [b, a];
-  if (small.size === 0) return 0;
-  let n = 0;
-  for (const t of small) if (large.has(t)) n++;
-  return n / small.size;
-}
-
-// Below this containment vs the previous counted search, the new search is
-// new territory (breadth-first facet research), not a rewording.
-const REFORMULATION_CONTAINMENT = 0.7;
-
-export function checkReformulationLoop(toolName: string, sessionKey: string, query?: string): string | null {
-  const now = Date.now();
-  const state = stateFor(sessionKey);
-
-  if (DRILL_IN_TOOLS.has(toolName)) {
-    state.lastDrillInTs = now;
-    return null;
-  }
-
-  if (!SEARCH_TOOLS.has(toolName)) return null;
-
-  // Filter to recent searches AFTER the last drill-in
-  state.recentSearches = state.recentSearches.filter(
-    (s) => s.ts > state.lastDrillInTs,
-  );
-
-  // Facet vs rewording: a query sharing few content words with the previous
-  // counted search is new territory (breadth-first research - one query per
-  // store/brand/sub-topic), not a reformulation. Reset the window instead
-  // of counting it. Observed 2026-08-05: four brand-enumeration websearches
-  // for sofa beds (koala / castlery / King Living / IKEA) hard-blocked with
-  // drill-in advice that does not fit shopping research.
-  const tokens = query ? queryTokens(query) : undefined;
-  const prev = state.recentSearches[state.recentSearches.length - 1];
-  if (
-    tokens && tokens.size > 0 &&
-    prev?.tokens && prev.tokens.size > 0 &&
-    tokenContainment(tokens, prev.tokens) < REFORMULATION_CONTAINMENT
-  ) {
-    state.recentSearches = [];
-  }
-
-  state.recentSearches.push({ tool: toolName, ts: now, tokens });
-
-  if (state.recentSearches.length >= LOOP_THRESHOLD + 1) {
-    const counts = new Map<string, number>();
-    for (const s of state.recentSearches) {
-      counts.set(s.tool, (counts.get(s.tool) ?? 0) + 1);
-    }
-    const total = state.recentSearches.length;
-    const breakdown = [...counts.entries()].map(([t, n]) => `${t}×${n}`).join(", ");
-    state.recentSearches = []; // advisory fired - start a fresh window
-    return `Reformulation loop detected: ${total} similar search calls (${breakdown}) since the last drill-in. If you are rewording the same query, open the most likely result instead: docs_search → docs_read (or docs_grep path=/docs/<source>/ to escalate after a zero-results docs_search), websearch → webfetch or web_research, codesearch → read on the linked file, context7_resolve → context7_query_docs. If these are genuinely distinct facets, ignore this note; if results don't fit your need, ask the user to clarify rather than searching again.`;
-  }
-
-  return null;
-}
-
-// ---- Research-stack routing guard ----
-//
-// Failure mode (audited 2026-08-05, sofa-bed session on kimi-k3): the user's
-// first message said "use the research tools" and the model still ran 6x
-// websearch + 3x web_research + 1x webfetch - all Exa - and never touched
-// the self-hosted SearXNG/crawler stack. Prompt rules alone don't reach
-// weaker models; a block-with-reason does.
-//
-// Two surfaces:
-//   input listener  - detects the explicit ask, arms the per-session flag,
-//     and appends a routing note to the user message (the decision aid).
-//   tool_call       - while armed, blocks Exa tools with the exact research
-//     stack recipe (the reinforcement). Disarms on compliance, after
-//     MAX_BLOCKS blocks (stack may genuinely be down), and at agent_end.
-//
-// "use ... research tools/stack" is required - bare mentions of the stack
-// ("the research stack is down") are meta-discussion, not a request. The
-// host alternatives require the full hostname: the bare product name
-// ("SearXNG") appears in prose too often (observed 2026-08-06: a pasted
-// session transcript quoting guard output re-armed the guard).
-export const RESEARCH_INTENT_RE =
-  /\buse\s+(?:the\s+|my\s+)?research\s+(?:tools?|stack)\b|\bsearxng\.erfi\.io\b|\bcrawler\.erfi\.io\b/i;
-
-// Quoted / code spans are stripped before matching: quoting the trigger
-// phrase or the guard's own output (pasted transcripts, the routing note's
-// curl recipe) is discussion ABOUT the guard, not a request. An apostrophe
-// in prose can swallow a real ask into a false quoted span - a miss just
-// means no arming (pre-guard behaviour), which is the safe direction.
-const QUOTED_SPAN_RE = /`[^`\n]*`|"[^"\n]*"|'[^'\n]*'/g;
-
-export function detectResearchIntent(text: string): boolean {
-  if (!text) return false;
-  return RESEARCH_INTENT_RE.test(text.replace(QUOTED_SPAN_RE, " "));
-}
-
-// web_research modes that route through the research stack (crawler fetches
-// and/or SearXNG cross-check) - they count as compliance.
-export const RESEARCH_STACK_MODES = new Set(["local", "fresh", "crosscheck"]);
-const RESEARCH_HOSTS_RE = /\b(?:searxng|crawler)\.erfi\.io\b/;
-const RESEARCH_ROUTE_MAX_BLOCKS = 2;
+// ---- Research-stack routing state ----
+type ResearchRouteState = { armed: boolean; blocks: number };
+const researchRouteStates = new Map<string, ResearchRouteState>();
+const researchSoftFired = new Set<string>();
 
 const RESEARCH_ROUTE_NOTE =
   "\n\n[tool-guard routing: \"research tools\" = the self-hosted research stack, NOT Exa. " +
@@ -785,74 +196,13 @@ const RESEARCH_ROUTE_NOTE =
   "websearch / webfetch / web_research-default are BLOCKED by tool-guard for this request; " +
   "web_research mode local/fresh/crosscheck counts as the stack.]";
 
-const RESEARCH_ROUTE_BLOCK_REASON =
-  "tool-guard[research_route]: the user explicitly asked for the research tools - that means the self-hosted research stack, not Exa. " +
-  "Search: bash curl -s 'https://searxng.erfi.io/search?q=<urlencoded>&format=json'. " +
-  "Fetch: bash curl -s -X POST 'https://crawler.erfi.io/extract' -H 'Content-Type: application/json' -d '{\"url\":\"<url>\"}' (field: markdown; \"force_js\":true for SPAs). " +
-  "Add -H \"Authorization: Bearer $RESEARCH_TOKEN\" when off-LAN. Full API: ~/.pi/agent/skills/research/SKILL.md. " +
-  "(web_research with mode local/fresh/crosscheck also complies - it routes through this stack. " +
-  `Guard lifts after ${RESEARCH_ROUTE_MAX_BLOCKS} blocks if the stack is genuinely unreachable.)`;
-
-export type ResearchRouteInput = {
-  query?: string;
-  mode?: string;
-  url?: string;
-  command?: string;
-};
-export type ResearchRouteDecision =
-  | { action: "allow" }
-  | { action: "comply" } // stack call observed - disarm, let it through
-  | { action: "block"; reason: string };
-
-// Pure decision while the research_route flag is armed. Exported for tests.
-export function decideResearchRoute(
-  toolName: string,
-  input: ResearchRouteInput,
-  blocksSoFar: number,
-): ResearchRouteDecision {
-  if (toolName === "bash") {
-    return RESEARCH_HOSTS_RE.test(input.command ?? "")
-      ? { action: "comply" }
-      : { action: "allow" };
-  }
-  if (toolName === "web_research" && RESEARCH_STACK_MODES.has(input.mode ?? "")) {
-    return { action: "comply" };
-  }
-  if (toolName === "websearch" || toolName === "webfetch" || toolName === "web_research") {
-    if (blocksSoFar >= RESEARCH_ROUTE_MAX_BLOCKS) return { action: "allow" };
-    return { action: "block", reason: RESEARCH_ROUTE_BLOCK_REASON };
-  }
-  return { action: "allow" };
-}
-
-// Soft tier: a bare Exa websearch on a non-technical / local query is the
-// weakest search path the stack offers (Exa's index is US-centric and thin
-// for SG-local shopping / reviews / long-tail). One self-exempting nudge
-// per session. Only bare websearch - web_research already auto-fetches via
-// the crawler, so it partially exercises the stack even in default mode.
-// Exported for tests.
-export function decideResearchRouteSoft(
-  toolName: string,
-  input: { query?: string },
-): boolean {
-  return (
-    toolName === "websearch" &&
-    NON_TECHNICAL_QUERY.test((input.query ?? "").trim())
-  );
-}
-
 const RESEARCH_ROUTE_SOFT_NOTE =
   "tool-guard[research_route_soft]: non-technical/local research query - bare Exa websearch is the weakest path here (SG-local, shopping, long-tail). " +
   "Consider the research stack for follow-ups: web_research with mode:\"local\" (crawler-backed fetches) or mode:\"fresh\" (SearXNG cross-check), " +
   "or SearXNG directly: bash curl -s 'https://searxng.erfi.io/search?q=<urlencoded>&format=json'.";
 
-type ResearchRouteState = { armed: boolean; blocks: number };
-const researchRouteStates = new Map<string, ResearchRouteState>();
-const researchSoftFired = new Set<string>();
-
-// Advisory notes from the heuristic search guards (docs_first,
-// reformulation_loop, research_route_soft), attached to the triggering
-// call's tool result: sessionKey -> toolCallId -> note.
+// Advisory notes attached to a triggering call's result:
+// sessionKey -> toolCallId -> note.
 const pendingAdvisories = new Map<string, Map<string, string>>();
 
 function addAdvisory(sessionKey: string, toolCallId: string | undefined, note: string): void {
@@ -880,31 +230,11 @@ function sessionKeyOf(ctx: {
   }
 }
 
-// Extract every target path from an apply_patch envelope. Mirrors
-// apply-patch.ts's parsePatch but bail-fast — we only need the file paths,
-// not the hunks. Any line matching `*** (Add|Update|Delete|Move) File: <path>`
-// contributes a path. (`Move to:` lines also count as a write target.)
-// Exported for unit tests.
-export function extractPatchPaths(patchText: string): string[] {
-  if (typeof patchText !== "string") return [];
-  const out: string[] = [];
-  for (const line of patchText.split(/\r?\n/)) {
-    const m = line.match(/^\*\*\* (?:Add|Update|Delete|Move(?: to)?) File: (.+)$/);
-    if (m) out.push(m[1].trim());
-  }
-  return out;
-}
-
 export default function (pi: ExtensionAPI) {
-  // Warm the docs topic cache at session start so the docs_first guard can
-  // make its coverage decision synchronously later. Fire-and-forget.
   pi.on("session_start", async () => {
     try { loadTopics(); } catch { /* best-effort */ }
   });
 
-  // Reset per-session loop state when sessions transition. Pi keeps the
-  // extension module loaded across /new, /resume, /fork — module-scope
-  // state survives. Without this, search counters leak across sessions.
   pi.on("session_shutdown", async (_event, ctx) => {
     try {
       const key = ctx.sessionManager.getSessionFile?.() ?? "default";
@@ -922,9 +252,6 @@ export default function (pi: ExtensionAPI) {
     } catch { /* ignore */ }
   });
 
-  // Arm the research-route guard when the user explicitly asks for the
-  // research tools, and append the routing note to their message so the
-  // decision is made BEFORE the first tool call, not after a block.
   pi.on("input", async (event, ctx) => {
     if (DISABLED.has("research_route")) return undefined;
     if (event.source === "extension") return undefined;
@@ -938,8 +265,7 @@ export default function (pi: ExtensionAPI) {
       try { return ctx.sessionManager.getSessionFile?.() ?? "default"; } catch { return "default"; }
     })();
 
-    // Research-stack routing (explicit ask). Runs before every other guard
-    // so a blocked Exa call gets the research recipe, not a generic reason.
+    // Research-stack routing (explicit ask).
     if (!DISABLED.has("research_route")) {
       const st = researchRouteStates.get(sessionKey);
       if (st?.armed) {
@@ -957,9 +283,7 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Reformulation-loop guard: advisory. Runs on every tool call (search
-    // families only) so the counters stay accurate; the note attaches to
-    // the result and the model decides whether it applies.
+    // Reformulation-loop guard: advisory.
     if (!DISABLED.has("reformulation_loop")) {
       const loopInput = event.input as { query?: string; libraryName?: string };
       const loopMsg = checkReformulationLoop(
@@ -972,16 +296,12 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Docs-first chain: mark docs check — any docs_* call opens the gate
+    // Docs-first chain: mark docs check - any docs_* call opens the gate.
     if (DOCS_FIRST_TOOLS.has(event.toolName)) {
       docsFirstSessions.add(sessionKey);
-      // fall through — never block docs_* tools
     }
 
-    // Docs-first chain: advise on websearch / web_research only when the
-    // query plausibly intersects docs.erfi.io coverage (decideDocsFirst).
-    // Silent allows do NOT consume the one-shot -- a later technical query
-    // in the same session still gets the one-time advisory.
+    // Docs-first chain: advise on websearch / web_research.
     if (!DISABLED.has("docs_first") && WEB_SEARCH_TOOLS.has(event.toolName)) {
       if (!docsFirstSessions.has(sessionKey)) {
         const decision = decideDocsFirst(
@@ -990,14 +310,13 @@ export default function (pi: ExtensionAPI) {
           loadTopics(),
         );
         if (decision.block) {
-          docsFirstSessions.add(sessionKey); // one advisory per session
+          docsFirstSessions.add(sessionKey);
           addAdvisory(sessionKey, event.toolCallId, docsFirstAdvisoryNote(decision.matchedTopic));
         }
       }
     }
 
-    // Research-stack routing (heuristic soft tier): advisory nudge on a
-    // bare Exa websearch with a non-technical query, once per session.
+    // Research-stack routing (heuristic soft tier).
     if (
       !DISABLED.has("research_route_soft") &&
       !researchSoftFired.has(sessionKey) &&
@@ -1011,17 +330,13 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName === "bash") {
       const command = (event.input as { command?: string }).command;
       if (typeof command !== "string") return undefined;
-
       for (const rule of BASH_RULES) {
         if (DISABLED.has(rule.id)) continue;
         const probe = rule.segment ? splitSegments(command) : [command];
         for (const seg of probe) {
           const matched = rule.test ? rule.test(seg) : rule.pattern.test(seg);
           if (matched) {
-            return {
-              block: true,
-              reason: `tool-guard[${rule.id}]: ${rule.reason}`,
-            };
+            return { block: true, reason: `tool-guard[${rule.id}]: ${rule.reason}` };
           }
         }
       }
@@ -1044,11 +359,6 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      // write_too_large — Bedrock and certain Claude proxies 500 on tool-use
-      // inputs above ~80-100 KB. The standard `write` tool packs the entire
-      // file content into a single tool-call argument, so big-file writes
-      // silently fail upstream and pi's relay swallows the error. Redirect
-      // to write_stream which is designed for this case.
       if (
         event.toolName === "write" &&
         !DISABLED.has("write_too_large") &&
@@ -1060,18 +370,17 @@ export default function (pi: ExtensionAPI) {
           return {
             block: true,
             reason:
-              `tool-guard[write_too_large]: write content is ${kb} KB — above the ${WRITE_TOO_LARGE_BYTES / 1024} KB ceiling where ` +
+              `tool-guard[write_too_large]: write content is ${kb} KB - above the ${WRITE_TOO_LARGE_BYTES / 1024} KB ceiling where ` +
               `the upstream tool-call-input path 500s (silently, in pi's relay). ` +
-              `Use the \`write_stream\` tool instead: send the content in chunks of ≤60 KB with ` +
-              `chunk='first' → 'middle' (repeat) → 'last'. Same atomicity as write, no upstream 500.`,
+              `Use the \`write_stream\` tool instead: send the content in chunks of <=60 KB with ` +
+              `chunk='first' -> 'middle' (repeat) -> 'last'. Same atomicity as write, no upstream 500.`,
           };
         }
       }
       return undefined;
     }
 
-    // apply_patch — writes via fs.writeFile, bypasses the write/edit guard
-    // surface. Parse the envelope, run WRITE_RULES on every target path.
+    // apply_patch - writes via fs.writeFile, bypasses the write/edit guard.
     if (event.toolName === "apply_patch") {
       const patchText = (event.input as { patchText?: string }).patchText;
       const paths = extractPatchPaths(patchText ?? "");
@@ -1081,7 +390,7 @@ export default function (pi: ExtensionAPI) {
           if (rule.pattern.test(p)) {
             return {
               block: true,
-              reason: `tool-guard[${rule.id}]: apply_patch target "${p}" — ${rule.reason}`,
+              reason: `tool-guard[${rule.id}]: apply_patch target "${p}" - ${rule.reason}`,
             };
           }
         }
@@ -1101,9 +410,6 @@ export default function (pi: ExtensionAPI) {
     return undefined;
   });
 
-  // Append any pending advisory note to the triggering call's result. The
-  // tool already ran - the model sees the suggestion next to the results
-  // and decides whether it applies.
   pi.on("tool_result", async (event, ctx) => {
     let sessionKey = "default";
     try { sessionKey = ctx.sessionManager.getSessionFile?.() ?? "default"; } catch { /* ignore */ }

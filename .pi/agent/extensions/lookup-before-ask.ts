@@ -37,92 +37,19 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { anySentence } from "./lib/sentences.ts";
+import {
+  asksForOwnInfraFact,
+  LOOKUP_TOOLS,
+  NUDGE_LINE as CORE_NUDGE_LINE,
+} from "./lib/lookup-before-ask-core.ts";
 
-/** Tools that would have answered the question. Any one call disarms. */
-export const LOOKUP_TOOLS = new Set([
-  "memledger_search",
-  "semantic_search",
-  "search_messages",
-  "search_ledger",
-  "search_memories",
-  "list_sessions",
-  "session_search",
-  "ledger_search",
-  "ledger_sql",
-]);
+// Re-exported for the pi test suite (tests/extensions.test.ts) and shared with
+// the Claude Code hook. Detection logic now lives in lib/lookup-before-ask-core.ts.
+export { asksForOwnInfraFact, LOOKUP_TOOLS };
 
-/**
- * Asking shapes. A question mark alone is too loose - the model ends plenty
- * of turns with a rhetorical or offer-shaped question - so an explicit
- * request verb counts too.
- */
-const ASK_RE =
-  /\?|\b(can you|could you|would you|please (?:run|check|measure|confirm|paste|send)|let me know|tell me|paste|send me|worth recording|if you (?:still )?have|do you (?:still )?(?:have|know|remember))\b/i;
-
-/**
- * FACT-shaped: a measurement, spec, identifier, date, or recorded past event.
- * Deliberately excludes opinion/preference nouns.
- */
-const FACT_RE =
-  /\b(measure(?:d|ment)?|reading|length|diameter|width|depth|clearance|size|speed|throughput|bandwidth|latency|rate|temperature|capacity|model|make|brand|serial|part number|sku|version|firmware|revision|spec(?:s|ification)?|category|rating|ip|address|subnet|hostname|port|interface|nic|mac|uuid|ref|id\b|output|result|log|numbers?|figures?|stats?|baseline|report(?:s|ed|ing)?|shows?|says?|when did|what did|how long|how many|how much|which (?:one|model|version|port|interface|nic|card|switch|box|host))\b/i;
-
-/**
- * Anchored to the user's own estate. Without this, ordinary technical
- * questions about third-party systems would trip the fact vocabulary.
- *
- * Possessives are the obvious anchor but the WEAK one: real asks about the
- * user's own kit rarely say "your". The two that prompted this extension were
- * "how long is that run?" and "worth recording the specifics if still to
- * hand" - no possessive anywhere, ownership carried entirely by context. So
- * the kit vocabulary below does most of the work.
- */
-const OWN_POSSESSIVE_RE =
-  /\b(your|yours|you have|you've|you run|you ran|you tested|you measured|on your|in your)\b/i;
-
-/**
- * Physical-kit and diagnostic-tool nouns. These essentially only appear when
- * the subject is the user's own hardware - nobody asks about "the faceplate"
- * or "iperf" in the abstract.
- */
-const OWN_KIT_RE =
-  /\b(pc|rack|switch|router|nas|mobo|motherboard|nic|keystone|faceplate|patch panel|uplink|trunk|jack|cable|penetration|conduit|iperf\d?|fio|smartctl|ethtool|speedtest|traceroute)\b/i;
-
-/**
- * Ambiguous words that are also common verbs ("does Supabase run...", "link
- * to the docs"). Only count them as kit when a determiner marks them as a
- * concrete thing the user possesses.
- */
-const OWN_DETERMINED_RE =
-  /\b(?:the|that|this|both|each)\s+(run|link|port|box|host|server|machine|drive|disk|node|card|board|line|socket)\b/i;
-
-function anchoredToOwnEstate(text: string): boolean {
-  return OWN_POSSESSIVE_RE.test(text) || OWN_KIT_RE.test(text) || OWN_DETERMINED_RE.test(text);
-}
-
-/**
- * Did this message ask the user for a fact about their own infrastructure?
- * Pure so the decision is unit-testable without a session.
- */
-export function asksForOwnInfraFact(text: string): boolean {
-  // Per SENTENCE, not per message. Matched across a whole answer the
-  // conjunction is vacuous - any long message has a question mark somewhere,
-  // a spec noun somewhere and a possessive somewhere. This fired live on a
-  // message that was merely DISCUSSING how to detect asks.
-  return anySentence(
-    text,
-    (s) => ASK_RE.test(s),
-    (s) => FACT_RE.test(s),
-    anchoredToOwnEstate,
-  );
-}
-
-export const NUDGE_LINE =
-  "lookup-before-ask: you asked for a fact about the user's own setup without searching first. " +
-  "memledger_search / search_ledger / session_search hold prior sessions across pi, opencode and claude - " +
-  "measurements, part numbers, commit SHAs, what was decided and when. Search before asking, " +
-  "and before writing a date or number for something they said they already did. " +
-  "Ask only once the lookup comes back empty, and say that it did. (PI_LOOKUP_NUDGE_OFF=1)";
+// pi uses the PI_-prefixed kill switch; the core's NUDGE_LINE ends with the
+// harness-agnostic (LOOKUP_NUDGE_OFF=1) hint, so swap it for pi's here.
+export const NUDGE_LINE = CORE_NUDGE_LINE.replace("(LOOKUP_NUDGE_OFF=1)", "(PI_LOOKUP_NUDGE_OFF=1)");
 
 type TextBlock = { type?: string; text?: string };
 
