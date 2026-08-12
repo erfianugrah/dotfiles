@@ -60,6 +60,32 @@ brew_install_each() {
   fi
 }
 
+# install_each <label> <listfile> -- <cmd...>
+# Install each non-comment name in <listfile> via `<cmd...> <name>`, one at a
+# time - so one bad name can't abort the batch (pacman/paru resolve every target
+# up front and abort the whole transaction on the first "target not found",
+# which under `set -e` also kills this script). Continues past failures and
+# flags them; sets PKG_ERRORS on any failure. Names are word-split (package
+# names contain no spaces/globs).
+install_each() {
+  local label="$1" list="$2"; shift 2
+  [ "${1:-}" = "--" ] && shift
+  if [ ! -f "$list" ]; then echo "!! $label: $list not found - skipping" >&2; return 0; fi
+  local name
+  local -a names=() failed=()
+  # shellcheck disable=SC2046
+  names=( $(grep -v '^[[:space:]]*#' "$list" | grep -v '^[[:space:]]*$') )
+  [ "${#names[@]}" -eq 0 ] && return 0   # empty list: skip (also avoids set -u array trap on old bash)
+  for name in "${names[@]}"; do
+    if [ "$DRY_RUN" = 1 ]; then echo "+ $* $name"; continue; fi
+    "$@" "$name" || { echo "!! $label failed: $name" >&2; failed+=("$name"); }
+  done
+  if [ "${#failed[@]}" -gt 0 ]; then
+    echo "!! ${#failed[@]} $label package(s) FAILED: ${failed[*]}" >&2
+    PKG_ERRORS=1
+  fi
+}
+
 detect_os() {
   if [ -f /etc/os-release ]; then
     # shellcheck disable=SC1091
@@ -263,17 +289,21 @@ case "$OS" in
     if [ "$LINKS_ONLY" = 0 ]; then
       echo ">> installing packages via home-manager (flake: packages/nix#deck)"
       run env NIX_CONFIG="experimental-features = nix-command flakes" \
-        nix run home-manager/master -- switch --flake "$DOTFILES/packages/nix#deck"
+        nix run home-manager/master -- switch --flake "$DOTFILES/packages/nix#deck" \
+        || echo "!! home-manager (deck) failed - continuing with stow links" >&2
     fi
     do_stow
     ;;
   arch)
     if [ "$LINKS_ONLY" = 0 ]; then
       echo ">> installing repo packages via pacman"
-      run sudo pacman -S --needed - < "$DOTFILES/packages/arch-repo.txt"
+      # Per-package via install_each: one bad name must not abort the batch
+      # (and, under set -e, the whole script). --needed still skips installed;
+      # --noconfirm because per-package prompts would be unusable.
+      install_each pacman "$DOTFILES/packages/arch-repo.txt" -- sudo pacman -S --needed --noconfirm
       if command -v paru >/dev/null 2>&1; then
         echo ">> installing AUR packages via paru"
-        run paru -S --needed - < "$DOTFILES/packages/arch-aur.txt"
+        install_each paru "$DOTFILES/packages/arch-aur.txt" -- paru -S --needed --noconfirm
       fi
     fi
     do_stow

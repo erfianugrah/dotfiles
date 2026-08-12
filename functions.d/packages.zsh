@@ -209,22 +209,33 @@ _pkg_install_arch() {
     print "Error: $repo_list not found" >&2; return 1
   fi
 
+  # Per-package (not one `pacman -S a b c` transaction): a single name that is
+  # not in the repos makes pacman abort with "target not found" and install
+  # nothing. --needed still skips already-installed packages. Flag failures.
+  local pkg; local -a failed=()
   local -a repo_pkgs=("${(@f)$(grep -v '^\s*#' "$repo_list" | grep -v '^\s*$')}")
-  print "Installing ${#repo_pkgs[@]} pacman packages..."
-  sudo pacman -S --needed --noconfirm "${repo_pkgs[@]}"
+  print "Installing ${#repo_pkgs[@]} pacman packages (one at a time; failures flagged)..."
+  for pkg in "${repo_pkgs[@]}"; do
+    sudo pacman -S --needed --noconfirm "$pkg" || { print -u2 "!! pacman failed: $pkg"; failed+=("$pkg") }
+  done
 
   if [[ -f "$aur_list" ]]; then
     local -a aur_pkgs=("${(@f)$(grep -v '^\s*#' "$aur_list" | grep -v '^\s*$')}")
     if (( ${#aur_pkgs[@]} )); then
       if command -v paru &>/dev/null; then
-        print "\nInstalling ${#aur_pkgs[@]} AUR packages via paru..."
-        paru -S --needed --noconfirm "${aur_pkgs[@]}"
+        print "\nInstalling ${#aur_pkgs[@]} AUR packages via paru (one at a time; failures flagged)..."
+        for pkg in "${aur_pkgs[@]}"; do
+          paru -S --needed --noconfirm "$pkg" || { print -u2 "!! paru failed: $pkg"; failed+=("$pkg") }
+        done
       else
         print "Warning: paru not on PATH. Install with: sudo pacman -S paru-bin (or build from AUR). Skipping AUR packages." >&2
       fi
     fi
   fi
 
+  if (( ${#failed[@]} )); then
+    print -u2 "${RED:-}!! ${#failed[@]} arch package(s) FAILED: ${failed[*]}${RESET:-}"; return 1
+  fi
   print "\n${GREEN}arch install complete${RESET}"
 }
 
@@ -379,8 +390,16 @@ _pkg_install_npm() {
     export PATH="${user_prefix}/bin:$PATH"
   fi
 
-  print "\n${BOLD:-}Installing ${#pkgs[@]} npm globals...${RESET:-}"
-  npm install -g "${pkgs[@]}" 2>&1 | grep -v 'up to date'
+  # Per-package (not `npm i -g a b c`): one bad/unpublished package must not
+  # abort the rest. Flag failures and return non-zero.
+  print "\n${BOLD:-}Installing ${#pkgs[@]} npm globals (one at a time; failures flagged)...${RESET:-}"
+  local pkg; local -a failed=()
+  for pkg in "${pkgs[@]}"; do
+    npm install -g "$pkg" || { print -u2 "!! npm global failed: $pkg"; failed+=("$pkg") }
+  done
+  if (( ${#failed[@]} )); then
+    print -u2 "${RED:-}!! ${#failed[@]} npm global(s) FAILED: ${failed[*]}${RESET:-}"; return 1
+  fi
 }
 
 _pkg_install_go() {
@@ -392,10 +411,14 @@ _pkg_install_go() {
   (( ${#tools[@]} )) || return 0
 
   print "\n${BOLD:-}Installing ${#tools[@]} go tools...${RESET:-}"
+  local tool; local -a failed=()
   for tool in "${tools[@]}"; do
     print "  go install ${tool}@latest"
-    go install "${tool}@latest" 2>&1 || print "  WARN: failed ${tool}" >&2
+    go install "${tool}@latest" 2>&1 || { print -u2 "!! go tool failed: ${tool}"; failed+=("$tool") }
   done
+  if (( ${#failed[@]} )); then
+    print -u2 "${RED:-}!! ${#failed[@]} go tool(s) FAILED: ${failed[*]}${RESET:-}"; return 1
+  fi
 }
 
 _pkg_install_cargo() {
@@ -406,8 +429,15 @@ _pkg_install_cargo() {
   local -a crates=("${(@f)$(_pkg_read_list "$list")}")
   (( ${#crates[@]} )) || return 0
 
-  print "\n${BOLD:-}Installing ${#crates[@]} cargo crates...${RESET:-}"
-  cargo install "${crates[@]}" 2>&1 | grep -v 'already installed'
+  # Per-crate: a single crate that fails to compile must not abort the rest.
+  print "\n${BOLD:-}Installing ${#crates[@]} cargo crates (one at a time; failures flagged)...${RESET:-}"
+  local crate; local -a failed=()
+  for crate in "${crates[@]}"; do
+    cargo install "$crate" || { print -u2 "!! cargo crate failed: $crate"; failed+=("$crate") }
+  done
+  if (( ${#failed[@]} )); then
+    print -u2 "${RED:-}!! ${#failed[@]} cargo crate(s) FAILED: ${failed[*]}${RESET:-}"; return 1
+  fi
 }
 
 _pkg_install_pip() {
@@ -415,12 +445,22 @@ _pkg_install_pip() {
   [[ -f "$list" ]] || return 0
   command -v pip &>/dev/null || command -v pip3 &>/dev/null || return 0
 
-  print "\n${BOLD:-}Installing pip user packages...${RESET:-}"
   local pip_cmd="pip"
   command -v pip &>/dev/null || pip_cmd="pip3"
+  local -a reqs=("${(@f)$(_pkg_read_list "$list")}")
+  (( ${#reqs[@]} )) || return 0
   # --break-system-packages needed on Arch/Fedora (PEP 668) for --user installs.
   # Safe: --user puts packages in ~/.local/lib/python*/site-packages/, not system dirs.
-  $pip_cmd install --user --break-system-packages -r "$list" 2>&1 | grep -v 'already satisfied'
+  # Per-requirement (not `-r file`): pip aborts the whole file on the first bad
+  # requirement, so one typo would install nothing. Install each; flag failures.
+  print "\n${BOLD:-}Installing ${#reqs[@]} pip user packages (one at a time; failures flagged)...${RESET:-}"
+  local req; local -a failed=()
+  for req in "${reqs[@]}"; do
+    $pip_cmd install --user --break-system-packages "$req" || { print -u2 "!! pip package failed: $req"; failed+=("$req") }
+  done
+  if (( ${#failed[@]} )); then
+    print -u2 "${RED:-}!! ${#failed[@]} pip package(s) FAILED: ${failed[*]}${RESET:-}"; return 1
+  fi
 }
 
 _pkg_install_deno() {
@@ -432,12 +472,16 @@ _pkg_install_deno() {
   (( ${#entries[@]} )) || return 0
 
   print "\n${BOLD:-}Installing ${#entries[@]} deno tools...${RESET:-}"
+  local entry name specifier; local -a failed=()
   for entry in "${entries[@]}"; do
-    local name="${entry%%=*}"
-    local specifier="${entry#*=}"
+    name="${entry%%=*}"
+    specifier="${entry#*=}"
     print "  deno install ${name}"
-    deno install -gArf --name "$name" "$specifier" 2>&1 || print "  WARN: failed ${name}" >&2
+    deno install -gArf --name "$name" "$specifier" 2>&1 || { print -u2 "!! deno tool failed: ${name}"; failed+=("$name") }
   done
+  if (( ${#failed[@]} )); then
+    print -u2 "${RED:-}!! ${#failed[@]} deno tool(s) FAILED: ${failed[*]}${RESET:-}"; return 1
+  fi
 }
 
 # ---------------------------------------------------------------------------
