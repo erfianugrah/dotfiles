@@ -353,12 +353,30 @@ async function fetchBriefRows(filter: string): Promise<BriefRow[]> {
 	return (await resp.json()) as BriefRow[];
 }
 
+// Project-scoped fetch via the search_sessions RPC (memledger 009):
+// attributed (title/project/cwd) UNION message-FTS mentions - catches
+// sessions that worked on the project from a different cwd, which the
+// plain project=eq filter cannot see (project is the frozen startup-cwd
+// basename). Pure one-off mentions are noise in a briefing: require
+// attributed/both, or mentions with hits>=2.
+async function fetchTopicRows(project: string): Promise<BriefRow[]> {
+	const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+	const url =
+		"https://memledger.erfi.io/rpc/search_sessions?q=" + encodeURIComponent(project) +
+		"&or=(match_kind.neq.mentions,hits.gte.2)" +
+		`&message_count=gte.8&started_at=lt.${encodeURIComponent(cutoff)}` +
+		"&order=started_at.desc.nullslast&limit=4&select=source,project,title,started_at,message_count";
+	const resp = await fetch(url, { signal: AbortSignal.timeout(1500) });
+	if (!resp.ok) return [];
+	return (await resp.json()) as BriefRow[];
+}
+
 async function fetchMemledgerBrief(project: string): Promise<string> {
 	project = project.split("/").filter(Boolean).pop() ?? project; // memledger stores basename
 	try {
 		// project-scoped first; fall back to a GLOBAL recent-work brief so a
 		// session opened in a random directory still starts informed
-		let rows = project ? await fetchBriefRows(`project=eq.${encodeURIComponent(project)}`) : [];
+		let rows = project ? await fetchTopicRows(project) : [];
 		let scope = "in this project";
 		if (rows.length === 0) {
 			rows = await fetchBriefRows("");
