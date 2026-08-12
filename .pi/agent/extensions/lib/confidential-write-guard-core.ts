@@ -209,7 +209,7 @@ export function isProsePath(p: string): boolean {
 // messages, tags, PR/issue/release bodies. Deliberately narrow: read/search
 // commands must never trip it (a term as a grep pattern must not false-positive).
 const COMMIT_PERSIST =
-  /\bgit\s+commit\b|\bgit\s+(?:tag|notes)\b|\bgh\s+(?:pr|issue|release)\s+(?:create|edit|comment)\b/;
+  /\bgit\s+commit\b|\bgit\s+(?:tag|notes)\b|\bgh\s+(?:pr|issue|release|gist)\s+(?:create|edit|comment|review)\b/;
 
 /** True when a bash command persists a commit message / PR / issue body. */
 export function isCommitPersist(cmd: string): boolean {

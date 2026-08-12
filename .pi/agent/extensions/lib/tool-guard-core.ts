@@ -265,10 +265,13 @@ export const BASH_RULES: BlockRule[] = [
   },
   {
     id: "bash_eval_curl",
-    pattern: /^\s*(curl|wget)\s+[^|&;]*\|\s*(sudo\s+)?(bash|sh|zsh)\b/,
+    // Tested against the WHOLE command (segment:false): the pattern needs the
+    // interior `|`, which splitSegments would otherwise consume. Not ^-anchored
+    // so `foo && curl url | sh` is caught, not just a leading curl.
+    pattern: /\b(curl|wget)\s+[^|&;]*\|\s*(sudo\s+)?(bash|sh|zsh)\b/,
     reason:
       "`curl | sh` blindly executes whatever the remote serves. Download first to a file, inspect, then run - OR install via the platform's package manager. Even for trusted installs (nvm, rustup), prefer the manual two-step.",
-    segment: true,
+    segment: false,
   },
   {
     id: "chmod_777",
@@ -287,7 +290,11 @@ export const BASH_RULES: BlockRule[] = [
   },
   {
     id: "force_push_protected",
-    pattern: /^\s*git\s+push\s+(\S+\s+)*(-f|--force)\b.*\b(main|master|dev|production|prod)\b/,
+    // Order-independent (lookaheads): a force indicator (-f/--force or a `+ref`
+    // refspec) AND a protected branch, in either order - catches both
+    // `git push --force origin main` and `git push origin main --force` and
+    // `git push origin +main`.
+    pattern: /^\s*git\s+push\b(?=.*(?:-f\b|--force\b|\s\+\S))(?=.*\b(?:main|master|dev|production|prod)\b)/,
     reason:
       "Force-pushing to main/master/dev/prod can erase teammates' work. Confirm the branch is yours alone and the remote is up to date. If you really need it, use `--force-with-lease` (refuses if the remote moved). Better: open a PR with the force-pushed branch separately.",
     segment: true,
@@ -345,8 +352,12 @@ export function checkWebfetchDocs(url: string): string | null {
 }
 
 // Splits a bash command into best-effort segments at shell operators.
+// Splits on newline and single `&` (background) too, so a rule-triggering
+// command on a line after the first, or backgrounded with `&`, is not hidden
+// from the ^-anchored per-segment rules. Over-splitting (e.g. `2>&1`) is safe:
+// it only yields more segments to check, never fewer.
 export function splitSegments(command: string): string[] {
-  return command.split(/&&|\|\||;|\|/);
+  return command.split(/&&|\|\||;|\||&|\r?\n/);
 }
 
 // ---- Pure orchestrator decisions (shared by pi + CC) ----

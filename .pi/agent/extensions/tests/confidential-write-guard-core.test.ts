@@ -86,8 +86,12 @@ describe("path + command classifiers", () => {
     expect(isCommitPersist("git commit -m x")).toBe(true);
     expect(isCommitPersist("git tag -a v1 -m x")).toBe(true);
     expect(isCommitPersist("gh pr create --body x")).toBe(true);
+    // regression (code-review): also cover gh pr review + gh gist
+    expect(isCommitPersist("gh pr review 5 --body x")).toBe(true);
+    expect(isCommitPersist("gh gist create -d x f.txt")).toBe(true);
     expect(isCommitPersist("git log --oneline")).toBe(false);
     expect(isCommitPersist("grep -r Acme .")).toBe(false);
+    expect(isCommitPersist("gh pr view 5")).toBe(false);
   });
 });
 

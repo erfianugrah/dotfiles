@@ -139,6 +139,17 @@ describe("matchesBashGate - compound / subshell forms", () => {
   test("fully read-only chain stays ungated", () => {
     expect(matchesBashGate("git status && git log && git diff")).toBeUndefined();
   });
+  // regression (code-review): the offending command on a line after the first,
+  // or backgrounded with a single `&`, must still be gated.
+  test("mutating command on a newline (line 2) is gated", () => {
+    expect(matchesBashGate("cd /repo\ngit push --force origin main")).toBeDefined();
+  });
+  test("mutating command backgrounded with single & is gated", () => {
+    expect(matchesBashGate("true & git reset --hard origin/main")).toBeDefined();
+  });
+  test("multi-line fully read-only chain stays ungated", () => {
+    expect(matchesBashGate("ls -la\ngit status\npwd")).toBeUndefined();
+  });
 });
 
 describe("classifyBashCommand", () => {
