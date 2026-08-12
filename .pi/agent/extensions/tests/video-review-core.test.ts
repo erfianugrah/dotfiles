@@ -251,3 +251,15 @@ describe("video-review-core.runVideoReview (bundle-backed, no network)", () => {
     expect((await runVideoReview({ action: "bogus" as any })).isError).toBe(true);
   });
 });
+
+import { safeOutputPath } from "../lib/video-review-core.ts";
+describe("video-review.safeOutputPath (code-review: workspace confinement)", () => {
+  const cwd = "/home/u/proj";
+  test("allows paths under cwd", () => {
+    expect(safeOutputPath("out/doc.md", cwd)).toBe("/home/u/proj/out/doc.md");
+  });
+  test("rejects absolute escape + traversal", () => {
+    expect(() => safeOutputPath("/home/u/.zshrc", cwd)).toThrow();
+    expect(() => safeOutputPath("../../etc/x", cwd)).toThrow();
+  });
+});

@@ -18,7 +18,22 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
+
+// Confine a caller-supplied output_path to the workspace (cwd). Resolves the
+// path and rejects anything that escapes cwd, so a tool-chosen output_path can
+// never overwrite files elsewhere (e.g. ~/.zshrc, /etc/...). Returns the
+// resolved absolute path. Exported for unit testing.
+export function safeOutputPath(outputPath: string, cwd: string = process.cwd()): string {
+  const root = resolve(cwd);
+  const resolved = resolve(root, outputPath);
+  if (resolved !== root && !resolved.startsWith(root + sep)) {
+    throw new Error(
+      `output_path escapes the workspace (${root}): ${outputPath}. Choose a path inside the current directory.`,
+    );
+  }
+  return resolved;
+}
 
 const WHISPER_URL = process.env.WHISPER_URL ?? "http://localhost:7860";
 // Persistent store (survives reboots - /tmp does not; a lost bundle costs a
@@ -1724,10 +1739,16 @@ async function doDoc(args: VideoReviewArgs, onUpdate: ((m: string) => void) | un
 
   const text = md.join("\n");
   if (args.output_path) {
-    mkdirSync(dirname(args.output_path), { recursive: true });
-    writeFileSync(args.output_path, text);
+    let outPath: string;
+    try {
+      outPath = safeOutputPath(args.output_path);
+    } catch (e) {
+      return { isError: true, text: (e as Error).message, details: { error: "unsafe-output-path", output_path: args.output_path } };
+    }
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, text);
     const stats = [
-      `wrote ${args.output_path} (${Buffer.byteLength(text)} bytes)`,
+      `wrote ${outPath} (${Buffer.byteLength(text)} bytes)`,
       `- source: ${bundle.file} (${hhmmss(bundle.duration)}), speakers: ${bundle.speakers.join(", ") || "(none)"}`,
       wantOverlap ? "- sections: source, speaking time, overlaps" + (wantFrames ? ", visual timeline" : "") + (wantTranscript ? ", transcript" : "") : "- sections: source" + (wantTranscript ? ", transcript" : ""),
       wantTranscript ? `- transcript segments: ${bundle.segments.length}` : "- transcript omitted",

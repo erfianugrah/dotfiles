@@ -295,3 +295,14 @@ describe("docs-core.runDocs", () => {
     expect(r.isError).toBe(true);
   });
 });
+
+import { safeHeadN } from "../lib/docs-core.ts";
+describe("docs-core.safeHeadN (code-review: head -N injection guard)", () => {
+  test("coerces to a bounded positive int; injection/negative -> fallback, float floored, capped", () => {
+    expect(safeHeadN(5)).toBe(5);
+    expect(safeHeadN(5.9)).toBe(5);
+    expect(safeHeadN("5; rm -rf /")).toBe(20);
+    expect(safeHeadN(-3)).toBe(20);
+    expect(safeHeadN(1e9)).toBe(1000);
+  });
+});
