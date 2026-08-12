@@ -77,4 +77,15 @@ describe("lookup-before-ask PreToolUse hook", () => {
     );
     expect(stdout.trim()).toBe("");
   });
+
+  test("PI_LOOKUP_NUDGE_OFF=1 also disables the nudge (pi-parity name)", async () => {
+    const { stdout } = await runHook(
+      {
+        tool_name: "AskUserQuestion",
+        tool_input: { questions: [{ question: "Paste that cable run's iperf numbers?" }] },
+      },
+      { PI_LOOKUP_NUDGE_OFF: "1" },
+    );
+    expect(stdout.trim()).toBe("");
+  });
 });

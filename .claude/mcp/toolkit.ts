@@ -50,8 +50,15 @@ server.registerTool(
     },
   },
   async ({ image, semver, current, limit }) => {
-    const { text } = await queryOciTags(image, { semver, current, limit });
-    return { content: [{ type: "text", text }] };
+    // oci-tags-core throws (network/404) rather than returning isError like the
+    // other cores - normalize to the same error shape here.
+    try {
+      const { text } = await queryOciTags(image, { semver, current, limit });
+      return { content: [{ type: "text" as const, text }] };
+    } catch (err) {
+      const text = `oci_tags failed for ${image}: ${err instanceof Error ? err.message : String(err)}`;
+      return { content: [{ type: "text" as const, text }], isError: true };
+    }
   },
 );
 

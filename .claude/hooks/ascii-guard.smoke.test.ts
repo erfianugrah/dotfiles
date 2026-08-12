@@ -11,11 +11,15 @@ import * as path from "node:path";
 
 const hookPath = path.join(import.meta.dir, "ascii-guard.ts");
 
-async function runHook(payload: unknown): Promise<{ code: number; stdout: string }> {
+async function runHook(
+  payload: unknown,
+  extraEnv: Record<string, string> = {},
+): Promise<{ code: number; stdout: string }> {
   const proc = Bun.spawn([process.execPath, hookPath], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, ...extraEnv },
   });
   proc.stdin.write(JSON.stringify(payload));
   await proc.stdin.end();
@@ -61,16 +65,35 @@ describe("ascii-guard PreToolUse hook", () => {
     expect(benign.stdout.trim()).toBe(""); // not a WRITE_BASH command -> allowed
   });
 
+  const EM = "\u2014"; // em dash - escaped so this repo's own ascii-guard permits the test file
+
   test("ASCII_GUARD_OFF=1 disables the guard", async () => {
-    const proc = Bun.spawn([process.execPath, hookPath], {
-      stdin: "pipe",
-      stdout: "pipe",
-      env: { ...process.env, ASCII_GUARD_OFF: "1" },
-    });
-    proc.stdin.write(JSON.stringify({ tool_name: "Write", tool_input: { file_path: "a.md", content: "x — y" } }));
-    await proc.stdin.end();
-    const stdout = await new Response(proc.stdout).text();
-    await proc.exited;
+    const { stdout } = await runHook(
+      { tool_name: "Write", tool_input: { file_path: "a.md", content: `x ${EM} y` } },
+      { ASCII_GUARD_OFF: "1" },
+    );
     expect(stdout.trim()).toBe("");
+  });
+
+  test("PI_ASCII_GUARD_OFF=1 also disables the guard (the name the deny reason advertises)", async () => {
+    const { stdout } = await runHook(
+      { tool_name: "Write", tool_input: { file_path: "a.md", content: `x ${EM} y` } },
+      { PI_ASCII_GUARD_OFF: "1" },
+    );
+    expect(stdout.trim()).toBe("");
+  });
+
+  test("PI_ASCII_GUARD_SCOPE=prose lets code files pass but still denies prose", async () => {
+    const env = { PI_ASCII_GUARD_SCOPE: "prose" };
+    const code = await runHook(
+      { tool_name: "Write", tool_input: { file_path: "/tmp/x.ts", content: `const s = "x ${EM} y";` } },
+      env,
+    );
+    expect(code.stdout.trim()).toBe("");
+    const prose = await runHook(
+      { tool_name: "Write", tool_input: { file_path: "/tmp/x.md", content: `x ${EM} y` } },
+      env,
+    );
+    expect(JSON.parse(prose.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
   });
 });

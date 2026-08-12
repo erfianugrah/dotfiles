@@ -1,8 +1,10 @@
 # Porting the pi harness to Claude Code
 
-Status: design doc (no code yet). Branch `cc-port`, worktree
-`/Users/erfi/dotfiles.worktrees/cc-port`. Nothing here touches the live
-`~/.pi/agent/` runtime or `~/dotfiles` main branch.
+Status: IMPLEMENTED - merged to main 2026-08-12 (PR #1, 20 commits). The
+topology below is live: shared cores in `.pi/agent/extensions/lib/`, thin pi
+adapters, `.claude/mcp/toolkit.ts` (22 MCP tools), `.claude/hooks/` (11 guard
+hooks), `.claude/commands/` + `.claude/skills/` symlinks, and `install.sh
+do_claude()` wiring MCP registration + hooks merge.
 
 ## Goal
 
@@ -26,7 +28,7 @@ Facts established from the live repo (2026-08-11):
   `extensions/lib/`).
 - **`.claude/` holds thin links/adapters back into it.** Already true for
   skills: `.claude/skills/caddy -> ../../.pi/agent/skills/caddy` (curated
-  18-skill subset). opencode does the whole dir: `.config/opencode/skills ->
+subset: 17 domain skills + 6 superpowers subskills today). opencode does the whole dir: `.config/opencode/skills ->
   ../../.pi/agent/skills`.
 - No tracked `.claude/settings.json` or `.mcp.json` exists yet - those (plus
   `.claude/mcp/` servers, `.claude/hooks/`, `.claude/commands/`) are the
@@ -171,11 +173,13 @@ an MCP server before being folded into pi.
 | `pg-analyser.pi.ts` | MCP | `pg-analyser` CLI | single tool; core already shells out. |
 | `session-search.ts` | MCP or SKIP | SQLite FTS5 of pi sessions | indexes *pi* sessions; only useful in CC if pointed at a shared corpus. Prefer `memledger` (cross-client) for CC. |
 
-Design: **two stdio MCP servers** rather than one monolith, so context cost is
-opt-in per project. Built on the official `@modelcontextprotocol/sdk` (v1.30,
-`McpServer` + `registerTool` + `StdioServerTransport`, Zod raw-shape schemas):
-- `.claude/mcp/toolkit.ts` - CLI wrappers (oci [done], osv/secret/hurl/go-test/bench/pg-analyser).
-- `.claude/mcp/research.ts` - service clients (docs/exa/osint/memledger/video-review).
+Design (as built): **one stdio MCP server** - `.claude/mcp/toolkit.ts`
+carries both the CLI wrappers (oci/osv/secret/hurl/go-test/bench/pg-analyser)
+and the service clients (docs/exa/osint/memledger/video-review/render-diagram/
+pdf/context7/build-favicon-set); the planned second `research.ts` server was
+folded in during Phase 4. Built on the official `@modelcontextprotocol/sdk`
+(v1.30, `McpServer` + `registerTool` + `StdioServerTransport`, Zod raw-shape
+schemas).
 
 Dependency model: deps in `.claude/mcp/{package.json,node_modules}`
 (node_modules + bun.lock git/stow-ignored via the repo's bare regexes). Because
@@ -290,28 +294,28 @@ already provides it · SKIP = pi TUI/session internals, no CC analogue.
 | bench | DONE (MCP) | bench |
 | pg-analyser.pi | DONE (MCP) | pg_analyser |
 | ascii-punctuation-guard | DONE (HOOK) | PreToolUse, live-verified |
-| memledger | TO-PORT (MCP) | memledger-core.ts ALREADY exists - near-trivial |
-| docs | TO-PORT (MCP) | docs.erfi.io over SSH; 6 sub-tools |
-| exa | TO-PORT (MCP) | websearch/codesearch (+ web-research folds in here) |
-| osint | TO-PORT (MCP) | osint.erfi.io; 9 sub-tools |
-| video-review | TO-PORT (MCP) | whisper service client |
-| render-diagram | TO-PORT (MCP) | mermaid/d2 CLIs |
-| pdf | TO-PORT (MCP) | pdftotext/tesseract/pdfplumber |
-| context7 | TO-PORT (MCP) | or register upstream context7 MCP directly |
-| build-favicon-set | TO-PORT (MCP) | niche |
+| memledger | DONE (MCP) | 5 tools (search/ledger/memories/sessions) |
+| docs | DONE (MCP) | docs.erfi.io over SSH; 6 sub-tools |
+| exa | DONE (MCP) | web_search / code_search |
+| osint | DONE (MCP) | osint.erfi.io; 9 sub-tools |
+| video-review | DONE (MCP) | whisper service client |
+| render-diagram | DONE (MCP) | mermaid/d2 CLIs |
+| pdf | DONE (MCP) | pdftotext/tesseract/pdfplumber |
+| context7 | DONE (MCP) | resolve_library_id + query_docs |
+| build-favicon-set | DONE (MCP) | niche |
 | web-research | FOLD -> exa | overlaps exa; expose one |
-| confidential-write-guard | TO-PORT (HOOK) | PreToolUse deny |
-| git-gh-gate | TO-PORT (HOOK) | PreToolUse Bash deny |
-| tool-guard | TO-PORT (HOOK) | PreToolUse anti-patterns |
-| bash-error-hints | TO-PORT (HOOK) | PostToolUse additionalContext |
-| entity-qualifier-nudge | TO-PORT (HOOK) | PreToolUse nudge |
-| skill-guard | TO-PORT (HOOK) | UserPromptSubmit/PreToolUse (high value) |
-| lookup-before-ask | TO-PORT (HOOK) | PreToolUse on AskUserQuestion; needs memledger MCP |
-| epistemic-guard | TO-PORT (HOOK) | PostToolUse/Stop transcript-provenance (complex) |
-| notify | TO-PORT (HOOK) | Notification/Stop |
-| cd-agents-reload | TO-PORT (HOOK) | SessionStart/CwdChanged (marginal) |
-| superpowers | TO-PORT (CMD) | register superpowers skills in .claude/skills |
-| prompt templates | TO-PORT (CMD) | /commit (AI-attribution ban) etc -> .claude/commands |
+| confidential-write-guard | DONE (HOOK) | PreToolUse deny |
+| git-gh-gate | DONE (HOOK) | PreToolUse deny (Bash|Write|Edit|MultiEdit) |
+| tool-guard | DONE (HOOK) | PreToolUse anti-patterns (Bash|WebFetch) |
+| bash-error-hints | DONE (HOOK) | PostToolUse Bash additionalContext |
+| entity-qualifier-nudge | DONE (HOOK) | PreToolUse additionalContext (live-verified) |
+| skill-guard | DONE (HOOK) | PreToolUse additionalContext (live-verified) |
+| lookup-before-ask | DONE (HOOK) | PreToolUse additionalContext on AskUserQuestion |
+| epistemic-guard | DONE (HOOK) | PostToolUse (Write|Edit|MultiEdit) transcript-provenance |
+| notify | DONE (HOOK) | Stop |
+| cd-agents-reload | DONE (HOOK) | PreToolUse Bash additionalContext (live-verified) |
+| superpowers | DONE (CMD) | 6 subskills symlinked into .claude/skills |
+| prompt templates | DONE (CMD) | commit/pr/test/rollback -> .claude/commands |
 | grep | NATIVE | CC Grep |
 | glob | NATIVE | CC Glob |
 | webfetch | NATIVE | CC WebFetch (SPA-escalation gap acceptable) |
@@ -395,6 +399,7 @@ JSON-RPC smoke tests (no `claude` binary needed).
 - [x] PreToolUse `permissionDecision: deny` + `permissionDecisionReason` honored by CC (verified: the guillemet Write was blocked, reason surfaced to the model).
 - [ ] `updatedInput` auto-rewrite: NOT yet tested (ascii-guard uses the deny path). Still the future enhancement for auto-fold.
 - [ ] `UserPromptSubmit` injection: NOT yet tested (no UserPromptSubmit hook until Phase 3 skill-guard).
+- [x] PreToolUse `additionalContext` honored (verified live 2026-08-12, CC 2.1.220): cd-agents-reload injected a probe repo's AGENTS.md carrying a unique codename; the model quoted the codename verbatim and the CC debug log shows `provided additionalContext (670 chars)`. First probe attempt returned a false negative because the hook's own framing ("rules below are NOT in your current context") led the model to answer NONE when asked what it could "see in context" - probe questions must not collide with the injected framing.
 - [x] Findings recorded above under "Live verification (2026-08-12)".
 
 **Phase 1 - vertical slice (proves the whole architecture end to end).**
@@ -404,7 +409,7 @@ Smallest set that exercises MCP + hook + shared core + stow, all at once.
 - [x] `.mcp.json` (tracked, project scope). Live-verified: user-scope `claude mcp add` (absolute path) -> `✔ Connected` + live `oci_tags` call returned real tags. Caveat found: `${CLAUDE_PROJECT_DIR}` warns "missing env var" in the health-check context, so `do_claude()`'s absolute-path user-scope registration is the reliable primary; `.mcp.json` is the project-scope convenience.
 - [x] Extract `lib/ascii-core.ts` (scan/isProsePath/WRITE_BASH/reason + new `foldToAscii`); re-point pi adapter (re-exports); ascii-core 48 pass (every code point) + pi suite/e2e 600 pass.
 - [x] `.claude/hooks/ascii-guard.ts` (PreToolUse Write|Edit|MultiEdit|Bash) + `.claude/settings.json` fragment. Emits `permissionDecision: deny` + the exact ASCII-folded form (guaranteed one-shot fix). Hook smoke test 4 pass. NOTE: true auto-rewrite via `updatedInput` is a [blocked: needs live CC] enhancement - deny-with-folded-form is the verified-correct baseline.
-- [x] Wire `install.sh` `do_claude()`: `bun install` + idempotent `claude mcp add --scope user erfi-toolkit`; deep jq-merge of `.claude/settings.json` hooks into `~/.claude/settings.json` (per-event array concat + `unique_by(tojson)` so re-runs are idempotent). `.claude/settings.json` added to `.stow-local-ignore`. Verified: `bash -n` OK, standalone jq-merge idempotent (theme preserved, count stays 1), `do_claude` dry-run emits the right commands with no side effects.
+- [x] Wire `install.sh` `do_claude()`: native-binary repair (postinstall re-run when `claude --version` reports "native binary not installed"), `bun install`, user-scope MCP registration probed via `~/.claude.json` (a `claude mcp list` grep false-matches the project-scope `.mcp.json` entry); deep jq-merge of `.claude/settings.json` hooks into `~/.claude/settings.json` (per-event concat + order-preserving first-seen dedup, perms preserved). All `claude` invocations carry `DISABLE_AUTOUPDATER=1`. `.claude/settings.json` and `.mcp.json` in `.stow-local-ignore`.
 - [x] Commit; this slice is the reference pattern for every later item. THE DUAL-HARNESS FOUNDATION IS COMPLETE: shared core + pi adapter + CC MCP tool + CC guard hook + automatic install, all verified without a `claude` binary. Remaining phases are BREADTH (more tools/guards) over this proven pattern.
 
 **Phase 2 - widen MCP (toolkit server, CLI wrappers).**
@@ -417,17 +422,20 @@ Smallest set that exercises MCP + hook + shared core + stow, all at once.
 
 **PHASE 2 COMPLETE.** Toolkit MCP exposes 7 tools: oci_tags, osv_scan, secret_scan, hurl_test, go_test, bench, pg_analyser - each over a shared dependency-free lib/*-core.ts with a pure unit test, all asserted by the SDK-client smoke test. pi suite held at 589 pass throughout.
 
-**Phase 3 - the guard hooks.**
-- [ ] confidential-write-guard -> core + PreToolUse deny hook + test.
-- [ ] git-gh-gate -> PreToolUse (Bash) deny hook + test.
-- [ ] skill-guard -> UserPromptSubmit/PreToolUse nudge (highest behavioural value).
-- [ ] bash-error-hints -> PostToolUse `additionalContext` hook.
-- [ ] tool-guard, entity-qualifier-nudge, lookup-before-ask.
+**Phase 3 - the guard hooks.** All DONE (2026-08-12). 11 hooks in
+`.claude/hooks/`, each with a subprocess smoke test. Post-merge review fixes:
+CC hooks honor BOTH the unprefixed and the PI_-prefixed kill switches (the
+shared cores' deny reasons advertise the PI_ names); confidential-write-guard's
+agentDir defaults to `~/.pi/agent` (a cwd-relative fallback silently lost the
+global store outside the dotfiles repo).
 
-**Phase 4 - research MCP + advanced + commands.**
-- [ ] `.claude/mcp/research.ts`: memledger (was an MCP server), docs, osint, exa, video-review.
-- [ ] `.claude/commands/*.md` for the prompt templates worth keeping (commit, review, test).
-- [ ] epistemic-guard transcript-provenance hook (reads `transcript_path`).
+**Phase 4 - research MCP + advanced + commands.** All DONE (2026-08-12).
+- [x] research tools shipped in `toolkit.ts` directly (memledger x5, docs, osint,
+  exa, video-review, render-diagram, pdf, context7 x2, build-favicon-set) - the
+  separate `research.ts` server was folded in; 22 tools total.
+- [x] `.claude/commands/`: commit, pr, test, rollback (zero-copy symlinks to
+  `.pi/agent/prompts/`).
+- [x] epistemic-guard transcript-provenance hook (reads `transcript_path`).
 
 **Phase 5 - packaging + docs.**
 - [ ] Decide distribution (open question 1): stow'd `.claude/` (default) vs CC plugin.

@@ -132,4 +132,17 @@ describe("cd-agents-reload PreToolUse hook", () => {
     );
     expect(stdout.trim()).toBe("");
   });
+
+  test("PI_NO_CD_AGENTS_RELOAD=1 also disables the guard (pi-parity name)", async () => {
+    const { stdout } = await runHook(
+      {
+        session_id: `sess-${Date.now()}-pioff`,
+        cwd: startupCwd,
+        tool_name: "Bash",
+        tool_input: { command: `cd ${siblingRepo} && ls` },
+      },
+      { PI_NO_CD_AGENTS_RELOAD: "1" },
+    );
+    expect(stdout.trim()).toBe("");
+  });
 });

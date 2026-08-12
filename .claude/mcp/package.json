@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Claude Code MCP servers over the shared .pi/agent/extensions/lib cores",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "zod": "^4.4.3"
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.4.3"
   }
 }

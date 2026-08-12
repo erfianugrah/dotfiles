@@ -144,8 +144,14 @@ installed Cloudflare skill set a whole-dir link would clobber):
   harness-agnostic subset of `.pi/agent/APPEND_SYSTEM.md`, kept in sync
   manually - pi's APPEND_SYSTEM has no include mechanism, so a shared file
   with includes would be a sync hazard.
-- `.claude/settings.json` is deliberately NOT tracked - Claude mutates it
-  live (`enabledPlugins` is machine-specific).
+- `.claude/settings.json` - tracked as a HOOKS FRAGMENT but stow-ignored:
+  the live `~/.claude/settings.json` is Claude-mutated user state
+  (`enabledPlugins` is machine-specific), so `install.sh do_claude()`
+  jq-merges the fragment's `hooks` into it instead of linking. Same
+  treatment for `.mcp.json` (project-scope convenience, not stowed).
+- `.claude/hooks/*.ts` + `.claude/mcp/toolkit.ts` - the CC guard hooks and
+  the 22-tool MCP server over the shared `.pi/agent/extensions/lib/` cores.
+  See `.pi/agent/docs/pi-to-claude-code-port.md`.
 
 ## Pi extensions
 

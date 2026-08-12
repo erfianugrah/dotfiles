@@ -22,7 +22,7 @@
  * `cd` (no command to inspect), so PreToolUse Bash is the semantically correct
  * hook for this guard. See .pi/agent/docs/pi-to-claude-code-port.md.
  *
- * Kill switch: CD_AGENTS_RELOAD_OFF=1 (parallels pi's PI_NO_CD_AGENTS_RELOAD).
+ * Kill switch: CD_AGENTS_RELOAD_OFF=1 or PI_NO_CD_AGENTS_RELOAD=1 (both honored).
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -73,7 +73,7 @@ function inject(context: string): never {
 }
 
 async function main() {
-  if (process.env.CD_AGENTS_RELOAD_OFF === "1") process.exit(0);
+  if (process.env.CD_AGENTS_RELOAD_OFF === "1" || process.env.PI_NO_CD_AGENTS_RELOAD === "1") process.exit(0);
 
   const raw = await Bun.stdin.text();
   let payload: {

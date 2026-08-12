@@ -14,10 +14,12 @@
  * a documented future enhancement pending live-CC confirmation. See
  * .pi/agent/docs/pi-to-claude-code-port.md.
  *
- * Kill switch: ASCII_GUARD_OFF=1 (parallels pi's PI_ASCII_GUARD_OFF).
+ * Kill switch: ASCII_GUARD_OFF=1 or PI_ASCII_GUARD_OFF=1 (both honored - the
+ * shared core's deny reason advertises the PI_ name, so it must work here).
+ * PI_ASCII_GUARD_SCOPE=prose limits file checks to prose paths, as in pi.
  */
 
-import { foldToAscii, reason, scan, WRITE_BASH, type Found } from "../../.pi/agent/extensions/lib/ascii-core.ts";
+import { foldToAscii, isProsePath, reason, scan, WRITE_BASH, type Found } from "../../.pi/agent/extensions/lib/ascii-core.ts";
 
 function deny(found: Found[], where: string, fixed: string): never {
   const out = {
@@ -32,7 +34,8 @@ function deny(found: Found[], where: string, fixed: string): never {
 }
 
 async function main() {
-  if (process.env.ASCII_GUARD_OFF === "1") process.exit(0);
+  if (process.env.ASCII_GUARD_OFF === "1" || process.env.PI_ASCII_GUARD_OFF === "1") process.exit(0);
+  const proseOnly = process.env.PI_ASCII_GUARD_SCOPE === "prose";
 
   const raw = await Bun.stdin.text();
   let payload: { tool_name?: string; tool_input?: Record<string, unknown> };
@@ -46,18 +49,24 @@ async function main() {
   const input = payload.tool_input ?? {};
 
   if (tool === "Write") {
+    const target = String(input.file_path ?? "");
+    if (proseOnly && !isProsePath(target)) process.exit(0);
     const text = String(input.content ?? "");
     const found = scan(text);
-    if (found.length) deny(found, `Write -> ${String(input.file_path ?? "")}`, foldToAscii(text));
+    if (found.length) deny(found, `Write -> ${target}`, foldToAscii(text));
   } else if (tool === "Edit") {
+    const target = String(input.file_path ?? "");
+    if (proseOnly && !isProsePath(target)) process.exit(0);
     const text = String(input.new_string ?? "");
     const found = scan(text);
-    if (found.length) deny(found, `Edit -> ${String(input.file_path ?? "")}`, foldToAscii(text));
+    if (found.length) deny(found, `Edit -> ${target}`, foldToAscii(text));
   } else if (tool === "MultiEdit") {
+    const target = String(input.file_path ?? "");
+    if (proseOnly && !isProsePath(target)) process.exit(0);
     const edits = Array.isArray(input.edits) ? (input.edits as Array<{ new_string?: string }>) : [];
     const text = edits.map((e) => e?.new_string ?? "").join("\n");
     const found = scan(text);
-    if (found.length) deny(found, `MultiEdit -> ${String(input.file_path ?? "")}`, foldToAscii(text));
+    if (found.length) deny(found, `MultiEdit -> ${target}`, foldToAscii(text));
   } else if (tool === "Bash") {
     const cmd = String(input.command ?? "");
     if (WRITE_BASH.test(cmd)) {

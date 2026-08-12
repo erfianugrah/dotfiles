@@ -9,7 +9,7 @@
  * The core is zero-dependency, so this runs identically from the repo checkout
  * or the stowed ~/.claude/hooks/ symlink (no node_modules needed).
  *
- * Guarded surfaces (matcher Bash|Read|WebFetch):
+ * Guarded surfaces (matcher Bash|WebFetch):
  *   - Bash:     BASH_RULES anti-patterns (ls/find/cat /docs, grep -r, find
  *               -name, npm/pnpm/npx, chmod 777, unsigned commit, force-push to
  *               protected branch, unicode escapes, etc.) -> deny with redirect.

@@ -135,17 +135,31 @@ do_claude() {
     claude_repair_native || echo "!! claude repair failed - continuing anyway" >&2
   fi
 
-  # 1. MCP toolkit server: install its deps in the repo checkout, register once.
+  # 1. MCP toolkit server: install its deps in the repo checkout, register once
+  #    at USER scope. The probe reads ~/.claude.json directly (user scope lives
+  #    there): `claude mcp list` from a repo cwd also shows PROJECT-scope
+  #    entries from .mcp.json, so a bare grep false-matches the pending-approval
+  #    project entry and skips the real registration (observed 2026-08-12).
+  #    A registered-but-stale path (e.g. an old worktree) is re-registered.
   #    DISABLE_AUTOUPDATER=1: invoking the npm-global claude otherwise triggers
   #    a self-update that re-drops the stub binary and breaks the NEXT call.
   if command -v claude >/dev/null 2>&1 && command -v bun >/dev/null 2>&1; then
     if [ -f "$ccdir/mcp/package.json" ]; then
       (cd "$ccdir/mcp" && run bun install --silent)
     fi
-    if DISABLE_AUTOUPDATER=1 claude mcp list 2>/dev/null | grep -q 'erfi-toolkit'; then
-      echo ">> MCP erfi-toolkit already registered"
+    local mcpcfg="$HOME/.claude.json" want="$ccdir/mcp/toolkit.ts" current=""
+    if command -v jq >/dev/null 2>&1 && [ -f "$mcpcfg" ]; then
+      current="$(jq -r '.mcpServers["erfi-toolkit"].args[-1] // empty' "$mcpcfg" 2>/dev/null)"
+    fi
+    if [ "$current" = "$want" ]; then
+      echo ">> MCP erfi-toolkit already registered (user scope, path OK)"
     else
-      run env DISABLE_AUTOUPDATER=1 claude mcp add --scope user erfi-toolkit -- bun "$ccdir/mcp/toolkit.ts"
+      if [ -n "$current" ]; then
+        echo ">> MCP erfi-toolkit points at $current - re-registering"
+        run env DISABLE_AUTOUPDATER=1 claude mcp remove erfi-toolkit -s user || true
+      fi
+      run env DISABLE_AUTOUPDATER=1 claude mcp add --scope user erfi-toolkit -- bun "$want" \
+        || echo "!! claude mcp add failed - register manually: claude mcp add --scope user erfi-toolkit -- bun $want" >&2
     fi
   else
     echo "!! claude or bun missing - skipping MCP registration"
@@ -153,6 +167,11 @@ do_claude() {
 
   # 2. Hooks: deep-merge .claude/settings.json's hooks into ~/.claude/settings.json,
   #    concatenating per-event arrays and de-duping so re-runs are idempotent.
+  #    Dedup preserves FIRST-seen order (unique_by would sort the array and
+  #    silently reshuffle the user's pre-existing hooks - CC runs same-matcher
+  #    hooks in array order). Write-back preserves the destination's perms by
+  #    overwriting in place (cat > keeps inode+mode); mktemp lands in the dest
+  #    dir so the new-file path is a same-fs atomic rename.
   local src="$ccdir/settings.json" dst="$HOME/.claude/settings.json"
   if [ -f "$src" ]; then
     if command -v jq >/dev/null 2>&1; then
@@ -161,15 +180,21 @@ do_claude() {
         echo "+ jq-merge $src hooks -> $dst"
       else
         [ -f "$dst" ] || echo '{}' > "$dst"
-        local tmp; tmp="$(mktemp)"
-        jq -s '
+        local tmp; tmp="$(mktemp "$HOME/.claude/.settings.XXXXXX")"
+        if jq -s '
+          def uniqseq: reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [$x] end);
           .[0] as $dst | .[1] as $src |
           $dst * { hooks:
             ( ($dst.hooks // {}) as $dh | ($src.hooks // {}) as $sh |
               reduce ($sh | keys[]) as $k ($dh;
-                .[$k] = (((.[$k] // []) + $sh[$k]) | unique_by(tojson))) )
-          }' "$dst" "$src" > "$tmp" && mv "$tmp" "$dst"
-        echo ">> merged CC hooks into $dst"
+                .[$k] = (((.[$k] // []) + $sh[$k]) | uniqseq)) )
+          }' "$dst" "$src" > "$tmp"; then
+          if [ -s "$dst" ]; then cat "$tmp" > "$dst"; rm -f "$tmp"; else mv "$tmp" "$dst"; fi
+          echo ">> merged CC hooks into $dst"
+        else
+          rm -f "$tmp"
+          echo "!! CC hooks merge failed (malformed JSON in $dst?) - skipping; fix it and rerun" >&2
+        fi
       fi
     else
       echo "!! jq not found - skipping CC hooks merge (install jq, rerun)"

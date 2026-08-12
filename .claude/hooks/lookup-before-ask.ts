@@ -17,13 +17,13 @@
  * advisory line to the assistant's own message rather than blocking. See
  * .pi/agent/docs/pi-to-claude-code-port.md.
  *
- * Kill switch: LOOKUP_NUDGE_OFF=1 (parallels pi's PI_LOOKUP_NUDGE_OFF).
+ * Kill switch: LOOKUP_NUDGE_OFF=1 or PI_LOOKUP_NUDGE_OFF=1 (both honored).
  */
 
 import { decideAskContext } from "../../.pi/agent/extensions/lib/lookup-before-ask-core.ts";
 
 async function main() {
-  if (process.env.LOOKUP_NUDGE_OFF === "1") process.exit(0);
+  if (process.env.LOOKUP_NUDGE_OFF === "1" || process.env.PI_LOOKUP_NUDGE_OFF === "1") process.exit(0);
 
   const raw = await Bun.stdin.text();
   let payload: { tool_name?: string; tool_input?: Record<string, unknown> };

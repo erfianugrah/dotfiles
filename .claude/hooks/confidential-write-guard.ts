@@ -16,8 +16,10 @@
  *   - global:   <agentDir>/confidential-terms.local.json
  *   - per-repo: <repo>/.git/info/confidential-terms.json
  * agentDir resolves from CONFIDENTIAL_GUARD_AGENT_DIR, else PI_AGENT_DIR, else
- * the repo-local .pi/agent dir under cwd (matching the pi layout). The per-repo
- * store is derived from the write target / resolved bash cwd regardless.
+ * ~/.pi/agent (the pi global layout). CC hooks run with cwd = the *project*
+ * dir, so a cwd-relative fallback would silently lose the global store in
+ * every repo except dotfiles - homedir is the correct default. The per-repo
+ * store (.git/info/...) is derived from the write target / bash cwd regardless.
  *
  * DENY (not the auto-rewrite path ascii-guard uses) is correct here: a
  * confidential leak has no safe automatic transform - the model must replace
@@ -30,9 +32,11 @@
  * so it is intentionally omitted here (see notes in the port doc). The
  * deterministic block - the security-critical half - is fully ported.
  *
- * Kill switch: CONFIDENTIAL_GUARD_OFF=1 (parallels pi's PI_CONFIDENTIAL_GUARD_OFF).
+ * Kill switch: CONFIDENTIAL_GUARD_OFF=1 or PI_CONFIDENTIAL_GUARD_OFF=1 (both
+ * honored - the shared core's deny reason advertises the PI_ name).
  */
 
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   blockedTermsFor,
@@ -50,7 +54,7 @@ function agentDir(): string {
   return (
     process.env.CONFIDENTIAL_GUARD_AGENT_DIR ||
     process.env.PI_AGENT_DIR ||
-    path.join(process.cwd(), ".pi", "agent")
+    path.join(os.homedir(), ".pi", "agent")
   );
 }
 
@@ -67,7 +71,7 @@ function deny(reason: string): never {
 }
 
 async function main() {
-  if (process.env[KILL_SWITCH] === "1") process.exit(0);
+  if (process.env[KILL_SWITCH] === "1" || process.env.PI_CONFIDENTIAL_GUARD_OFF === "1") process.exit(0);
 
   const raw = await Bun.stdin.text();
   let payload: { tool_name?: string; tool_input?: Record<string, unknown> };

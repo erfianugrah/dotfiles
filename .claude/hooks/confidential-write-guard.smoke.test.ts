@@ -127,4 +127,54 @@ describe("confidential-write-guard PreToolUse hook", () => {
     );
     expect(stdout.trim()).toBe("");
   });
+
+  test("PI_CONFIDENTIAL_GUARD_OFF=1 also disables the guard (the name the reason advertises)", async () => {
+    const { stdout } = await runHook(
+      {
+        tool_name: "Write",
+        tool_input: { file_path: path.join(repoDir, "plan.md"), content: `leak ${TERM}` },
+      },
+      { PI_CONFIDENTIAL_GUARD_OFF: "1" },
+    );
+    expect(stdout.trim()).toBe("");
+  });
+
+  test("with no agent-dir env, the global store is read from $HOME/.pi/agent (not cwd)", async () => {
+    // CC hooks run with cwd = the project dir; a cwd-relative fallback would
+    // silently lose the global store. Spawn with a fake HOME holding a global
+    // store and a target OUTSIDE any git repo, so only the global store can hit.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cwg-home-"));
+    const globalDir = path.join(home, ".pi", "agent");
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(globalDir, "confidential-terms.local.json"),
+      JSON.stringify({ blocked: ["Globterm9"], allowed: [] }),
+    );
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "cwg-outside-"));
+    try {
+      const env = { ...process.env, HOME: home };
+      delete env.CONFIDENTIAL_GUARD_AGENT_DIR;
+      delete env.PI_AGENT_DIR;
+      const proc = Bun.spawn([process.execPath, hookPath], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        env,
+        cwd: outside, // cwd holds NO .pi/agent - a cwd fallback would miss the store
+      });
+      proc.stdin.write(JSON.stringify({
+        tool_name: "Write",
+        tool_input: { file_path: path.join(outside, "note.md"), content: "mentions Globterm9 here" },
+      }));
+      await proc.stdin.end();
+      const stdout = await new Response(proc.stdout).text();
+      await proc.exited;
+      const out = JSON.parse(stdout);
+      expect(out.hookSpecificOutput.permissionDecision).toBe("deny");
+      expect(out.hookSpecificOutput.permissionDecisionReason).not.toContain("Globterm9");
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
 });
