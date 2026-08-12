@@ -94,7 +94,7 @@ syft
 tcptraceroute
 hashicorp/tap/terraform
 tesseract
-tflint
+terraform-linters/tap/tflint
 thefuck
 tmux
 tre-command
