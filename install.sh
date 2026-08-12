@@ -251,8 +251,16 @@ case "$OS" in
     ;;
   macos)
     if [ "$LINKS_ONLY" = 0 ]; then
-      echo ">> installing packages via brew bundle"
-      run brew bundle --file="$DOTFILES/packages/brew.txt"
+      echo ">> installing packages via brew"
+      # brew.txt is a plain `brew leaves` list, NOT Brewfile DSL: brew bundle
+      # instance_evals the file as Ruby and the parse dies on versioned
+      # formulae ('python@3.13' - '@' is a Ruby syntax error), and even plain
+      # names raise NoMethodError (only mas/vscode/go/... extensions are
+      # tolerated bare). Filter comments + brew install directly, same as
+      # functions.d/packages.zsh _pkg_install_brew. Unquoted expansion is
+      # intentional word-splitting; names contain no spaces/globs.
+      # shellcheck disable=SC2046
+      run brew install $(grep -v '^[[:space:]]*#' "$DOTFILES/packages/brew.txt" | grep -v '^[[:space:]]*$')
     fi
     do_stow
     ;;
