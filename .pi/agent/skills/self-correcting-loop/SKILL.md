@@ -297,7 +297,22 @@ pass `--allow-dirty`. (`--dry` is exempt: it runs no git ops.) With
 (`git add -A`) snapshots it into the index and every revert/rollback restores
 from that checkpoint index, never from HEAD - so pre-existing uncommitted
 changes round-trip intact, and only files the agent actually touched since
-the last checkpoint are scope-checked or rolled back. (Pre-2026-07-24 the
+the last checkpoint are scope-checked or rolled back.
+
+Two adjacent operator traps, both observed on 2026-08-12 (llm-compose):
+
+- **Do not move/delete a file a guard sensor references to make the tree
+  "clean" for a run.** The guard goes red at baseline, and the agent's
+  cheapest path back to green is inside its writeScope - weakening the test.
+  (A preset TOML parked in /tmp made `test_load_all_presets` fail; the agent
+  deleted the preset name from the expected set. The judge caught it, but the
+  run was unfixable: restoring the file was outside `writeScope`.) Fix the
+  baseline honestly, or commit the file, before running.
+- **A killed run leaves the checkpoint's `git add -A` staged.** The next
+  `git commit` you make sweeps the agent's staged work into YOUR commit.
+  After killing a loop mid-iteration, `git status` and unstage/restore
+  deliberately before committing anything; check `git show --stat HEAD`
+  for surprise passengers. (Pre-2026-07-24 the
 scope guard restored violations from HEAD and diffed against HEAD, which
 destroyed uncommitted out-of-scope work; regression-tested in
 loop.integration.test.ts.)
@@ -429,6 +444,18 @@ manifest/usage error.
     (`anthropic/claude-sonnet-5`) completed the 2026-08-11 memledger run after
     both gateways hit their balance limits. Add these ids to the ladder so the
     loop automatically traverses gateways when one is drained.
+  - **$0 local rung (llama-server provider, llm-compose proxy on the 5090).**
+    `llama-server/loop` (Gemma 4 26B-A4B MoE, agentic-tuned preset) is a real
+    worker rung for judged loops, not just a toy: A/B on the same scoped task
+    (proxy /metrics route, kimi-k3 judge both runs) it passed in 2 iterations
+    / 8 min vs `llama-server/qwen36-moe`'s 3 iterations / 15 min - the MoE
+    generation-speed and instruction-following edge shows up as wall-clock.
+    Two operational requirements, both observed live on 2026-08-12: **lock the
+    preset first** (`llmc lock loop`) or any other client of the proxy (Open
+    WebUI re-POSTs the previously-selected model) evicts the worker's model
+    mid-iteration; and keep the judge on a hosted frontier model - the local
+    rung writes, the frontier judges, so the only cost is a per-iteration
+    review call.
   - **Judge-idiom evidence.** In the 2026-08-11 memledger-summarise loop the
     `moonshotai/kimi-k3` judge caught a degenerate-filter threshold drift (40
     -> 27) plus a fabricated `the contract test pins this` justification
