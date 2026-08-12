@@ -105,3 +105,15 @@ describe("bash-error-hints PostToolUse hook", () => {
     expect(stdout.trim()).toBe("");
   });
 });
+
+// regression (code-review): command-only hint patterns must fire in CC even
+// when stdout/stderr don't contain the trigger (pi relied on the command echo).
+test("command-only hint (git author override) fires with clean stdout", async () => {
+  const { stdout } = await runHook({
+    tool_name: "Bash",
+    session_id: `cmd-hint-${process.pid}-${Date.now()}`,
+    tool_input: { command: "git -c user.email=x@y commit -m z" },
+    tool_response: { stdout: "[main abc] z", stderr: "" },
+  });
+  expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toMatch(/author|committer|user\.email/i);
+});

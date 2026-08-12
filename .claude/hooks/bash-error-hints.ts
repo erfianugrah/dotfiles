@@ -104,7 +104,12 @@ async function main() {
   // Only annotate Bash results.
   if (payload.tool_name && payload.tool_name !== "Bash") process.exit(0);
 
-  const text = bashOutputText(payload);
+  // Scan the COMMAND plus its output. pi's bash output began with the command
+  // echo, so command-only hint patterns (e.g. git author-override) relied on
+  // that; CC's tool_response omits the echo, so prepend tool_input.command.
+  const ti = payload.tool_input as Record<string, unknown> | undefined;
+  const command = ti && typeof ti.command === "string" ? ti.command : "";
+  const text = [command, bashOutputText(payload)].filter(Boolean).join("\n");
   if (!text) process.exit(0);
 
   const matches = matchHintsDetailed(text);

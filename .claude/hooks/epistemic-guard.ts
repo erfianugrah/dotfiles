@@ -81,11 +81,22 @@ function contentToText(content: unknown): string {
  * turns are skipped wholesale (that is the agent's own output).
  */
 function provenanceFromEntry(entry: unknown): string {
-  const e = entry as { type?: string; message?: { role?: string; content?: unknown } };
+  const e = entry as { type?: string; summary?: unknown; message?: { role?: string; content?: unknown } };
   if (!e || typeof e !== "object") return "";
   const role = e.message?.role ?? e.type;
   if (role === "assistant") return ""; // agent's own words are never provenance
   if (role === "user") return contentToText(e.message?.content);
+  // Compaction / branch summaries carry verified facts forward past a
+  // compaction boundary - the core's provenanceText harvests them, so the CC
+  // corpus must too (else a fact verified pre-compaction is falsely flagged as
+  // recalled afterwards). CC's exact summary-entry shape could NOT be confirmed
+  // against a live transcript (no compaction had occurred), so harvest
+  // DEFENSIVELY across plausible shapes. Additive only: never affects the
+  // user/assistant paths above.
+  if (typeof e.summary === "string" && e.summary) return e.summary;
+  if (role === "summary" || role === "compactionSummary" || role === "branchSummary") {
+    return contentToText(e.summary ?? e.message?.content);
+  }
   return "";
 }
 
