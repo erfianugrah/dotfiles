@@ -258,10 +258,17 @@ async function sh(cmd: string[], stdin?: string): Promise<{ code: number; out: s
  * collector also reads, so the exclusion has to live here too.
  */
 const JUDGE_IGNORED = [".pi/harness-run.log", ".pi/harness-report.json"];
+/** Loop-owned DIRECTORIES; matched by prefix, since their contents vary
+ * (iteration-N.txt per iteration). Same split as loop.ts's LOOP_ARTIFACT_DIRS. */
+const JUDGE_IGNORED_DIRS = [".pi/harness-prompts"];
 
 /** Suffix match, so a loop running in a subdir of the repo is covered. */
 export function omitLoopArtifacts(paths: string[]): string[] {
-	return paths.filter((p) => !JUDGE_IGNORED.some((a) => p === a || p.endsWith(`/${a}`)));
+	return paths.filter(
+		(p) =>
+			!JUDGE_IGNORED.some((a) => p === a || p.endsWith(`/${a}`)) &&
+			!JUDGE_IGNORED_DIRS.some((d) => p.startsWith(`${d}/`) || p.includes(`/${d}/`)),
+	);
 }
 
 /**
@@ -281,7 +288,14 @@ async function collectDiff(base: string): Promise<string> {
 	// Exclude the artifacts from the tracked side too, in case a repo has
 	// committed them at some point (several do, via a defensive .gitignore).
 	const tracked = (
-		await sh(["git", "diff", base, "--", ".", ...JUDGE_IGNORED.map((a) => `:(exclude)${a}`)])
+		await sh([
+			"git",
+			"diff",
+			base,
+			"--",
+			".",
+			...[...JUDGE_IGNORED, ...JUDGE_IGNORED_DIRS].map((a) => `:(exclude)${a}`),
+		])
 	).out;
 	// Include untracked files so a brand-new file is judged, not invisible.
 	const others = omitLoopArtifacts(

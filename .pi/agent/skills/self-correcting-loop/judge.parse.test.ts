@@ -172,6 +172,17 @@ describe("judge omitLoopArtifacts", () => {
 	test("leaves the manifest alone - that IS reviewable work", () => {
 		expect(omitLoopArtifacts([".pi/harness.json"])).toEqual([".pi/harness.json"]);
 	});
+
+	test("drops the recorded prompts dir (per-iteration contents), root and subdir", () => {
+		expect(
+			omitLoopArtifacts([
+				".pi/harness-prompts/iteration-1.txt",
+				".pi/harness-prompts/iteration-2.txt",
+				"sub/.pi/harness-prompts/iteration-1.txt",
+				"src/main.ts",
+			]),
+		).toEqual(["src/main.ts"]);
+	});
 });
 
 // At baseline the tree matches the base ref, so an adversarial CODE judge
