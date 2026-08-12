@@ -80,6 +80,44 @@ do_local_bin() {
   done
 }
 
+# claude native-binary sanity. An npm-global claude can lose its
+# platform-native optional dependency (postinstall skipped via
+# --ignore-scripts / --omit=optional, or the auto-updater re-dropping the stub
+# binary); the symptom is "claude native binary not installed" at startup.
+# Same failure and same repair on macos/nixos/steamos/arch - the only variance
+# is where npm's global root lives and whether it's user-writable, so resolve
+# via `npm root -g` and branch on writability.
+claude_native_ok() {
+  local out
+  out="$(DISABLE_AUTOUPDATER=1 claude --version 2>&1)" && return 0
+  printf '%s' "$out" | grep -q 'native binary not installed' || return 0 # some other failure - not ours to repair
+  return 1
+}
+
+claude_repair_native() {
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "!! npm not found - reinstall claude manually" >&2
+    return 1
+  fi
+  local pkg; pkg="$(npm root -g)/@anthropic-ai/claude-code"
+  if [ ! -f "$pkg/install.cjs" ]; then
+    echo "!! $pkg/install.cjs not found - claude is not an npm-global install (nix/brew?) - repair via its package manager" >&2
+    return 1
+  fi
+  echo ">> claude native binary missing - running package postinstall ($pkg/install.cjs)"
+  if [ -w "$pkg" ]; then
+    run node "$pkg/install.cjs"
+  elif [[ "$pkg" != /nix/* ]] && command -v sudo >/dev/null 2>&1; then
+    # Root-owned system prefix (arch /usr/lib, some brew layouts). sudo needs
+    # an absolute node - nvm/fnm node isn't on sudo's PATH.
+    run sudo "$(command -v node)" "$pkg/install.cjs"
+  else
+    echo "!! $pkg is not writable - run: node $pkg/install.cjs" >&2
+    return 1
+  fi
+  claude_native_ok || echo "!! repair ran but claude still reports the error - reinstall claude" >&2
+}
+
 # Claude Code dual-harness wiring. stow already links .claude/ (skills, hooks,
 # mcp scripts, CLAUDE.md) into ~/.claude, but two CC integration points live in
 # files stow must NOT own because they are live CC state:
@@ -92,15 +130,22 @@ do_claude() {
   [ -d "$ccdir" ] || return 0
   echo ">> wiring Claude Code (MCP + hooks)"
 
+  # 0. Repair a broken npm-global claude before anything invokes it.
+  if command -v claude >/dev/null 2>&1 && ! claude_native_ok; then
+    claude_repair_native || echo "!! claude repair failed - continuing anyway" >&2
+  fi
+
   # 1. MCP toolkit server: install its deps in the repo checkout, register once.
+  #    DISABLE_AUTOUPDATER=1: invoking the npm-global claude otherwise triggers
+  #    a self-update that re-drops the stub binary and breaks the NEXT call.
   if command -v claude >/dev/null 2>&1 && command -v bun >/dev/null 2>&1; then
     if [ -f "$ccdir/mcp/package.json" ]; then
       (cd "$ccdir/mcp" && run bun install --silent)
     fi
-    if claude mcp list 2>/dev/null | grep -q 'erfi-toolkit'; then
+    if DISABLE_AUTOUPDATER=1 claude mcp list 2>/dev/null | grep -q 'erfi-toolkit'; then
       echo ">> MCP erfi-toolkit already registered"
     else
-      run claude mcp add --scope user erfi-toolkit -- bun "$ccdir/mcp/toolkit.ts"
+      run env DISABLE_AUTOUPDATER=1 claude mcp add --scope user erfi-toolkit -- bun "$ccdir/mcp/toolkit.ts"
     fi
   else
     echo "!! claude or bun missing - skipping MCP registration"
