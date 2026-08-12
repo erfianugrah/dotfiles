@@ -31,3 +31,14 @@ bin/memledger
 .pi/harness-run.log
 .pi/harness-report.json
 .pi/harness-prompts/
+
+# pi agent runtime state - per-machine, regenerated on startup; auth.json holds
+# live credentials (opencode token) and must never be staged
+.pi/agent/auth.json
+.pi/agent/sessions/
+.pi/agent/ledger.db*
+.pi/agent/session-fts.db*
+.pi/agent/mcp-bridge.cache.json
+.pi/agent/.docs-topics.json
+.pi/agent/bin/
+.pi/agent/git/
