@@ -255,13 +255,25 @@ bw_serve_start() {
         # daemon answers the health poll, so you see "API running" followed by a
         # background "exit 1" and end up with nothing listening.
         pkill -f "bw serve --port ${BW_SERVE_PORT}" 2>/dev/null
+        # Kill whatever still holds the port by PID - a survivor the pattern
+        # pkill missed (stale nohup job, differently-quoted argv) would keep
+        # 8087 and force the new serve into EADDRINUSE below.
+        local _bw_holder
+        _bw_holder=$(lsof -nP -tiTCP:"${BW_SERVE_PORT}" -sTCP:LISTEN 2>/dev/null)
+        [[ -n "$_bw_holder" ]] && kill -9 ${=_bw_holder} 2>/dev/null
         local _bw_wait=0
         while lsof -nP -iTCP:"${BW_SERVE_PORT}" -sTCP:LISTEN >/dev/null 2>&1; do
             (( ++_bw_wait > 50 )) && break   # ~5s safety cap
             sleep 0.1
         done
+        # Detach stdin from the tty (</dev/null) and disown (&!) so the daemon
+        # is fully decoupled from this interactive shell - no job-table entry, no
+        # stray "exit N" notification cluttering the prompt. Critically, send the
+        # daemon's stderr to a log (not /dev/null): a swallowed stderr is why a
+        # crashing `bw serve` looked like a silent "started -> API running -> gone"
+        # for so long. The log is what surfaced the 2026.7.0 WASM serve crash.
         BW_SESSION="$session" nohup bw serve --port "$BW_SERVE_PORT" --hostname 127.0.0.1 \
-            >/dev/null 2>&1 &
+            </dev/null >/tmp/bw-serve.log 2>&1 &!
         echo "[bw-serve] started in background (pid $!), waiting for API..."
     else
         systemctl --user reset-failed bw-serve.service 2>/dev/null
