@@ -1,6 +1,6 @@
 ---
 name: composer
-description: Use when deploying, updating, restarting, or removing a Docker Compose stack via the user's Composer platform API; designing, scheduling, or debugging a Composer pipeline (multi-step shell_command / docker_exec / http_request flows replacing cron containers); scripting against the Composer REST API; or touching composerd source or its Astro frontend. Fires on 'composer', 'composerd', 'deploy the stack', 'composer pipeline', 'composer.erfi.io'. HARD SAFETY: NEVER run composerd on the dev box - its startup hook AES-encrypts ~/.ssh. Repo ~/infra/composer.
+description: "Use when deploying, updating, restarting, or removing a Docker Compose stack via the user's Composer platform API; designing, scheduling, or debugging a Composer pipeline (multi-step shell_command / docker_exec / http_request flows replacing cron containers); scripting against the Composer REST API; or touching composerd source or its Astro frontend. Fires on 'composer', 'composerd', 'deploy the stack', 'composer pipeline', 'composer.erfi.io'. HARD SAFETY: NEVER run composerd on the dev box - its startup hook AES-encrypts ~/.ssh. Repo ~/infra/composer."
 ---
 
 # composer skill
