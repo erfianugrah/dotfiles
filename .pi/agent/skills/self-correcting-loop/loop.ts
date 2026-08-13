@@ -929,10 +929,15 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 			if (bad.length) {
 				await revertPaths(bad);
 				scopeViolations = bad;
+				// Cap the rendered list: an agent that writes thousands of files
+				// (e.g. a repo-local build cache) would otherwise blow ARG_MAX on
+				// the next iteration's prompt argv - observed 2026-08-13 (E2BIG).
+				const shown = bad.slice(0, 20).join(", ");
+				const more = bad.length > 20 ? ` +${bad.length - 20} more` : "";
 				notes.push(
-					`Reverted ${bad.length} out-of-scope edit(s): ${bad.join(", ")}. Only write: ${m.writeScope.join(", ")}.`,
+					`Reverted ${bad.length} out-of-scope edit(s): ${shown}${more}. Only write: ${m.writeScope.join(", ")}.`,
 				);
-				console.log(`  ! reverted out-of-scope edits: ${bad.join(", ")}`);
+				console.log(`  ! reverted ${bad.length} out-of-scope edits: ${shown}${more}`);
 			}
 		}
 
