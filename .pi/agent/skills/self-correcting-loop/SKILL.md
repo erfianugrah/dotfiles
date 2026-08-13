@@ -355,8 +355,7 @@ falsifies ("no X yet", a stale count, "duplicates the const"). Presence-only
 doc checks pass while the rest of the file still contradicts the feature -
 that exact gap shipped a doc asserting the opposite of five shipped items.
 
-`run` exit codes: `0` all sensors green, `1` still red after budget, `2`
-manifest/usage error.
+`run` exit codes: `0` all sensors green, `1` still red after budget, `2` manifest/usage error, `3` all green, pending human review
 
 ## The manifest (`.pi/harness.json`)
 
@@ -371,6 +370,7 @@ manifest/usage error.
   "timeoutMs": 600000,
   "agentTimeoutMs": 1800000,
   "limits": { "memoryMax": "8G", "cpuQuota": "400%", "tasksMax": 4096 },
+  "humanGate": false,
   "guide": ["docs/provider-contract.md"],
   "rules": ["never add a dependency; the stdlib covers this"],
   "sensors": [
@@ -391,6 +391,8 @@ manifest/usage error.
 
 - `task` - the feed-forward instruction. Keep it scoped; one module/feature.
 - `expect` - `"fail"` marks a FEATURE sensor that must be red on the unchanged
+- `humanGate` - optional flag for human review. If true, converged runs exit with 3.
+
   tree; the run is refused if it is green (see the discrimination lesson
   above). Omit it for guards.
 - `after` - names of sensors that must PASS in the same pass before this one
@@ -482,7 +484,12 @@ manifest/usage error.
     `loop` preset runs `parallel_slots = 2`, 2x98K ctx); same-repo loops need
     a separate git worktree each; and loop sensors must never rebuild/restart
     the stack that serves them (a proxy restart kills the other loop's
-    in-flight request and clears the in-memory owner set).
+    in-flight request). Since 2026-08-12 (llm-compose a566af5) the lock is
+    persisted via the proxy state file and SURVIVES a proxy restart - so a
+    loop that exits without unlocking leaves the pinned model resident,
+    holding VRAM indefinitely (observed 2026-08-13: Gemma 26B squatting
+    22.5 GiB for hours after loop end). Always `llmc unlock --owner <id>`
+    in loop teardown; `llmc unlock` (ownerless) force-clears a stale set.
   - **Judge-idiom evidence.** In the 2026-08-11 memledger-summarise loop the
     `moonshotai/kimi-k3` judge caught a degenerate-filter threshold drift (40
     -> 27) plus a fabricated `the contract test pins this` justification

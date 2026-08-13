@@ -1019,6 +1019,10 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 			report.result = "pass";
 			report.finishedAt = new Date().toISOString();
 			await writeReport(report);
+			if (m.humanGate) {
+				console.log("PENDING HUMAN REVIEW");
+				return 3;
+			}
 			console.log(`\nPASS: all sensors green on iteration ${i}.`);
 			return 0;
 		}

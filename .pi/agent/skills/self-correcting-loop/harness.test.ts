@@ -61,6 +61,7 @@ describe("parseManifest", () => {
 	test("accepts a minimal manifest and applies defaults", () => {
 		const m = parseManifest(base);
 		expect(m.task).toBe("do the thing");
+		expect(m.humanGate).toBe(false);
 		expect(m.maxIterations).toBe(10);
 		expect(m.models).toEqual([""]);
 		expect(m.stallPatience).toBe(2);
@@ -105,6 +106,13 @@ describe("parseManifest", () => {
 		expect(parseManifest({ ...base, baseline: true }).baseline).toBe(true);
 		expect(() => parseManifest({ ...base, baseline: "yes" })).toThrow("baseline");
 	});
+
+	test("accepts humanGate flag; rejects non-boolean", () => {
+		expect(parseManifest({ ...base, humanGate: true }).humanGate).toBe(true);
+		expect(parseManifest({ ...base, humanGate: false }).humanGate).toBe(false);
+		expect(() => parseManifest({ ...base, humanGate: "yes" })).toThrow("humanGate");
+	});
+
 
 	test("accepts an optional per-sensor hint; rejects a non-string hint", () => {
 		const withHint = parseManifest({

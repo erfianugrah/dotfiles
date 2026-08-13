@@ -135,6 +135,11 @@ export interface Manifest {
 	 * (pre-existing debt) and only gate on NEW failures. Lets the loop adopt a
 	 * legacy repo without a green-the-world sprint first (ArchUnit `freeze`).
 	 */
+	/**
+	 * Optional flag for human review. If true, when the run converges (all
+	 * sensors pass), the loop prints a notice and exits with 3.
+	 */
+	humanGate?: boolean;
 	baseline: boolean;
 	/** pi --tools whitelist for the spawned agent. */
 	tools: string[];
@@ -285,12 +290,20 @@ export function parseManifest(raw: unknown): Manifest {
 	}
 
 	let baseline = false;
+	let humanGate = false;
+	if (r.humanGate !== undefined) {
+		if (typeof r.humanGate !== "boolean") {
+			throw new Error("manifest.humanGate must be a boolean");
+		}
+		humanGate = r.humanGate;
+	}
 	if (r.baseline !== undefined) {
 		if (typeof r.baseline !== "boolean") {
 			throw new Error("manifest.baseline must be a boolean");
 		}
 		baseline = r.baseline;
 	}
+
 
 	let tools = DEFAULT_TOOLS;
 	if (r.tools !== undefined) {
@@ -441,6 +454,7 @@ export function parseManifest(raw: unknown): Manifest {
 		models,
 		stallPatience,
 		baseline,
+		humanGate,
 		tools,
 		writeScope,
 		sandbox,

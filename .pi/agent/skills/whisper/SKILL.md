@@ -219,6 +219,14 @@ JOB=$(curl -sX POST http://localhost:7860/api/jobs \
 ## Troubleshooting
 
 - **GPU error**: another service may be using GPU. Wait 30s; proxy auto-swaps.
+- **Resident VRAM**: whisper-live keeps large-v3 loaded on the GPU (~5.6 GiB,
+  measured 2026-08-13) even when idle - batch whisper idle-unloads after
+  ~300s but live does not. GPU-exclusive work (quant benches, >26 GB model
+  loads) must `docker stop whisper-transcribe-whisper-1
+  whisper-transcribe-whisper-live-1` first. NEVER `docker rm` them - they
+  are compose-managed; recover with `cd ~/infra/ai/whisper-transcribe &&
+  make up` (observed 2026-08-13: rm'd containers could not be `docker
+  start`ed).
 - **Empty transcript**: audio too quiet or language mismatch; try explicit `language` param.
 - **Long delay on YouTube**: yt-dlp deno path may need fresh remote-components. Check whisper service logs.
 - **Path not found**: `file_path` must exist on whisper server's filesystem, not yours. Use `/api/yt-download` to materialise YouTube URLs first.
