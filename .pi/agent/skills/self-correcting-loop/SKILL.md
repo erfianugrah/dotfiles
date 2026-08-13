@@ -1446,6 +1446,21 @@ skill has never seen.
   escalation are still exercised only by scripted agents in
   `loop.integration.test.ts`. Treat those as designed-and-unit-tested, not as
   field-proven.
+- **A crashed agent iteration can read as "progress" and eat the escalation
+  it should have triggered.** Observed 2026-08-13 (composer run-persistence
+  run, local Gemma rung): the agent died mid-iteration with a malformed
+  tool-call (`pi -p` exit 1, zero tree changes), the governor continued,
+  sensors re-ran on the unchanged checkpoint, and the verdict printed
+  `failing 3 -> 3 (progress)` - the stall counter reset on an iteration where
+  the agent did literally nothing, so `stallPatience: 2` never fired and the
+  local model kept (and wasted) the final iteration. Read "(progress)" with
+  the iteration's agent exit status, not just the sensor delta: an
+  agent-exit-1 iteration is definitionally no-progress. Related crash surface,
+  now patched in `loop.ts`: an agent that writes thousands of files into the
+  repo (a repo-local build cache was the observed case) made the
+  scope-violation note embed every path into the next prompt's argv and
+  `posix_spawn` died with E2BIG - the note is now capped at 20 paths, and the
+  harness rule "GOCACHE/GOMODCACHE under /tmp" prevents the trigger.
 
   That first real rollback is also the clearest statement of the aggregate
   count's limit. The discarded iteration had built 15 working endpoints and
