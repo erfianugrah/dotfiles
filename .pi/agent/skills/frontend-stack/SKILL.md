@@ -1,6 +1,6 @@
 ---
 name: frontend-stack
-description: 'Scaffold web frontend projects with the user''s preferred stack. Astro 6 default, React via create-tsrouter-app, or Next.js. Foundation = biome (lint+format), shadcn/ui CLI v4 + Tailwind v4 (UI), zod v4 (validation), tanstack-form (forms), tanstack-query (server state), tanstack-router (React routing). Use when starting a new frontend project or making integration-level decisions. Pairs with `design-utilitarian` for the default visual ethos.'
+description: Use when scaffolding a new web frontend project or making integration-level frontend decisions - Astro (default), React via create-tsrouter-app, or Next.js, with biome, shadcn/ui + Tailwind, zod, and the tanstack libraries. Fires on 'new frontend/app/site', 'scaffold a web app', 'Astro vs React vs Next', 'add shadcn', 'Tailwind setup', 'tanstack-form/query/router'. Pair with design-utilitarian for the visual ethos.
 ---
 
 # frontend-stack — Astro 6 / React / shadcn / Tailwind v4 / zod 4
@@ -316,4 +316,4 @@ If backend includes Supabase, defer to the `supabase` skill for client setup, RL
 - `supabase` — backend when included
 - `supabase-postgres-best-practices` — DB schema decisions
 - `favicons-and-icons` — favicon set after scaffold
-- `superpowers` (`brainstorming`, `writing-plans`) — methodology layer above
+- `superpowers/writing-plans` — methodology layer above (`brainstorming` is disabled locally)

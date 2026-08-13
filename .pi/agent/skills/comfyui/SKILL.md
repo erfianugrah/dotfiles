@@ -1,6 +1,6 @@
 ---
 name: comfyui
-description: Generate images via the ComfyUI service routed through the llm-compose proxy on localhost:11434. Use for SDXL/Illustrious/Flux text-to-image generation, queue inspection, and history retrieval. Triggers GPU mode swap (stops llama-server, starts ComfyUI). Default SDXL output path is portrait 832×1216, 30 steps, Euler, CFG 5.
+description: Use when generating images with Stable Diffusion (SDXL/Illustrious/Flux checkpoints) via the local ComfyUI service, inspecting the generation queue, or retrieving past generations. Fires on 'generate an image', 'comfyui', an SDXL/Flux prompt, LoRA weights in a prompt, image history. Triggers a GPU mode swap - llama-server pauses during generation.
 ---
 
 # ComfyUI Image Generation
@@ -67,12 +67,9 @@ Output is at `~/docker-volumes/comfyui/output/<filename>.png`.
 ### Single image with prompt override
 
 ```bash
-PROMPT='masterpiece, best quality, samurai cat in cyberpunk alley, neon, rain'
-NEGATIVE='lowres, blurry, jpeg artifacts, ugly, signature, watermark'
-SEED=$RANDOM
-
-# Use defaults from comfyui.local.env, override prompt/negative/seed.
-# Or send full workflow JSON as above.
+# Easiest: use the pi comfyui_generate tool with prompt / negative_prompt / seed
+# overrides (defaults come from comfyui.local.env). Or send full workflow JSON
+# as above.
 ```
 
 ### List recent generations

@@ -1,6 +1,6 @@
 ---
 name: whisper
-description: Transcribe audio/video via the whisper-transcribe HTTP API on localhost:7860. Use for transcribing YouTube videos/playlists, local audio files, or anything WhisperX can process. Returns plain transcript text, supports translation, diarization, language hints, and hotwords. Handles long-running jobs via job_id polling. Triggers GPU mode swap on the llm-compose stack (stops llama-server, starts whisper).
+description: Use when transcribing audio or video via the local whisper-transcribe service - YouTube videos/playlists or local audio files - with translation, diarization, language hints, or hotwords. Fires on 'transcribe', 'whisper', 'YouTube transcript', 'diarize this call', 'subtitles'. Triggers a GPU mode swap on the llm-compose stack (llama-server pauses).
 ---
 
 # Whisper Transcription

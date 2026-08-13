@@ -1,6 +1,6 @@
 ---
 name: pg-analyser
-description: Drive the user's `pg-analyser` CLI - a Postgres performance analyzer (formerly sbperf) that fetches advisors, SQL diagnostics, config, and infra metrics and renders a self-contained HTML + PDF report, with windowed trends accumulated to SQLite or pulled from Grafana. It runs PAT-first (audit with only a Personal Access Token) on Supabase projects, or on any Postgres via a superuser connstring (no-PAT mode). Use when auditing/optimizing a Postgres database's performance, generating a report (for a project, org, or fleet of customer databases), reproducing `supabase inspect` findings via the Management API OR superuser connstring, wiring infra trends without Prometheus/Grafana, white-labeling (--brand) or review-annotating (--overlay) a report, or debugging the tool's zod-at-boundary / API-drift-check / metrics-allowlist internals. Sibling to `supabase`, `supabase-postgres-best-practices`, `sbshift`, `fly`. Repo `~/work/pg-analyser`; runs on Bun, no build step.
+description: Use when auditing or optimizing a Postgres database's performance and producing an HTML/PDF report - Supabase projects via a Personal Access Token, or any Postgres via superuser connstring (no-PAT mode). Fires on 'pg-analyser', 'sbperf', 'database performance report', 'slow queries', 'advisors', 'fleet audit', 'reproduce supabase inspect', 'white-label a report', 'pgbench baseline'. Repo ~/work/pg-analyser (Bun, no build step).
 ---
 
 # pg-analyser - Postgres performance analyzer (formerly sbperf)
@@ -19,10 +19,10 @@ direct over the connstring, advisors from the self-hosted splinter lints, trends
 from Grafana - so you can audit a customer project you only have a connstring
 for. A single `--profile <file>.json` bundles that whole config.
 
-- **Repo:** `~/pg-analyser` - Bun runs `src/index.ts` directly, no build step.
-- **Run from the repo:** `cd ~/pg-analyser && bun run src/index.ts <cmd>`, or the
+- **Repo:** `~/work/pg-analyser` - Bun runs `src/index.ts` directly, no build step.
+- **Run from the repo:** `cd ~/work/pg-analyser && bun run src/index.ts <cmd>`, or the
   compiled binary `./pg-analyser <cmd>` after `bun run build`.
-- **Design + every gotcha:** `~/pg-analyser/AGENTS.md` and `~/pg-analyser/README.md`.
+- **Design + every gotcha:** `~/work/pg-analyser/AGENTS.md` and `~/work/pg-analyser/README.md`.
 - **Perf query source of truth:** the `supabase-postgres-best-practices` skill.
 
 Two SQL tiers behind one interface (`sqlrunner.ts`): the **PAT read-only runner**
@@ -86,7 +86,7 @@ never touching `analysis.json` (precedence `--overlay` > `PG_ANALYSER_OVERLAY` >
 | Just the data, no render | `analyze --ref <ref>` -> `analysis.json` |
 | Re-render HTML from existing `analysis.json` | `report <dir>` |
 | Did a migration/index/tuning change help? | `diff <oldDir> <newDir>` or `diff --ref <ref>` (last 2 store snapshots) |
-| Prove it under concurrency (benchmark) | `bench --db-url <c> -f q.sql --name before` -> change one GUC -> same run `--name after` -> `bench --compare <idA> <idB>` (perf delta + pg_settings diff). Guardrails: client-saturation check, warmup + N runs, exact p50/p95/p99. Guide: `~/pg-analyser/docs/pgbench.md` |
+| Prove it under concurrency (benchmark) | `bench --db-url <c> -f q.sql --name before` -> change one GUC -> same run `--name after` -> `bench --compare <idA> <idB>` (perf delta + pg_settings diff). Guardrails: client-saturation check, warmup + N runs, exact p50/p95/p99. Guide: `~/work/pg-analyser/docs/pgbench.md` |
 | Gate CI on findings | `check <dir> --fail-on high\|med\|low` (+ `--category`, `--new-since <baselineDir>`); exits 1 on breach |
 | Optional plain-language one-pager | `summary <dir>` (standalone; NOT emitted by `full`/`report`/`pdf`) |
 | Merge external CSV/JSON trend series | `import-trends <dir> <file...>` |
@@ -346,7 +346,7 @@ with some Supabase extras - it makes the project's internal Grafana unnecessary.
 
 ## See also
 
-- `~/pg-analyser/AGENTS.md` - authoritative conventions + verified-facts log.
+- `~/work/pg-analyser/AGENTS.md` - authoritative conventions + verified-facts log.
 - `supabase` skill - API/CLI/auth reference for the platform itself.
 - `supabase-postgres-best-practices` skill - source of the perf queries.
 - `sbshift` skill - the migration sibling; also a PAT + Management API tool.

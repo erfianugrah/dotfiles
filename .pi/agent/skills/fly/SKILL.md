@@ -1,6 +1,6 @@
 ---
 name: fly
-description: Fly.io app lifecycle via the `flyctl` CLI — deploy, secrets (Vaultwarden → flyctl set workflow), cert + custom DNS, machines (vs apps model), volumes + snapshots, scaling + auto-stop/start, private networking + .internal DNS, logs + debugging, cost optimization. Sibling to your self-hosted compose stacks — use Fly for workloads that benefit from global anycast / managed cert / auto-scale-to-zero. Default to Compose / k3s on your own hardware first; Fly is for things you can't or don't want to host yourself.
+description: Use when deploying or operating apps on Fly.io via flyctl - deploys, secrets, certs + custom DNS, machines, volumes + snapshots, scaling + auto-stop/start, private networking + .internal DNS, logs + debugging, cost optimization. Fires on 'fly.io', 'flyctl', 'fly deploy', 'fly.toml', 'machine won't start', 'volume snapshot', 'anycast'. Default to compose/k3s on the user's own hardware first (infrastructure-stack); Fly is for what they can't or don't want to self-host.
 ---
 
 # fly — fly.io operations
@@ -121,7 +121,7 @@ docker push registry.fly.io/<app>:<ver>
 flyctl deploy -a <app> --image registry.fly.io/<app>:<ver>
 ```
 
-Canonical worked example: `~/knotea/resolver/Makefile` targets `fly-image` +
+Canonical worked example: `~/infra/knotea/resolver/Makefile` targets `fly-image` +
 `fly-deploy`. Note that despite the name, `fly-deploy` builds **nothing**
 locally - it mirrors the CI-built image. Mirror the same step in the release
 workflow so tagged versions are pushable without a local Docker at all.

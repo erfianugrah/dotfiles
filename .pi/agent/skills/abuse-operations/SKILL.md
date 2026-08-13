@@ -11,7 +11,7 @@ Anti-abuse is the *twilight zone* of infosec: not red team, not blue team, not a
 
 If you offer a free service, free trial, or any surface with an angle to extract value, someone is already trying to make money off it. The line between "a business getting off the ground" and "an abuser taking advantage" is thin and only resolvable *after the fact* by establishing **intent**.
 
-The fraud-detection project (`~/fraud-detection/forminator`) is the canonical local instantiation — its `src/lib/scoring.ts` is the per-submission scorer; this skill is the operating model around it.
+The fraud-detection project (`~/cf-stuff/fraud-detection/forminator`) is the canonical local instantiation — its `src/lib/scoring.ts` is the per-submission scorer; this skill is the operating model around it.
 
 ## When to use
 
@@ -156,4 +156,4 @@ Whack-a-mole is unsustainable and burns the team out. The business really wants 
 
 ## Files
 
-- `footprint.ts` — zero-dependency reference: `matchFootprint`, `matchAll`, `detectSplash`, `suggestFootprintUpdate`. Framework-agnostic; adapt into any scorer. Forminator's copy lives at `forminator/src/lib/footprint.ts` with `tests/footprint.spec.ts`.
+- `footprint.ts` — zero-dependency reference: `matchFootprint`, `matchAll`, `detectSplash`, `suggestFootprintUpdate`. Framework-agnostic; adapt into any scorer. Forminator's copy lives at `~/cf-stuff/fraud-detection/forminator/src/lib/footprint.ts` with `tests/footprint.spec.ts`.

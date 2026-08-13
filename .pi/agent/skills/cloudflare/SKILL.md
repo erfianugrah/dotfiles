@@ -1,6 +1,6 @@
 ---
 name: cloudflare
-description: Drive Cloudflare via the API (REST), `wrangler` CLI (Workers / Pages / R2 / D1 / KV / Queues / Hyperdrive / Durable Objects / Tunnels / Email), and bulk Python automation. Covers token auth (account vs zone scoping), the resource model (zones / DNS / rulesets / Workers / R2 / Pages / Zero Trust), Durable Object patterns (sharding, alarms, hibernation, SQLite storage), Queues producer/consumer, Hyperdrive Postgres pooling, Email Routing + Workers, Zero Trust (Access / Gateway / WARP / Tunnels), rate-limit handling, and the import-existing-state-into-Terraform workflow via `cf-terraforming`. Pairs with the `terraform` skill for IaC and with `infrastructure-stack` (Caddy in front of compose stacks behind Cloudflare). Use when working against the Cloudflare API directly, writing wrangler-deployed Workers/Pages, building stateful Durable Objects, debugging DNS/cache/WAF behaviour, or scripting bulk operations across multiple zones.
+description: Use when working against the Cloudflare API (REST) or wrangler CLI - zones/DNS/rulesets, Workers/Pages/R2/D1/KV/Queues/Hyperdrive/Durable Objects/Email Routing, Zero Trust (Access/Gateway/WARP/Tunnels), debugging DNS/cache/WAF behaviour, bulk operations across zones, or adopting CF resources into Terraform via cf-terraforming. Fires on 'cloudflare', 'wrangler', 'worker', 'R2', 'durable object', 'cache purge', 'WAF rule', 'tunnel'.
 ---
 
 # Cloudflare

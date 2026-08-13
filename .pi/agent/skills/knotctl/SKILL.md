@@ -1,25 +1,25 @@
 ---
 name: knotctl
-description: Drive the user's `knotctl` CLI for live DNS edits against the merged knotea authority on `glory-hole` Fly (`137.66.1.170`, `erfi.io` + `lab.erfi.io`; ex-`knot-fly-mvp`). TSIG-keyed RFC 2136 over TCP — no nsupdate heredocs, /tmp keyfiles, or Cloudflare API token. Covers add/rm/set/ls/export/keys/apply (declarative YAML reconcile; additive by default, `--prune` for full reconciliation), atomic multi-value `set`, sub-zone routing via `known_zones`, canonical MX/CNAME/NS/SRV rdata, key roles/ACLs (`knotctl`, `axfr-out`, `caddy-acme`, `caddy-ddns`; ddns is A/AAAA-only, acme is `_acme-challenge` TXT-only), script exit codes, auto-verify-after-write, `--json`, and `make smoke` live integration test. Sibling to `knot-dns`, `caddy`, and `cloudflare`. Source `~/knotea/authority/cmd/knotctl/` (monorepo; default server now `137.66.1.170:53` post-cutover), binary `~/bin/knotctl`.
+description: Use when making live DNS edits against the user's Knot authoritative server (erfi.io + lab.erfi.io, TSIG-keyed RFC 2136 over TCP) - add/rm/set/ls records, declarative YAML zone apply, TSIG key roles and ACLs, or the live smoke test. Fires on 'knotctl', 'add/change a DNS record', 'RFC 2136', 'TSIG key', 'zone apply', '_acme-challenge TXT'. NOT for resolver work (gloryhole) or DNS architecture (knot-dns). Source ~/infra/knotea/authority/cmd/knotctl/, binary ~/bin/knotctl.
 ---
 
 # knotctl — TSIG-keyed DNS editor
 
 > **knotea merge (2026-06-16)** — knotctl source now lives in the knotea
-> monorepo at **`~/knotea/authority/cmd/knotctl/`** (built via
-> `cd ~/knotea/authority && make install-knotctl`). The legacy
-> `~/knot-fly/cmd/knotctl/` checkout is retained until the P6 Fly cutover but is
+> monorepo at **`~/infra/knotea/authority/cmd/knotctl/`** (built via
+> `cd ~/infra/knotea/authority && make install-knotctl`). The legacy
+> `~/infra/knot-fly/cmd/knotctl/` checkout is retained until the P6 Fly cutover but is
 > no longer the build source. **Cutover done (2026-06-25):** the live RFC 2136
 > target is now knotea's anycast v4 **`137.66.1.170`** (the `glory-hole` Fly app's
 > embedded knotd); `knot-fly-mvp`/`169.155.56.21` is frozen and pending retirement
-> after the soak. Plans: `~/knotea/docs/plans/2026-06-16-knotea-merge.md` +
-> `~/knotea/docs/plans/2026-06-25-knotea-cutover-runbook.md`.
+> after the soak. Plans: `~/infra/knotea/docs/plans/2026-06-16-knotea-merge.md` +
+> `~/infra/knotea/docs/plans/2026-06-25-knotea-cutover-runbook.md`.
 
-Lives at `~/knotea/authority/cmd/knotctl/`. Static Go binary, ~9.5MB, `CGO_ENABLED=0`,
+Lives at `~/infra/knotea/authority/cmd/knotctl/`. Static Go binary, ~9.5MB, `CGO_ENABLED=0`,
 talks miekg/dns RFC 2136 directly to `knotd` on `137.66.1.170:53`. No shim,
 no Cloudflare API token, no `nsupdate -y` (which leaks secrets to argv) —
 just keyfiles + TSIG + auto-verify polling. See the M0.5 plan at
-`~/knotea/authority/docs/plans/2026-05-25-knotctl-foundation.md` for the full design.
+`~/infra/knotea/authority/docs/plans/2026-05-25-knotctl-foundation.md` for the full design.
 
 ## When to reach for it
 
@@ -40,15 +40,15 @@ just keyfiles + TSIG + auto-verify polling. See the M0.5 plan at
 CF-shape HTTP API - that ships separately and is now **live** on the merged
 `glory-hole` Fly app at `https://knotea.erfi.io:2096/client/v4` (bearer-token,
 in-process over the same loopback knotd). Full schema:
-`~/knotea/authority/docs/api.md`. Use `knotctl` for wire-level operator edits;
+`~/infra/knotea/authority/docs/api.md`. Use `knotctl` for wire-level operator edits;
 use the HTTP API for CF-compatible tooling (terraform-provider-cloudflare,
 cloudflare-go, dnscontrol, octodns).
 
 ## Install + first-run
 
 ```bash
-# from ~/knot-fly source tree (built with ldflags so --version is stamped)
-cd ~/knot-fly && make install-knotctl
+# from the ~/infra/knotea/authority source tree (built with ldflags so --version is stamped)
+cd ~/infra/knotea/authority && make install-knotctl
 # installs to ~/bin/knotctl  (ensure ~/bin is on $PATH)
 
 knotctl --version
@@ -70,8 +70,9 @@ load it — `chmod 600 ~/.config/knotctl/keys/*.key`.
 
 ## The four key roles — DO NOT MIX UP
 
-This is the single most important thing in this skill. The four TSIG keys
-provisioned on `knot-fly-mvp` each map to a narrow ACL. Using the wrong
+This is the single most important thing in this skill. The four TSIG keys on
+the authority (the merged `glory-hole` Fly app, ex-`knot-fly-mvp`) each map to
+a narrow ACL. Using the wrong
 key for a record type produces `NOTAUTH (rcode=9)` → `knotctl` exits 2.
 
 | Key role | Keyfile | ACL on Knot side | What it CAN do |
@@ -244,7 +245,7 @@ knotctl keys import-env [PATH]            # default: ~/.knot-fly-mvp.env
 ```
 
 `keys show` deliberately does NOT echo the secret (defense against the
-gotcha #25 leak class — see `~/knotea/authority/AGENTS.md`). Read the file
+gotcha #25 leak class — see `~/infra/knotea/authority/AGENTS.md`). Read the file
 directly if you genuinely need the value.
 
 ## Exit code contract — `$?` after any knotctl call
@@ -299,7 +300,8 @@ keys:
 YAML
 ```
 
-Defaults hardcode the live `knot-fly-mvp` anycast IP. The 4 environment
+Code defaults: server `127.0.0.1:53` (dev); point `KNOTCTL_SERVER` / `--server`
+at the prod authority `137.66.1.170:53`. The 4 environment
 variables: `KNOTCTL_SERVER`, `KNOTCTL_KEY` (default-key basename),
 `KNOTCTL_ZONE`, `KNOTCTL_KEYDIR`.
 
@@ -362,7 +364,7 @@ including the full apply lifecycle (dry-run → real → idempotent →
 prune), cleans up via `trap EXIT`.
 
 ```bash
-cd ~/knot-fly && make smoke
+cd ~/infra/knot-fly && make smoke
 # Defaults to SMOKE_ZONE=erfi.io. Pass SMOKE_ZONE=lab.erfi.io to
 # exercise the sub-zone routing path.
 
@@ -398,7 +400,7 @@ Almost always "wrong key role for the record type." Check:
    write a TXT? Pass `--key knotctl` explicitly to force the
    general-purpose key, or fix the `Keys` map in config.yml.
 3. Is the secret in your `.key` file actually the current one?
-   See gotcha #25 in `~/knotea/authority/AGENTS.md` for the rotation procedure.
+   See gotcha #25 in `~/infra/knotea/authority/AGENTS.md` for the rotation procedure.
 
 ### `error: update: network error: ... i/o timeout` (exit 4)
 
@@ -406,7 +408,7 @@ The default server `137.66.1.170:53` is the public anycast IP. If you're
 running `knotctl` from inside a Fly machine in `fra`, the UDP hairpin
 block applies and queries timeout — but TCP works fine. `knotctl` uses
 TCP throughout, so this usually means a real outage, not the hairpin
-issue. See gotcha #24 in `~/knotea/authority/AGENTS.md` for the full UDP/TCP
+issue. See gotcha #24 in `~/infra/knotea/authority/AGENTS.md` for the full UDP/TCP
 matrix per source.
 
 ### Verify timed out (exit 1) — write succeeded but record not yet queryable
@@ -430,7 +432,7 @@ Rare with Knot (primary serves authoritative immediately). Possibilities:
   (bearer-token, argon2id side-store, 16 endpoints over the same loopback
   knotd). `knotctl` is the wire-level CLI; the JSON shape matches, so scripts
   port over. Full schema + scopes + codegen pipeline:
-  `~/knotea/authority/docs/api.md`.
+  `~/infra/knotea/authority/docs/api.md`.
 - **Mostly not for DNSSEC ops.** Knot's KASP manages keys + signing
   automatically. DNSKEY/RRSIG/NSEC3/CDS/CDNSKEY can't be edited via
   `knotctl` (uneditable-type validation rejects them client-side, exit
@@ -442,7 +444,7 @@ Rare with Knot (primary serves authoritative immediately). Possibilities:
   2026-06-30 lab.erfi.io's DS into erfi.io is also auto-reconciled on
   KSK rollover via same-server ds-push (confdb `remote[parent_loopback]`
   + `zone[lab.erfi.io].ds-push`) - see gotcha #28 in
-  `~/knotea/authority/AGENTS.md`.
+  `~/infra/knotea/authority/AGENTS.md`.
 - **Not for zone-level config** (NS, SOA at apex, TSIG keys, ACLs). Use
   `knotc conf-set` from the server side via the `knot-dns` skill. `apply
   --prune` will NOT remove apex NS or SOA even if they appear in the
@@ -454,15 +456,15 @@ Rare with Knot (primary serves authoritative immediately). Possibilities:
 
 ## Updating knotctl
 
-`knotctl` lives in `~/knotea/authority/cmd/knotctl/`. Update via:
+`knotctl` lives in `~/infra/knotea/authority/cmd/knotctl/`. Update via:
 
 ```bash
-cd ~/knot-fly
+cd ~/infra/knot-fly
 git pull
 make install-knotctl    # rebuilds with current commit SHA in --version
 ```
 
-If you're modifying knotctl itself, see `~/knotea/authority/AGENTS.md` and the
+If you're modifying knotctl itself, see `~/infra/knotea/authority/AGENTS.md` and the
 M0.5 plan. The test surface is comprehensive (~96 race-clean unit tests
 across 4 packages, plus the live smoke). Add tests when changing
 handlers; the `pkg/tsigtest` in-process server is the canonical helper.

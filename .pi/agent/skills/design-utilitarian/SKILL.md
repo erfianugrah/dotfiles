@@ -1,6 +1,6 @@
 ---
 name: design-utilitarian
-description: Apply the user's McMaster-Carr-style utilitarian design ethos to ANY web UI work — information density over whitespace, tables over card grids, server-rendered, no animation tax, two-color palette + neutrals, no marketing prose in product surfaces. Use when laying out a page, picking shadcn components, writing CSS/Tailwind, choosing a typography/spacing scale, reviewing a design, or pushing back on glassmorphism / hero gradients / skeleton loaders. Independent of framework choice (Astro / React / Next) — pair with `frontend-stack` when scaffolding too.
+description: Use when laying out a page, picking UI components, writing CSS/Tailwind, choosing a typography/spacing scale, reviewing a design, or pushing back on glassmorphism / hero gradients / skeleton loaders - applies the user's McMaster-Carr-style utilitarian ethos (information density over whitespace, tables over card grids, server-rendered, no animation tax, no marketing prose in product surfaces). Framework-agnostic (Astro / React / Next) - pair with frontend-stack when scaffolding.
 ---
 
 # design-utilitarian — McMaster-Carr ethos for web UI

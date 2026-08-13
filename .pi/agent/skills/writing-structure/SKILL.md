@@ -21,23 +21,23 @@ This is a reference/technique skill. Read it, apply the pattern that fits the su
 
 ## Document hierarchy
 
-From the web-accessibility and government style guides (W3C WAI, WebAIM, MDN, Australian Style Manual, Digital.gov), all convergent:
-
 - **One H1** - the document title. H2s for major sections, H3/H4 for subsections.
 - **Never skip levels going down** (no H2 -> H4). Skipping *up* when closing a subsection is fine.
 - **Three levels is the working ceiling.** Deeper = the doc wants splitting, not more levels.
 - **Headings are the outline.** Screen readers, search engines, skimmers, and the `docs_summary` tool all navigate on headings alone - the heading list must be a coherent TOC. Never pick a level for visual size; that is CSS's job.
 - **Heading style**: sentence case, short, front-loaded keywords, parallel grammar at the same level. Statement or topic headings by default; question headings only when the audience arrives with known questions (a FAQ, a troubleshooting page).
 
-## Essay / long-form skeleton
+Sources: W3C WAI, WebAIM, MDN, Australian Style Manual, Digital.gov - all convergent.
 
-From the university writing centres (ANU, RMIT, Victoria U, Oxford Brookes, Newcastle):
+## Essay / long-form skeleton
 
 - **Intro ~10%** (broad to narrow: context -> the issue -> thesis -> outline), **body ~80%**, **conclusion ~10%** (narrow to broad: restate thesis, sum points, wider implication).
 - **No new information in the conclusion.** If a fact first appears there, it belongs in the body.
 - **The thesis is the spine.** Intro, every topic sentence, and conclusion all reference it. Re-read intro and conclusion together; if the argument differs between them, the thesis needs revising.
 - **Court report, not murder mystery** (Newcastle): state the conclusion first, then show how you got there. A reader should get the gist by reading only the first line of each section/paragraph.
 - Expect plan -> draft -> edit -> redraft; structure problems are found in the edit pass, not prevented in the draft.
+
+Sources: ANU, RMIT, Victoria U, Oxford Brookes, Newcastle writing centres.
 
 ## Paragraphs: PEEL
 
@@ -52,7 +52,7 @@ For agent-drafted docs the mapping is direct: every H2 section's first sentence 
 
 ## Sentence discipline (imported from ASD-STE100)
 
-STE is the controlled language of aircraft maintenance manuals (required by ATA iSpec 2200 and S1000D since 1986; Issue 9, Jan 2025, made it an international standard). Its full apparatus - a ~900-word approved dictionary, one-word-one-meaning, the -ing-form restrictions - is for safety-critical docs read by non-native speakers and does NOT generalise. Its sentence-level principles do:
+STE's sentence-level principles generalise; its full apparatus does not. The apparatus - a ~900-word approved dictionary, one-word-one-meaning, the -ing-form restrictions - is for safety-critical maintenance docs read by non-native speakers (STE is mandated by ATA iSpec 2200 and S1000D; Issue 9, Jan 2025, made it an international standard). What transfers to technical prose:
 
 - **One idea per sentence.** Short beats elegant.
 - **Active voice; imperative for procedures.** "Install the component", not "the component must be installed" - write as if standing next to the person doing the work.

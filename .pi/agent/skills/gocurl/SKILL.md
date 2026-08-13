@@ -1,6 +1,6 @@
 ---
 name: gocurl
-description: Drive the user's `gocurl` CLI - a Go HTTP performance-measurement tool (curl-like flags + httptrace phase breakdown + load testing + streaming/buffering analysis). Use when measuring HTTP latency, breaking a request into DNS/TCP/TLS/server/transfer phases, load-testing an endpoint (percentiles, RPS, tail latency), comparing endpoints or environments, validating streaming/SSE endpoints in CI, or emitting HTTP-probe metrics as JSON/CSV/Prometheus for reports and automation. Fires on "test the latency of <url>", "load test", "TTFB / waterfall / phase breakdown", "PostgREST vs direct latency" (the HTTP side), "p95/p99 of this API", "gocurl". HTTP-only - for Postgres/TCP wire-protocol latency use psql/pgbench, not gocurl. Sibling to `pg-analyser` (Postgres perf, formerly sbperf), `fly`, `supabase`. Repo `~/gocurl`, binary `/usr/local/bin/gocurl` (built via `make build` to `./bin/gocurl`, `make install` copies to /usr/local/bin). Go 1.24+.
+description: Use when measuring HTTP latency or load-testing an endpoint - DNS/TCP/TLS/server/transfer phase breakdown via httptrace, percentiles/RPS/tail latency under load, comparing endpoints or environments, validating streaming/SSE in CI, or emitting probes as JSON/CSV/Prometheus. Fires on 'test the latency of <url>', 'load test', 'TTFB / waterfall / phase breakdown', 'p95/p99 of this API', 'gocurl'. HTTP-only - for Postgres/TCP wire-protocol latency use psql/pgbench.
 ---
 
 # gocurl - HTTP performance measurement

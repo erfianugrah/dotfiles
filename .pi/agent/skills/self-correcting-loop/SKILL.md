@@ -1,6 +1,6 @@
 ---
 name: self-correcting-loop
-description: "Run an unattended, sensor-gated agent loop that drives a fresh pi -p each iteration until the sensors pass, then stops. Sensors span computational (build/lint/test/typecheck, architecture fitness, mutation testing, security/drift scans, headless-browser DOM asserts, prose linting) and inferential (LLM-as-judge on the diff; vision judge + pixel-diff for rendered UI/UX). Use when the user wants to 'set an agent in a loop', run a task autonomously, self-correct without supervision, add a UI/UX or visual-regression gate against a live dev server, an LLM-as-judge correctness gate, gate docs on writing quality (AI slop, marketing voice, facts deleted while shortening), or make a weaker model reliably good on a scoped task. The model never decides 'done' - the sensors do. Language-agnostic - sensors are command strings in a per-project .pi/harness.json. Ships browser-assert, judge, pixel-diff, and prose-lint. Pairs with scaffold-new-project, frontend-stack, and software-architecture."
+description: Use when the user wants to set an agent in an unattended loop, run a task autonomously, or self-correct without supervision until objective sensors pass - build/lint/test/typecheck gates, architecture fitness, mutation testing, security scans, headless-browser DOM asserts, LLM-as-judge, pixel-diff visual regression, prose linting. Fires on 'set an agent in a loop', 'run a loop', 'self-correcting', 'harness.json', 'UI/UX gate against a dev server', 'make a weaker model reliable on a scoped task'. The model never decides done - the sensors do.
 ---
 
 # Self-correcting loop
@@ -431,7 +431,7 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
     cheap base under a frontier top (`anthropic/claude-sonnet-5`, or
     `claude-opus-4-8` only if you want the ceiling). `opencode/deepseek-v4-flash-free`
     is a $0 bottom rung for high-volume iterations. Working example:
-    `~/knotea/.pi/harness.json` uses
+    `~/infra/knotea/.pi/harness.json` uses
     `["opencode/deepseek-v4-pro", "opencode/glm-5.2", "anthropic/claude-sonnet-5"]`.
   - **Gotcha: Kimi K3 is NOT a cheap rung.** It matches Opus 4.8 on quality (AA
     Intelligence Index ~57) but is frontier-priced (~$3/$15 per M). It IS in

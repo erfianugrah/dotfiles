@@ -1,6 +1,6 @@
 ---
 name: terraform
-description: Infrastructure-as-code with OpenTofu (preferred) or Terraform — module structure, state backends (S3 / R2 / local), provider version pinning, SOPS+age secrets, `tflint` / `tfsec` linting, `terraform import` and `cf-terraforming` for adopting existing resources, drift detection, and the dir-per-environment layout the user employs. Covers the OpenTofu fork rationale, provider upgrade migrations (esp. Cloudflare v4→v5), `for_each` + `dynamic` block patterns, and dependency graph debugging. Use when writing or refactoring `.tf` files, importing existing cloud resources, setting up a new IaC repo, or migrating from Terraform to OpenTofu. Pairs with `cloudflare` (for the actual CF resources) and the `infrastructure-stack` skill.
+description: Use when writing or refactoring OpenTofu/Terraform .tf files, importing existing cloud resources into state (terraform import, cf-terraforming), setting up a new IaC repo (state backends, provider pinning, SOPS+age secrets, dir-per-environment), detecting drift, or debugging the dependency graph. Fires on 'terraform', 'opentofu', 'tofu plan/apply', '.tf', 'state backend', 'provider version', 'import this resource'.
 ---
 
 # Terraform / OpenTofu

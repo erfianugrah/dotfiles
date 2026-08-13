@@ -1,6 +1,6 @@
 ---
 name: mermaid-d2
-description: Write and render mermaid or d2 diagrams via the `render_diagram` tool (local mmdc + d2 CLIs, ~3-5s mermaid / instant d2). Use when creating architecture diagrams, flowcharts, sequence/ER/state diagrams, or any system visualisation that needs to live next to code or docs. Validates syntax before committing — catches silent parse errors that would produce broken renders downstream.
+description: Use when writing or rendering mermaid or d2 diagrams - architecture diagrams, flowcharts, sequence/ER/state diagrams, or any system visualisation that lives next to code or docs. Fires on 'diagram', 'mermaid', 'd2', 'flowchart', 'ER diagram', 'sequence diagram', 'render this diagram'. Validates syntax before committing via the render_diagram tool.
 ---
 
 # Mermaid / d2 diagram generation

@@ -1,6 +1,6 @@
 ---
 name: caddy
-description: Drive the user's custom Caddy build + WAF management stack at `~/infra/ergo/caddy-compose/` - the host-mode EDGE reverse proxy on the MS-01 NixOS router (ssh alias `nixos`) fronting the user's `*.<your-zone>` services; backends live on servarr over the LAN. Covers the xcaddy plugin set (cloudflare, rfc2136, dynamicdns, l4, body-matcher, policy-engine, ddos-mitigator), the Caddyfile snippet idiom (`(waf)`, `(forward_auth)`, `(tls_config)` vs `(tls_config_rfc2136)`, `(site_log)`, `(proxy_headers)`), the TSIG/rfc2136 secret chain to Knot, the wafctl Go service + Astro/React dashboard, the bearer/LAN gate idiom (Authelia retired 2026-07), the `make restart` vs `make restart-caddy` SOPS footgun, and the zone-migration pattern. Use when working in `~/infra/ergo/caddy-compose/`, adding a new site block, debugging an ACME failure, bumping a plugin version, or touching anything wafctl. Sibling to `knot-dns`, `composer`, `infrastructure-stack`.
+description: Use when working on the user's custom Caddy edge reverse-proxy stack at ~/infra/ergo/caddy-compose/ - adding or editing a site block, debugging ACME issuance (Cloudflare or rfc2136/TSIG to Knot), bumping xcaddy plugin versions, or touching the wafctl WAF service or its Astro/React dashboard. Fires on 'caddy', 'Caddyfile', 'wafctl', 'the edge proxy', 'WAF', 'ACME failure', 'make restart'.
 ---
 
 # caddy — custom build + WAF management stack
@@ -184,7 +184,7 @@ Check status checkboxes in each PLAN before claiming anything beyond "in design"
 
 ## Cross-references
 
-- **`knot-dns` skill** + `~/knot-fly/AGENTS.md` — upstream of rfc2136; owner of TSIG rotation procedure and force-renewal recipe.
+- **`knot-dns` skill** + `~/infra/knot-fly/AGENTS.md` — upstream of rfc2136; owner of TSIG rotation procedure and force-renewal recipe.
 - **`composer` skill** — composer API endpoints (`stacks/<name>/{sync,up}`, `stacks/<name>/env`), the WAF UA gotcha for PUT/POST, SOPS-decrypt-on-deploy contract.
 - **`infrastructure-stack` skill** — SOPS+age, compose conventions, Unraid+cache patterns, healthchecks, read-only rootfs, cap_drop.
 - **`tailscale-homelab` skill** — every `ssh nixos` invocation below assumes this works.

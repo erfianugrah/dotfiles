@@ -1,6 +1,6 @@
 ---
 name: lora-train
-description: Train SDXL or Flux LoRAs via the llm-compose lora-train service (HTTP API on the proxy at localhost:11434/train/*). Use for fine-tuning checkpoints with kohya sd-scripts. Defaults differ by model type — SDXL uses dim=32 alpha=dim (Illustrious base, clip_skip=2); Flux uses dim=16 alpha=16 (flux1-dev base, fp8_base+t5_attn_mask on). 4 epochs default — bump to 8-12 for Flux face LoRAs. Also handles BLIP-2/WD14 captioning and deploying trained LoRAs to ComfyUI.
+description: Use when fine-tuning an SDXL or Flux checkpoint into a LoRA via the local lora-train service (kohya sd-scripts), captioning a training dataset (BLIP-2 natural language or WD14 Danbooru tags), or deploying a trained LoRA to ComfyUI. Fires on 'train a LoRA', 'fine-tune this checkpoint', 'kohya', 'caption this dataset', 'deploy the LoRA'.
 ---
 
 # LoRA Training

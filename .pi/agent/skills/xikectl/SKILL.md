@@ -1,6 +1,6 @@
 ---
 name: xikectl
-description: Drive the user's `xikectl` CLI - the operator tool for the XikeStor SKS8300-12E2T2X switch at 10.0.69.4 (edge switch between the MS-01 router and the servarr box). Use when reading switch state (VLANs, interfaces, MAC table, MTU/jumbo, port stats, STP, LLDP, ARP, CPU/memory/fan), running the live smoke or verify suites, adding a show resource, probing switch CLI commands, saving/backing up switch config, or planning the switch write lane (set/apply/restore) or reboot. Fires on "xikectl", "XikeStor", "SKS8300", "the switch", "switch VLANs/ports", "jumbo MTU on the switch", "display vlan", "trunk port". NOT for router/DHCP/NAT/firewall (that's `eaves` on the NixOS router), DNS (`knotctl`/`gloryhole`), or the arr media stack (`arr-stack`). Sibling to `eaves`, `tailscale-homelab`, `caddy`. Repo `~/infra/xikectl`, Go, 162 unit tests + live smoke green.
+description: Use when reading switch state (VLANs, interfaces, MAC table, MTU/jumbo, port stats, STP, LLDP, ARP, CPU/memory/fan) from the user's XikeStor SKS8300-12E2T2X at 10.0.69.4 via xikectl, running the live smoke or verify suites, adding a show resource, probing switch CLI commands, saving/backing up switch config, or planning the switch write lane or reboot. Fires on 'xikectl', 'XikeStor', 'SKS8300', 'the switch', 'switch VLANs/ports', 'jumbo MTU on the switch', 'display vlan', 'trunk port'. NOT for router/DHCP/NAT/firewall (eaves), DNS (knotctl/gloryhole), or the arr media stack (arr-stack).
 ---
 
 # xikectl - operator CLI for the XikeStor switch

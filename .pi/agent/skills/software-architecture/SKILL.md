@@ -1,6 +1,6 @@
 ---
 name: software-architecture
-description: System-level design decisions for backend services and full-stack apps — bounded contexts (DDD-lite), interface-driven cross-context dependencies, API surface design (REST + WS with correlation IDs and event envelopes), persistence patterns (Postgres primary + Valkey optional with in-process fallbacks), observability (slog + Prometheus + request IDs), error handling, async work, and migration strategies. Encodes the user's established Go pattern (see ~/bonkled/AGENTS.md for canonical example). Complements `superpowers` (which covers process) and `frontend-stack` / `supabase` (which cover framework choices) with the system-shape decisions that span both. Use when starting a new backend service, refactoring module boundaries, or designing API surfaces.
+description: Use when making system-level design decisions for a backend service or full-stack app - bounded contexts (DDD-lite), module boundaries, API surface design (REST + WS), persistence patterns (Postgres primary), observability, error handling, async work, migration strategies. Fires on 'new backend service', 'refactor module boundaries', 'design the API surface', 'where should this logic live'.
 ---
 
 # Software architecture — system shape
@@ -312,9 +312,8 @@ Read `~/bonkled/AGENTS.md` for the canonical example.
 
 ## Related
 
-- **`superpowers/brainstorming`** — use FIRST when starting a new feature (clarifies intent before reaching for this skill)
 - **`superpowers/writing-plans`** — after this skill establishes shape, plans turn shape into ordered steps
-- **`superpowers/test-driven-development`** — every implementation tier
+- **TDD (global agent rules)** — every implementation tier (`superpowers/test-driven-development` is disabled locally; the RED-GREEN-REFACTOR rules live in the global AGENTS.md)
 - **`infrastructure-stack`** — how this service gets deployed
 - **`frontend-stack`** — when this service also has a frontend
 - **`supabase`** + **`supabase-postgres-best-practices`** — when persistence is Supabase rather than self-hosted Postgres

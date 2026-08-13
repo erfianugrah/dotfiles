@@ -1,6 +1,6 @@
 ---
 name: quarto
-description: Use when authoring, rendering, or publishing Quarto documents or projects — .qmd files, _quarto.yml configuration, multi-format output (HTML/PDF/Revealjs/Word/Typst/ePub), project types (website/book/blog/manuscript/dashboard), code execution with Python/R/Julia, freeze/cache management, cross-references, callouts, citations, and publishing to Quarto Pub / GitHub Pages / Netlify / Posit Connect. Also covers building and debugging Reveal.js presentations - slide layout/overflow, footnote-style source citations, mermaid theming, 2D section/vertical navigation, and self-verifying rendered slides via headless chromium/decktape screenshots.
+description: Use when authoring, rendering, or publishing Quarto documents or projects - .qmd files, _quarto.yml configuration, multi-format output, project types (website/book/blog/manuscript/dashboard), code execution with Python/R/Julia, freeze/cache management, cross-references, callouts, citations, and publishing. Also fires on building or debugging Reveal.js presentations - slide overflow, citations, mermaid theming, self-verifying rendered slides via headless screenshots.
 ---
 
 # Quarto

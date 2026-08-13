@@ -1,14 +1,14 @@
 ---
 name: gloryhole
-description: "Work in the user's self-built DNS resolver `glory-hole`, now at `~/knotea/resolver/` (merged knotea binary; since the 2026-06-25 cutover the `glory-hole` Fly app is ALSO authoritative NS for `erfi.io`+`lab.erfi.io` at `137.66.1.170`) - Go binary + embedded Unbound recursor + loopback knotd + Astro/React dashboard. Pi-hole-style ad-blocking, expr policy engine, local records, sharded LRU cache, SQLite query log, REST/WS API, DoT/DoH. Three profiles - home (LAN-fronted, VyOS upstream on servarr), VyOS podman LAN resolver (vyos-sg), public DoT/DoH on Fly.io (sin). Covers the packet-path `pkg/dns` → policy → blocklist → cache → forwarder, the `pkg/forwarder` round-robin + circuit-breaker + UpstreamHealth model, SERVFAIL pass-through, bundled-Unbound topology, Fly UDP-binding, OTel+Prometheus, and the mock-DNS test idiom. Use when adding a forwarder/policy/blocklist feature, debugging a SERVFAIL path, designing telemetry, or touching the Fly deploy. Sibling to `knot-dns`, `knotctl`, `fly`."
+description: Use when working on the user's self-built DNS resolver glory-hole - adding a forwarder/policy/blocklist feature, debugging a SERVFAIL or packet-path issue, designing telemetry, or touching the Fly.io public DoT/DoH deploy. Fires on 'glory-hole', 'the resolver', 'expr policy', 'blocklist', 'upstream health', 'SERVFAIL', 'DoH/DoT', 'Pi-hole-style'. Source is the knotea monorepo at ~/infra/knotea/resolver/. NOT for authoritative DNS (knot-dns) or live record edits (knotctl).
 ---
 
 # gloryhole — self-built DNS server
 
 > **knotea merge (2026-06-16)** — glory-hole is being merged with `knot-fly`
 > (authoritative DNS) into a single supervised binary, `knotea`. The monorepo
-> lives at `~/knotea/` with glory-hole under **`~/knotea/resolver/`** and
-> knot-fly under `~/knotea/authority/`. The monorepo is the canonical source
+> lives at `~/infra/knotea/` with glory-hole under **`~/infra/knotea/resolver/`** and
+> knot-fly under `~/infra/knotea/authority/`. The monorepo is the canonical source
 > tree. **P6 cutover DONE (2026-06-25):** the live `glory-hole` Fly app (sin,
 > anycast v4 `137.66.1.170`) now runs the merged knotea binary and is the
 > **authoritative** nameserver for `erfi.io` + `lab.erfi.io` — the Namecheap glue
@@ -16,13 +16,13 @@ description: "Work in the user's self-built DNS resolver `glory-hole`, now at `~
 > after soak). The binary supervises both Unbound (recursive, `127.0.0.1:5353`)
 > and knotd (authoritative, `127.0.0.1:5354`) — co-location fixes the Fly UDP
 > hairpin SERVFAIL on `*.erfi.io` (knot-dns gotcha #24). Plans:
-> `~/knotea/docs/plans/2026-06-16-knotea-merge.md` +
-> `~/knotea/docs/plans/2026-06-25-knotea-cutover-runbook.md`. Sibling skills:
+> `~/infra/knotea/docs/plans/2026-06-16-knotea-merge.md` +
+> `~/infra/knotea/docs/plans/2026-06-25-knotea-cutover-runbook.md`. Sibling skills:
 > `knot-dns`, `knotctl`.
 
-Repo: `~/knotea/resolver/` (canonical source; the live `glory-hole` app builds from the monorepo root Dockerfile as of the cutover). Module path `glory-hole` (single Go module). Binary / image / Fly app: `glory-hole` (cosmetic name — Fly can't rename in place; the binary is knotea). Don't conflate the two.
+Repo: `~/infra/knotea/resolver/` (canonical source; the live `glory-hole` app builds from the monorepo root Dockerfile as of the cutover). Module path `glory-hole` (single Go module). Binary / image / Fly app: `glory-hole` (cosmetic name — Fly can't rename in place; the binary is knotea). Don't conflate the two.
 
-**Project-truth: `~/knotea/resolver/AGENTS.md` + `~/knotea/resolver/CHANGELOG.md`** — read first for current version, config schema, and per-feature decisions. Root merge guardrails live in `~/knotea/AGENTS.md` + `~/knotea/docs/plans/2026-06-16-knotea-merge.md`. This skill is the pattern layer.
+**Project-truth: `~/infra/knotea/resolver/AGENTS.md` + `~/infra/knotea/resolver/CHANGELOG.md`** — read first for current version, config schema, and per-feature decisions. Root merge guardrails live in `~/infra/knotea/AGENTS.md` + `~/infra/knotea/docs/plans/2026-06-16-knotea-merge.md`. This skill is the pattern layer.
 
 ## What it is — one self-contained binary
 
@@ -36,7 +36,7 @@ Single Go binary that combines:
 - Sharded LRU cache with TTL + blocked-TTL override
 - SQLite query log (modernc.org/sqlite — CGO=0; WAL; async-buffered writes)
 - REST + Server-Sent-Events + WebSocket API with API key / Basic / session+CSRF auth
-- **CF-shape authoritative REST API** (`authority/pkg/api`, mounted in-process via `cmd/glory-hole/cfapi.go`) - a Cloudflare-API-compatible DNS surface (16 endpoints, bearer-token + argon2id side-store) over the loopback knotd. Live on Fly at `https://knotea.erfi.io:2096/client/v4`; off by default (`knot_api.enabled`). Point terraform-provider-cloudflare / cloudflare-go / dnscontrol here. Full schema: `~/knotea/authority/docs/api.md`
+- **CF-shape authoritative REST API** (`authority/pkg/api`, mounted in-process via `cmd/glory-hole/cfapi.go`) - a Cloudflare-API-compatible DNS surface (16 endpoints, bearer-token + argon2id side-store) over the loopback knotd. Live on Fly at `https://knotea.erfi.io:2096/client/v4`; off by default (`knot_api.enabled`). Point terraform-provider-cloudflare / cloudflare-go / dnscontrol here. Full schema: `~/infra/knotea/authority/docs/api.md`
 - Embedded Astro + React + shadcn dashboard (go:embed)
 - **Bundled Unbound recursor** built from source in the Docker image, supervised as a child process on a loopback port — provides DNSSEC-validated recursion without trusting an upstream
 
@@ -249,7 +249,7 @@ E2E via `docker-compose.e2e.yml` — auth disabled, all features on, high ports 
 9. **UDP response size + TC bit** — `Handler.writeMsg` enforces `EDNS0 UDPSize()` (or 512) on UDP, sets `Truncated: true`, strips Answer. Forces client TCP retry. Don't disable without an alternative anti-amplification guard.
 10. **Dashboard rebuild is silent** — Astro lives under `pkg/api/ui/dashboard/`; touching `package.json` requires `npm ci && npm run build`. Embedded via `go:embed`, so a stale `dist/` ships into the binary without warning.
 11. **Hot reload coverage** — config-watcher `OnChange` reloads blocklist, policy, local records, whitelist (→ policy), conditional forwarding, rate limit, forwarder. Listen-address changes still require restart.
-12. **Repo dir vs binary name** — `gloryhole/` on disk, `glory-hole` everywhere else. Don't fight it.
+12. **Repo vs binary name** — source lives in the knotea monorepo at `~/infra/knotea/resolver/`; the binary and Fly app are `glory-hole`. A standalone `~/infra/gloryhole/` clone still exists (pre-merge) — the monorepo is canonical.
 13. **VyOS container deploy (equuleus 1.3, `vyos-sg`)** — the gotchas that cost time: (a) run config sessions via `ssh vyos-sg 'vbash -s' <<EOF … EOF` — `bash -s` silently fails to persist `set`s; (b) `volume`/`port` attributes must be separate per-leaf `set` commands, not a combined one-liner; (c) the **plain** `erfianugrah/glory-hole` image bakes `config.example.yml`, NOT `config.yml`, so the default `-config /etc/glory-hole/config.yml` fails — override with `set container name gloryhole command '-config'` + `arguments '/var/lib/glory-hole/config.yml'` pointing at the mounted config; (d) VyOS `service dns forwarding` **recurses independently** unless given `name-server <glory-hole-ip>` — without it the DHCP-secondary/gateway path bypasses ad-blocking. Web UI reached at `http://172.16.0.5:8080` (host-port `:3021` mapping is flaky — podman port-forward quirk).
 
 14. **Fly-profile query-log sizing (2026-07-22)** - the "prune cron" is the in-app hourly retention goroutine (`cmd/glory-hole/main.go`, `database.retention_days`, 50K-row batches, 5-min ctx per run); there is no system cron. On the public Fly profile ~100K queries/day (internet scanners + LE validators) make 7-day retention ~500MB SQLite on the 512MB shared-cpu box, and the dashboard's 24h stats aggregations blow the API's 15s deadline -> `/api/stats/*` 500s while DNS stays healthy. Fixed by `retention_days: 2` in the on-volume `/var/lib/glory-hole/config.yml` (Fly profile only; live-edited + machine restart - the retention value is captured at boot, hot-reload does NOT restart the goroutine). Symptom fingerprint: dashboard stats 500s + `Slow batch flush detected` + 100MB+ WAL; diagnose with `sqlite3 ... "select count(*), min(timestamp) from queries"` - if oldest ~ retention window, the goroutine works and it's a sizing problem, not a stuck cron. The .db file does not shrink after deletes (free pages get reused); VACUUM needs exclusive access so skip it unless the volume is actually filling.

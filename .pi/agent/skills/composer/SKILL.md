@@ -1,16 +1,16 @@
 ---
 name: composer
-description: "Manage Docker Compose stacks on the user's self-hosted Composer platform (repo at `~/infra/composer/`, instance at `composer.erfi.io` on the MS-01 router, moved off servarr 2026-07). Fires on deploying / updating / restarting / removing a stack via API; on designing, scheduling, debugging, or replacing cron containers with a Composer pipeline (multi-step shell_command / docker_exec / http_request flows); on querying or scripting against the Composer REST API; on touching `composerd` source or the Astro frontend; on the release workflow. Covers ~119 endpoints under /api/v1 (incl. multi-host docker-hosts registry + self-upgrade), auth (API keys / cookies / first-admin bootstrap), pipeline step footguns (env-var passing, jq+curl inside shell_command, GITEA_TOKEN handling), and the hard 'NEVER run composerd on the dev box — startup hook AES-encrypts ~/.ssh' safety rule."
+description: Use when deploying, updating, restarting, or removing a Docker Compose stack via the user's Composer platform API; designing, scheduling, or debugging a Composer pipeline (multi-step shell_command / docker_exec / http_request flows replacing cron containers); scripting against the Composer REST API; or touching composerd source or its Astro frontend. Fires on 'composer', 'composerd', 'deploy the stack', 'composer pipeline', 'composer.erfi.io'. HARD SAFETY: NEVER run composerd on the dev box - its startup hook AES-encrypts ~/.ssh. Repo ~/infra/composer.
 ---
 
 # composer skill
 
-Self-hosted compose-mgmt platform. Go + Astro. REST API only — no end-user CLI. Repo: `/home/erfi/composer`. Daemon: single Go binary `composerd`. Frontend: Astro 6 + React 19 + Tailwind 4 + shadcn (embedded via `static.go`).
+Self-hosted compose-mgmt platform. Go + Astro. REST API only — no end-user CLI. Repo: `/home/erfi/infra/composer`. Daemon: single Go binary `composerd`. Frontend: Astro 6 + React 19 + Tailwind 4 + shadcn (embedded via `static.go`).
 
 ## When this skill does NOT apply
 
 Composer (on the **MS-01 NixOS router**, ssh alias `nixos`, public URL `https://composer.erfi.io`; moved off servarr 2026-07) manages stacks across TWO docker daemons: the MS-01 local socket AND servarr's daemon via the drawbridge mTLS proxy (see the multi-host section). It does NOT see:
-- Local dev compose stacks (`~/infra/ai/llm-compose/`, `~/infra/composer/deploy/`, `~/knot-fly/`, any compose file the user is editing on the dev box).
+- Local dev compose stacks (`~/infra/ai/llm-compose/`, `~/infra/composer/deploy/`, `~/infra/knot-fly/`, any compose file the user is editing on the dev box).
 - Stacks on other servers not registered in the docker-hosts registry.
 - Anything reached via plain `docker ...` on the dev machine.
 - drawbridge itself - deliberately NOT composer-managed (composer reaches servarr's docker THROUGH drawbridge; composer managing it would be a self-dependency loop). See the drawbridge skill.
@@ -26,13 +26,13 @@ For local stacks, use `docker compose -f <path> {logs,ps,restart}` directly. Don
 
 | Doc | When |
 |---|---|
-| `/home/erfi/composer/AGENTS.md` | Agent guide — Safety, Build, Testing, Release, Architecture |
-| `/home/erfi/composer/docs/api-reference.md` | The 106-endpoint canonical ref |
-| `/home/erfi/composer/docs/configuration.md` | All `COMPOSER_*` env vars |
-| `/home/erfi/composer/docs/architecture.md` | DDD layer diagram |
-| `/home/erfi/composer/docs/design.md` | Full design spec with domain models |
-| `/home/erfi/composer/docs/security.md` | Docker socket, RBAC, encryption, hardening |
-| `/home/erfi/composer/docs/deployment.md` | Docker / Unraid / TrueNAS / Podman / bare metal |
+| `/home/erfi/infra/composer/AGENTS.md` | Agent guide — Safety, Build, Testing, Release, Architecture |
+| `/home/erfi/infra/composer/docs/api-reference.md` | The 106-endpoint canonical ref |
+| `/home/erfi/infra/composer/docs/configuration.md` | All `COMPOSER_*` env vars |
+| `/home/erfi/infra/composer/docs/architecture.md` | DDD layer diagram |
+| `/home/erfi/infra/composer/docs/design.md` | Full design spec with domain models |
+| `/home/erfi/infra/composer/docs/security.md` | Docker socket, RBAC, encryption, hardening |
+| `/home/erfi/infra/composer/docs/deployment.md` | Docker / Unraid / TrueNAS / Podman / bare metal |
 
 When the API spec matters, the **live source of truth** is the daemon itself. Both JSON and YAML are served publicly:
 
@@ -407,7 +407,7 @@ version.go            const Version — currently 0.20.2; bump first on release
 ## Tool-routing for composer questions
 
 1. Source-of-truth spec → `curl $COMPOSER/openapi.json | jq` (or `localhost:8080` in dev). Do NOT guess endpoint shapes.
-2. Architecture / design → `read /home/erfi/composer/docs/architecture.md` or `docs/design.md`.
-3. Endpoint reference → `read /home/erfi/composer/docs/api-reference.md`.
+2. Architecture / design → `read /home/erfi/infra/composer/docs/architecture.md` or `docs/design.md`.
+3. Endpoint reference → `read /home/erfi/infra/composer/docs/api-reference.md`.
 4. Code spelunking → `grep` / `lsp` on `internal/{domain,app,api,infra}/`. Use `lsp` for symbol navigation (Go LSP is accurate).
 5. NEVER bash-run `./composerd`. NEVER `go run ./cmd/composerd/`.

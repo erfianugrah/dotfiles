@@ -1,6 +1,6 @@
 ---
 name: favicons-and-icons
-description: Generate favicons, app icons, and brand marks via two paths — SVG (agent writes vector source for clean geometric marks / monograms) or raster (ComfyUI generates 512×512+ for rich stylised icons with gradients and materials). Either path feeds into `build_favicon_set` which produces the full PWA artifact set (favicon.ico multi-res + apple-touch + 192/512/maskable + site.webmanifest + HTML <head> snippet). Use when the user wants a favicon, app icon, brand mark, or PWA icon set.
+description: Use when the user wants a favicon, app icon, brand mark, or full PWA icon set (favicon.ico, apple-touch, 192/512/maskable, site.webmanifest). Fires on 'favicon', 'app icon', 'PWA icons', 'apple-touch-icon', 'site.webmanifest', 'logo or brand mark for a site'.
 ---
 
 # Favicons / icons / brand marks

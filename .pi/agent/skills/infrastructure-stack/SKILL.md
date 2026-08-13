@@ -1,6 +1,6 @@
 ---
 name: infrastructure-stack
-description: Deploy and architect self-hosted services using Docker Compose with bridge-network + static-IP + host-mode-Caddy reverse-proxy conventions (the user's established pattern across ~12 compose stacks). Covers per-stack AGENTS.md template, subnet allocation, expose vs ports, bind-mounts, PUID/PGID, health checks, resource limits, internal-only networks, cross-stack shared networks, secrets, and backups. Includes when-to-graduate-to k3s/k8s and Proxmox VM patterns. Use when starting a new compose stack, modifying networking, integrating with Caddy, or deciding compose vs k8s vs VM.
+description: Use when starting a new self-hosted service as a Docker Compose stack, changing stack networking (bridge + static IP, subnets, expose vs ports, cross-stack shared networks), integrating a stack with the host-mode Caddy proxy, writing a per-stack AGENTS.md, or deciding compose vs k3s vs Proxmox VM. Fires on 'new compose stack', 'subnet allocation', 'expose vs ports', 'PUID/PGID', 'health check', 'graduate to k8s'.
 ---
 
 # Infrastructure — Compose-first, k3s/VMs as escalation
@@ -279,4 +279,4 @@ The user's pattern (from servarr `MIGRATION_PLAN_ZFS.md`):
 - `supabase` — when the project uses Supabase instead of self-hosted Postgres
 - `ci-workflows` — to deploy this stack via CI
 - **Docs sources**: `docker`, `kubernetes`, `k3s`, `caddy`, `traefik`, `cloudflare`, `ansible`, `terraform`, `helm`
-- **User's reference repos**: `~/infra/ergo/caddy-compose/AGENTS.md`, `~/infra/servarr-compose/AGENTS.md`, `~/keycloak-compose/`, `~/vaultwarden-compose/`, `~/gitea-compose/`, `~/immich-compose/` — read these for canonical examples
+- **User's reference repos**: `~/infra/ergo/caddy-compose/AGENTS.md`, `~/infra/servarr-compose/AGENTS.md`, `~/infra/keycloak-compose/`, `~/infra/vaultwarden-compose/`, `~/infra/gitea-compose/`, `~/infra/immich-compose/` — read these for canonical examples

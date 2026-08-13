@@ -1,6 +1,6 @@
 ---
 name: drawbridge
-description: "Work on or operate `drawbridge` - the user's mTLS-gated, route-allowlisted, audited reverse proxy for the Docker Engine API (repo `~/drawbridge`, image `ghcr.io/erfianugrah/drawbridge`, Go stdlib-first). It fronts `/var/run/docker.sock` on servarr so composer on MS-01 can manage servarr's containers over the tailnet without a plaintext socket. Fires on 'drawbridge', 'docker socket proxy', 'mTLS docker', 'tcp://100.69.69.7:2376', '403 drawbridge: route not allowed', allowlist/cert rotation/audit-log questions, deploying or upgrading the servarr docker gateway, or debugging composer remote-host TLS failures. Sibling to `composer` (the management plane that connects through it) and `tailscale-homelab` (transport)."
+description: "Work on or operate `drawbridge` - the user's mTLS-gated, route-allowlisted, audited reverse proxy for the Docker Engine API (repo `~/infra/drawbridge`, image `ghcr.io/erfianugrah/drawbridge`, Go stdlib-first). It fronts `/var/run/docker.sock` on servarr so composer on MS-01 can manage servarr's containers over the tailnet without a plaintext socket. Fires on 'drawbridge', 'docker socket proxy', 'mTLS docker', 'tcp://100.69.69.7:2376', '403 drawbridge: route not allowed', allowlist/cert rotation/audit-log questions, deploying or upgrading the servarr docker gateway, or debugging composer remote-host TLS failures. Sibling to `composer` (the management plane that connects through it) and `tailscale-homelab` (transport)."
 ---
 
 # drawbridge skill

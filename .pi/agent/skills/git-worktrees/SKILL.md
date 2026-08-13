@@ -1,6 +1,6 @@
 ---
 name: git-worktrees
-description: Use when about to do agent work in a repo that ANOTHER session, loop, or human might touch at the same time - starting a self-correcting loop, a long multi-file refactor, or writing new untracked files while a background agent runs there. Also fires on "another session is working in that repo", "run a loop", "parallel work", or after any incident where an agent's files vanished. Covers the worktree setup recipe, the shared-index hazards that make same-directory parallel work unsafe, and the finish/cleanup flow.
+description: Use when about to do agent work in a repo that ANOTHER session, loop, or human might touch at the same time - starting a self-correcting loop, a long multi-file refactor, or writing new untracked files while a background agent runs there. Also fires on 'another session is working in that repo', 'run a loop', 'parallel work', or after any incident where an agent's files vanished.
 ---
 
 # Git worktrees as the default for parallel agent work

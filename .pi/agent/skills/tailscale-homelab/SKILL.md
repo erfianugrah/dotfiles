@@ -1,6 +1,6 @@
 ---
 name: tailscale-homelab
-description: SSH into and operate the user's tailscale-routed homelab — a primary Unraid server (alias `servarr`), site routers, OOB management, ARM SBC compute, edge devices. Covers the per-host identity-file convention (`IdentitiesOnly yes` is load-bearing), the dual `10.0.X.Y` / `10.68.X.Y` alias pattern for primary/backup site-to-site paths, magic-DNS vs IP fallback, subnet router behaviour, exit-node ACL `via:` grants, ssh failure-mode diagnostic order, and the `ssh servarr 'docker exec / docker logs / docker restart'` operator idiom that runs almost everything else in the homelab. Use whenever you need to reach a homelab host, debug a tailscale connectivity issue, or write a remote operation script. Sibling to every other infrastructure skill — `caddy`, `composer`, `infrastructure-stack`, `knot-dns`, and `gloryhole` all assume `ssh <alias>` works.
+description: Use when SSHing into or operating the user's tailscale-routed homelab (servarr Unraid server, site routers, OOB PiKVMs, ARM SBC cluster, edge devices) or debugging tailscale connectivity. Fires on host aliases like 'servarr', '10.0.X.Y / 10.68.X.Y' addresses, magic-DNS vs IP questions, subnet-router or exit-node issues, 'ssh servarr docker exec ...'. Sibling to every other infrastructure skill - they all assume ssh <alias> works.
 ---
 
 # tailscale-homelab — operate the user's homelab over tailscale
@@ -15,7 +15,7 @@ Two physical sites stitched together by site routers running IPsec/GRE and adver
 
 | Role | Notes |
 |---|---|
-| `servarr` (primary host) | Unraid server. Runs ~12 Docker Compose stacks managed by `composer` (GitOps). Hosts Caddy (`network_mode: host`), media stack, Authelia, Immich, Vaultwarden, Keycloak, Gitea, MinIO. Origin host for ACME renewals against the off-site Knot DNS. |
+| `servarr` (primary host) | Unraid server. Runs the Docker Compose stacks managed by `composer` (GitOps): media stack, Immich, Vaultwarden, Keycloak, Gitea, MinIO. The host-mode Caddy edge + ACME moved to the MS-01 router (2026-07); Authelia is retired. |
 | Site routers (×2) | IPsec/GRE site-to-site, plus tailscale subnet advertisement. One site has the public IP. |
 | OOB management | PiKVMs — recovery when SSH/network is dead. |
 | SBC cluster | ARM compute modules + BMC. |

@@ -1,6 +1,6 @@
 ---
 name: sbshift
-description: Drive the user's `sbshift` CLI — a typed Bun/TypeScript orchestrator for near-zero-downtime Postgres→Postgres migration via native logical replication. Use for cross-region Supabase moves, Supabase↔self-hosted, self-hosted↔self-hosted, same-region tier changes, project splits, or Azure Database for PostgreSQL Flexible Server moves — any low-downtime PG migration where dump/restore downtime is unacceptable. Covers direct-vs-pooler IPv6 setup (`SOURCE_DB_URL` pooler + `SOURCE_REPLICATION_URL` direct), logical-replication gaps (DDL, roles, extensions, sequences, Supabase `auth`/`storage`) and the dump/restore pre-step, `auth.users` FK trap, sequence resync, WAL/slot/stuck-worker watchdogs, cutover write-stop gate, checksum reconcile, `run`/`status` CI, sandbox/live/scale validation. Sibling to `supabase`, `fly`, `infrastructure-stack`. Repo `~/sbshift`; runbook `docs/RUNBOOK.md`.
+description: Use when planning or running a near-zero-downtime Postgres-to-Postgres migration via native logical replication - cross-region Supabase moves, Supabase<->self-hosted, self-hosted<->self-hosted, same-region tier changes, project splits, or Azure Database for PostgreSQL Flexible Server moves; any low-downtime PG migration where dump/restore downtime is unacceptable. Fires on 'sbshift', 'logical replication', 'database cutover', 'sequence resync', 'move this Postgres with no downtime'. Repo ~/work/sbshift; runbook docs/RUNBOOK.md. Sibling to supabase, fly, infrastructure-stack.
 ---
 
 # sbshift — Postgres→Postgres logical-replication migrator
@@ -14,10 +14,10 @@ for the non-replicated pieces (schema, storage, functions, project config).
 It owns the one piece nothing else automates: the **data-replication state
 machine + reconciliation + WAL watchdog**.
 
-- **Repo:** `~/sbshift` — Bun runs `src/cli.ts` directly, no build step (`bun start <cmd>`).
-- **Full runbook:** `~/sbshift/docs/RUNBOOK.md` (per-phase, with abort/rollback §12).
-- **Design + every gotcha:** `~/sbshift/README.md`.
-- **Run from the repo:** `cd ~/sbshift && bun start <subcommand>`.
+- **Repo:** `~/work/sbshift` — Bun runs `src/cli.ts` directly, no build step (`bun start <cmd>`).
+- **Full runbook:** `~/work/sbshift/docs/RUNBOOK.md` (per-phase, with abort/rollback §12).
+- **Design + every gotcha:** `~/work/sbshift/README.md`.
+- **Run from the repo:** `cd ~/work/sbshift && bun start <subcommand>`.
 - **Secrets:** loaded from `.env` (or `--env-file <path>`), AUTHORITATIVE over inherited shell vars — sbshift warns when it overrides a conflicting one, so a stale exported `SOURCE_DB_URL` can't silently point a run at the wrong DB. `--no-env-file` uses the shell env as-is.
 
 Read the README and RUNBOOK before a real migration — this skill is the router,

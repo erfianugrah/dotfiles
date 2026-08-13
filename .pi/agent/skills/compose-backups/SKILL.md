@@ -1,6 +1,6 @@
 ---
 name: compose-backups
-description: Add or review an automated backup sidecar for any of the user's docker-compose stacks. Encodes the validated offen/docker-volume-backup pattern - cron schedule, DB dumps via lifecycle labels into a shared staging volume, age client-side encryption with the shared infra recipient, S3-compatible upload (R2 or MinIO), retention pruning, and shoutrrr email-on-failure. Use when adding backups to a stack, debugging a backup sidecar, restoring from one of these backups, or reviewing backup coverage. Fires on "backup this stack", "offen", "docker-volume-backup", "restore drill", "pg_dump to R2/MinIO". Sibling to infrastructure-stack (stack conventions), composer (deploy path).
+description: Use when adding an automated backup sidecar to any of the user's docker-compose stacks, debugging or restoring from a backup sidecar, or reviewing backup coverage. Fires on 'backup this stack', 'offen', 'docker-volume-backup', 'restore drill', 'pg_dump to R2/MinIO', 'retention pruning'. Sibling to infrastructure-stack (stack conventions), composer (deploy path).
 ---
 
 # Compose stack backups (offen/docker-volume-backup pattern)

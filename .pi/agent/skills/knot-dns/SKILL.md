@@ -1,26 +1,26 @@
 ---
 name: knot-dns
-description: Deploy self-hosted authoritative DNS — Knot DNS 3.5 on Fly.io anycast, with TSIG-keyed RFC 2136 ACME (Caddy), AXFR/IXFR primary↔secondary, and the Cloudflare → Knot migration path. Covers nameserver choice (Knot vs NSD vs PowerDNS vs CoreDNS), Fly machine sizing and the PROXY-on-TCP-is-broken trap, knotc confdb operations, ACME ACL pattern (the `sub-or-equal` vs `pattern` mismatch for `_acme-challenge`), Namecheap glue + in-bailiwick NS, the CF outgoing-AXFR migration (NOTIFY source-IP gotchas, Fly edge NAT rewriting source to 172.16.x), TTL pre-lowering, registry NS swap timing per TLD, and the post-migration Caddy `dns cloudflare` → `dns rfc2136` cutover. Sibling to `fly`, `cloudflare`, `infrastructure-stack`, `gloryhole`, and `knotctl`. Reference deployment source lives at `~/knotea/authority/deploy/knot-only/` (standalone-knotd pattern, now historical — post-2026-06-25 cutover the live authority is the merged knotea binary on `glory-hole` Fly at `137.66.1.170`; `knot-fly-mvp` retired).
+description: Use when working on the user's self-hosted authoritative DNS (Knot DNS on Fly.io anycast, serving erfi.io + lab.erfi.io) - nameserver choice, knotc confdb operations, TSIG-keyed RFC 2136 ACME, AXFR/IXFR primary/secondary, the Cloudflare -> Knot migration path (TTL pre-lowering, NOTIFY gotchas, registry NS swap), or the Caddy dns rfc2136 cutover. Fires on 'knot', 'authoritative DNS', 'nameserver', 'AXFR/IXFR', 'glue records', 'zone migration', 'knotc'.
 ---
 
 # knot-dns — authoritative DNS on Fly
 
 > **knotea merge (2026-06-16)** — knot-fly is being merged with `glory-hole`
 > (recursive resolver) into a single supervised binary, `knotea`. The monorepo
-> lives at `~/knotea/` with knot-fly under **`~/knotea/authority/`** and
-> glory-hole under `~/knotea/resolver/`. The monorepo is the canonical source
+> lives at `~/infra/knotea/` with knot-fly under **`~/infra/knotea/authority/`** and
+> glory-hole under `~/infra/knotea/resolver/`. The monorepo is the canonical source
 > tree. **P6 cutover DONE (2026-06-25):** the live authority for `erfi.io` +
 > `lab.erfi.io` is now the merged knotea binary on the `glory-hole` Fly app (sin,
 > anycast v4 `137.66.1.170`); the Namecheap glue was swapped off `knot-fly-mvp`
 > (`169.155.56.21`, fra) which is now frozen and pending `apps destroy` after the
-> 24–48h soak. Plans: `~/knotea/docs/plans/2026-06-16-knotea-merge.md` +
-> `~/knotea/docs/plans/2026-06-25-knotea-cutover-runbook.md`. Post-merge,
+> 24–48h soak. Plans: `~/infra/knotea/docs/plans/2026-06-16-knotea-merge.md` +
+> `~/infra/knotea/docs/plans/2026-06-25-knotea-cutover-runbook.md`. Post-merge,
 > knotd no longer binds public `:53` — it runs loopback-only on `127.0.0.1:5354`
 > and knotea owns the public sockets, proxying RFC 2136 UPDATE + AXFR inward.
 > This resolves the PROXY-on-TCP limitation (gotcha #2) and the UDP hairpin
 > SERVFAIL (gotcha #24) by co-location.
 
-The reference deployment source is `~/knotea/authority/deploy/knot-only/` — the former `~/knot-fly/deploy/knot-only/` tree — now **historical**: it documents the standalone-knotd pattern, but the live authority is the merged knotea binary (see the `gloryhole` skill), not a bare knotd app. The retired `knot-fly-mvp` app (fra) served `<your-zone>` + `lab.<your-zone>` and issued real Let's Encrypt certs for ~45 Caddy sites via `dns rfc2136`; that same TSIG/ACME machinery now runs through knotea's loopback knotd. Every snippet below still mirrors that working tree. Read `~/knotea/authority/AGENTS.md` for the canonical gotcha list this skill condenses.
+The reference deployment source is `~/infra/knotea/authority/deploy/knot-only/` — the former `~/infra/knot-fly/deploy/knot-only/` tree — now **historical**: it documents the standalone-knotd pattern, but the live authority is the merged knotea binary (see the `gloryhole` skill), not a bare knotd app. The retired `knot-fly-mvp` app (fra) served `<your-zone>` + `lab.<your-zone>` and issued real Let's Encrypt certs for ~45 Caddy sites via `dns rfc2136`; that same TSIG/ACME machinery now runs through knotea's loopback knotd. Every snippet below still mirrors that working tree. Read `~/infra/knotea/authority/AGENTS.md` for the canonical gotcha list this skill condenses.
 
 ## Why self-host
 
@@ -54,7 +54,7 @@ Two regions is the minimum for "not a single point of failure": one primary, one
 
 ## fly.toml — the shape
 
-`~/knotea/authority/deploy/knot-only/fly.toml`. Two ports, no PROXY protocol on TCP. The PROXY-on-TCP omission is **load-bearing**.
+`~/infra/knotea/authority/deploy/knot-only/fly.toml`. Two ports, no PROXY protocol on TCP. The PROXY-on-TCP omission is **load-bearing**.
 
 ```toml
 app = "<your-knot-app>"
@@ -120,7 +120,7 @@ Knot has two configuration modes. **`knotd -c knot.conf`** (file mode) makes `kn
 
 ```bash
 # /usr/local/bin/docker-entrypoint.sh — abridged. Full file in
-# ~/knotea/authority/deploy/knot-only/docker-entrypoint.sh
+# ~/infra/knotea/authority/deploy/knot-only/docker-entrypoint.sh
 set -eu
 STORAGE=/var/lib/knot-fly
 TPL=/etc/knot/knot.conf.template
@@ -163,7 +163,7 @@ exec knotd -C "$CONFDB"
 
 ## knot.conf template — keys, ACLs, templates
 
-`~/knotea/authority/deploy/knot-only/knot.conf.template`. Zones are NOT in the template — they're operator state, added at runtime by `bootstrap-zone.sh` or `cf-axfr-setup.sh`. Three TSIG keys: `caddy-acme.` (ACME challenges, narrow ACL), `caddy-ddns.` (general A/AAAA DDNS), `axfr-out.` (outbound transfers to secondaries).
+`~/infra/knotea/authority/deploy/knot-only/knot.conf.template`. Zones are NOT in the template — they're operator state, added at runtime by `bootstrap-zone.sh` or `cf-axfr-setup.sh`. Three TSIG keys: `caddy-acme.` (ACME challenges, narrow ACL), `caddy-ddns.` (general A/AAAA DDNS), `axfr-out.` (outbound transfers to secondaries).
 
 ```yaml
 server:
@@ -271,10 +271,10 @@ knotc zone-set     lab.<your-zone> @ 3600 NS  "ns1.lab.<your-zone>."
 knotc zone-commit  lab.<your-zone>
 ```
 
-From your dev box via the `~/knotea/authority/deploy/knot-only/Makefile`:
+From your dev box via the `~/infra/knotea/authority/deploy/knot-only/Makefile`:
 
 ```bash
-cd ~/knotea/authority/deploy/knot-only
+cd ~/infra/knotea/authority/deploy/knot-only
 make bootstrap-zone ZONE=lab.<your-zone> NS_FQDN=ns1.lab.<your-zone>
 ```
 
@@ -350,11 +350,11 @@ TLD propagation timing (real-world from 2026-05-24):
 
 Zone already lives at CF (Enterprise), you want a hidden Knot mirror to validate against before flipping NS. **CF outgoing AXFR requires Enterprise** — free/pro can't push.
 
-One command does the whole bootstrap (`~/knotea/authority/deploy/knot-only/scripts/cf-axfr-setup.sh`):
+One command does the whole bootstrap (`~/infra/knotea/authority/deploy/knot-only/scripts/cf-axfr-setup.sh`):
 
 ```bash
 export CLOUDFLARE_API_TOKEN=...
-cd ~/knotea/authority/deploy/knot-only
+cd ~/infra/knotea/authority/deploy/knot-only
 ./scripts/cf-axfr-setup.sh <your-zone>
 ```
 
@@ -511,7 +511,7 @@ ssh servarr "docker logs --since 1m caddy 2>&1 | grep -iE '$HOST|acme'"
 
 ## DNSSEC — when to enable
 
-Per-zone decision. Knot's KASP does online signing — `conf-set 'zone[<zone>].dnssec-signing' on` plus a policy with NSEC3 + automatic KSK/ZSK rollover. Phase 2 territory in `~/knotea/authority/PLAN.md`; not enabled on the MVP yet.
+Per-zone decision. Knot's KASP does online signing — `conf-set 'zone[<zone>].dnssec-signing' on` plus a policy with NSEC3 + automatic KSK/ZSK rollover. Phase 2 territory in `~/infra/knotea/authority/PLAN.md`; not enabled on the MVP yet.
 
 When to enable:
 
@@ -571,7 +571,7 @@ dig +trace SOA <your-zone>
 
 ## Foot-guns — the running list
 
-Distilled from `~/knotea/authority/AGENTS.md`. Each is a real failure mode with a real fix.
+Distilled from `~/infra/knotea/authority/AGENTS.md`. Each is a real failure mode with a real fix.
 
 1. **`server.storage` is invalid in Knot 3.5.** Moved to `database.storage`.
 2. **PROXY-on-TCP is unsupported in Knot 3.5.** `proxy-allowlist` is UDP-only. Drop `handlers = ["proxy_proto"]` from fly.toml's TCP service or connections close with "end of file".
@@ -608,6 +608,6 @@ Two regions for HA doubles VM cost. Volumes are regional — each region needs i
 - **`cloudflare`** — CF Secondary DNS API endpoints (`/secondary_dns/tsigs`, `/secondary_dns/peers`, `/secondary_dns/outgoing`) used by `cf-axfr-setup.sh`. CF anycast IP list at `api.cloudflare.com/client/v4/ips`.
 - **`infrastructure-stack`** — the Caddy stack in `~/infra/ergo/caddy-compose/` is the consumer of the TSIG path. Three-edits-at-once rule for adding a TSIG-driven site is in that stack's `AGENTS.md`.
 - **`terraform`** — if you ever want to IaC the registrar bits; Namecheap glue + NS records can be managed by `namecheap/namecheap` provider.
-- **`~/knotea/authority/AGENTS.md`** — the authoritative gotcha list and live-system state.
-- **`~/knotea/authority/docs/runbooks/cf-to-knot-migration.md`** — the full operator playbook with rollback procedures.
-- **`~/knotea/authority/PLAN.md`** — Phase 1 Cloudflare-shaped REST API design (not yet implemented as of 2026-05-24).
+- **`~/infra/knotea/authority/AGENTS.md`** — the authoritative gotcha list and live-system state.
+- **`~/infra/knotea/authority/docs/runbooks/cf-to-knot-migration.md`** — the full operator playbook with rollback procedures.
+- **`~/infra/knotea/authority/PLAN.md`** — Phase 1 Cloudflare-shaped REST API design (implemented; live on the `glory-hole` Fly app at `https://knotea.erfi.io:2096/client/v4`).

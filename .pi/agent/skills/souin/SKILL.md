@@ -1,6 +1,6 @@
 ---
 name: souin
-description: Operate and configure the edge HTTP cache (caddyserver/cache-handler, Souin core via the erfianugrah fork, nuts/nutsdb on-disk storage) in ~/infra/ergo/caddy-compose. Use when adding cache to a site on the edge Caddyfile, debugging cache misses / non-persistence / Cache-Status anomalies, changing nuts storage options (EntryIdxMode, SegmentSize, MergeInterval), purging or reclaiming cache storage, or extending the test/cache harness. Fires on "souin", "cache-handler", "nuts", "edge cache", "Cache-Status", "stale-if-error", "cache purge". Covers the three storage bugs verified 2026-07-31 (provider-inheritance race, nuts.Factory Dir-drop, harness blind spot), the REQUIRED per-site nuts config pattern, the cachectl ops tool, and the 7 documented behavioral quirks. Sibling to `caddy` (the wider Caddy/WAF stack) and `composer` (deploy path).
+description: Use when adding cache to a site on the edge Caddyfile, debugging cache misses / non-persistence / Cache-Status anomalies, changing nuts storage options (EntryIdxMode, SegmentSize, MergeInterval), purging or reclaiming cache storage, or extending the test/cache harness. Fires on 'souin', 'cache-handler', 'nuts', 'edge cache', 'Cache-Status', 'stale-if-error', 'cache purge'. Sibling to caddy (the wider Caddy/WAF stack) and composer (deploy path).
 ---
 
 # souin - edge HTTP cache operations

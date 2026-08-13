@@ -1,6 +1,6 @@
 ---
 name: ci-workflows
-description: Set up CI/CD workflows for GitHub Actions or Gitea Actions (self-hosted) with verified-current action versions. Covers the .github/workflows/ and .gitea/workflows/ YAML, action pinning, Gitea-specific compatibility quirks (ignored fields, runner labels, default action source), Docker image build+push patterns, language setup (node/python/go/java/bun/deno), pages deployment, GitHub Releases, and the verification protocol for staying current. Use when adding or reviewing any workflow YAML, or migrating between GitHub and Gitea Actions.
+description: Use when adding or reviewing CI/CD workflow YAML for GitHub Actions or Gitea Actions (self-hosted), pinning action versions, migrating workflows between GitHub and Gitea, building/pushing Docker images in CI, setting up language toolchains (node/python/go/java/bun/deno), deploying Pages, or cutting GitHub Releases in CI.
 ---
 
 # CI workflows — GitHub Actions + Gitea Actions
@@ -438,4 +438,4 @@ steps:
 
 - **Docs sources**: `github` (GitHub product docs incl. Actions YAML reference), `gitea` (self-hosted instance docs), `gitea-api`
 - `frontend-stack` — when scaffolding a project that needs CI on day one
-- `oci_tags` — query for current versions of container images you build/push
+- the pi `oci_tags` tool — query for current versions of container images you build/push
