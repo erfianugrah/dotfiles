@@ -73,7 +73,7 @@ Don't use `task` for: reading 1-3 known files, simple `grep`, work needing paren
 - Multi-file pattern rewrites (5+ files): `ast-grep --rewrite` for AST precision, `sd` for plain text. Single `edit` per file is the slow path.
 - Lockfiles (package-lock.json, pnpm-lock.yaml, Cargo.lock, poetry.lock): query with `jq` / `yq` / `rg`, NEVER full-read.
 - Probe before reading unknown files: `wc -l file` or `stat file`. >300 lines → `read` with `offset` / `limit`, not full-file.
-- **Batch diagnostics in one bash call.** When investigating a failure with multiple cheap probes (`git status` + `git ls-files` + `git check-ignore`; `ps` + `ss` + `journalctl`; `df` + `du` + `lsblk`), separate them with `;` or newlines in a single call. Three-round-trip sequential probing is the most common cause of "five-minute investigation that should have taken thirty seconds". For git-specific failures see the `git-troubleshooting` skill.
+- **Secrets: use, never print.** Run commands WITH credentials by var reference (`curl -H "X-API-Key: $COMPOSER_API_KEY" ...`) - the var NAME in the command is harmless. NEVER print resolved values: no `env` / `printenv` / bare `set` / `export -p` dumps, no `echo $KEY`, no `cat .env` to "check auth". To verify a var is set: `env | grep ^NAME | sed 's/=.*/=<set>/'`. The `secret-output-guard` extension blocks env dumps and redacts known secret values in tool results, but it only knows pi's own env - a key that lives only in a file can still leak if you print the file.
 
 ## CLI-wrapped pi tools (prefer over raw `bash`)
 

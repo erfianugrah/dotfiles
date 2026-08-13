@@ -314,6 +314,7 @@ already provides it · SKIP = pi TUI/session internals, no CC analogue.
 | epistemic-guard | DONE (HOOK) | PostToolUse (Write|Edit|MultiEdit) transcript-provenance |
 | notify | DONE (HOOK) | Stop |
 | cd-agents-reload | DONE (HOOK) | PreToolUse Bash additionalContext (live-verified) |
+| secret-output-guard | DONE (HOOK) | PreToolUse Bash deny (env dumps) + PostToolUse (Bash\|Read\|Grep\|WebFetch) leak alarm - CC cannot mutate tool_response, so pi's redaction layer ports as detection-only additionalContext |
 | superpowers | DONE (CMD) | 6 subskills symlinked into .claude/skills |
 | prompt templates | DONE (CMD) | commit/pr/test/rollback -> .claude/commands |
 | grep | NATIVE | CC Grep |

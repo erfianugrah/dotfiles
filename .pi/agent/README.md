@@ -106,6 +106,7 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `compaction-progress.ts` | Spinner + token-delta toast during `/compact` and auto-compaction. |
 | `confidential-write-guard.ts` | Blocks confidential third-party identifiers (customer/partner/client names, codenames, named individuals, unreleased roadmap) in tracked-repo writes; one-time nudge + `confidential_terms` enforcement. |
 | `continue-after-error.ts` | Recovery affordance for provider 401/402/429 - offers retry / model-switch instead of a dead turn. |
+| `secret-output-guard.ts` | Keeps secret VALUES out of tool results while leaving credential USE untouched: blocks wholesale env dumps (`env`/`printenv`/bare `set`/`export -p`) at tool_call; redacts values of sensitive-named env vars + known token formats (ghp_, AKIA, sk-, JWT, PEM blocks) in every tool_result. `PI_SECRET_GUARD_OFF=1` kill switch. |
 | `yank.ts` | `/y` (alias `/yank`) — copy ONE code block from the last assistant message to the system clipboard intact, bypassing terminal wrap. Terse syntax: `/y` (block 1), `/y 2`, `/y -1` (last), `/y ?` (list), `/y ^` (previous message), `/y 2^^` (block 2, two messages back). `/y 2!` = paste-friendly transform: ASCII-fold cosmetic Unicode (em-dash → `-`, smart quotes → ASCII, NBSP, ellipsis) so PS in CP437/CP1252 doesn't mojibake; strip comment-only lines; flatten line-continuations; join shell-family statements with ` ; ` so PowerShell parses the whole block atomically. Probes clip.exe (WSL) → pbcopy → wl-copy → xclip → xsel → termux → OSC 52 fallback. Sibling to built-in `/copy` (which grabs the whole message). |
 | `git-gh-gate.ts` | Confirms mutating git/gh commands; protects `.git/` from direct writes; **also inspects apply\_patch envelopes** so apply\_patch can't bypass the gate. |
 | `inline-bash.ts` | Expand `!{cmd}` patterns inside user prompts before send. |
@@ -262,7 +263,7 @@ Unit tests for the pure parsers in each extension:
 - osv-scan / secret-scan (gitleaks + noseyparker) / hurl-test / go-test / bench parsers
 - bg-tasks duration formatter + slug generator
 - task.ts subagent-event parser + progress tracker + fake-`pi` streaming/abort integration, tool-activity tracker + `lib/tool-label.ts` (the `loop-*.test.ts` contract files)
-- ascii-punctuation-guard + confidential-write-guard payload scanners
+- ascii-punctuation-guard + confidential-write-guard + secret-output-guard payload scanners
 - tool-output-prune pruner + write-stream chunk assembler
 
 ```bash
