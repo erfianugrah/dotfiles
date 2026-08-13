@@ -20,6 +20,50 @@ Everything below is how that disposition shows up per channel. When a rule below
 
 This is a voice/reference skill, not a discipline rule. Read it, apply the patterns, match the register. No ritual.
 
+Division of labour: this skill owns VOICE (register, tone, the corpo-tell kill list). For doc-length SKELETON - heading hierarchy, PEEL paragraph structure, thesis placement - and citation FORMAT by surface (plain URL vs `Source:` line vs APA 7 vs RFC-style [TAG]), see **writing-structure**.
+
+## When to use
+
+- "Answer this as if I'm replying" / "draft my reply to X" / "write this back to whoever asked"
+- After the LLM reviews something (feedback list, spec, thread, PR) and the user wants the response in his words
+- Email, Slack, GitHub comment, a technical answer to a question
+
+**Register matters** -- pick by channel:
+
+| Channel | Register |
+|---|---|
+| Slack / quick one-liner | Lowercase-ok, terse, fast. Lead with the answer. One link if it settles the point. No headers. This is a single reply, NOT a chat burst -- see the DM-register warning below. |
+| Slack / email summary | STRUCTURED, even in Slack. Multi-point answers get headers or a tight bullet list, references inline, one concrete next action. Do NOT collapse into one-thought-per-line chat bursts -- a summary is composed, not streamed. |
+| Email / structured reply | One-line opener that acknowledges + frames ("Thanks for forwarding - going item by item"), NOT gush. Then item-by-item with headers. References inline. Concrete next action at the end. |
+| Technical review reply | Per-item, prose-first. Split solvable-today / genuine-gap / roadmap-or-inferred *in your head* - do NOT stamp them as labels. Source on every non-obvious claim. Table only a genuinely multi-option item; no per-item takeaway line, no closing recap. |
+| GitHub issue/PR comment | Direct, technical, link the line/commit/doc. No pleasantries. |
+
+### DM / chat register exists -- and is OUT of scope here
+
+Erfi's private chat register (measured across ~105k real Discord messages) is
+distinct and must NOT leak into any surface this skill drafts for. What the
+chat data shows, and why it stays walled off:
+
+- **Bursts, not paragraphs.** 87% of chat messages are under 40 chars; one
+  thought is split across several sequential messages, continued with leading
+  connectors (`so` / `but` / `and` / `cause` / `also`). 84% carry no terminal
+  punctuation; sentences start lowercase by default; dashes are essentially
+  absent (commas + message breaks instead). Fillers: `yeah` / `ya` / `haha` /
+  `lol` / `kinda` / `defo`, `cause` over `because` ~3:1, `i think` as the
+  default hedge.
+- **This is DM texture, not a drafting style.** A Slack/email summary, PR
+  comment, or review reply is COMPOSED and structured (see the table above) --
+  it is never one-thought-per-line, lowercase, punctuation-free burst. Do not
+  import the chat mechanics into professional surfaces, and never quote private
+  chat content into a tracked file.
+- The transferable bit is only the register-independent disposition from the
+  Overview (plain words, connector-chained reasoning, hedge-soft-but-blunt, no
+  ceremony) -- and that disposition is exactly what makes any surface sound
+  like Erfi. The chat corpus is its truest, unperformed sample; the blog is the
+  performed version. Ground the *voice* in the corpus, the *format* in the
+  matching-register sample. The burst *mechanics* do not transfer to structured
+  surfaces.
+
 ## Kill the corpo tells (the #1 lever)
 
 Getting the voice right is mostly SUBTRACTION. The drafts that miss aren't under-structured -- they're over-corporate. Cut these on sight:
@@ -99,48 +143,6 @@ Open COLD on the first point ("On broadcast_changes vs your hand-rolled send - d
 
 These read as SaaS-CS / management-consultant voice, not Erfi. Verbatim strike-outs from real edits (2026-07): "this is great to read", "quick hits", "I'd drop that suggestion for you", "SOS is the one I'd slow down on" / "where I'd slow down", "you've (already) got the right instinct", "genuinely can't trust", "and the big one" / "this is the big one" / "the big one", "strongest bit" / "your strongest bit", "that's what turns it from best-effort into something you'd stake safety on", "let me just lay out how I'd build it". Also from earlier edits: "strawman" (say "rough shape"/"outline"). The "big one" and "strongest bit" family is corpo tell #7 (rating your own point instead of stating it) in casual costume - it survives into chat/Discord drafts where the corpo guard feels off-duty; do NOT emphasise which item matters most, just order them so the one that matters is first and state each flatly. When Erfi flags a phrase as not-his, drop it globally and never re-suggest a paraphrase of it.
 
-## When to use
-
-- "Answer this as if I'm replying" / "draft my reply to X" / "write this back to whoever asked"
-- After the LLM reviews something (feedback list, spec, thread, PR) and the user wants the response in his words
-- Email, Slack, GitHub comment, a technical answer to a question
-
-**Register matters** -- pick by channel:
-
-| Channel | Register |
-|---|---|
-| Slack / quick one-liner | Lowercase-ok, terse, fast. Lead with the answer. One link if it settles the point. No headers. This is a single reply, NOT a chat burst -- see the DM-register warning below. |
-| Slack / email summary | STRUCTURED, even in Slack. Multi-point answers get headers or a tight bullet list, references inline, one concrete next action. Do NOT collapse into one-thought-per-line chat bursts -- a summary is composed, not streamed. |
-| Email / structured reply | One-line opener that acknowledges + frames ("Thanks for forwarding - going item by item"), NOT gush. Then item-by-item with headers. References inline. Concrete next action at the end. |
-| Technical review reply | Per-item, prose-first. Split solvable-today / genuine-gap / roadmap-or-inferred *in your head* - do NOT stamp them as labels. Source on every non-obvious claim. Table only a genuinely multi-option item; no per-item takeaway line, no closing recap. |
-| GitHub issue/PR comment | Direct, technical, link the line/commit/doc. No pleasantries. |
-
-### DM / chat register exists -- and is OUT of scope here
-
-Erfi's private chat register (measured across ~105k real Discord messages) is
-distinct and must NOT leak into any surface this skill drafts for. What the
-chat data shows, and why it stays walled off:
-
-- **Bursts, not paragraphs.** 87% of chat messages are under 40 chars; one
-  thought is split across several sequential messages, continued with leading
-  connectors (`so` / `but` / `and` / `cause` / `also`). 84% carry no terminal
-  punctuation; sentences start lowercase by default; dashes are essentially
-  absent (commas + message breaks instead). Fillers: `yeah` / `ya` / `haha` /
-  `lol` / `kinda` / `defo`, `cause` over `because` ~3:1, `i think` as the
-  default hedge.
-- **This is DM texture, not a drafting style.** A Slack/email summary, PR
-  comment, or review reply is COMPOSED and structured (see the table above) --
-  it is never one-thought-per-line, lowercase, punctuation-free burst. Do not
-  import the chat mechanics into professional surfaces, and never quote private
-  chat content into a tracked file.
-- The transferable bit is only the register-independent disposition from the
-  Overview (plain words, connector-chained reasoning, hedge-soft-but-blunt, no
-  ceremony) -- and that disposition is exactly what makes any surface sound
-  like Erfi. The chat corpus is its truest, unperformed sample; the blog is the
-  performed version. Ground the *voice* in the corpus, the *format* in the
-  matching-register sample. The burst *mechanics* do not transfer to structured
-  surfaces.
-
 ## Ground in real samples first (do not skip)
 
 Real writing samples beat any hand-written style description for texture -- examples carry nuance (sentence rhythm, table density, bold placement) that prose rules can't. So before drafting anything beyond a single quick one-liner -- and a multi-point Slack reply counts: it reads short but is exactly where guessing shows -- pull 2-3 real samples in the matching register and study them. And if a draft comes back rejected ("that's not how I talk"), the next move is ALWAYS to pull samples, NEVER to re-guess or re-word from imagination -- re-guessing after a rejection is the documented failure mode:
@@ -211,7 +213,7 @@ Every example below is verbatim from your public technical blog (mirrored under 
 
 4. **Own the mistake without ego.** Real: "Everything here was learned the hard way through actual cluster failures. Each section includes the root cause analysis, the fix, and the gotchas." (`guides/k3s-arm64-cluster-ops.md`) If a prior claim was wrong, retract it plainly -- no defensiveness, no burying it.
 
-5. **References are verification, not decoration -- and verify against reality, not the doc.** Link or quote the actual source. Real: "`link(2)` returns `EXDEV` (cross-device link) across mount boundaries. This is **confirmed by moby/moby#7457**." (`reference/docker-servarr-security.md`) The sibling move: distrust theoretical/documented values, test them, and report what you actually observed -- "Do not rely on theoretical values alone ... discover the real-world path limitations and verify your settings", "Always verify with empirical testing." (`guides/magic-wan-interop.md`) This is what "I tested this on the current CLI (2.108) and it's not what the docs suggest" is doing. Never assert a fact you didn't check -- that's the whole point of the voice.
+5. **References are verification, not decoration -- and verify against reality, not the doc.** Link or quote the actual source. Real: "`link(2)` returns `EXDEV` (cross-device link) across mount boundaries. This is **confirmed by moby/moby#7457**." (`reference/docker-servarr-security.md`) The sibling move: distrust theoretical/documented values, test them, and report what you actually observed -- "Do not rely on theoretical values alone ... discover the real-world path limitations and verify your settings", "Always verify with empirical testing." (`guides/magic-wan-interop.md`) This is what "I tested this on the current CLI (2.108) and it's not what the docs suggest" is doing. Never assert a fact you didn't check -- that's the whole point of the voice. Citation FORMAT by surface (plain full URL in chat, `Source:` line for docs.erfi.io, APA 7 in formal docs, [TAG] + References in spec-like docs) is in **writing-structure**.
 
 6. **Explicit takeaway lines -- LONG-FORM ONLY.** In a blog/doc, close a section with the one line to remember ("By design - one zone can't control another's cache.", `reference/caching.md`). In an email/Slack reply, a per-item takeaway plus a priorities recap is restating yourself - cut it.
 
