@@ -3,7 +3,7 @@ name: supabase
 description: "Use when doing ANY task involving Supabase. Triggers: Supabase products (Database, Auth, Edge Functions, Realtime, Storage, Vectors, Cron, Queues); client libraries and SSR integrations (supabase-js, @supabase/server, @supabase/ssr) in Next.js, React, SvelteKit, Astro, Remix; auth issues (login, logout, sessions, JWT, cookies, getSession, getUser, getClaims, RLS); Supabase CLI or MCP server; schema changes, migrations, security audits, Postgres extensions (pg_graphql, pg_cron, pg_vector)."
 metadata:
   author: supabase
-  version: "0.4.0"
+  version: "0.5.0"
 ---
 
 # Supabase
@@ -69,7 +69,14 @@ withSupabase({ auth: ['user', 'secret'] }, …)   // first match wins
 
 **Header convention**: `'user'` reads the JWT from the `Authorization: Bearer` header. `'publishable'` / `'secret'` read the key from the `apikey` header. Both can be present; `withSupabase` picks the mode that matches.
 
-**Hono adapter** (community-maintained, ships with the core package):
+**Framework adapters** (community-maintained, ship inside the core package - no separate install):
+
+| Framework | Import | Access pattern |
+|---|---|---|
+| Hono | `@supabase/server/adapters/hono` | `c.var.supabaseContext` |
+| H3 / Nuxt | `@supabase/server/adapters/h3` | `event.context.supabaseContext` |
+| Elysia | `@supabase/server/adapters/elysia` | `supabaseContext` in handler ctx (scoped resolve) |
+| NestJS | `@supabase/server/adapters/nestjs` | `withSupabase` guard + `SupabaseCtx` param decorator |
 
 ```ts
 import { Hono } from 'hono';
@@ -85,7 +92,9 @@ app.get('/todos', async (c) => {
 export default { fetch: app.fetch };
 ```
 
-**H3 / Nuxt adapter** also shipped: `@supabase/server/adapters/h3`.
+**No adapter handles CORS** - the `cors` config option is excluded from every adapter's config type. Use the framework's own CORS middleware (`hono/cors`, `@elysiajs/cors`, NestJS `enableCors`, etc.). Adapter auth failures throw the framework's native exception (`HTTPException` in Hono, `HttpException` in NestJS) with the original `AuthError` on `.cause`.
+
+**Typed clients (1.4+):** thread the generated `Database` type through the adapter generic - `withSupabase<Database>({ auth: 'user' })` - and `ctx.supabase` / `c.var.supabaseContext.supabase` become fully typed `SupabaseClient<Database>` (`/docs/supabase-server/docs/typescript-generics.md`).
 
 **Primitives** from `@supabase/server/core` when one handler needs multiple routes with different auth modes, custom response headers, or you're building an MCP/middleware/adapter:
 
@@ -107,14 +116,14 @@ import {
 withSupabase(
 	{
 		auth: 'user',     // who can call this function
-		cors: false,      // disable CORS (default: standard supabase-js CORS headers)
+		cors: 'disabled',// 'default' | 'disabled' | { headers } (default: supabase-js CORS headers)
 		env: { url: '…' },// env overrides (optional)
 	},
 	handler,
 );
 ```
 
-`cors` accepts `Record<string, string>` for custom headers, or `false` to disable (e.g. when a framework handles CORS separately). `env` overrides per-request env-var resolution (useful for tests and per-tenant routing).
+`cors` accepts `'default'` (standard supabase-js CORS headers), `'disabled'`, or `{ headers }` for custom headers (1.4+ shape). The boolean (`true`/`false`) and bare `Record<string, string>` forms are deprecated but still accepted. `env` overrides per-request env-var resolution (useful for tests and per-tenant routing).
 
 ### Env-vars (read by `@supabase/server`)
 
@@ -157,7 +166,7 @@ Singular fallback form (local dev, self-hosted):
 
 ### Status
 
-**v1.0.0 stable** since May 6, 2026 — first SemVer release. Breaking changes only ship as major bumps. Adapters and ergonomic improvements ship in minor releases.
+**v1.x - SemVer since v1.0.0 (May 6, 2026); latest 1.4.1 (Jul 2026), 1.5.0 in beta.** Breaking changes only ship as major bumps. Upstream self-describes v1.x as "Public Beta... still early" - expect new adapters and ergonomic improvements in minor releases. Check `npm view @supabase/server version` before citing a version.
 
 Docs:
 - `docs_read(path="/docs/supabase-server/README.md")` — API surface
