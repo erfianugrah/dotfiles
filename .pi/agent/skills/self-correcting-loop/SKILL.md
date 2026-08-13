@@ -391,10 +391,12 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
 
 - `task` - the feed-forward instruction. Keep it scoped; one module/feature.
 - `expect` - `"fail"` marks a FEATURE sensor that must be red on the unchanged
-- `humanGate` - optional flag for human review. If true, converged runs exit with 3.
-
   tree; the run is refused if it is green (see the discrimination lesson
   above). Omit it for guards.
+- `humanGate` - optional boolean (default false). If true, a converged run
+  prints PENDING HUMAN REVIEW and exits `3` instead of `0`, so CI can route
+  green-but-high-blast-radius work through a human gate. The baseline-green
+  early exit is unaffected.
 - `after` - names of sensors that must PASS in the same pass before this one
   runs. Cost control for expensive gates: on a real run the judge cost 147s of
   a frontier model per iteration while the other 22 sensors together took under

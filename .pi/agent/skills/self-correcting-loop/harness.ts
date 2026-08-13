@@ -135,12 +135,12 @@ export interface Manifest {
 	 * (pre-existing debt) and only gate on NEW failures. Lets the loop adopt a
 	 * legacy repo without a green-the-world sprint first (ArchUnit `freeze`).
 	 */
+	baseline: boolean;
 	/**
 	 * Optional flag for human review. If true, when the run converges (all
 	 * sensors pass), the loop prints a notice and exits with 3.
 	 */
 	humanGate?: boolean;
-	baseline: boolean;
 	/** pi --tools whitelist for the spawned agent. */
 	tools: string[];
 	/**
