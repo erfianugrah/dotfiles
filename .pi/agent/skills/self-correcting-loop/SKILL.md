@@ -480,6 +480,32 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
     `.pi/lock-owners-probe.py`, booting the real handler over HTTP) is the
     strongest sensor form - the agent cannot edit it, and its named check
     failures are exactly the feedback a weak model needs.
+  - **Judge-gated schema-exact JSON is beyond the local rung (measured
+    2026-08-13, hearth power dashboard loop, 6 iterations + trial).** Gemma
+    26B one-shot ~95% of a 4-file task (render.sh job, compose changes,
+    16-panel dashboard, valid PromQL) in iteration 1, then ORBITED the
+    frontier judge for 6 iterations without converging: every rewrite fixed
+    the judge's named items and invented fresh schema errors (drawMode/
+    stackType keys, matcher `type` vs `id`, raw-tab corruption inside
+    strings, gridPos deleted wholesale). Practical endgame: when the judge's
+    list is down to enumerable schema placements and the local rung has
+    rewritten the file 3+ times, the operator lands the list by hand (judge
+    went green first try). Adjacent traps, all observed: (1) **kept-on-
+    changed-failure-content sinks the floor** - when the judge is the ONLY
+    red sensor, a strictly-worse diff (gridPos deleted, datasource type
+    corrupted) is KEPT because the failure text changed; add a cheap
+    computational floor sensor for shape invariants (gridPos keys,
+    datasource `type`) so regressions flip a guard red and force rollback.
+    (2) **Mid-run guide edits are futile** - the scope guard restores
+    tracked out-of-scope files from the checkpoint, including the operator's
+    own guide enrichment; enrich the guide BETWEEN runs. (3) The scope guard
+    otherwise works exactly as designed: 33 out-of-scope agent writes (a
+    split-into-p1..p17.json strategy) reverted cleanly. (4) A strong
+    anti-hallucination sensor form: validate every metric name in dashboard
+    exprs against the LIVE endpoint (caught `hearth_sensor_power_sw`).
+    (5) A trial/run that dies mid-iteration leaves the governor's checkpoint
+    staged in the index; recover the pre-run state with
+    `git restore --source=HEAD --staged --worktree -- .`
   - **Concurrent loops (llm-compose).** The proxy lock is a SHARED lock with
     named owners: each loop `llmc lock loop --owner <session-id>`, unlock
     releases only that owner. Concurrent loops must share ONE preset (the
