@@ -18,7 +18,7 @@ cd "$HERE/../../.."
 # Unit suite (filter passes through as "$@"). The loop-*.test.ts files are
 # the task.ts streaming / tool-activity contracts born from the 2026-08-09
 # self-correcting-loop run; they ride the same preload as the unit suite.
-bun test --preload "$HERE/preload.ts" "$HERE/extensions.test.ts" "$HERE/loop-task.test.ts" "$HERE/loop-activity.test.ts" "$HERE/loop-date-class.test.ts" "$HERE/loop-entity-qualifier.test.ts" "$HERE/cost-guard.test.ts" "$HERE/secret-output-guard.test.ts" "$@"
+bun test --preload "$HERE/preload.ts" "$HERE/extensions.test.ts" "$HERE/loop-task.test.ts" "$HERE/loop-activity.test.ts" "$HERE/loop-date-class.test.ts" "$HERE/loop-entity-qualifier.test.ts" "$HERE/cost-guard.test.ts" "$HERE/secret-output-guard.test.ts" "$HERE/pwsh-core.test.ts" "$@"
 
 # Integration suite (self-mocked; no preload). Always run in full.
 bun test "$HERE/integration/"
