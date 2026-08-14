@@ -200,20 +200,32 @@ if [[ -o interactive ]] && (( $+functions[load_bw] )); then
       fi
       unset _bw_out
     else
-      # One auto-attempt per flag-file lifetime. The flag stores an epoch and
-      # lapses after an hour: macOS has no XDG_RUNTIME_DIR and its per-user
-      # TMPDIR survives logout (only reboot clears it), so a bare ! -e check
-      # means one declined/failed unlock mutes every later shell until REBOOT
-      # - and if the un-supervised nohup serve daemon dies, no shell ever
-      # retries. Epoch-in-file instead of mtime: no GNU/BSD stat fork needed.
-      local _bw_flag="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/bw-load-attempted" _bw_last=0
-      [[ -f "$_bw_flag" ]] && read -r _bw_last < "$_bw_flag"
-      [[ "$_bw_last" == <-> ]] || _bw_last=0
-      if (( $(date +%s) - _bw_last > 3600 )); then
-        print -r -- "$(date +%s)" >| "$_bw_flag"
-        load_bw
-      fi
-      unset _bw_flag _bw_last
+      # Defer the auto-attempt to first precmd. The attempt can land in
+      # bw_serve_start -> `bw unlock`, an interactive master-password read.
+      # Inside the p10k instant-prompt window that read is invisible (no
+      # echo, typed keystrokes get buffered/eaten) and the shell looks hung
+      # - 2026-08-13, new tmux window after a fresh boot. At first precmd
+      # the instant prompt is torn down and the prompt renders normally.
+      _bw_deferred_auto_unlock() {
+        add-zsh-hook -d precmd _bw_deferred_auto_unlock
+        # Another shell may have unlocked while this one was starting.
+        _bw_serve_ok && return 0
+        # One auto-attempt per flag-file lifetime. The flag stores an epoch
+        # and lapses after an hour: macOS has no XDG_RUNTIME_DIR and its
+        # per-user TMPDIR survives logout (only reboot clears it), so a bare
+        # ! -e check means one declined/failed unlock mutes every later shell
+        # until REBOOT - and if the un-supervised nohup serve daemon dies, no
+        # shell ever retries. Epoch-in-file: no GNU/BSD stat fork needed.
+        local _bw_flag="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/bw-load-attempted" _bw_last=0
+        [[ -f "$_bw_flag" ]] && read -r _bw_last < "$_bw_flag"
+        [[ "$_bw_last" == <-> ]] || _bw_last=0
+        if (( $(date +%s) - _bw_last > 3600 )); then
+          print -r -- "$(date +%s)" >| "$_bw_flag"
+          load_bw
+        fi
+      }
+      autoload -Uz add-zsh-hook
+      add-zsh-hook precmd _bw_deferred_auto_unlock
     fi
   fi
 fi
