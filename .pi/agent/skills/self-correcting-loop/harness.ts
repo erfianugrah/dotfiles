@@ -583,11 +583,28 @@ export function countFailing(results: SensorResult[]): number {
 /**
  * A stable fingerprint of the failing state. Two iterations with the same
  * fingerprint made no progress (the model is stuck).
+ *
+ * The output is normalized first: sensor output routinely embeds run-varying
+ * noise (build-log timestamps, durations, pids, tmp paths), and raw-text
+ * comparison then flips the fingerprint on EVERY iteration - which `decide`
+ * reads as "progress", resetting the stall ladder so escalation never fires
+ * (observed 2026-08-14: 5 no-fix iterations on rung 0, biome's formatter diff
+ * + astro build timestamps kept the fingerprint churning).
  */
+function normalizeVolatile(s: string): string {
+	return s
+		.replace(/\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?/g, "<ts>")
+		.replace(/\b\d{1,2}:\d{2}:\d{2}(\.\d+)?\b/g, "<ts>")
+		.replace(/\b\d+(\.\d+)?\s?(ms|min)\b/g, "<dur>")
+		.replace(/\b\d+(\.\d+)?s\b/g, "<dur>")
+		.replace(/\bpids?[=: ]\d+\b/gi, "<pid>")
+		.replace(/\/tmp\/[^\s"']+/g, "<tmp>");
+}
+
 export function fingerprint(results: SensorResult[]): string {
 	return results
 		.filter((r) => !r.ok)
-		.map((r) => `${r.name}:${r.exitCode}:${r.output}`)
+		.map((r) => `${r.name}:${r.exitCode}:${normalizeVolatile(r.output)}`)
 		.join("\u0001");
 }
 

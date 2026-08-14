@@ -181,6 +181,17 @@ describe("allPass / countFailing / fingerprint", () => {
 		expect(fingerprint([fail("t", "x")])).not.toBe(fingerprint([fail("t", "y")]));
 		expect(fingerprint([ok("t")])).toBe("");
 	});
+	test("fingerprint ignores run-varying noise (timestamps, durations, pids, tmp paths)", () => {
+		// the 2026-08-14 stall-escalation bug: build/tool timestamps in sensor
+		// output churned the fingerprint every iteration, so `decide` saw
+		// perpetual "progress" and the stall ladder never escalated.
+		const a = fail("build", "11:19:53 [build] Complete! in 487ms, pid 1234, wrote /tmp/abc123/out");
+		const b = fail("build", "12:41:07 [build] Complete! in 612ms, pid 9987, wrote /tmp/xyz789/out");
+		expect(fingerprint([a])).toBe(fingerprint([b]));
+		// but a genuinely different failure still flips it
+		const c = fail("build", "12:41:07 [build] FAILED: syntax error in foo.ts");
+		expect(fingerprint([a])).not.toBe(fingerprint([c]));
+	});
 });
 
 describe("truncate", () => {
