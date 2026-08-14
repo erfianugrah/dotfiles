@@ -70,6 +70,28 @@ make -C ~/infra/ergo/<svc>-compose restart                  # NOT restart-<svc>
 
 The `make restart` vs `restart-<svc>` distinction is critical and lives in the `caddy` and `composer` skills. Don't recreate-via-`docker restart` a container whose `.env` is SOPS-managed unless you know its env is already plaintext in memory.
 
+### servarr tailscale: Unraid plugin, `tailscale1`, boot race
+
+- servarr's tailscaled is the Unraid **plugin**, not systemd (no systemctl
+  on Unraid): `/usr/local/sbin/tailscaled -statedir /boot/config/plugins/tailscale/state -tun tailscale1`.
+  The interface is **`tailscale1`, not `tailscale0`** - `ip addr show tailscale0`
+  finding nothing is normal, not a down state. Tailscale SSH runs as its
+  `be-child` process (its argv shows `--remote-ip=<peer tailnet IP>`, useful
+  for seeing which peer a session arrived from).
+- **Boot race**: after a host reboot the plugin brings `tailscale1` up LATER
+  than docker autostart. Any container publishing on the host tailnet IP
+  (100.69.69.7) fails to bind and exits 128; the restart policy does not
+  retry config-level failures. Repair via composer recreate (see the owning
+  stack's AGENTS.md), not `docker start` (verified: can come back "Up" with
+  zero published ports - silent userland-proxy failure).
+- **Tailnet services are reachable from the dev box even with its tailscaled
+  down**: tailnet IPs route via the site-router tailnet hairpin (sessions
+  source-NAT to the router's tailnet IP, observed as 100.69.69.10 in servarr's
+  tailscale-ssh remote-ip; the reachability itself is verified -
+  `nc 100.69.69.7 5433` works with dev-box tailscaled inactive). Corollary:
+  `tailscale ping` failing locally does NOT mean tailnet services are down -
+  test the actual service port before declaring an outage.
+
 For other hosts (site routers, PiKVMs, SBCs) the user drops into an interactive shell — these are config-by-CLI devices, not script targets.
 
 ## Tailscale CLI — the minimum useful set
