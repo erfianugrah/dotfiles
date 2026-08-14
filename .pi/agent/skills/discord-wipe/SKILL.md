@@ -15,7 +15,8 @@ Drive the user's self-bot bulk deleter: repo `~/discord-wipe-go` (cobra CLI, ima
 - **Only-my-messages is load-bearing** (author-filtered search, export-only-own, 403 terminal). Never add a code path enumerating others' messages.
 - **`DELETE_DELAY` >= 0.3s floor** - account-level abuse heuristics, not just buckets.
 - **Dry-run first**, then real run with a FRESH state file: dry-run still `Mark()`s, so reusing its state file makes the real run's no-progress guard exit having deleted nothing.
-- **purge `--retention-days` defaults to 0 = delete EVERYTHING in scope** regardless of age. `run` defaults 14 (prod compose.yaml sets 7; the stack `.env` holds ONLY `DISCORD_TOKEN`).
+- **purge `--retention-days` defaults to 0 = delete EVERYTHING in scope** regardless of age. `run` defaults 14 (prod compose.yaml sets 7; the stack `.env` holds `DISCORD_TOKEN` + `RETENTION_OVERRIDES`).
+- **Per-scope retention (v1.2.0+)**: `RETENTION_OVERRIDES` / `--retention-override` entries `guild:<id>:<days>` / `channel:<id>:<days>` pin one scope's window; `run` only, live catch-up phase only (export phase always uses the global window). Malformed entries are fatal. Values are confidential - they live in `.env` + container env only, never in the public repo.
 
 ## Purge a scope (one-shot)
 
@@ -33,8 +34,8 @@ This stack has `auto_sync=true` but **NO auto-deploy**: a push auto-syncs the ch
 1. Commit + push `main` (release.yml rebuilds `:main`; tag `v*` for releases).
 2. `pull` via composer API on nixos, key piped on stdin (one curl per pipe - stdin is consumed):
    `printf 'header = "X-API-Key: %s"\n' "$COMPOSER_API_KEY" | ssh nixos 'curl -s --config - -X POST "http://localhost:8080/api/v1/stacks/discord-wipe/pull?async=true"'`
-3. **Recreate `.env`** - every git-sync (the push-triggered auto-sync, or a manual pull/up) git-cleans untracked files, wiping it; `up` then fails `.env not found`. Pipe container -> file cross-host, verify `wc -c` = 85:
-   `ssh servarr 'docker inspect discord-wipe --format "{{range .Config.Env}}{{println .}}{{end}}" | sed -n "s/^DISCORD_TOKEN=//p" | tr -d "\r" | sed "s/^/DISCORD_TOKEN=/"' | ssh nixos 'cat > /var/lib/composer/stacks/discord-wipe/.env; chmod 600 /var/lib/composer/stacks/discord-wipe/.env'`
+3. **Recreate `.env`** - every git-sync (the push-triggered auto-sync, or a manual pull/up) git-cleans untracked files, wiping it; `up` then fails `.env not found`. Pipe BOTH keys container -> file cross-host, verify `grep -c '^DISCORD_TOKEN='` = 1:
+   `ssh servarr 'docker inspect discord-wipe --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -E "^(DISCORD_TOKEN|RETENTION_OVERRIDES)=" | tr -d "\r"' | ssh nixos 'cat > /var/lib/composer/stacks/discord-wipe/.env; chmod 600 /var/lib/composer/stacks/discord-wipe/.env'`
 4. `up?async=true` same as pull, then poll `GET /api/v1/jobs/<id>`.
 5. Verify: `ssh servarr 'docker inspect discord-wipe --format "{{index .Config.Labels \"org.opencontainers.image.revision\"}}"'` matches the pushed SHA; logs show `pass start cutoff=` ~RETENTION_DAYS ago, NOT "now".
 
