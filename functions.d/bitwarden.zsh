@@ -68,7 +68,9 @@ _BW_EXTRA_UNSET=(
 # answers /status and /sync (with success!) while serving stale data.
 _bw_serve_ok() {
     local response
-    response=$(curl -sf "${BW_SERVE_ADDR}/status" 2>/dev/null) || return 1
+    # --max-time: a wedged serve daemon accepts TCP but never answers; without
+    # a bound this froze zsh init (and the whole new shell) on 2026-08-13.
+    response=$(curl -sf --max-time 2 "${BW_SERVE_ADDR}/status" 2>/dev/null) || return 1
     [[ $(print -r -- "$response" | jq -r '.data.template.status // empty' 2>/dev/null) == "unlocked" ]]
 }
 
@@ -174,7 +176,7 @@ _bw_api_get_note() {
     emulate -L zsh
     local item_name=$1 encoded_name response
     encoded_name=$(printf '%s' "$item_name" | jq -sRr @uri)
-    response=$(curl -sf "${BW_SERVE_ADDR}/list/object/items?search=${encoded_name}") || {
+    response=$(curl -sf --max-time 2 "${BW_SERVE_ADDR}/list/object/items?search=${encoded_name}") || {
         print -u2 "bw serve not reachable on ${BW_SERVE_ADDR}. Run bw_serve_start first."
         return 1
     }
@@ -354,7 +356,7 @@ bw_serve_sync() {
     fi
     echo "[bw-serve] Syncing vault via daemon API..."
     local response
-    response=$(curl -sf -X POST "${BW_SERVE_ADDR}/sync") || {
+    response=$(curl -sf --max-time 5 -X POST "${BW_SERVE_ADDR}/sync") || {
         echo "[bw-serve] Sync request failed." >&2
         return 1
     }
