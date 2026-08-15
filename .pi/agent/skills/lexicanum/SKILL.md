@@ -40,8 +40,8 @@ aliases:                  # optional: old URLs -> redirects (on rename/move)
 - Rename/move = rename file + add old URL to `aliases`. Never edit
   `astro.config.mjs` redirects directly.
 - New category = edit `TAXONOMY` only (deliberate; docs cannot invent one).
-- Dev caveat: sidebar/redirects compute once at server start - restart
-  `bun dev` after changing taxonomy frontmatter.
+- Dev note: a watcher restarts the dev server automatically when a doc's
+  frontmatter changes; prose edits keep hot reload.
 
 ## Commands
 
