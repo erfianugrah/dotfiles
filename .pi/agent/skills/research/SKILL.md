@@ -1,6 +1,6 @@
 ---
 name: research
-description: "Use when a task needs multi-engine web search, clean content extraction from JS-heavy pages, or OSINT lookups (domain DNS/subdomains, IP geo/ports, email platform registrations, username scans, phone metadata, URL scan history, VirusTotal reputation, CVE details). Fires on 'research X', 'whois/subdomains for', 'what runs on this IP', 'where is this email/username registered', 'CVE-...'. Backs onto three local services: SearXNG :8888, crawler :8889, OSINT :8890."
+description: "Use when a task needs multi-engine web search, clean content extraction from JS-heavy pages, OSINT lookups (domain DNS/subdomains, IP geo/ports, email platform registrations, username scans, phone metadata, URL scan history, VirusTotal reputation, CVE details), or location scouting via street-level imagery (area-wide POI enumeration, pano sweeps, CLIP facade classification). Fires on 'research X', 'whois/subdomains for', 'what runs on this IP', 'where is this email/username registered', 'CVE-...', 'street view of', 'pano sweep', 'scout locations'. Backs onto four local services: SearXNG :8888, crawler :8889, OSINT :8890, CLIP sidecar (internal)."
 ---
 
 # Research & OSINT
@@ -186,7 +186,49 @@ curl -sX POST http://localhost:8890/investigate/harvest \
   -d '{"domain":"example.com","limit":500,"sources":"bing,duckduckgo,crtsh,hackertarget,otx,rapiddns,urlscan"}'
 ```
 
-Slower and noisier than `/investigate/domain` — use when you want the broad sweep.
+Slower and noisier than `/investigate/domain` - use when you want the broad sweep.
+
+## Geo pano pipeline (location scouting)
+
+Street-level imagery senses on the osint service (`https://osint.erfi.io`),
+backed by the keyless `streetlevel` GSV wrapper. Artifacts persist on servarr
+under `GEO_DIR` (`/mnt/user/appdata/research/geo`) in `<sweep_id>/` dirs.
+
+```bash
+# 1. Enumerate candidates across a whole area (Overpass; regex is POSIX, ,i applied)
+curl -sX POST http://localhost:8890/geo/area \
+  -H 'content-type: application/json' \
+  -d '{"area":"Singapore","tags":{"amenity":"marketplace"},"name_regex":"food centre|hawker","limit":200}'
+
+# 2. Sweep: point or candidate list -> panos + manifest + contact sheets
+#    Directional 5-seed sampling (centre+N/S/E/W) is deliberate - single-seed
+#    misses rear facades. ~190 candidates ~= 8 min.
+curl -sX POST http://localhost:8890/geo/panos \
+  -H 'content-type: application/json' \
+  -d '{"candidates":[{"name":"Sim Lim Square","lat":1.3030332,"lon":103.8530255}],"cap":8,"zoom":2}'
+# -> { "sweep_id": "YYYYMMDD-HHMMSS-<hash>", "n_panos": ..., "n_sheets": ... }
+
+# 3. CLIP-classify a sweep (research-clip sidecar, torch CPU)
+#    reference_b64 = "more like this image"; positive/negatives = zero-shot.
+#    granularity sheets (fast triage, default) | panos (slower, localises).
+curl -sX POST http://localhost:8890/geo/classify \
+  -H 'content-type: application/json' \
+  -d '{"sweep_id":"<id>","granularity":"sheets","top_n":20}'
+# verdicts.json persists in the sweep dir
+
+curl -s http://localhost:8890/geo/sweeps                     # list sweep ids
+curl -s http://localhost:8890/geo/file/<sweep_id>/sheets/<slug>.jpg -O   # pull artifacts
+```
+
+pi tools (preferred over curl): `osint_geo_area`, `osint_geo_panos`,
+`osint_geo_sheet` (pulls a sheet to `~/.cache/geo-sheets/` and returns the
+LOCAL path for `read`), `osint_geo_classify` (takes `reference_path` for a
+local reference image).
+
+Gotchas: negatives mean "not visible from street coverage", never proof of
+absence; small podium ducts sit below sheet resolution. CLIP triage is a
+filter, not a verdict - eyeball top hits before asserting them. Reference
+mode with a tight crop beats zero-shot text for specific visual features.
 
 ## Long-running jobs
 
@@ -216,3 +258,4 @@ curl -s "http://localhost:8890/jobs/$JOB_ID"
 - Repo: `~/infra/research`
 - MCP wrapper: `~/infra/research/mcp/research-server.py`
 - SearXNG instance is dockerised; check `~/infra/research/compose.yaml` for the stack.
+- Geo pipeline design + calibration notes: `~/infra/research/docs/plans/2026-08-15-geo-pano-pipeline.md`
