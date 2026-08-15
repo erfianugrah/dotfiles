@@ -1,7 +1,7 @@
 # Universal agent rules (all harnesses)
 
-These are the harness-agnostic rules shared across pi.dev, opencode, and
-Claude Code. The canonical source of the pi-specific superset is
+These are the harness-agnostic rules shared across pi.dev and Claude Code
+(opencode was retired 2026-08-15). The canonical source of the pi-specific superset is
 `.pi/agent/APPEND_SYSTEM.md`; this file is the universal subset, kept in sync
 manually. Do not add harness-specific tool names here.
 
@@ -55,8 +55,8 @@ The operational test for a SPECIFIC (version, CLI flag, config key, system path,
 
 # Agent-surface routing (which harness gets what)
 
-pi.dev is the primary harness; Claude Code is the WORK harness; opencode is legacy. When adding resources on this machine:
+pi.dev is the primary harness; Claude Code is the WORK harness. When adding resources on this machine:
 
 - **Skills**: canonical home is `~/dotfiles/.pi/agent/skills/<name>/`. A skill only reaches Claude Code via an explicit per-skill symlink in `~/dotfiles/.claude/skills/` - the work harness is opt-in. NEVER promote private-corpus (mnemo, personal session data), media/GPU, local-hardware, or purely-personal skills here. The directory contents are the allowlist.
-- **MCP servers**: Claude Code does NOT read `opencode.json` (that shared registry serves pi via pi-mcp-bridge, and legacy opencode). Register via `claude mcp add` or the erfi-toolkit in `~/.claude/mcp/toolkit.ts`, and only for work-relevant servers. Private-corpus servers (mnemo) never go to the work harness.
+- **MCP servers**: pi's shared no-secrets registry is `~/.pi/agent/mcp-servers.json` (tracked in dotfiles, read via pi-mcp-bridge); Claude Code does NOT read it. Register via `claude mcp add` or the erfi-toolkit in `~/.claude/mcp/toolkit.ts`, and only for work-relevant servers. Private-corpus servers (mnemo) never go to the work harness.
 - **Config/rules**: universal rule changes go in BOTH this file and `~/dotfiles/.pi/agent/prompts/tool-routing.md` (pi's prepend). Full policy: `~/dotfiles/AGENTS.md` section "Agent-surface routing".

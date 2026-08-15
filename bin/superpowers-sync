@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# superpowers-sync — sync obra/superpowers skills/ into opencode skills dir.
+# superpowers-sync - sync obra/superpowers skills/ into the canonical pi skills dir.
 #
 # Usage:
 #   superpowers-sync                 pull latest v* tag from upstream
@@ -12,7 +12,7 @@
 # Env:
 #   SUPERPOWERS_REF         override default ref (same as --ref)
 #   SUPERPOWERS_CACHE_DIR   override cache location (default: ~/.cache/superpowers-sync)
-#   SUPERPOWERS_DEST_DIR    override dest location (default: ~/dotfiles/.config/opencode/skills/superpowers)
+#   SUPERPOWERS_DEST_DIR    override dest location (default: ~/dotfiles/.pi/agent/skills/superpowers)
 #   SUPERPOWERS_SPECS_DIR   project-relative path skills should reference for specs
 #                           (default: docs/specs; upstream default is docs/superpowers/specs)
 #   SUPERPOWERS_PLANS_DIR   project-relative path skills should reference for plans
@@ -29,7 +29,7 @@ set -euo pipefail
 
 REPO="obra/superpowers"
 CACHE_DIR="${SUPERPOWERS_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/superpowers-sync}"
-DEST_DIR="${SUPERPOWERS_DEST_DIR:-$HOME/dotfiles/.config/opencode/skills/superpowers}"
+DEST_DIR="${SUPERPOWERS_DEST_DIR:-$HOME/dotfiles/.pi/agent/skills/superpowers}"
 REF="${SUPERPOWERS_REF:-latest-tag}"
 SPECS_DIR="${SUPERPOWERS_SPECS_DIR:-docs/specs}"
 PLANS_DIR="${SUPERPOWERS_PLANS_DIR:-docs/plans}"

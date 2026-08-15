@@ -2,8 +2,8 @@
 
 This directory holds the Pi (pi.dev / earendil-works/pi-coding-agent) configuration.
 Most files are symlinks back to the source of truth under `~/dotfiles/.pi/agent/`.
-The legacy opencode tree (`~/dotfiles/.config/opencode/`) holds back-compat
-symlinks INTO this tree, not the other way round.
+(The legacy opencode tree at `~/dotfiles/.config/opencode/` was deleted when
+opencode retired on 2026-08-15 - git history is the archive.)
 
 ## What's here
 
@@ -11,8 +11,7 @@ symlinks INTO this tree, not the other way round.
 ~/.pi/agent/
 ├── APPEND_SYSTEM.md   → ~/dotfiles/.pi/agent/APPEND_SYSTEM.md (commit/safety rules)
 ├── models.json        → ~/dotfiles/.pi/agent/models.json (llama-server + 8 local models)
-├── skills/            → ~/dotfiles/.pi/agent/skills (canonical since 2026-05-27; opencode
-│                        reads the same tree via the ~/.config/opencode/skills back-compat hop)
+├── skills/            → ~/dotfiles/.pi/agent/skills (canonical since 2026-05-27)
 ├── extensions/        per-file symlinks to ~/dotfiles/.pi/agent/extensions/ (+ lib/ shared helpers)
 ├── tests/             → ~/dotfiles/.pi/agent/tests/ (bun unit tests for pure helpers)
 ├── settings.json      → ~/dotfiles/.pi/agent/settings.json (defaultProvider/Model + theme)
@@ -161,7 +160,7 @@ Switch via `/settings` or set `"theme"` in `settings.json`.
 
 ## Skills
 
-All skills live in `~/.config/opencode/skills/` and are reused zero-copy.
+All skills live in `~/.pi/agent/skills/` (stow-linked from the repo).
 List loaded at startup; each has its own `SKILL.md` with the actual rules.
 
 | Skill | Purpose |

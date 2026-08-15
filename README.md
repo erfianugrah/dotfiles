@@ -21,7 +21,7 @@ section of [`AGENTS.md`](AGENTS.md).
 .vimrc                         # minimal vim (numbers, syntax, mouse)
 .ssh/config                    # SSH hosts (Cloudflare Tunnel, Proxmox, TuringPi, etc.)
 
-functions.zsh                  # modular loader — sources functions.d/*
+functions.zsh                  # modular loader - sources functions.d/*
 functions.d/
   system.zsh                   # OS detection, update_all, fix_file_limits
   crypto.zsh                   # SOPS/Age encrypt & decrypt
@@ -47,24 +47,14 @@ packages/
 
 bin/
   caddyfmt                     # Caddyfile formatter (Python, stdin/stdout)
-  superpowers-sync             # sync obra/superpowers skills/ into .config/opencode/skills/superpowers/
-                               #   (lands in .pi/agent/skills/superpowers/ via the back-compat symlink)
-                               # → see .config/opencode/skills/superpowers/.sync.json for ref/sha/timestamp
-                               # → opencode fork (erfianugrah/opencode) has built-in conditional injection
+  superpowers-sync             # sync obra/superpowers skills/ into .pi/agent/skills/superpowers/
+                               # → see .pi/agent/skills/superpowers/.sync.json for ref/sha/timestamp
+                               # → conditional injection via pi's superpowers.ts extension
                                # → run with --status, --check, --ref <tag|sha>, --main, or --help
 
 .config/
   atuin/config.toml            # Atuin shell history (self-hosted sync)
   systemd/user/bw-serve.service  # Bitwarden CLI REST API service
-  opencode/                    # opencode AI coding agent (custom fork, LEGACY - see Coding-agents)
-    AGENTS.md                  # committed symlink -> ../../.pi/agent/prompts/tool-routing.md
-                               #   (back-compat for the legacy TUI + output-rules.ts plugin)
-    opencode.json              # shared no-secrets MCP registry (pi reads it via pi-mcp-bridge
-                               #   fallback; stow-ignored real file - edit BOTH copies, stow-drift
-                               #   compares them; see AGENTS.md "Agent-surface routing")
-    plugins/output-rules.ts    # prepends AGENTS.md output rules to system prompt
-    tools/docs.ts              # docs.erfi.io SSH tool (docs_search/read/grep/find/summary/sources)
-    skills/                    # back-compat symlink -> ../../.pi/agent/skills
 
 .claude/                       # Claude Code wiring (user-level, stow-linked to ~/.claude/)
   CLAUDE.md                    # universal agent rules (harness-agnostic subset of APPEND_SYSTEM.md)
@@ -81,8 +71,8 @@ bin/
     commit.md, pr.md, review.md, test.md, init.md, rollback.md, docs-reference.md
   extensions/                  # TypeScript plugins
     tool-routing.ts            #   prepends prompts/tool-routing.md (above the tool-routing:end
-                               #   marker) as system-prompt prefix; falls back to the
-                               #   .config/opencode/AGENTS.md symlink
+                               #   marker) as system-prompt prefix; resolves self-relative to
+                               #   its own module path so pi-package checkouts work
     exa.ts, webfetch.ts, oci-tags.ts, web-research.ts
     docs.ts, context7.ts, session-search.ts
     memory.ts, todowrite.ts, task.ts, question.ts
@@ -165,7 +155,7 @@ install_packages
 
 ### Steam Deck
 
-SteamOS is immutable — `pacman` installs get wiped on OS updates. Nix
+SteamOS is immutable - `pacman` installs get wiped on OS updates. Nix
 survives updates by storing everything in `/nix/store`.
 
 ```sh
@@ -260,7 +250,7 @@ tmux source ~/.tmux.conf
 > **macOS yellow status bar:** `tokyo-night-tmux`'s `themes.sh` uses `declare -A`
 > (bash >= 4.2), but macOS ships bash 3.2 at `/bin/bash` and the script bails ->
 > default yellow/orange bar. Fix: `brew install bash` (now in `packages/brew.txt`,
-> so `install_packages` handles it), then `tmux kill-server` and reopen — the
+> so `install_packages` handles it), then `tmux kill-server` and reopen - the
 > running server caches the old PATH, so a restart is required. `.tmux.conf`
 > already prepends Homebrew to the tmux server PATH so `env bash` finds 4.2+.
 
@@ -437,8 +427,8 @@ session age. If served secrets ever look stale, the fix is `bw_serve_start`
 | `c` | `cargo` | Rust |
 | `s` | `sentry-cli` | |
 | `sb` | `supabase` | |
-| `ls` | `eza` | guarded — falls back if eza missing |
-| `cat` | `bat` | guarded — falls back if bat missing |
+| `ls` | `eza` | guarded - falls back if eza missing |
+| `cat` | `bat` | guarded - falls back if bat missing |
 
 ### Environment variables
 
@@ -466,7 +456,7 @@ session age. If served secrets ever look stale, the fix is `bw_serve_start`
 
 - **Colorscheme:** Lovelace
 - **Font:** IosevkaTerm NF, 12pt
-- **Leader key:** `Ctrl-A` (same as tmux prefix — WezTerm handles workspaces,
+- **Leader key:** `Ctrl-A` (same as tmux prefix - WezTerm handles workspaces,
   tmux handles sessions inside)
 - **Workspaces:** `Leader+n/p` next/prev, `Leader+s` fuzzy picker,
   `Leader+c` create new
@@ -494,7 +484,7 @@ session age. If served secrets ever look stale, the fix is `bw_serve_start`
 Hosts organized by access method:
 
 - **Cloudflare Tunnel:** `*.proxmox.erfianugrah.com`, `pie.erfianugrah.com`,
-  `*.vyos.erfianugrah.com` — uses `cloudflared access ssh` as ProxyCommand
+  `*.vyos.erfianugrah.com` - uses `cloudflared access ssh` as ProxyCommand
 - **Self-hosted services:** `docs.erfi.io` (port 2222), `git.erfi.io` (port
   2223, Gitea)
 - **Infrastructure:** Proxmox, VyOS routers, TuringPi cluster (rock1-4),
@@ -503,25 +493,25 @@ Hosts organized by access method:
 - **Cloud:** GCP instances, Steam Deck
 
 Global defaults (`Host *`):
-- `ServerAliveInterval 60` — keepalive every 60s
-- `IdentitiesOnly yes` — only offer configured keys (no agent key spray)
-- `AddKeysToAgent yes` — auto-add keys on first use
-- `HashKnownHosts yes` — privacy for known_hosts
+- `ServerAliveInterval 60` - keepalive every 60s
+- `IdentitiesOnly yes` - only offer configured keys (no agent key spray)
+- `AddKeysToAgent yes` - auto-add keys on first use
+- `HashKnownHosts yes` - privacy for known_hosts
 
 ### Pre-commit hook (`.git-template/hooks/pre-commit`)
 
 Global Git hook (applied to all repos via `init.templateDir`). Blocks
 committing unencrypted sensitive files:
 
-- **Always checked:** `.env`, `.tfvars`, `.tfstate` — must be SOPS/Age
+- **Always checked:** `.env`, `.tfvars`, `.tfstate` - must be SOPS/Age
   encrypted
-- **Content-scanned:** `.yaml`, `.yml`, `.json` — flagged only if they contain
+- **Content-scanned:** `.yaml`, `.yml`, `.json` - flagged only if they contain
   secret-like patterns (`password`, `secret`, `token`, `api_key`, etc.)
 - **`.sops.yaml` integration:** files matching `path_regex` creation rules are
   checked for SOPS encryption
 - **Escape hatches:**
-  - `touch .allow-unencrypted` — skip all checks for this repo
-  - `.allow-unencrypted-paths` — one glob pattern per line to skip specific
+  - `touch .allow-unencrypted` - skip all checks for this repo
+  - `.allow-unencrypted-paths` - one glob pattern per line to skip specific
     files
 
 ### Atuin (`.config/atuin/config.toml`)
@@ -542,9 +532,9 @@ Load order: `system` → `crypto` → `bitwarden` → `terraform` → `misc` →
 `packages`. Order matters: `system.zsh` sets `_SYS_OS`/`_SYS_PKG` used by
 all other modules.
 
-### `system.zsh` — System maintenance
+### `system.zsh` - System maintenance
 
-OS-aware — detects platform and package manager at source time
+OS-aware - detects platform and package manager at source time
 (`apt`, `dnf`, `pacman`, `zypper`, `brew`). Also picks up Flatpak and Snap.
 
 | Function | Description |
@@ -552,7 +542,7 @@ OS-aware — detects platform and package manager at source time
 | `update_all` / `upall` | Update all detected package managers (apt, dnf, pacman + AUR, zypper, brew, flatpak, snap) |
 | `fix_file_limits` / `fixfiles` | Inspect and optionally raise file descriptor limits (Linux: `limits.conf` + sysctl, macOS: `launchctl` + LaunchDaemon) |
 
-### `crypto.zsh` — password hashing + SOPS / Age encryption
+### `crypto.zsh` - password hashing + SOPS / Age encryption
 
 `bcrypt_hash [rounds]` prompts for a password (hidden, entered twice for
 confirmation) and prints its bcrypt hash, verifying the hash round-trips
@@ -562,7 +552,7 @@ package. Useful for seeding htpasswd / Authelia / app credential hashes.
 Encrypt and decrypt files in-place using SOPS with Age keys. Requires
 `SOPS_AGE_KEYS` to be set (use `load_sops_age_keys` or `load_bw`).
 
-Private keys are never exported to the environment — passed inline to sops
+Private keys are never exported to the environment - passed inline to sops
 commands via `SOPS_AGE_KEY="$key" sops ...` so they exist only for the
 duration of each command.
 
@@ -576,7 +566,7 @@ duration of each command.
 | `decrypt_k3s_secret <file>` | Decrypt K8s Secret YAML |
 | `encrypt_tf` / `decrypt_tf` | Encrypt/decrypt Terraform sensitive files (`secrets.tfvars`, `terraform.tfvars`, `blueprint-export.yaml`, `*.tfstate*`) |
 
-### `bitwarden.zsh` — Bitwarden Serve API
+### `bitwarden.zsh` - Bitwarden Serve API
 
 Local REST API (`bw serve`) with a two-tier cache. Secret mappings defined
 in `_BW_SECRETS` / `_BW_WRANGLER_SECRETS` arrays - single source of truth
@@ -603,9 +593,9 @@ for `load_bw`, `load_wrangler_token`, and `unset_bw_vars`.
 | `load_sops_age_keys` | Export the current SOPS Age keypair (key 2) into `SOPS_AGE_KEYS` |
 | `unset_bw_vars` | Wipe all Bitwarden-loaded env vars from current shell |
 
-### `terraform.zsh` — Terraform / OpenTofu
+### `terraform.zsh` - Terraform / OpenTofu
 
-#### `tf_out` — output accessor
+#### `tf_out` - output accessor
 
 Generic, project-agnostic accessor for `tofu output` / `terraform output`.
 Auto-detects the IaC tool. Supports fuzzy name matching, nested key
@@ -651,9 +641,9 @@ tf_out -F  | --flush                # clear cache for current project
 ```
 
 **Tab completion** (works with fzf-tab):
-- `tf_out <TAB>` — output names with type/sensitivity
-- `tf_out -<TAB>` — flags with descriptions
-- `tf_out <name> <TAB>` — object keys
+- `tf_out <TAB>` - output names with type/sensitivity
+- `tf_out -<TAB>` - flags with descriptions
+- `tf_out <name> <TAB>` - object keys
 - Preview pane shows metadata; sensitive values redacted
 
 #### Other Terraform helpers
@@ -663,7 +653,7 @@ tf_out -F  | --flush                # clear cache for current project
 | `tf_debug_on` / `tf_debug_off` / `tf_debug_toggle` | Toggle `TF_LOG=debug` |
 | `cf_permissions <tf\|tofu> <category>` | Query Cloudflare permission groups via console (`account`, `zone`, `user`, `r2`, `roles`, `all`) |
 
-### `misc.zsh` — Ansible, tmux, utilities
+### `misc.zsh` - Ansible, tmux, utilities
 
 | Function | Description |
 |---|---|
@@ -673,7 +663,7 @@ tf_out -F  | --flush                # clear cache for current project
 | `p10k_colours` | Print all 256 terminal colors |
 | `time_now` | ISO 8601 timestamp with milliseconds (cross-platform) |
 
-### `packages.zsh` — Multi-OS package management
+### `packages.zsh` - Multi-OS package management
 
 Three-phase hierarchical install: system → ecosystems → standalone.
 Auto-detects platform. Supports per-phase and per-ecosystem targeting.
@@ -690,11 +680,10 @@ Auto-detects platform. Supports per-phase and per-ecosystem targeting.
 
 Files and directories excluded from symlinking into `~`:
 
-- `.git` — prevents `~/.git` symlink (would make `~` look like a repo)
+- `.git` - prevents `~/.git` symlink (would make `~` look like a repo)
 - `README.md`, legacy package lists (`brew_packages_list.txt`, `pacman_list.txt`, `yay_list.txt`)
-- `packages/`, `tests/` — data/test files, not dotfiles
-- `.config/nvim` — managed in a [separate repo](https://github.com/erfianugrah/kickstart.nvim)
-- `.config/opencode/node_modules`, lock files
+- `packages/`, `tests/` - data/test files, not dotfiles
+- `.config/nvim` - managed in a [separate repo](https://github.com/erfianugrah/kickstart.nvim)
 
 ## Branches
 
@@ -705,7 +694,7 @@ Files and directories excluded from symlinking into `~`:
 | `macos` | macOS deployment |
 | `vyos` | VyOS router config |
 
-All platform branches track `main` — divergence is handled by the
+All platform branches track `main` - divergence is handled by the
 cross-platform detection in `system.zsh` rather than branch differences.
 
 ## Testing
@@ -724,45 +713,36 @@ Docker-based test matrix covering all three platforms:
 | `steamos` | `archlinux:latest` + Nix | Steam Deck detection, nix home-manager switch, all nix packages |
 | `macos` | `ubuntu:24.04` + Linuxbrew | Brew dispatch, tap handling, list validation, crypto, config |
 
-Arch test caches system packages in a Docker layer — rebuilds only re-run
+Arch test caches system packages in a Docker layer - rebuilds only re-run
 ecosystem installs unless `packages/arch-repo.txt` changes.
 
-## Coding agents (pi.dev primary; opencode + Claude Code alternates)
+## Coding agents (pi.dev primary; Claude Code for work)
 
-pi.dev (Earendil Works) is the current primary harness - it owns the
-daily-driver TUI, extension model, skills loader, and sessions. opencode (a
-custom fork at `~/opencode`) and Claude Code are alternates the user may
-also run. All three are wired to a single skills / AGENTS.md surface, so any
-rule or skill applies to every harness: opencode via the back-compat symlink
-chain, Claude Code by pointing its skill discovery at the same tree.
+pi.dev (Earendil Works) is the primary harness - it owns the daily-driver
+TUI, extension model, skills loader, and sessions. Claude Code is the work
+harness, wired to a curated subset of the same skills tree via per-skill
+symlinks (see AGENTS.md "Agent-surface routing"). opencode (the earlier
+custom fork at `~/opencode`) was RETIRED 2026-08-15: its `.config/opencode/`
+tree is deleted from this repo - git history is the archive.
 
 ### Shared surface
 
 The tool-routing rules live once at `.pi/agent/prompts/tool-routing.md`
-(canonical since 2026-08-15, shipped in the pi package); the legacy path
-`.config/opencode/AGENTS.md` is a committed symlink to it. Skills were relocated to be
-pi-canonical on 2026-05-27: the source of truth is now `.pi/agent/skills/`,
-and opencode reads the same tree through a back-compat symlink chain
-(`~/.config/opencode/skills` -> `~/dotfiles/.config/opencode/skills` ->
-`../../.pi/agent/skills`).
+(canonical since 2026-08-15, shipped in the pi package). Skills were
+relocated to be pi-canonical on 2026-05-27: the source of truth is
+`.pi/agent/skills/`.
 
-Result: any skill added or AGENTS rule edited applies to pi on the next launch
-(and to opencode via the symlink if it is ever run).
+Result: any skill added or AGENTS rule edited applies to pi on the next
+launch; Claude Code gets it only via deliberate per-skill promotion.
 
 ### Tool routing (the policy layer)
 
-Both agents use a *plugin-injected* policy block prepended to the system
-prompt with `CRITICAL MANDATORY INSTRUCTION` framing. Same content, two
-implementations:
-
-- **opencode** — `.config/opencode/plugins/output-rules.ts` reads AGENTS.md
-  and unshifts the pre-`## Documentation` section onto `output.system`.
-- **pi** — `.pi/agent/extensions/tool-routing.ts` reads
+- **pi** - `.pi/agent/extensions/tool-routing.ts` reads
   `~/.pi/agent/prompts/tool-routing.md` (everything above the
-  `tool-routing:end` marker; falls back to the legacy
-  `~/.config/opencode/AGENTS.md` symlink) and prepends it via the
-  `before_agent_start` hook (re-runs every user prompt, so post-compaction
-  re-injection is automatic).
+  `tool-routing:end` marker; resolves self-relative to its own module
+  path so pi-package checkouts loaded in place work too) and prepends it
+  via the `before_agent_start` hook (re-runs every user prompt, so
+  post-compaction re-injection is automatic).
 
 The routing rules cover: search-family reformulation loop, web research
 escalation (Exa → fetch → research SearXNG / Playwright), docs.erfi.io
@@ -786,8 +766,8 @@ rationale.
 
 | Skill | Purpose |
 |---|---|
-| `scaffold-new-project` | Triggers on "start / build / scaffold a new X" — routes to the relevant concrete-tech skills below, asks at most 3 batched questions, produces project skeleton + repo-level AGENTS.md cross-referencing user-level skills. **No design doc, no plan doc** — just code with conventions baked in |
-| `software-architecture` | Backend/system design — DDD bounded contexts, interface-driven deps, REST+WS surface with correlation IDs, Postgres+Valkey persistence (with the user's signature flat-single-binary go:embed full-stack Go pattern documented), slog+Prometheus observability |
+| `scaffold-new-project` | Triggers on "start / build / scaffold a new X" - routes to the relevant concrete-tech skills below, asks at most 3 batched questions, produces project skeleton + repo-level AGENTS.md cross-referencing user-level skills. **No design doc, no plan doc** - just code with conventions baked in |
+| `software-architecture` | Backend/system design - DDD bounded contexts, interface-driven deps, REST+WS surface with correlation IDs, Postgres+Valkey persistence (with the user's signature flat-single-binary go:embed full-stack Go pattern documented), slog+Prometheus observability |
 | `superpowers` (residual) | obra/superpowers - only `verification-before-completion` (always-on), `writing-plans`, `subagent-driven-development`, `systematic-debugging`, `requesting-code-review`, `writing-skills` survive as 6 opt-in subskills. Conditional injection extension defaults to OFF; opt back in per-session via `SUPERPOWERS_ON=1` |
 | `sa-pov` | Solutions-Architect PoV / PoC methodology - scope + negotiate success criteria, validate each live (not from docs), solution runbook with real evidence, package for the customer |
 | `self-correcting-loop` | Unattended sensor-gated agent loop - runs a fresh `pi -p` per iteration until computational + inferential sensors (build / test / judge / visual) pass. Governor: wall-clock budgets per sensor + per agent (process-group kill, so a hang can't stall a run), optional `systemd-run` cgroup limits, git checkpoint/rollback, write-scope fence, bwrap jail, model-escalation ladder. Steering: `rules` + `guide` hot-reloaded from the manifest between iterations, and `--trial` verdicts the *harness* before you spend the budget. `judge --adversarial N` runs N independent reviewers (any reject = fail) |
@@ -798,8 +778,8 @@ rationale.
 
 | Skill | Purpose |
 |---|---|
-| `frontend-stack` | Astro 6 / React (tsrouter) / Next.js with biome / shadcn v4 / Tailwind v4 / zod v4 / tanstack-form+query+router — includes embedded-into-Go-binary Astro pattern for full-stack Go |
-| `design-utilitarian` | McMaster-Carr visual + interaction ethos for ANY web UI work — info density, tables over cards, no animation tax, two-color palette, no marketing prose in product surfaces |
+| `frontend-stack` | Astro 6 / React (tsrouter) / Next.js with biome / shadcn v4 / Tailwind v4 / zod v4 / tanstack-form+query+router - includes embedded-into-Go-binary Astro pattern for full-stack Go |
+| `design-utilitarian` | McMaster-Carr visual + interaction ethos for ANY web UI work - info density, tables over cards, no animation tax, two-color palette, no marketing prose in product surfaces |
 | `mermaid-d2` | Diagram language picker + render via `render_diagram` tool |
 | `favicons-and-icons` | SVG-first or ComfyUI-raster to `build_favicon_set` to full PWA favicon set |
 
@@ -816,15 +796,15 @@ rationale.
 
 | Skill | Purpose |
 |---|---|
-| `infrastructure-stack` | Self-hosted Docker Compose stacks — bridge networks + static IPs, expose-not-ports, host-mode Caddy, PUID/PGID, cross-stack shared networks |
+| `infrastructure-stack` | Self-hosted Docker Compose stacks - bridge networks + static IPs, expose-not-ports, host-mode Caddy, PUID/PGID, cross-stack shared networks |
 | `composer` | Self-hosted Docker Compose mgmt platform at composer.servarr.erfi.io - ~109-endpoint REST API, auth, pipeline footguns, release workflow |
 | `docker` | Dockerfile authoring, buildx multi-arch + cache, image inspection, registry workflows, BuildKit cache mounts / secrets / SSH |
-| `fly` | Fly.io app lifecycle — deploy, secrets, certs, machines, volumes, scale + auto-stop, .internal DNS |
-| `terraform` | OpenTofu (preferred) / Terraform — module structure, state backends, SOPS+age secrets, `terraform import` + `cf-terraforming` for adopting existing resources |
-| `cloudflare` | CF API + wrangler + bulk Python automation — zones / DNS / rulesets / Workers / R2 / Pages / Zero Trust |
-| `knot-dns` | Self-hosted authoritative DNS — Knot 3.5 on Fly anycast, TSIG-keyed RFC 2136 ACME for Caddy, AXFR/IXFR primary↔secondary, the CF → Knot migration path with all the documented-IPs-are-wrong gotchas |
-| `ci-workflows` | GitHub + Gitea Actions YAML — verified-current action pins, language setup, Docker build+push, pages deploy |
-| `gh` | gh CLI ops: PR/issue/release lifecycle, Actions runs + cache, repo + auth, gh extensions — token-efficient `--json` + `--jq` patterns |
+| `fly` | Fly.io app lifecycle - deploy, secrets, certs, machines, volumes, scale + auto-stop, .internal DNS |
+| `terraform` | OpenTofu (preferred) / Terraform - module structure, state backends, SOPS+age secrets, `terraform import` + `cf-terraforming` for adopting existing resources |
+| `cloudflare` | CF API + wrangler + bulk Python automation - zones / DNS / rulesets / Workers / R2 / Pages / Zero Trust |
+| `knot-dns` | Self-hosted authoritative DNS - Knot 3.5 on Fly anycast, TSIG-keyed RFC 2136 ACME for Caddy, AXFR/IXFR primary↔secondary, the CF → Knot migration path with all the documented-IPs-are-wrong gotchas |
+| `ci-workflows` | GitHub + Gitea Actions YAML - verified-current action pins, language setup, Docker build+push, pages deploy |
+| `gh` | gh CLI ops: PR/issue/release lifecycle, Actions runs + cache, repo + auth, gh extensions - token-efficient `--json` + `--jq` patterns |
 | `gh-search` | Cross-repo GitHub code/issue/PR search via `gh` CLI |
 | `caddy` | Custom Caddy build + WAF stack at `~/infra/ergo/caddy-compose` - xcaddy plugin set, snippet idiom, wafctl dashboard, TSIG/rfc2136 chain to Knot |
 | `knotctl` | `knotctl` CLI for live DNS edits (TSIG RFC 2136 over TCP) against the merged knotea authority |
@@ -861,13 +841,13 @@ rationale.
 
 | Skill | Purpose |
 |---|---|
-| `git-troubleshooting` | Diagnostic battery for `git mv` / `git add` / pathspec failures — gitignore-first hypothesis, the symptom → cause table, recovery patterns |
+| `git-troubleshooting` | Diagnostic battery for `git mv` / `git add` / pathspec failures - gitignore-first hypothesis, the symptom → cause table, recovery patterns |
 
 `bin/superpowers-sync` keeps `superpowers/` synced from
-obra/superpowers upstream; see `.config/opencode/skills/superpowers/.sync.json`
+obra/superpowers upstream; see `.pi/agent/skills/superpowers/.sync.json`
 for the pinned ref/sha. Run `--status`, `--check`, `--ref <tag|sha>`,
 `--main`. **Note**: the sync only refreshes upstream skills; it doesn't
-undo the `.disabled` renames from the audit — those are intentional
+undo the `.disabled` renames from the audit - those are intentional
 local overrides.
 
 ### pi extensions (`.pi/agent/extensions/`)
@@ -883,13 +863,13 @@ DB access, session lifecycle hooks).
 | Extension | Provides |
 |---|---|
 | `docs.ts` (symlink) | docs.erfi.io SSH tools: `docs_search` / `read` / `grep` / `find` / `summary` / `sources` |
-| `bash-error-hints.ts` | Decorates bash tool results with one-line hints when stderr matches a known footgun (gitignore traps, pathspec mismatch, mv ENOENT, permission denied, Anthropic stream cutoff) — the agent sees actionable next-probe text appended to the error, no context cost when no pattern fires |
+| `bash-error-hints.ts` | Decorates bash tool results with one-line hints when stderr matches a known footgun (gitignore traps, pathspec mismatch, mv ENOENT, permission denied, Anthropic stream cutoff) - the agent sees actionable next-probe text appended to the error, no context cost when no pattern fires |
 | `exa.ts` | `websearch` + `codesearch` via mcp.exa.ai |
 | `webfetch.ts` | URL → markdown / text / html (5MB cap, Cloudflare retry) |
 | `web-research.ts` | Exa + auto-fetch top results + optional SearXNG cross-check; eliminates snippet-only reasoning |
 | `oci-tags.ts` | Docker Hub / ghcr.io / quay.io tag query (no stale registry data) |
 | `context7.ts` | Library docs via context7.com MCP |
-| `session-search.ts` | Full-text search across past pi sessions — FTS5 fast path, ripgrep fallback for unindexed files |
+| `session-search.ts` | Full-text search across past pi sessions - FTS5 fast path, ripgrep fallback for unindexed files |
 | `glob.ts` | `**/*.ts`-style file pattern lookup, mtime-sorted |
 | `grep.ts` | Ripgrep regex content search with `include` glob filter |
 | `render-diagram.ts` | mermaid + d2 render via local `mmdc` / `d2` CLI |
@@ -941,9 +921,9 @@ DB access, session lifecycle hooks).
 | Extension | Provides |
 |---|---|
 | `custom-footer.ts` (**disabled**) | Retired to `custom-footer.ts.disabled` - pi's built-in footer now covers cost/tokens/context. Kept for reference: cumulative cost + per-turn delta, true input tokens (sums `input + cacheRead + cacheWrite`), width-aware right-side field drop, NaN-guarded accumulators (pi#4158), status aggregation |
-| `session-auto-title.ts` | Auto-generates a 3-6 word session title from the first user message via a small cheap model. Model picker reads `~/.pi/agent/models.json`, scores every configured `provider/id` pair by (provider weight + name pattern weight) — local llama-server / ollama / lmstudio first, then haiku / mini / nano patterns, then gemma / qwen3-4 / phi / llama-3-small patterns. First with valid auth wins. Falls back to current session model only if nothing else has auth. Records a marker so it runs once per session and respects manual `/session-name` overrides |
+| `session-auto-title.ts` | Auto-generates a 3-6 word session title from the first user message via a small cheap model. Model picker reads `~/.pi/agent/models.json`, scores every configured `provider/id` pair by (provider weight + name pattern weight) - local llama-server / ollama / lmstudio first, then haiku / mini / nano patterns, then gemma / qwen3-4 / phi / llama-3-small patterns. First with valid auth wins. Falls back to current session model only if nothing else has auth. Records a marker so it runs once per session and respects manual `/session-name` overrides |
 | `session-summary.ts` | On `startup` / `new` session_start, injects a project briefing: branch + ahead/behind, working-tree status counts, last 3 commits, up to 3 open PRs. Hard 1.5s budget; silent outside git working trees |
-| `session-fts/` | Background SQLite FTS5 indexer for `~/.pi/agent/sessions/`. Two files: `index.ts` (main-thread façade — spawns worker, owns read-only DB handle for `searchFts()` + `indexStats()`) and `worker.ts` (Bun Worker — owns writer-side DB, runs all synchronous SQLite churn off the main event loop). On a 1.3GB index every INSERT costs ~3ms because FTS5 has to update its inverted index; 100 files × ~150 rows = ~45s of unyielding work that previously caused visible typing lag at every session_start. Worker thread eliminates that. WAL mode allows concurrent reader+writer. 100 newest-first files per startup, 5s startup delay, single-flight guard prevents stacked requests. `/session-index status \| rebuild \| gc` |
+| `session-fts/` | Background SQLite FTS5 indexer for `~/.pi/agent/sessions/`. Two files: `index.ts` (main-thread façade - spawns worker, owns read-only DB handle for `searchFts()` + `indexStats()`) and `worker.ts` (Bun Worker - owns writer-side DB, runs all synchronous SQLite churn off the main event loop). On a 1.3GB index every INSERT costs ~3ms because FTS5 has to update its inverted index; 100 files × ~150 rows = ~45s of unyielding work that previously caused visible typing lag at every session_start. Worker thread eliminates that. WAL mode allows concurrent reader+writer. 100 newest-first files per startup, 5s startup delay, single-flight guard prevents stacked requests. `/session-index status \| rebuild \| gc` |
 | `compaction-progress.ts` | Live spinner + token-before/after toast during /compact |
 | `tool-output-prune.ts` | opencode-style surgical pruning of oversized tool outputs to preserve context |
 | `compaction-model.ts` | Runs pi's compaction summarizer on a cheaper / faster model |
@@ -958,11 +938,10 @@ Two extensions are parked as `.disabled`: `custom-footer.ts` (superseded by pi's
 pi.dev is the current daily driver: a richer extension API
 (`before_agent_start`, `tool_call` / `tool_result` gating, custom tool
 rendering), larger TUI primitives (modals, widgets, status slots), a `task` /
-subagent system, and the ~57-extension surface documented above. opencode (the
+subagent system, and the extension surface documented above. opencode (the
 earlier fork, with its `output-rules.ts` plugin pattern and builtin Exa /
-codesearch / context7) and Claude Code are not abandoned - the point of the
-shared skills + AGENTS.md surface is that switching harnesses has zero
-ergonomic delta. To point Claude Code at the same skills, symlink individual skills into
+codesearch / context7) was retired 2026-08-15. Claude Code gets a curated
+subset: symlink individual skills into
 `~/.claude/skills/` (whole-dir symlink would clobber the existing Cloudflare
 skill set there; a tracked `dotfiles/.claude/skills/<name>` ->
 `../../.pi/agent/skills/<name>` per-skill symlink stows cleanly alongside

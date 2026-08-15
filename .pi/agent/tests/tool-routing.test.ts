@@ -60,34 +60,48 @@ describe("resolveRulesPath", () => {
     return home;
   }
 
-  test("neither file exists -> null", () => {
-    expect(resolveRulesPath(mkHome())).toBeNull();
+  test("nothing exists -> null", () => {
+    expect(resolveRulesPath(mkHome(), undefined)).toBeNull();
   });
 
-  test("legacy-only install -> legacy path", () => {
+  test("home prompts path is found (hand-rolled / stow live install)", () => {
     const h = mkHome();
-    const legacy = join(h, ".config/opencode");
-    mkdirSync(legacy, { recursive: true });
-    writeFileSync(join(legacy, "AGENTS.md"), "rules");
-    expect(resolveRulesPath(h)).toBe(join(h, ".config/opencode/AGENTS.md"));
-  });
-
-  test("both present -> canonical pi path wins", () => {
-    const h = mkHome();
-    const canonical = join(h, ".pi/agent/prompts");
-    const legacy = join(h, ".config/opencode");
-    mkdirSync(canonical, { recursive: true });
-    mkdirSync(legacy, { recursive: true });
-    writeFileSync(join(canonical, "tool-routing.md"), "rules");
-    writeFileSync(join(legacy, "AGENTS.md"), "rules");
-    expect(resolveRulesPath(h)).toBe(
+    const prompts = join(h, ".pi/agent/prompts");
+    mkdirSync(prompts, { recursive: true });
+    writeFileSync(join(prompts, "tool-routing.md"), "rules");
+    expect(resolveRulesPath(h, undefined)).toBe(
       join(h, ".pi/agent/prompts/tool-routing.md"),
     );
   });
 
-  test("candidates list order matches resolution priority", () => {
-    const c = rulesPathCandidates("/x");
-    expect(c[0]).toBe("/x/.pi/agent/prompts/tool-routing.md");
-    expect(c[1]).toBe("/x/.config/opencode/AGENTS.md");
+  test("self-relative path wins (pi-package checkout layout)", () => {
+    const h = mkHome();
+    // fake package checkout: <pkg>/.pi/agent/{extensions,prompts}
+    const pkg = join(h, "pkg/.pi/agent");
+    const extDir = join(pkg, "extensions");
+    mkdirSync(extDir, { recursive: true });
+    mkdirSync(join(pkg, "prompts"), { recursive: true });
+    writeFileSync(join(pkg, "prompts", "tool-routing.md"), "rules");
+    // home path ALSO exists - self-relative must win
+    const prompts = join(h, ".pi/agent/prompts");
+    mkdirSync(prompts, { recursive: true });
+    writeFileSync(join(prompts, "tool-routing.md"), "rules");
+    expect(resolveRulesPath(h, extDir)).toBe(
+      join(pkg, "prompts", "tool-routing.md"),
+    );
+  });
+
+  test("candidates: selfDir omitted -> home path only", () => {
+    expect(rulesPathCandidates("/x", undefined)).toEqual([
+      "/x/.pi/agent/prompts/tool-routing.md",
+    ]);
+  });
+
+  test("candidates: selfDir present -> self-relative first, home second", () => {
+    // join() normalizes the ".." away
+    expect(rulesPathCandidates("/x", "/pkg/extensions")).toEqual([
+      "/pkg/prompts/tool-routing.md",
+      "/x/.pi/agent/prompts/tool-routing.md",
+    ]);
   });
 });

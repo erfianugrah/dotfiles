@@ -169,7 +169,7 @@ function buildMinimalBootstrap(decision: InjectionDecision): string {
     MARKER,
     "<superpowers-essentials>",
     "Four-skill methodology gate. Load the named SKILL.md from",
-    "~/.config/opencode/skills/superpowers/<name>/SKILL.md when its trigger fires:",
+    "~/.pi/agent/skills/superpowers/<name>/SKILL.md when its trigger fires:",
     "",
     "1. brainstorming \u2014 BEFORE any implementation. HARD-GATE: do not write",
     "   code until you present a design (one paragraph for small changes) and",
@@ -220,7 +220,7 @@ function buildFullBootstrap(skillContent: string, decision: InjectionDecision): 
 function bootstrapPath(): string {
   const env = process.env.SUPERPOWERS_BOOTSTRAP;
   if (env) return env;
-  return join(homedir(), ".config/opencode/skills/superpowers/using-superpowers/SKILL.md");
+  return join(homedir(), ".pi/agent/skills/superpowers/using-superpowers/SKILL.md");
 }
 
 let cachedSkillContent: string | null | undefined = undefined;

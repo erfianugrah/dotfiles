@@ -2,8 +2,8 @@
 
 Project-specific guidance for an agent working in `~/dotfiles`. The global
 agent rules live in `.pi/agent/prompts/tool-routing.md` (canonical since
-2026-08-15; `.config/opencode/AGENTS.md` is a committed back-compat symlink
-for the legacy opencode TUI). pi receives them via the `tool-routing.ts`
+2026-08-15; opencode was retired the same day and its `.config/opencode/`
+tree is deleted - git history is the archive). pi receives them via the `tool-routing.ts`
 extension's prepend (the old `~/.pi/agent/AGENTS.md` symlink was retired
 2026-08-09 because pi loaded it natively AND the extension prepended it -
 a 17.7KB/turn double injection). The notes here are repo-shape only.
@@ -30,12 +30,11 @@ exactly:
   keys, or rate-limit handling, the answer is about **opencode-zen** —
   NOT the harness, NOT the legacy TUI.
 
-- **opencode (legacy TUI)** — the standalone `opencode` TUI app the user
-  ran BEFORE migrating to pi. Configs still live in `.config/opencode/`
-  in this repo and are partially shared with pi via symlink
-  (`~/.config/opencode/skills` → `~/dotfiles/.pi/agent/skills` since the
-  2026-05-27 relocation; pi is canonical, opencode is the back-compat
-  hop). It is an occasional alternate harness (pi.dev is the daily driver), not the current primary. Only reach for opencode docs / source when answering a
+- **opencode (legacy TUI, RETIRED 2026-08-15)** — the standalone `opencode` TUI app the user
+  ran BEFORE migrating to pi. Its `.config/opencode/`
+  tree is deleted from this repo (git history is the archive); the
+  back-compat symlinks (`skills`, `AGENTS.md`) went with it. Only reach
+  for opencode docs / source when answering a
   question about the upstream project this codebase forked patterns from
   (e.g. the `tool-output-prune` algorithm is a port from
   `~/opencode/packages/opencode/src/session/compaction.ts`).
@@ -60,8 +59,7 @@ This repo is the **source of truth** for everything in `~/.pi/agent/`,
 
 ```
 ~/.pi/agent/extensions/foo.ts  →  ../../../dotfiles/.pi/agent/extensions/foo.ts
-~/.config/opencode/AGENTS.md   →  ../../dotfiles/.config/opencode/AGENTS.md
-                                 →  ../../.pi/agent/prompts/tool-routing.md (repo symlink)
+~/.pi/agent/mcp-servers.json   →  ../../dotfiles/.pi/agent/mcp-servers.json
 ~/.zshrc                       →  dotfiles/.zshrc
 ```
 
@@ -76,16 +74,15 @@ cd ~ && stow -d ~/dotfiles -t ~ -n -v .       # dry run, shows what would link
 `.stow-local-ignore` (at repo root) excludes files that live in the repo
 but should NOT be linked to `$HOME` - `.git`, `README.md`, `AGENTS.md`,
 the root `package.json`, package lists, nested config dirs already managed
-elsewhere. It is also where DELIBERATE real-file exceptions are documented:
-`.config/opencode/opencode.json` is a real file by design (pi-mcp-bridge
-reads it; not stow-linked), with a comment in the ignore file saying so.
+elsewhere. DELIBERATE real-file exceptions get a comment there plus a
+`compareOnly` entry in `bin/stow-drift.go` (byte-compares live vs repo;
+the list is empty since the opencode.json exception retired 2026-08-15).
 
 **Drift check:** `stow-drift` (in `bin/`, Go) walks the repo and flags any
 `$HOME` target that is a real file instead of a symlink into the repo -
 the failure mode where edits to one side silently diverge. Run it after any
 manual `~/.config` or `~/.ssh` edit; exit 1 means drift. Known-good state is
-`0 drifted` (opencode.json is exempted via the ignore file, everything else
-must link).
+`0 drifted`.
 
 **PATH tools:** `~/bin` is a folded stow link but NOT on PATH. Tools that
 need to be runnable by name (`mdclip`, `stow-drift`) are additionally
@@ -119,7 +116,7 @@ machine; do NOT use both on the same machine or resources load twice.
    superpowers subskills), 8 prompt templates and the theme. It does NOT carry
    user config (pi packages
    ship resources only): `settings.json`, `models.json`, `keybindings.json`,
-   `APPEND_SYSTEM.md`. Bootstrap those once (idempotent; symlinks the 4 files
+   `APPEND_SYSTEM.md`. Bootstrap those once (idempotent; symlinks the files
    into `~/.pi/agent/`, backing up any existing non-symlink; `COPY=1` to copy):
 
    ```bash
@@ -157,18 +154,17 @@ installed Cloudflare skill set a whole-dir link would clobber):
   the 22-tool MCP server over the shared `.pi/agent/extensions/lib/` cores.
   See `.pi/agent/docs/pi-to-claude-code-port.md`.
 
-## Agent-surface routing (pi primary / Claude Code work / opencode legacy)
+## Agent-surface routing (pi primary / Claude Code work)
 
 The rule that prevents "added to the wrong agent": **pi.dev is the daily
 driver** - new resources land in pi's tree FIRST. **Claude Code is the
 work harness** - propagation there is opt-in and curated, never automatic.
-**opencode is legacy** - it receives things for free via symlink
-back-compat hops and is NEVER a primary edit target.
+(opencode, the legacy third harness, was retired 2026-08-15.)
 
 ### Skills
 
 - Canonical home: `.pi/agent/skills/<name>/` in this repo. pi sees it
-  directly; opencode sees it via the back-compat hop. No other wiring.
+  directly. No other wiring.
 - Claude Code: promote by adding the per-skill symlink in `.claude/skills/`
   (mechanism in "Claude Code wiring" above). Promote methodology and
   work-adjacent infra skills. NEVER promote: private-corpus tools
@@ -183,15 +179,12 @@ back-compat hops and is NEVER a primary edit target.
   untracked runtime state, chmod 600, NEVER committed.
 - **project-scoped**: `<repo>/.pi/mcp-bridge.json` (tracked in that repo
   when it carries no secrets).
-- **shared no-secret server (pi + opencode)**: the `mcp` block of
-  `.config/opencode/opencode.json`. Counter-intuitive but correct: pi
-  consumes it through pi-mcp-bridge's fallback chain, and it is the one
-  tracked registry both harnesses read. TWO REAL FILES exist because stow
-  ignores it: live `~/.config/opencode/opencode.json` and the repo copy
-  here. Edit BOTH, verify with
-  `diff <(jq -S . ~/.config/opencode/opencode.json) <(jq -S . ~/dotfiles/.config/opencode/opencode.json)`;
-  `stow-drift` hard-fails on divergence (see below).
-- **Claude Code**: separate surface, does NOT read opencode.json.
+- **shared no-secret server**: `.pi/agent/mcp-servers.json` in this repo
+  (stow-linked to `~/.pi/agent/mcp-servers.json`; pi-mcp-bridge reads it,
+  standard `mcpServers` shape). Remote (HTTP) servers are NOT bridged -
+  pi covers those with native extensions (context7, gh-search). Migrated
+  out of the retired opencode.json `mcp` block on 2026-08-15.
+- **Claude Code**: separate surface, does NOT read the pi registry.
   `claude mcp add` or the erfi-toolkit (`.claude/mcp/toolkit.ts`) only,
   and only for work-relevant servers. Private-corpus servers (e.g. mnemo)
   NEVER go to the work harness.
@@ -290,13 +283,9 @@ tests in /tmp/ that drive the real `execute()` via the SDK preload mock.
   `.pi/agent/extensions/`.
 - Live at: `~/.pi/agent/skills/` (stow-managed relative symlink to the
   dotfiles tree, 1 hop).
-- Opencode (legacy) reads the same tree via `~/.config/opencode/skills`
-  → `~/dotfiles/.config/opencode/skills` → `../../.pi/agent/skills`. The
-  in-repo `~/dotfiles/.config/opencode/skills` is a committed symlink
-  preserving back-compat without duplicating the source.
 - **Add a new skill:** create `.pi/agent/skills/<name>/SKILL.md` in the
   repo, then `cd ~ && stow -d ~/dotfiles -t ~ -v .` if you also added
-  supporting files alongside it. Both pi and opencode pick it up
+  supporting files alongside it. pi picks it up
   immediately (no symlink work needed for new files; they live inside
   the already-symlinked directory).
 - **Edit a skill:** edit the source file in `~/dotfiles/.pi/agent/skills/<name>/`,
@@ -311,9 +300,9 @@ tests in /tmp/ that drive the real `execute()` via the SDK preload mock.
 - `.pi/agent/prompts/tool-routing.md` - the tool-routing rules themselves
   (canonical since 2026-08-15). pi gets them ONLY via `tool-routing.ts`,
   which prepends everything above the `<!-- tool-routing:end -->` marker
-  each turn. `.config/opencode/AGENTS.md` is a committed symlink to it for
-  the legacy opencode TUI + its output-rules.ts plugin, and is the
-  extension's fallback read path.
+  each turn. The extension resolves the file self-relative to its own
+  module path (so pi-package checkouts loaded in place work), with
+  `~/.pi/agent/prompts/tool-routing.md` as the fallback.
 - `.pi/agent/prompts/local-model-rules.md` — appended only when a local
   llama-server model is in use.
 - Other `prompts/*.md` files are slash-command templates.

@@ -126,27 +126,19 @@ When a task will take >30s OR you want pi to keep working in parallel, use the b
 
 ## Agent-surface routing (registering skills / MCP servers / rules)
 
-- **pi.dev is the primary harness. Claude Code is the user's WORK harness. opencode is legacy.** Register free/agent resources with this priority; opencode is NEVER a primary edit target.
-- **New skill** -> `~/dotfiles/.pi/agent/skills/<name>/` (canonical; opencode sees it automatically via symlink). Promote to Claude Code only if work-relevant: per-skill symlink in `~/dotfiles/.claude/skills/`. NEVER promote private-corpus (mnemo, personal session data), media/GPU (comfyui/lora-train/whisper/arr/jellyfin), local-hardware (xikectl/eaves/gloryhole), or purely-personal (discord-wipe) skills to the work harness.
-- **New MCP server**: with secrets -> `~/.pi/agent/mcp-bridge.json` (untracked, chmod 600, never commit); one project only -> `<repo>/.pi/mcp-bridge.json`; shared no-secret -> the `mcp` block in `opencode.json` (pi reads it via pi-mcp-bridge's fallback chain; this is the one tracked registry both pi and opencode read). opencode.json is stow-ignored: TWO REAL FILES exist (live `~/.config/opencode/opencode.json` + repo copy `~/dotfiles/.config/opencode/opencode.json`) - **edit BOTH**; `stow-drift` fails on divergence.
-- **Claude Code MCP is a separate surface** (`claude mcp add` / `~/.claude/mcp/toolkit.ts`); CC never reads opencode.json. Private-corpus servers (mnemo) never go to work CC.
+- **pi.dev is the primary harness. Claude Code is the user's WORK harness.** (opencode was retired 2026-08-15; its config tree is deleted - git history is the archive. The `opencode` PROVIDER in pi's auth is opencode-zen, the self-hosted gateway - that stays.)
+- **New skill** -> `~/dotfiles/.pi/agent/skills/<name>/` (canonical). Promote to Claude Code only if work-relevant: per-skill symlink in `~/dotfiles/.claude/skills/`. NEVER promote private-corpus (mnemo, personal session data), media/GPU (comfyui/lora-train/whisper/arr/jellyfin), local-hardware (xikectl/eaves/gloryhole), or purely-personal (discord-wipe) skills to the work harness.
+- **New MCP server**: with secrets -> `~/.pi/agent/mcp-bridge.json` (untracked, chmod 600, never commit); one project only -> `<repo>/.pi/mcp-bridge.json`; shared no-secret -> `~/dotfiles/.pi/agent/mcp-servers.json` (tracked, stow-linked to `~/.pi/agent/mcp-servers.json`; pi reads it via pi-mcp-bridge). Remote (HTTP) servers are NOT bridged - pi covers those with native extensions (context7, gh-search).
+- **Claude Code MCP is a separate surface** (`claude mcp add` / `~/.claude/mcp/toolkit.ts`); CC never reads the pi registry. Private-corpus servers (mnemo) never go to work CC.
 - **Rule changes**: universal rules go in BOTH `.pi/agent/prompts/tool-routing.md` (pi prepend; canonical since 2026-08-15) and `~/.claude/CLAUDE.md`. Full policy: `~/dotfiles/AGENTS.md` section "Agent-surface routing".
 
 <!-- tool-routing:end - ~/.pi/agent/extensions/tool-routing.ts prepends only
      what is ABOVE this marker into pi's system prompt. Canonical home since
      2026-08-15: .pi/agent/prompts/tool-routing.md (ships inside the pi
-     package, so package-only machines get the rules too).
-     .config/opencode/AGENTS.md is a committed symlink to THIS file - the
-     legacy opencode TUI and its output-rules.ts plugin read it there, and
-     tool-routing.ts uses it as the fallback path. The Documentation +
+     package, so package-only machines get the rules too). The Documentation +
      General-computer-use sections moved to .pi/agent/APPEND_SYSTEM.md on
      2026-08-09 to fix the double injection (pi natively loaded this whole
      file via the old ~/.pi/agent/AGENTS.md symlink while tool-routing
-     prepended the top slice). Content below this marker is
-     opencode-legacy only. -->
-
-## OpenCode-specific gotchas (legacy TUI - not routed to pi)
-
-- **Edit/Write degrade past ~100KB or ~1000 lines** (opencode#20471 O(N²) diff, #19604 silent Write fail, #16115 LSP socket deadlock, #10099 4MB freeze). For large files: `sd` or `sed -i`.
-- **`/messages` payload bloat** with many edits on 4MB+ files (#14543) — kills browser. Avoid Edit cycles on bundled JS / generated files.
-- **MCP tool timeout default 30s** (`packages/opencode/src/mcp/index.ts:36`). JSON-RPC -32001 = timeout. Bump via `mcp.<name>.timeout` (ms) in `opencode.json`.
+     prepended the top slice). The OpenCode-specific gotchas that used to
+     live below this marker were deleted when opencode was retired
+     (2026-08-15) - git history has them. -->

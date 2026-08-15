@@ -17,7 +17,7 @@ set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${PI_AGENT_DIR:-$HOME/.pi/agent}"
-FILES=(settings.json models.json keybindings.json APPEND_SYSTEM.md)
+FILES=(settings.json models.json keybindings.json APPEND_SYSTEM.md mcp-servers.json)
 
 mkdir -p "$DEST"
 echo "pi config: $SRC -> $DEST"

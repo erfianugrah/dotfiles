@@ -73,9 +73,9 @@ Tool-routing rules live in ~/.pi/agent/prompts/tool-routing.md (everything
 ABOVE the `<!-- tool-routing:end -->` marker) and are prepended to the
 system prompt by ~/.pi/agent/extensions/tool-routing.ts. Canonical edit
 target: ~/dotfiles/.pi/agent/prompts/tool-routing.md (ships in the pi
-package since 2026-08-15). ~/.config/opencode/AGENTS.md is a committed
-symlink to it - the legacy opencode TUI and its output-rules.ts plugin
-read it there, and tool-routing.ts uses it as the fallback path.
+package since 2026-08-15). The opencode back-compat symlink at
+~/.config/opencode/AGENTS.md was removed when opencode retired (2026-08-15);
+tool-routing.ts resolves self-relative first, then ~/.pi/agent/prompts/.
 
 Until 2026-08-09 a manual ~/.pi/agent/AGENTS.md symlink made pi ALSO load
 the same file natively as global project instructions, duplicating ~17.7KB

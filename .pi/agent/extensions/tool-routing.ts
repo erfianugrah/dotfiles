@@ -17,14 +17,18 @@
  *     websearch/bash/grep from habit and bypasses APPEND_SYSTEM rules.
  *     Prepending with hard framing is what opencode does and it works.
  *
- * Source: ~/.pi/agent/prompts/tool-routing.md (everything ABOVE the
- * `<!-- tool-routing:end -->` marker; falls back to the historical
- * `## Documentation` boundary, then to the whole file). The canonical
- * file lives in pi's tree since 2026-08-15 and ships inside the pi
- * package, so package-only machines (no stow) get the rules too.
- * ~/.config/opencode/AGENTS.md is now a committed symlink to it for the
- * legacy opencode TUI and its output-rules.ts plugin, and doubles as
- * this extension's fallback path (mid-migration / hand-rolled installs).
+ * Source: the tool-routing.md sitting next to THIS extension file
+ * (../prompts/tool-routing.md, resolved from import.meta so it works for
+ * the stow live path, the repo real path, and pi-package checkouts,
+ * which pi loads in place - package machines never get a
+ * ~/.pi/agent/prompts/ copy). Fallback: ~/.pi/agent/prompts/
+ * tool-routing.md for hand-rolled installs. The legacy
+ * ~/.config/opencode/AGENTS.md path was dropped when opencode was
+ * retired (2026-08-15).
+ *
+ * Slicing: everything ABOVE the `<!-- tool-routing:end -->` marker;
+ * falls back to the historical `## Documentation` boundary, then to the
+ * whole file.
  *
  * Until 2026-08-09 this read ~/.pi/agent/AGENTS.md, a manual symlink to
  * the same file - but pi ALSO loaded that path natively as global
@@ -41,8 +45,24 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { homedir } from "os";
+
+// Directory this file was loaded from. import.meta.dirname can be
+// undefined under some loaders - fall back to fileURLToPath. A failure
+// here must not break module load (it would take down ALL extensions),
+// so worst case is undefined and the self-relative candidate is skipped.
+const SELF_DIR: string | undefined =
+  typeof import.meta.dirname === "string"
+    ? import.meta.dirname
+    : (() => {
+        try {
+          return dirname(fileURLToPath(import.meta.url));
+        } catch {
+          return undefined;
+        }
+      })();
 
 const END_MARKER = "<!-- tool-routing:end";
 const LEGACY_DOC_MARKER = "\n## Documentation";
@@ -57,19 +77,25 @@ const FOOTER =
 const SEPARATOR = "\n\n---\n\n";
 
 /**
- * Canonical source first, legacy back-compat path second. On stow
- * machines the legacy path is a symlink to the canonical file, so the
- * fallback only ever fires mid-migration or on hand-rolled installs.
+ * Self-relative path first (works for stow live links, the repo real
+ * path, and pi-package checkouts loaded in place), then the stow live
+ * home path for hand-rolled installs.
  */
-export function rulesPathCandidates(home: string): string[] {
-  return [
-    join(home, ".pi/agent/prompts/tool-routing.md"),
-    join(home, ".config/opencode/AGENTS.md"),
-  ];
+export function rulesPathCandidates(
+  home: string,
+  selfDir?: string,
+): string[] {
+  const out: string[] = [];
+  if (selfDir) out.push(join(selfDir, "..", "prompts", "tool-routing.md"));
+  out.push(join(home, ".pi/agent/prompts/tool-routing.md"));
+  return out;
 }
 
-export function resolveRulesPath(home: string = homedir()): string | null {
-  for (const p of rulesPathCandidates(home)) {
+export function resolveRulesPath(
+  home: string,
+  selfDir?: string,
+): string | null {
+  for (const p of rulesPathCandidates(home, selfDir)) {
     if (existsSync(p)) return p;
   }
   return null;
@@ -87,7 +113,7 @@ let cachedRules: string | null | undefined = undefined;
 
 function loadRules(): string | null {
   if (cachedRules !== undefined) return cachedRules;
-  const path = resolveRulesPath();
+  const path = resolveRulesPath(homedir(), SELF_DIR);
   if (!path) {
     cachedRules = null;
     return null;

@@ -29,8 +29,10 @@ import (
 // compareOnly lists stow-ignored real-file exceptions (see .stow-local-ignore)
 // whose live $HOME copy must stay content-identical to the tracked dotfiles
 // copy. The normal walk skips them via the ignore file, so they get their own
-// compare pass in run().
-var compareOnly = []string{".config/opencode/opencode.json"}
+// compare pass in run(). Empty since the opencode.json exception retired with
+// opencode (2026-08-15); the mechanism stays for the next real-file exception -
+// add its repo-relative path here.
+var compareOnly []string
 
 const (
 	Linked  = "LINKED"

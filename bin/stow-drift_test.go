@@ -127,27 +127,33 @@ func TestClassifyFolded(t *testing.T) {
 // mkRealFileTree builds the minimal tree for compareOnly scenarios: the
 // exception path is stow-ignored so the walk skips it, leaving the
 // byte-compare pass as the only reporter for it.
-func mkRealFileTree(t *testing.T) (dotfiles, home string) {
+func mkRealFileTree(t *testing.T, rel string) (dotfiles, home string) {
 	t.Helper()
 	root := t.TempDir()
 	dotfiles = filepath.Join(root, "dotfiles")
 	home = filepath.Join(root, "home")
 	for _, d := range []string{
-		filepath.Join(dotfiles, ".config", "opencode"),
-		filepath.Join(home, ".config", "opencode"),
+		filepath.Join(dotfiles, filepath.Dir(rel)),
+		filepath.Join(home, filepath.Dir(rel)),
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := os.WriteFile(filepath.Join(dotfiles, ".stow-local-ignore"),
-		[]byte(".config/opencode/opencode.json\n"), 0o644); err != nil {
+		[]byte(rel+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return dotfiles, home
 }
 
 func TestCompareOnly(t *testing.T) {
+	// The production list is empty since the opencode.json exception retired
+	// with opencode (2026-08-15); inject a synthetic exception to exercise
+	// the mechanism.
+	saved := compareOnly
+	compareOnly = []string{".fake/exception.json"}
+	t.Cleanup(func() { compareOnly = saved })
 	rel := compareOnly[0]
 	write := func(root, s string) {
 		t.Helper()
@@ -157,7 +163,7 @@ func TestCompareOnly(t *testing.T) {
 	}
 
 	t.Run("identical counts as linked", func(t *testing.T) {
-		dotfiles, home := mkRealFileTree(t)
+		dotfiles, home := mkRealFileTree(t, rel)
 		write(dotfiles, "{}")
 		write(home, "{}")
 		var buf bytes.Buffer
@@ -170,7 +176,7 @@ func TestCompareOnly(t *testing.T) {
 	})
 
 	t.Run("content divergence is drift", func(t *testing.T) {
-		dotfiles, home := mkRealFileTree(t)
+		dotfiles, home := mkRealFileTree(t, rel)
 		write(dotfiles, "{\"a\":1}")
 		write(home, "{\"a\":2}")
 		var buf bytes.Buffer
@@ -184,7 +190,7 @@ func TestCompareOnly(t *testing.T) {
 	})
 
 	t.Run("live copy missing is miss not drift", func(t *testing.T) {
-		dotfiles, home := mkRealFileTree(t)
+		dotfiles, home := mkRealFileTree(t, rel)
 		write(dotfiles, "{}")
 		var buf bytes.Buffer
 		code := run(dotfiles, home, true, &buf)
@@ -197,7 +203,7 @@ func TestCompareOnly(t *testing.T) {
 	})
 
 	t.Run("repo copy missing is drift", func(t *testing.T) {
-		dotfiles, home := mkRealFileTree(t)
+		dotfiles, home := mkRealFileTree(t, rel)
 		write(home, "{}")
 		var buf bytes.Buffer
 		code := run(dotfiles, home, true, &buf)

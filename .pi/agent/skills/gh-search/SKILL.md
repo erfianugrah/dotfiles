@@ -122,7 +122,7 @@ Useful fields: `textMatches[]` (fragment, matches[]), `repository` (nameWithOwne
 ## Alternatives (for completeness)
 
 - **`rg` locally**: when you have the code cloned, `rg` is faster + more flexible than this skill.
-- **grep.app**: web UI for cross-repo search; MCP-wrapped as `gh_grep` in the shared opencode.json (pi reaches MCP servers via the pi-mcp-bridge). This skill covers the same ground via the `gh` CLI with auth and higher rate limits.
+- **grep.app**: web UI for cross-repo search; MCP-wrapped as `gh_grep` (a remote MCP server - pi-mcp-bridge is stdio-only, so pi never bridged it). This skill covers the same ground via the `gh` CLI with auth and higher rate limits.
 - **codeberg.org search**: federated alternative for non-GitHub code.
 
 ## Related
