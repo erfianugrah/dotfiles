@@ -108,10 +108,23 @@
       "environment": {
         "SEARXNG_URL": "https://searxng.erfi.io",
         "CRAWLER_URL": "https://crawler.erfi.io",
-        "OSINT_URL":   "https://osint.erfi.io",
-        "LLM_URL":     "https://llama.erfi.io"
+        "OSINT_URL": "https://osint.erfi.io",
+        "LLM_URL": "https://llama.erfi.io"
       },
       "timeout": 120000,
+      "enabled": true
+    },
+    "mnemo": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--project",
+        "/home/erfi/infra/mnemosyne",
+        "python",
+        "/home/erfi/infra/mnemosyne/mcp/mnemo-server.py"
+      ],
+      "timeout": 60000,
       "enabled": true
     }
   }
