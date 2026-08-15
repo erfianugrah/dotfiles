@@ -7,10 +7,16 @@
 //	MISSING   target does not exist
 //	DRIFT     target exists as a real file, or a link pointing elsewhere
 //
+// Stow-ignored real-file exceptions listed in compareOnly (e.g. opencode.json,
+// which pi-mcp-bridge reads from $HOME while dotfiles tracks the backup copy)
+// get a byte-compare pass instead: identical counts as LINKED, differing is
+// DRIFT, missing live copy is MISSING.
+//
 // Exit 1 if any DRIFT found. Usage: stow-drift [--verbose]
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +25,12 @@ import (
 	"sort"
 	"strings"
 )
+
+// compareOnly lists stow-ignored real-file exceptions (see .stow-local-ignore)
+// whose live $HOME copy must stay content-identical to the tracked dotfiles
+// copy. The normal walk skips them via the ignore file, so they get their own
+// compare pass in run().
+var compareOnly = []string{".config/opencode/opencode.json"}
 
 const (
 	Linked  = "LINKED"
@@ -122,6 +134,24 @@ func run(dotfiles, home string, verbose bool, out io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(out, "error:", err)
 		return 2
+	}
+
+	// Real-file exceptions: byte-compare live vs repo copy.
+	for _, rel := range compareOnly {
+		srcB, srcErr := os.ReadFile(filepath.Join(dotfiles, rel))
+		dstB, dstErr := os.ReadFile(filepath.Join(home, rel))
+		switch {
+		case os.IsNotExist(srcErr) && os.IsNotExist(dstErr):
+			// absent both sides - nothing to keep in sync
+		case dstErr != nil:
+			missing = append(missing, rel+"  (real-file-exception)")
+		case srcErr != nil:
+			drift = append(drift, rel+"  (real-file-exception:no-repo-copy)")
+		case !bytes.Equal(srcB, dstB):
+			drift = append(drift, rel+"  (real-file-exception:content-differs)")
+		default:
+			linked++
+		}
 	}
 
 	sort.Strings(drift)

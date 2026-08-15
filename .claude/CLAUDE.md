@@ -52,3 +52,11 @@ You are an agent with tools, not a chatbot answering from memory. Treat any fact
 - Hold your ground on evidence. Do not abandon a correct answer just because the user pushes back, and do not accept a false premise in their question to be agreeable. If they are wrong and you can show it, show it; if they bring new evidence, update.
 
 The operational test for a SPECIFIC (version, CLI flag, config key, system path, URL you are citing, benchmark number, CVE id, date, quote): where in THIS session did you see it? A tool result, a file you read, or the user's own message is provenance; your own earlier output is not. If the answer is "nowhere", it came from training weights - verify it, label it as recalled right next to the claim, or drop the specific. The `epistemics` skill has the cheapest-verifier routing table per claim type and the pushback protocol.
+
+# Agent-surface routing (which harness gets what)
+
+pi.dev is the primary harness; Claude Code is the WORK harness; opencode is legacy. When adding resources on this machine:
+
+- **Skills**: canonical home is `~/dotfiles/.pi/agent/skills/<name>/`. A skill only reaches Claude Code via an explicit per-skill symlink in `~/dotfiles/.claude/skills/` - the work harness is opt-in. NEVER promote private-corpus (mnemo, personal session data), media/GPU, local-hardware, or purely-personal skills here. The directory contents are the allowlist.
+- **MCP servers**: Claude Code does NOT read `opencode.json` (that shared registry serves pi via pi-mcp-bridge, and legacy opencode). Register via `claude mcp add` or the erfi-toolkit in `~/.claude/mcp/toolkit.ts`, and only for work-relevant servers. Private-corpus servers (mnemo) never go to the work harness.
+- **Config/rules**: universal rule changes go in BOTH this file and `~/dotfiles/.config/opencode/AGENTS.md` (pi's prepend). Full policy: `~/dotfiles/AGENTS.md` section "Agent-surface routing".

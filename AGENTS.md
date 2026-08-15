@@ -137,8 +137,10 @@ symlinks, NOT a whole-dir link (`~/.claude/skills/` already holds a locally
 installed Cloudflare skill set a whole-dir link would clobber):
 
 - `.claude/skills/<name>` -> `../../.pi/agent/skills/<name>` - one relative
-  symlink per shared skill (17 domain skills today). Add another the same
-  way + stow; stow nests it alongside the local skills, no folding.
+  symlink per promoted skill. The directory contents ARE the allowlist
+  (see "Agent-surface routing" below for what may be promoted). Add
+  another the same way + stow; stow nests it alongside the local skills,
+  no folding.
 - `.claude/CLAUDE.md` - universal agent rules (authorship, safety,
   confidential IDs, ASCII output, calibration). A handwritten
   harness-agnostic subset of `.pi/agent/APPEND_SYSTEM.md`, kept in sync
@@ -152,6 +154,64 @@ installed Cloudflare skill set a whole-dir link would clobber):
 - `.claude/hooks/*.ts` + `.claude/mcp/toolkit.ts` - the CC guard hooks and
   the 22-tool MCP server over the shared `.pi/agent/extensions/lib/` cores.
   See `.pi/agent/docs/pi-to-claude-code-port.md`.
+
+## Agent-surface routing (pi primary / Claude Code work / opencode legacy)
+
+The rule that prevents "added to the wrong agent": **pi.dev is the daily
+driver** - new resources land in pi's tree FIRST. **Claude Code is the
+work harness** - propagation there is opt-in and curated, never automatic.
+**opencode is legacy** - it receives things for free via symlink
+back-compat hops and is NEVER a primary edit target.
+
+### Skills
+
+- Canonical home: `.pi/agent/skills/<name>/` in this repo. pi sees it
+  directly; opencode sees it via the back-compat hop. No other wiring.
+- Claude Code: promote by adding the per-skill symlink in `.claude/skills/`
+  (mechanism in "Claude Code wiring" above). Promote methodology and
+  work-adjacent infra skills. NEVER promote: private-corpus tools
+  (anything touching mnemo or personal session data), the media/GPU stack
+  (comfyui, lora-train, whisper, arr-stack, jellyfin), local hardware
+  (xikectl, eaves, gloryhole), purely personal ops (discord-wipe). When
+  in doubt: don't, or ask.
+
+### MCP servers
+
+- **pi-only, with secrets** (bearer/token): `~/.pi/agent/mcp-bridge.json` -
+  untracked runtime state, chmod 600, NEVER committed.
+- **project-scoped**: `<repo>/.pi/mcp-bridge.json` (tracked in that repo
+  when it carries no secrets).
+- **shared no-secret server (pi + opencode)**: the `mcp` block of
+  `.config/opencode/opencode.json`. Counter-intuitive but correct: pi
+  consumes it through pi-mcp-bridge's fallback chain, and it is the one
+  tracked registry both harnesses read. TWO REAL FILES exist because stow
+  ignores it: live `~/.config/opencode/opencode.json` and the repo copy
+  here. Edit BOTH, verify with
+  `diff <(jq -S . ~/.config/opencode/opencode.json) <(jq -S . ~/dotfiles/.config/opencode/opencode.json)`;
+  `stow-drift` hard-fails on divergence (see below).
+- **Claude Code**: separate surface, does NOT read opencode.json.
+  `claude mcp add` or the erfi-toolkit (`.claude/mcp/toolkit.ts`) only,
+  and only for work-relevant servers. Private-corpus servers (e.g. mnemo)
+  NEVER go to the work harness.
+- Verify a pi-side registration without an LLM round-trip: pi-core has
+  no `mcp` CLI subcommand (`pi mcp list` starts an interactive session
+  and hangs) - MCP in pi comes from pi-mcp-bridge. Headless checks:
+  `jq -r 'keys[]' ~/.pi/agent/mcp-bridge.cache.json` lists discovered
+  servers; `pi -p '/mcp-refresh'` re-runs discovery and rewrites that
+  cache (the mtime is the observable signal - `ui.notify` is a no-op in
+  print mode). In the TUI, `/mcp-status` lists servers + tool counts.
+  The tools appear in the next session's tool list.
+
+### Extensions, hooks, prompts
+
+- pi: `.pi/agent/extensions/*.ts` (+ shared helpers in `lib/`). opencode
+  does not load these.
+- Claude Code: harness-specific equivalents live in `.claude/hooks/` and
+  `.claude/mcp/toolkit.ts` over the shared `lib/` cores.
+- Rules prose: pi gets the tool-routing rules via the
+  `.config/opencode/AGENTS.md` prepend plus `.pi/agent/APPEND_SYSTEM.md`;
+  CC gets the hand-synced subset in `.claude/CLAUDE.md`. A change to
+  UNIVERSAL rules goes in both.
 
 ## Pi extensions
 

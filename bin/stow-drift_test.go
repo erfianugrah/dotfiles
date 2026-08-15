@@ -124,6 +124,92 @@ func TestClassifyFolded(t *testing.T) {
 	}
 }
 
+// mkRealFileTree builds the minimal tree for compareOnly scenarios: the
+// exception path is stow-ignored so the walk skips it, leaving the
+// byte-compare pass as the only reporter for it.
+func mkRealFileTree(t *testing.T) (dotfiles, home string) {
+	t.Helper()
+	root := t.TempDir()
+	dotfiles = filepath.Join(root, "dotfiles")
+	home = filepath.Join(root, "home")
+	for _, d := range []string{
+		filepath.Join(dotfiles, ".config", "opencode"),
+		filepath.Join(home, ".config", "opencode"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dotfiles, ".stow-local-ignore"),
+		[]byte(".config/opencode/opencode.json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dotfiles, home
+}
+
+func TestCompareOnly(t *testing.T) {
+	rel := compareOnly[0]
+	write := func(root, s string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("identical counts as linked", func(t *testing.T) {
+		dotfiles, home := mkRealFileTree(t)
+		write(dotfiles, "{}")
+		write(home, "{}")
+		var buf bytes.Buffer
+		if code := run(dotfiles, home, true, &buf); code != 0 {
+			t.Errorf("exit = %d, want 0\n%s", code, buf.String())
+		}
+		if !strings.Contains(buf.String(), "1 linked, 0 drifted, 0 missing") {
+			t.Errorf("in-sync exception not counted as linked\n%s", buf.String())
+		}
+	})
+
+	t.Run("content divergence is drift", func(t *testing.T) {
+		dotfiles, home := mkRealFileTree(t)
+		write(dotfiles, "{\"a\":1}")
+		write(home, "{\"a\":2}")
+		var buf bytes.Buffer
+		code := run(dotfiles, home, true, &buf)
+		if code != 1 {
+			t.Errorf("exit = %d, want 1", code)
+		}
+		if !strings.Contains(buf.String(), "content-differs") {
+			t.Errorf("output missing content-differs\n%s", buf.String())
+		}
+	})
+
+	t.Run("live copy missing is miss not drift", func(t *testing.T) {
+		dotfiles, home := mkRealFileTree(t)
+		write(dotfiles, "{}")
+		var buf bytes.Buffer
+		code := run(dotfiles, home, true, &buf)
+		if code != 0 {
+			t.Errorf("exit = %d, want 0 (missing is not drift)", code)
+		}
+		if !strings.Contains(buf.String(), rel+"  (real-file-exception)") {
+			t.Errorf("output missing real-file-exception MISS\n%s", buf.String())
+		}
+	})
+
+	t.Run("repo copy missing is drift", func(t *testing.T) {
+		dotfiles, home := mkRealFileTree(t)
+		write(home, "{}")
+		var buf bytes.Buffer
+		code := run(dotfiles, home, true, &buf)
+		if code != 1 {
+			t.Errorf("exit = %d, want 1", code)
+		}
+		if !strings.Contains(buf.String(), "no-repo-copy") {
+			t.Errorf("output missing no-repo-copy\n%s", buf.String())
+		}
+	})
+}
+
 func TestLoadIgnoreBadRegex(t *testing.T) {
 	root := t.TempDir()
 	p := filepath.Join(root, ".stow-local-ignore")

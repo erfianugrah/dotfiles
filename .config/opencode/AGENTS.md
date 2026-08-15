@@ -124,6 +124,14 @@ When a task will take >30s OR you want pi to keep working in parallel, use the b
 - **Worktree cleanup**: only `git worktree remove` paths under `.worktrees/`, `worktrees/`, or `~/.config/superpowers/worktrees/`. `cd` to the main repo root before removing. Verify the path with `git worktree list` first. Never `rm -rf` a worktree directly — it leaves a stale entry in `.git/worktrees/` that confuses git.
 - **Scaffolding new projects**: when the user asks to start / scaffold / build a new project, invoke the `scaffold-new-project` skill rather than running an ad-hoc question loop. That skill orchestrates the relevant concrete-tech skills (`frontend-stack`, `infrastructure-stack`, `software-architecture`, `design-utilitarian`, `ci-workflows`) so user defaults are applied without re-asking.
 
+## Agent-surface routing (registering skills / MCP servers / rules)
+
+- **pi.dev is the primary harness. Claude Code is the user's WORK harness. opencode is legacy.** Register free/agent resources with this priority; opencode is NEVER a primary edit target.
+- **New skill** -> `~/dotfiles/.pi/agent/skills/<name>/` (canonical; opencode sees it automatically via symlink). Promote to Claude Code only if work-relevant: per-skill symlink in `~/dotfiles/.claude/skills/`. NEVER promote private-corpus (mnemo, personal session data), media/GPU (comfyui/lora-train/whisper/arr/jellyfin), local-hardware (xikectl/eaves/gloryhole), or purely-personal (discord-wipe) skills to the work harness.
+- **New MCP server**: with secrets -> `~/.pi/agent/mcp-bridge.json` (untracked, chmod 600, never commit); one project only -> `<repo>/.pi/mcp-bridge.json`; shared no-secret -> the `mcp` block in `opencode.json` (pi reads it via pi-mcp-bridge's fallback chain; this is the one tracked registry both pi and opencode read). opencode.json is stow-ignored: TWO REAL FILES exist (live `~/.config/opencode/opencode.json` + repo copy `~/dotfiles/.config/opencode/opencode.json`) - **edit BOTH**; `stow-drift` fails on divergence.
+- **Claude Code MCP is a separate surface** (`claude mcp add` / `~/.claude/mcp/toolkit.ts`); CC never reads opencode.json. Private-corpus servers (mnemo) never go to work CC.
+- **Rule changes**: universal rules go in BOTH `.config/opencode/AGENTS.md` (pi prepend) and `~/.claude/CLAUDE.md`. Full policy: `~/dotfiles/AGENTS.md` section "Agent-surface routing".
+
 <!-- tool-routing:end - tool-routing.ts prepends only what is ABOVE this
      marker into pi's system prompt. The Documentation + General-computer-use
      sections moved to .pi/agent/APPEND_SYSTEM.md on 2026-08-09 to fix the
