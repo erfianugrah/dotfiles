@@ -28,8 +28,11 @@
  *   osint_threat    — VirusTotal hash/URL/IP/domain reputation
  *   osint_cve       — NVD CVE lookup
  *   osint_geo       — OSM geocode / reverse-geocode / nearby POI by tag
- *   osint_harvest   — theHarvester emails + hosts (slow, ~7min)
- *   archive_lookup  — Wayback change log for a URL (the one temporal tool)
+ *   osint_harvest   - theHarvester emails + hosts (slow, ~7min)
+ *   archive_lookup  - Wayback change log for a URL (the one temporal tool)
+ *   osint_geo_area  - area-wide OSM candidate enumeration (all X in area Y)
+ *   osint_geo_panos - server-side street-level pano sweep + contact sheets
+ *   osint_geo_sheet - pull one contact sheet locally to eyeball facades
  */
 
 import { Type } from "@earendil-works/pi-ai";
@@ -42,6 +45,8 @@ import {
   formatDomain,
   formatEmail,
   formatGeo,
+  formatGeoArea,
+  formatGeoSweep,
   formatHarvest,
   formatIp,
   formatPhone,
@@ -52,8 +57,10 @@ import {
   metaFooter,
   OSINT_URL,
   osintCall,
+  osintDownload,
   poiCategory,
   summarise,
+  type GeoSweepResult,
   type Investigation,
 } from "./lib/osint-core.ts";
 
@@ -393,6 +400,108 @@ const archiveLookup = defineTool({
   },
 });
 
+const osintGeoArea = defineTool({
+  name: "osint_geo_area",
+  promptSnippet:
+    "osint_geo_area - enumerate every POI of a kind across a whole named area (e.g. all hawker centres in Singapore) via Overpass.",
+  promptGuidelines: [
+    "Area defaults to Singapore. tags values are exact or '*'; name_regex is POSIX (Overpass), always applied case-insensitively.",
+    "Pair with osint_geo_panos to street-view-verify the candidates.",
+  ],
+  label: "OSINT Geo Area",
+  description:
+    "Area-wide OSM candidate enumeration: every nwr matching tags (+ optional name regex) inside a named administrative area. Returns name | lat,lon | category rows.",
+  parameters: Type.Object({
+    area: Type.Optional(Type.String({ description: "OSM area name (default: Singapore)" })),
+    tags: Type.Record(Type.String(), Type.String(), {
+      description: "OSM tags, e.g. {amenity: 'marketplace'}",
+    }),
+    name_regex: Type.Optional(Type.String({
+      description: "POSIX regex on the name tag, e.g. 'food centre|hawker'",
+    })),
+    limit: Type.Optional(Type.Number({ description: "Max results (default 200, cap 1000)" })),
+  }),
+  async execute(_id, params, signal) {
+    const inv = await osintCall("/geo/area", {
+      area: params.area ?? "Singapore",
+      tags: params.tags,
+      name_regex: params.name_regex ?? null,
+      limit: params.limit ?? 200,
+    }, 120_000, signal);
+    return makeResult(formatGeoArea(inv), summarise(inv));
+  },
+});
+
+const osintGeoPanos = defineTool({
+  name: "osint_geo_panos",
+  promptSnippet:
+    "osint_geo_panos - fetch street-level panoramas around a point or candidate list, server-side, with directional sampling (rear facades included); builds contact sheets.",
+  promptGuidelines: [
+    "Runs on servarr; artifacts persist under a sweep_id. Sheets, not raw panos, are what you pull back - the inter-site link is ~1 MB/s.",
+    "A sweep of ~190 candidates takes ~8 min. Use osint_geo_sheet to view results.",
+    "Negatives mean 'not visible from street coverage', never proof of absence - small podium ducts can sit below sheet resolution.",
+  ],
+  label: "OSINT Geo Panos",
+  description:
+    "Keyless street-level pano sweep (Google Street View via streetlevel): candidates -> panos -> manifest + contact sheets, persisted server-side. Returns sweep_id.",
+  parameters: Type.Object({
+    name: Type.Optional(Type.String({ description: "Label for a single point" })),
+    lat: Type.Optional(Type.Number({ description: "Latitude (single-point mode)" })),
+    lon: Type.Optional(Type.Number({ description: "Longitude (single-point mode)" })),
+    candidates: Type.Optional(Type.Array(Type.Object({
+      name: Type.String(),
+      lat: Type.Number(),
+      lon: Type.Number(),
+      note: Type.Optional(Type.String()),
+    }), { description: "Batch mode: up to 500 candidates" })),
+    radius_m: Type.Optional(Type.Number({ description: "Search radius per seed (default 100)" })),
+    cap: Type.Optional(Type.Number({ description: "Max panos per candidate (default 8)" })),
+    zoom: Type.Optional(Type.Number({ description: "2=2048px (default), 3=4096" })),
+    history: Type.Optional(Type.Boolean({
+      description: "Also fetch dated historical panos (demolished buildings)",
+    })),
+  }),
+  async execute(_id, params, signal) {
+    const shared = {
+      radius_m: params.radius_m ?? 100,
+      cap: params.cap ?? 8,
+      zoom: params.zoom ?? 2,
+      history: params.history ?? false,
+    };
+    const body = params.candidates
+      ? { candidates: params.candidates, ...shared }
+      : { name: params.name, lat: params.lat, lon: params.lon, ...shared };
+    const r = await osintCall("/geo/panos", body, 900_000, signal) as unknown as GeoSweepResult;
+    return makeResult(formatGeoSweep(r), { sweep_id: r.sweep_id });
+  },
+});
+
+const osintGeoSheet = defineTool({
+  name: "osint_geo_sheet",
+  promptSnippet:
+    "osint_geo_sheet - pull one candidate's contact sheet from a sweep to a local file so you can read it.",
+  promptGuidelines: [
+    "Returns the LOCAL path - read it with the read tool to eyeball the facades.",
+  ],
+  label: "OSINT Geo Sheet",
+  description:
+    "Download one contact sheet from a server-side pano sweep to local disk and report the local path.",
+  parameters: Type.Object({
+    sweep_id: Type.String({ description: "From osint_geo_panos output" }),
+    name: Type.String({ description: "Candidate name (any slugifiable form)" }),
+  }),
+  async execute(_id, params, signal) {
+    const slug = params.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const rel = `${params.sweep_id}/sheets/${slug}.jpg`;
+    const local = await osintDownload(
+      `/geo/file/${rel}`,
+      `${process.env.HOME}/.cache/geo-sheets/${rel}`,
+      signal,
+    );
+    return makeResult(`sheet: ${local}`, { local_path: local });
+  },
+});
+
 // Exports for unit tests + extension entry. Re-exported from the pure core so
 // existing importers (tests/extensions.test.ts) keep resolving them here.
 export const _internals = {
@@ -429,4 +538,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(osintGeo);
   pi.registerTool(osintHarvest);
   pi.registerTool(archiveLookup);
+  pi.registerTool(osintGeoArea);
+  pi.registerTool(osintGeoPanos);
+  pi.registerTool(osintGeoSheet);
 }

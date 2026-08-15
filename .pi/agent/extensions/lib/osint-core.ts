@@ -6,11 +6,18 @@
  * (../../../.claude/mcp/toolkit.ts).
  *
  * Wraps `POST {OSINT_URL}/investigate/{domain,ip,email,username,url,phone,
- * threat,cve,geo,harvest,archive}` with bearer auth from RESEARCH_TOKEN.
+ * threat,cve,geo,harvest,archive}` + the `/geo/*` pano-sweep family with
+ * bearer auth from RESEARCH_TOKEN.
  *
  * Extracted from osint.ts (2026-08-12); see
  * .pi/agent/docs/pi-to-claude-code-port.md.
  */
+
+import { createWriteStream } from "node:fs";
+import { mkdir, rename, rm } from "node:fs/promises";
+import { dirname } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 export const OSINT_URL = process.env.OSINT_URL ?? "https://osint.erfi.io";
 const OSINT_URL_IS_DEFAULT = process.env.OSINT_URL === undefined;
@@ -855,4 +862,61 @@ function ok(text: string, inv: Investigation): OsintResult {
 
 function errResult(msg: string): OsintResult {
   return { isError: true, text: `Error: ${msg}`, details: { error: msg } };
+}
+
+// -- geo pano pipeline (/geo/*) -----------------------------------------------
+
+export interface GeoSweepResult {
+  sweep_id: string;
+  n_candidates: number;
+  n_panos: number;
+  n_sheets: number;
+  manifest: string;
+  sheets: string;
+}
+
+export function formatGeoArea(inv: Investigation): string {
+  const pois = groupByKind(inv.findings)["poi"] ?? [];
+  const lines = pois.map((f) => {
+    const ex = (f.extra ?? {}) as Record<string, unknown>;
+    const tags = (ex.tags ?? {}) as Record<string, unknown>;
+    return `${f.value} | ${ex.lat ?? "?"},${ex.lon ?? "?"} | ${poiCategory(tags)}`;
+  });
+  const parts = [`# ${asString(inv.entity)}: ${pois.length} candidates`, ""];
+  parts.push(...(lines.length ? lines : ["(no candidates)"]));
+  parts.push("", metaFooter(inv));
+  return parts.join("\n");
+}
+
+export function formatGeoSweep(r: GeoSweepResult): string {
+  return [
+    `sweep_id: ${r.sweep_id}`,
+    `candidates: ${r.n_candidates} | panos: ${r.n_panos} | sheets: ${r.n_sheets}`,
+    "Pull a sheet to view locally with osint_geo_sheet.",
+  ].join("\n");
+}
+
+// Copy a service-side artifact (contact sheet, manifest) to this machine.
+// Same contract as the dataset localCopy: the path in the response is inside
+// the osint container on another host, so the local copy is what gets reported.
+// tmp+rename so a killed download never leaves a half-written file behind.
+export async function osintDownload(
+  path: string,
+  localPath: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  await mkdir(dirname(localPath), { recursive: true });
+  const tmp = `${localPath}.part`;
+  const res = await fetch(`${OSINT_URL}${path}`, { headers: authHeaders(), signal });
+  if (!res.ok || !res.body) {
+    throw new OsintError(`file download HTTP ${res.status}: ${path}`);
+  }
+  try {
+    await pipeline(Readable.fromWeb(res.body as never), createWriteStream(tmp));
+    await rename(tmp, localPath);
+  } catch (err) {
+    await rm(tmp, { force: true });
+    throw err;
+  }
+  return localPath;
 }
