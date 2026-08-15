@@ -17,7 +17,7 @@ Read the highest-value sources first:
 - build, test, lint, formatter, typecheck, codegen, and migration configs
 - CI workflows (`.github/workflows/`, `.gitlab-ci.yml`) and pre-commit / task runner config
 - existing instruction files: `AGENTS.md`, `CLAUDE.md`, `.cursor/rules/`, `.cursorrules`, `.github/copilot-instructions.md`
-- repo-local Pi config: `.pi/agent/AGENTS.md`, `.pi/extensions/`, `opencode.json` (if present)
+- repo-local Pi config: `.pi/AGENTS.md`, `.pi/extensions/`, `.pi/mcp-bridge.json` (if present)
 
 Cross-reference with the docs server when stack is identified — `docs.erfi.io` has 158 sources covering most things (postgres, nextjs, rust, supabase, kubernetes, etc.). Cite them like `[docs: postgres → ddl-rowsecurity]` if a non-obvious behaviour is worth pointing to.
 

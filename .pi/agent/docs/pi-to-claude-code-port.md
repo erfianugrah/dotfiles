@@ -28,7 +28,8 @@ Facts established from the live repo (2026-08-11):
   `extensions/lib/`).
 - **`.claude/` holds thin links/adapters back into it.** Already true for
   skills: `.claude/skills/caddy -> ../../.pi/agent/skills/caddy` (curated
-subset: 17 domain skills + 6 superpowers subskills today). opencode does the whole dir: `.config/opencode/skills ->
+subset: the promoted per-skill symlinks - `.claude/skills/` IS the allowlist,
+see repo AGENTS.md "Agent-surface routing"). opencode does the whole dir: `.config/opencode/skills ->
   ../../.pi/agent/skills`.
 - No tracked `.claude/settings.json` or `.mcp.json` exists yet - those (plus
   `.claude/mcp/` servers, `.claude/hooks/`, `.claude/commands/`) are the

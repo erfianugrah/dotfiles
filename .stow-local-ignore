@@ -17,7 +17,8 @@ package.json
 bun.lock
 node_modules
 .pi/harness.json
-# opencode.json: pi-mcp-bridge-managed, real file by design (drift-checked manually)
+# opencode.json: pi-mcp-bridge-managed, real file by design (content-compared
+# against the live copy by stow-drift's compareOnly list - see bin/stow-drift.go)
 .config/opencode/opencode.json
 # .claude/settings.json: live CC user state (theme etc). install.sh jq-merges the
 # tracked hooks fragment into ~/.claude/settings.json rather than stow-linking it.

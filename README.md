@@ -3,8 +3,8 @@
 Cross-platform dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/).
 Targets Arch Linux (native + WSL2), macOS, and Steam Deck (SteamOS via Nix).
 
-The pi coding-agent harness under `.pi/agent/` (52 extensions, 38 skills, 8
-prompt templates, theme) is also packaged as a **pi package**
+The pi coding-agent harness under `.pi/agent/` (65 extensions, 53 skills +
+superpowers subskills, 8 prompt templates, theme) is also packaged as a **pi package**
 (`@erfianugrah/pi-harness`, root `package.json`). Install it standalone on any
 machine - no stow required - with `pi install git:github.com/erfianugrah/dotfiles`.
 See [`.pi/agent/README.md`](.pi/agent/README.md) and the "Cross-machine install"
@@ -48,6 +48,7 @@ packages/
 bin/
   caddyfmt                     # Caddyfile formatter (Python, stdin/stdout)
   superpowers-sync             # sync obra/superpowers skills/ into .config/opencode/skills/superpowers/
+                               #   (lands in .pi/agent/skills/superpowers/ via the back-compat symlink)
                                # → see .config/opencode/skills/superpowers/.sync.json for ref/sha/timestamp
                                # → opencode fork (erfianugrah/opencode) has built-in conditional injection
                                # → run with --status, --check, --ref <tag|sha>, --main, or --help
@@ -57,7 +58,9 @@ bin/
   systemd/user/bw-serve.service  # Bitwarden CLI REST API service
   opencode/                    # opencode AI coding agent (custom fork, LEGACY - see Coding-agents)
     AGENTS.md                  # canonical tool-routing context (linked from .pi/agent/AGENTS.md)
-    opencode.json              # MCP servers (context7, gh-grep, whisper, comfyui, lora-train, research)
+    opencode.json              # shared no-secrets MCP registry (pi reads it via pi-mcp-bridge
+                               #   fallback; stow-ignored real file - edit BOTH copies, stow-drift
+                               #   compares them; see AGENTS.md "Agent-surface routing")
     plugins/output-rules.ts    # prepends AGENTS.md output rules to system prompt
     tools/docs.ts              # docs.erfi.io SSH tool (docs_search/read/grep/find/summary/sources)
     skills/                    # back-compat symlink -> ../../.pi/agent/skills
@@ -65,20 +68,21 @@ bin/
 .claude/                       # Claude Code wiring (user-level, stow-linked to ~/.claude/)
   CLAUDE.md                    # universal agent rules (harness-agnostic subset of APPEND_SYSTEM.md)
   skills/                      # per-skill relative symlinks -> ../../.pi/agent/skills/<name>
-                               # (17 domain skills; coexists with the local Cloudflare skill set.
+                               # (23 promoted today - the directory IS the allowlist, see AGENTS.md
+                               #  "Agent-surface routing"; coexists with the local Cloudflare skill set.
                                #  settings.json deliberately NOT tracked - Claude mutates it live)
 
 .pi/agent/                     # pi AI coding agent (PRIMARY harness; canonical skills + resources)
   APPEND_SYSTEM.md             # appended: Commit/PR, Safety, Epistemic calibration, Confidential-IDs, Output
-  skills/                      # 46 skills + 6 superpowers subskills (canonical since 2026-05-27)
+  skills/                      # 53 skills + superpowers subskills (canonical since 2026-05-27)
   prompts/                     # markdown sources loaded by extensions
-    tool-routing.md            #   prepended via before_agent_start with CRITICAL framing
     local-model-rules.md       #   prepended only for gemma/qwen/llama-server models
-    commit.md, pr.md, review.md, test.md, init.md
+    commit.md, pr.md, review.md, test.md, init.md, rollback.md, docs-reference.md
   extensions/                  # TypeScript plugins
-    tool-routing.ts            #   inject tool-routing.md as system prompt prefix
+    tool-routing.ts            #   prepends .config/opencode/AGENTS.md (above the tool-routing:end
+                               #   marker) as system-prompt prefix
     exa.ts, webfetch.ts, oci-tags.ts, web-research.ts
-    docs.ts (symlinked from opencode/tools/), context7.ts, session-search.ts
+    docs.ts, context7.ts, session-search.ts
     memory.ts, todowrite.ts, task.ts, question.ts
     git-gh-gate.ts, superpowers.ts, local-model-rules.ts, lsp/
     render-diagram.ts          #   mermaid + d2 via local mmdc / d2 CLI
@@ -751,9 +755,9 @@ implementations:
 - **opencode** — `.config/opencode/plugins/output-rules.ts` reads AGENTS.md
   and unshifts the pre-`## Documentation` section onto `output.system`.
 - **pi** — `.pi/agent/extensions/tool-routing.ts` reads
-  `.pi/agent/prompts/tool-routing.md` and prepends it via the
-  `before_agent_start` hook (re-runs every user prompt, so post-compaction
-  re-injection is automatic).
+  `~/.config/opencode/AGENTS.md` (everything above the `tool-routing:end`
+  marker) and prepends it via the `before_agent_start` hook (re-runs every
+  user prompt, so post-compaction re-injection is automatic).
 
 The routing rules cover: search-family reformulation loop, web research
 escalation (Exa → fetch → research SearXNG / Playwright), docs.erfi.io
@@ -922,7 +926,7 @@ DB access, session lifecycle hooks).
 
 | Extension | Provides |
 |---|---|
-| `tool-routing.ts` | Prepends `prompts/tool-routing.md` with CRITICAL framing on every user prompt |
+| `tool-routing.ts` | Prepends `.config/opencode/AGENTS.md` (above the `tool-routing:end` marker) with CRITICAL framing on every user prompt |
 | `local-model-rules.ts` | Per-model rules for gemma / qwen / llama-server |
 | `superpowers.ts` | Conditional injection of using-superpowers/SKILL.md on build/debug intent |
 | `style-toggle.ts` | Per-session output-style switcher |
