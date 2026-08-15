@@ -33,6 +33,7 @@
  *   osint_geo_area  - area-wide OSM candidate enumeration (all X in area Y)
  *   osint_geo_panos - server-side street-level pano sweep + contact sheets
  *   osint_geo_sheet - pull one contact sheet locally to eyeball facades
+ *   osint_geo_classify - CLIP-score a sweep, get the YES pile
  */
 
 import { Type } from "@earendil-works/pi-ai";
@@ -46,6 +47,7 @@ import {
   formatEmail,
   formatGeo,
   formatGeoArea,
+  formatGeoClassify,
   formatGeoSweep,
   formatHarvest,
   formatIp,
@@ -60,6 +62,7 @@ import {
   osintDownload,
   poiCategory,
   summarise,
+  type GeoClassifyResult,
   type GeoSweepResult,
   type Investigation,
 } from "./lib/osint-core.ts";
@@ -502,6 +505,50 @@ const osintGeoSheet = defineTool({
   },
 });
 
+const osintGeoClassify = defineTool({
+  name: "osint_geo_classify",
+  promptSnippet:
+    "osint_geo_classify - CLIP-score a pano sweep against a reference image or text prompts; writes verdicts.json, returns the YES pile.",
+  promptGuidelines: [
+    "granularity 'sheets' (default) scores one contact sheet per candidate - fast triage. 'panos' scores every pano band - slower but localises the hit.",
+    "Pass reference_path (a local image, e.g. a crop of the look you want) for similarity mode, or positive/negatives for zero-shot mode. Defaults target external exhaust ducts.",
+    "Eyeball top hits with osint_geo_sheet before asserting them - CLIP triage is a filter, not a verdict.",
+  ],
+  label: "OSINT Geo Classify",
+  description:
+    "CLIP ViT-B/32 classification of a server-side pano sweep: reference-image similarity or zero-shot prompt margin. Returns the top-scored candidates; verdicts.json persists in the sweep dir.",
+  parameters: Type.Object({
+    sweep_id: Type.String({ description: "From osint_geo_panos output" }),
+    reference_path: Type.Optional(Type.String({
+      description: "Local image file for similarity mode (read and sent as base64)",
+    })),
+    positive: Type.Optional(Type.String({ description: "Zero-shot positive prompt" })),
+    negatives: Type.Optional(Type.Array(Type.String(), {
+      description: "Zero-shot negative prompts (score = sim(pos) - max sim(negs))",
+    })),
+    granularity: Type.Optional(Type.Union([Type.Literal("sheets"), Type.Literal("panos")], {
+      description: "'sheets' (default, fast) or 'panos' (slow, localised)",
+    })),
+    top_n: Type.Optional(Type.Number({ description: "Hits to return (default 20)" })),
+  }),
+  async execute(_id, params, signal) {
+    let reference_b64: string | null = null;
+    if (params.reference_path) {
+      const { readFile } = await import("node:fs/promises");
+      reference_b64 = (await readFile(params.reference_path)).toString("base64");
+    }
+    const r = await osintCall("/geo/classify", {
+      sweep_id: params.sweep_id,
+      reference_b64,
+      positive: params.positive ?? null,
+      negatives: params.negatives ?? [],
+      top_n: params.top_n ?? 20,
+      granularity: params.granularity ?? "sheets",
+    }, 1_800_000, signal) as unknown as GeoClassifyResult;
+    return makeResult(formatGeoClassify(r), { sweep_id: r.sweep_id, mode: r.mode });
+  },
+});
+
 // Exports for unit tests + extension entry. Re-exported from the pure core so
 // existing importers (tests/extensions.test.ts) keep resolving them here.
 export const _internals = {
@@ -541,4 +588,5 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(osintGeoArea);
   pi.registerTool(osintGeoPanos);
   pi.registerTool(osintGeoSheet);
+  pi.registerTool(osintGeoClassify);
 }

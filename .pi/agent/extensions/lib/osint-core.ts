@@ -920,3 +920,22 @@ export async function osintDownload(
   }
   return localPath;
 }
+
+export interface GeoClassifyResult {
+  sweep_id: string;
+  mode: string;
+  granularity: string;
+  n_scored: number;
+  top: { name: string; score: number; sheet?: string; pano_id?: string; path: string }[];
+}
+
+export function formatGeoClassify(r: GeoClassifyResult): string {
+  const lines = r.top.map((v, i) => `${i + 1}. ${v.name} | ${v.score}`);
+  return [
+    `# ${r.sweep_id} - ${r.mode} (${r.granularity}), ${r.n_scored} scored`,
+    "",
+    ...(lines.length ? lines : ["(nothing scored)"]),
+    "",
+    "Eyeball a hit with osint_geo_sheet(sweep_id, name).",
+  ].join("\n");
+}
