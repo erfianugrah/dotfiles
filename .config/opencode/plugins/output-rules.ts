@@ -2,7 +2,8 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { readFileSync } from "node:fs"
 import { resolve, dirname } from "node:path"
 
-// Read output rules from AGENTS.md (lines before "## Documentation")
+// Read output rules from ./AGENTS.md - a committed symlink to
+// ../../.pi/agent/prompts/tool-routing.md (lines before "## Documentation")
 const AGENTS_PATH = resolve(dirname(import.meta.dirname), "AGENTS.md")
 function loadOutputRules(): string {
   try {

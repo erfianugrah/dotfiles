@@ -59,4 +59,4 @@ pi.dev is the primary harness; Claude Code is the WORK harness; opencode is lega
 
 - **Skills**: canonical home is `~/dotfiles/.pi/agent/skills/<name>/`. A skill only reaches Claude Code via an explicit per-skill symlink in `~/dotfiles/.claude/skills/` - the work harness is opt-in. NEVER promote private-corpus (mnemo, personal session data), media/GPU, local-hardware, or purely-personal skills here. The directory contents are the allowlist.
 - **MCP servers**: Claude Code does NOT read `opencode.json` (that shared registry serves pi via pi-mcp-bridge, and legacy opencode). Register via `claude mcp add` or the erfi-toolkit in `~/.claude/mcp/toolkit.ts`, and only for work-relevant servers. Private-corpus servers (mnemo) never go to the work harness.
-- **Config/rules**: universal rule changes go in BOTH this file and `~/dotfiles/.config/opencode/AGENTS.md` (pi's prepend). Full policy: `~/dotfiles/AGENTS.md` section "Agent-surface routing".
+- **Config/rules**: universal rule changes go in BOTH this file and `~/dotfiles/.pi/agent/prompts/tool-routing.md` (pi's prepend). Full policy: `~/dotfiles/AGENTS.md` section "Agent-surface routing".

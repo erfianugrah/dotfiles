@@ -1,22 +1,23 @@
 # Pi setup — `~/.pi/agent/`
 
-This directory holds the Pi (pi.dev / earendil-works/pi-coding-agent) configuration
-ported from the opencode fork. Most files are symlinks back to source-of-truth
-locations under `~/dotfiles/.config/opencode/` (skills, AGENTS.md) or
-`~/dotfiles/.pi/agent/` (Pi-specific).
+This directory holds the Pi (pi.dev / earendil-works/pi-coding-agent) configuration.
+Most files are symlinks back to the source of truth under `~/dotfiles/.pi/agent/`.
+The legacy opencode tree (`~/dotfiles/.config/opencode/`) holds back-compat
+symlinks INTO this tree, not the other way round.
 
 ## What's here
 
 ```
 ~/.pi/agent/
-├── AGENTS.md          → ~/dotfiles/.config/opencode/AGENTS.md (shared with opencode)
 ├── APPEND_SYSTEM.md   → ~/dotfiles/.pi/agent/APPEND_SYSTEM.md (commit/safety rules)
 ├── models.json        → ~/dotfiles/.pi/agent/models.json (llama-server + 8 local models)
-├── skills/            → ~/.config/opencode/skills (zero-copy: 38 top-level + 14 superpowers subskills)
-├── extensions/        contains symlinks to ~/dotfiles/.pi/agent/extensions/ (57 single-file + lsp/ + session-fts/ dirs + lib/ shared helpers)
+├── skills/            → ~/dotfiles/.pi/agent/skills (canonical since 2026-05-27; opencode
+│                        reads the same tree via the ~/.config/opencode/skills back-compat hop)
+├── extensions/        per-file symlinks to ~/dotfiles/.pi/agent/extensions/ (+ lib/ shared helpers)
 ├── tests/             → ~/dotfiles/.pi/agent/tests/ (bun unit tests for pure helpers)
 ├── settings.json      → ~/dotfiles/.pi/agent/settings.json (defaultProvider/Model + theme)
-├── prompts/           → ~/dotfiles/.pi/agent/prompts/ (8 prompt files: 7 slash commands + docs-reference)
+├── prompts/           → ~/dotfiles/.pi/agent/prompts/ (slash-command templates, docs-reference,
+│                        and tool-routing.md - the tool-routing rules prepended by tool-routing.ts)
 ├── themes/            → ~/dotfiles/.pi/agent/themes/ (opencode-dark high-contrast)
 ├── auth.json          (NOT tracked — runtime auth state)
 ├── sessions/          (NOT tracked — session JSONL files)

@@ -69,16 +69,18 @@ Two rules, do not conflate them:
 Glyphs WITH no clean ASCII equivalent that are usually the intended character — arrows (`→ ←`), bullets (`•`), box-drawing, check / cross marks (`✓ ✗`) — are NOT guarded: paste the real glyph as before. (In response text / chat — which the guard cannot see — real em-dashes are fine too; the ASCII rule bites specifically on persisted + pasted artifacts.)
 
 <!--
-Tool-routing rules live in ~/.config/opencode/AGENTS.md (everything ABOVE
-the `<!-- tool-routing:end -->` marker) and are prepended to the system
-prompt by ~/.pi/agent/extensions/tool-routing.ts. Canonical edit target
-via the symlink chain is ~/dotfiles/.config/opencode/AGENTS.md.
+Tool-routing rules live in ~/.pi/agent/prompts/tool-routing.md (everything
+ABOVE the `<!-- tool-routing:end -->` marker) and are prepended to the
+system prompt by ~/.pi/agent/extensions/tool-routing.ts. Canonical edit
+target: ~/dotfiles/.pi/agent/prompts/tool-routing.md (ships in the pi
+package since 2026-08-15). ~/.config/opencode/AGENTS.md is a committed
+symlink to it - the legacy opencode TUI and its output-rules.ts plugin
+read it there, and tool-routing.ts uses it as the fallback path.
 
 Until 2026-08-09 a manual ~/.pi/agent/AGENTS.md symlink made pi ALSO load
 the same file natively as global project instructions, duplicating ~17.7KB
 per turn. The symlink is deleted; pi gets the rules once (prepended) and
 the Documentation / General-computer-use sections once (appended below).
-opencode (legacy TUI) still reads .config/opencode/AGENTS.md directly.
 -->
 
 <!--- moved from .config/opencode/AGENTS.md 2026-08-09 (double-injection fix);

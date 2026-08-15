@@ -57,7 +57,8 @@ bin/
   atuin/config.toml            # Atuin shell history (self-hosted sync)
   systemd/user/bw-serve.service  # Bitwarden CLI REST API service
   opencode/                    # opencode AI coding agent (custom fork, LEGACY - see Coding-agents)
-    AGENTS.md                  # canonical tool-routing context (linked from .pi/agent/AGENTS.md)
+    AGENTS.md                  # committed symlink -> ../../.pi/agent/prompts/tool-routing.md
+                               #   (back-compat for the legacy TUI + output-rules.ts plugin)
     opencode.json              # shared no-secrets MCP registry (pi reads it via pi-mcp-bridge
                                #   fallback; stow-ignored real file - edit BOTH copies, stow-drift
                                #   compares them; see AGENTS.md "Agent-surface routing")
@@ -79,8 +80,9 @@ bin/
     local-model-rules.md       #   prepended only for gemma/qwen/llama-server models
     commit.md, pr.md, review.md, test.md, init.md, rollback.md, docs-reference.md
   extensions/                  # TypeScript plugins
-    tool-routing.ts            #   prepends .config/opencode/AGENTS.md (above the tool-routing:end
-                               #   marker) as system-prompt prefix
+    tool-routing.ts            #   prepends prompts/tool-routing.md (above the tool-routing:end
+                               #   marker) as system-prompt prefix; falls back to the
+                               #   .config/opencode/AGENTS.md symlink
     exa.ts, webfetch.ts, oci-tags.ts, web-research.ts
     docs.ts, context7.ts, session-search.ts
     memory.ts, todowrite.ts, task.ts, question.ts
@@ -736,8 +738,9 @@ chain, Claude Code by pointing its skill discovery at the same tree.
 
 ### Shared surface
 
-The tool-routing `AGENTS.md` lives once at `.config/opencode/AGENTS.md` and is
-symlinked from `~/.pi/agent/AGENTS.md`. Skills were relocated to be
+The tool-routing rules live once at `.pi/agent/prompts/tool-routing.md`
+(canonical since 2026-08-15, shipped in the pi package); the legacy path
+`.config/opencode/AGENTS.md` is a committed symlink to it. Skills were relocated to be
 pi-canonical on 2026-05-27: the source of truth is now `.pi/agent/skills/`,
 and opencode reads the same tree through a back-compat symlink chain
 (`~/.config/opencode/skills` -> `~/dotfiles/.config/opencode/skills` ->
@@ -755,9 +758,11 @@ implementations:
 - **opencode** — `.config/opencode/plugins/output-rules.ts` reads AGENTS.md
   and unshifts the pre-`## Documentation` section onto `output.system`.
 - **pi** — `.pi/agent/extensions/tool-routing.ts` reads
-  `~/.config/opencode/AGENTS.md` (everything above the `tool-routing:end`
-  marker) and prepends it via the `before_agent_start` hook (re-runs every
-  user prompt, so post-compaction re-injection is automatic).
+  `~/.pi/agent/prompts/tool-routing.md` (everything above the
+  `tool-routing:end` marker; falls back to the legacy
+  `~/.config/opencode/AGENTS.md` symlink) and prepends it via the
+  `before_agent_start` hook (re-runs every user prompt, so post-compaction
+  re-injection is automatic).
 
 The routing rules cover: search-family reformulation loop, web research
 escalation (Exa → fetch → research SearXNG / Playwright), docs.erfi.io
@@ -926,7 +931,7 @@ DB access, session lifecycle hooks).
 
 | Extension | Provides |
 |---|---|
-| `tool-routing.ts` | Prepends `.config/opencode/AGENTS.md` (above the `tool-routing:end` marker) with CRITICAL framing on every user prompt |
+| `tool-routing.ts` | Prepends `prompts/tool-routing.md` (above the `tool-routing:end` marker; legacy-path fallback) with CRITICAL framing on every user prompt |
 | `local-model-rules.ts` | Per-model rules for gemma / qwen / llama-server |
 | `superpowers.ts` | Conditional injection of using-superpowers/SKILL.md on build/debug intent |
 | `style-toggle.ts` | Per-session output-style switcher |

@@ -1,11 +1,12 @@
 # dotfiles repo — agent notes
 
 Project-specific guidance for an agent working in `~/dotfiles`. The global
-agent rules live in `.config/opencode/AGENTS.md`; pi receives them via the
-`tool-routing.ts` extension's prepend (the old `~/.pi/agent/AGENTS.md`
-symlink was retired 2026-08-09 because pi loaded it natively AND the
-extension prepended it - a 17.7KB/turn double injection). The notes here
-are repo-shape only.
+agent rules live in `.pi/agent/prompts/tool-routing.md` (canonical since
+2026-08-15; `.config/opencode/AGENTS.md` is a committed back-compat symlink
+for the legacy opencode TUI). pi receives them via the `tool-routing.ts`
+extension's prepend (the old `~/.pi/agent/AGENTS.md` symlink was retired
+2026-08-09 because pi loaded it natively AND the extension prepended it -
+a 17.7KB/turn double injection). The notes here are repo-shape only.
 
 ## What's running here (pi vs opencode disambiguation)
 
@@ -60,6 +61,7 @@ This repo is the **source of truth** for everything in `~/.pi/agent/`,
 ```
 ~/.pi/agent/extensions/foo.ts  →  ../../../dotfiles/.pi/agent/extensions/foo.ts
 ~/.config/opencode/AGENTS.md   →  ../../dotfiles/.config/opencode/AGENTS.md
+                                 →  ../../.pi/agent/prompts/tool-routing.md (repo symlink)
 ~/.zshrc                       →  dotfiles/.zshrc
 ```
 
@@ -209,9 +211,9 @@ back-compat hops and is NEVER a primary edit target.
 - Claude Code: harness-specific equivalents live in `.claude/hooks/` and
   `.claude/mcp/toolkit.ts` over the shared `lib/` cores.
 - Rules prose: pi gets the tool-routing rules via the
-  `.config/opencode/AGENTS.md` prepend plus `.pi/agent/APPEND_SYSTEM.md`;
-  CC gets the hand-synced subset in `.claude/CLAUDE.md`. A change to
-  UNIVERSAL rules goes in both.
+  `.pi/agent/prompts/tool-routing.md` prepend plus
+  `.pi/agent/APPEND_SYSTEM.md`; CC gets the hand-synced subset in
+  `.claude/CLAUDE.md`. A change to UNIVERSAL rules goes in both.
 
 ## Pi extensions
 
@@ -306,9 +308,12 @@ tests in /tmp/ that drive the real `execute()` via the SDK preload mock.
   turn. Project-wide rules go here. Also carries the `## Documentation` and
   `## General computer use` sections (moved out of
   `.config/opencode/AGENTS.md` in the 2026-08-09 double-injection fix).
-- `.config/opencode/AGENTS.md` - the tool-routing rules themselves. pi gets
-  them ONLY via `tool-routing.ts`, which prepends everything above the
-  `<!-- tool-routing:end -->` marker each turn.
+- `.pi/agent/prompts/tool-routing.md` - the tool-routing rules themselves
+  (canonical since 2026-08-15). pi gets them ONLY via `tool-routing.ts`,
+  which prepends everything above the `<!-- tool-routing:end -->` marker
+  each turn. `.config/opencode/AGENTS.md` is a committed symlink to it for
+  the legacy opencode TUI + its output-rules.ts plugin, and is the
+  extension's fallback read path.
 - `.pi/agent/prompts/local-model-rules.md` — appended only when a local
   llama-server model is in use.
 - Other `prompts/*.md` files are slash-command templates.
