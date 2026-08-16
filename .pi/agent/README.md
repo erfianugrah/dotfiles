@@ -56,6 +56,7 @@ the loader without deleting it.
 | Extension | Purpose |
 |---|---|
 | `apply-patch.ts` | Multi-file atomic patch envelope (Add/Update/Delete File). Two-phase commit via `*.applypatch-<rand>` tmps + rename so partial failures roll back cleanly. Success output appends edit-style diffs for Update ops via pi's `generateDiffString`. |
+| `atuin.ts` | Tracks pi's bash tool calls in Atuin history with author `pi` (start/end hooks via events, never blocks execution). Requires `atuin hook install pi`. |
 | `build-favicon-set.ts` | SVG/PNG → full PWA favicon artifact set + HTML head snippet. |
 | `context7.ts` | `context7_resolve_library_id` + `context7_query_docs` via REST (anon tier; `CONTEXT7_API_KEY` for higher tier). |
 | `docs.ts` | `docs_search` / `docs_read` / `docs_grep` / `docs_find` / `docs_summary` / `docs_sources` against docs.erfi.io via SSH. |
@@ -65,6 +66,7 @@ the loader without deleting it.
 | `lsp/` | Language Server Protocol — 8 operations (hover/definition/references/implementation/document\_symbols/workspace\_symbol/incoming\_calls/outgoing\_calls) + auto-install for 14 languages via bun/go/cargo/rustup. |
 | `memory.ts` | Persistent cross-session memory + per-LLM-call inject. mtime cache (no per-call disk read), `MEMORY_INJECT_MAX_BYTES` cap, `MEMORY_OFF=1` kill switch. |
 | `oci-tags.ts` | Query OCI registries (Docker Hub, ghcr, quay) for image tags. |
+| `opendata.ts` | `dataset_search` / `dataset_fetch` - official open-data portals (data.gov.sg default) via the crawler service's `/dataset/*` endpoints. Rows never enter context: fetch writes a local FILE, returns path + schema + preview; query with duckdb/mlr. |
 | `osint.ts` | `osint_domain/ip/email/username/url/phone/threat/cve/harvest` via the research OSINT service (`osint.erfi.io` / `:8890`). |
 | `pdf.ts` | `pdf` - diagnostic-first PDF extraction (pdftotext for born-digital, tesseract OCR for scanned, pdfplumber tables, rasterize-to-PNG visual). Fills pi's PDF-blind `read`. |
 | `question.ts` | Interactive question prompts during execution (skill-compatible). |

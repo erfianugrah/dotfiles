@@ -3,7 +3,7 @@
 Cross-platform dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/).
 Targets Arch Linux (native + WSL2), macOS, and Steam Deck (SteamOS via Nix).
 
-The pi coding-agent harness under `.pi/agent/` (64 extensions, 61 skills,
+The pi coding-agent harness under `.pi/agent/` (66 extensions, 61 skills,
 8 prompt templates, theme) is also packaged as a **pi package**
 (`@erfianugrah/pi-harness`, root `package.json`). Install it standalone on any
 machine - no stow required - with `pi install git:github.com/erfianugrah/dotfiles`.
@@ -866,6 +866,7 @@ DB access, session lifecycle hooks).
 | Extension | Provides |
 |---|---|
 | `docs.ts` (symlink) | docs.erfi.io SSH tools: `docs_search` / `read` / `grep` / `find` / `summary` / `sources` |
+| `opendata.ts` | `dataset_search` / `dataset_fetch` - official open-data portals (data.gov.sg) via crawler `/dataset/*`; fetch writes a FILE, rows never enter context |
 | `bash-error-hints.ts` | Decorates bash tool results with one-line hints when stderr matches a known footgun (gitignore traps, pathspec mismatch, mv ENOENT, permission denied, Anthropic stream cutoff) - the agent sees actionable next-probe text appended to the error, no context cost when no pattern fires |
 | `exa.ts` | `websearch` + `codesearch` via mcp.exa.ai |
 | `webfetch.ts` | URL → markdown / text / html (5MB cap, Cloudflare retry) |
@@ -922,6 +923,7 @@ DB access, session lifecycle hooks).
 
 | Extension | Provides |
 |---|---|
+| `atuin.ts` | Tracks pi's bash calls in Atuin history (author `pi`) via tool_call/tool_execution_end events |
 | `custom-footer.ts` (**disabled**) | Retired to `custom-footer.ts.disabled` - pi's built-in footer now covers cost/tokens/context. Kept for reference: cumulative cost + per-turn delta, true input tokens (sums `input + cacheRead + cacheWrite`), width-aware right-side field drop, NaN-guarded accumulators (pi#4158), status aggregation |
 | `session-auto-title.ts` | Auto-generates a 3-6 word session title from the first user message via a small cheap model. Model picker reads `~/.pi/agent/models.json`, scores every configured `provider/id` pair by (provider weight + name pattern weight) - local llama-server / ollama / lmstudio first, then haiku / mini / nano patterns, then gemma / qwen3-4 / phi / llama-3-small patterns. First with valid auth wins. Falls back to current session model only if nothing else has auth. Records a marker so it runs once per session and respects manual `/session-name` overrides |
 | `session-summary.ts` | On `startup` / `new` session_start, injects a project briefing: branch + ahead/behind, working-tree status counts, last 3 commits, up to 3 open PRs. Hard 1.5s budget; silent outside git working trees |
