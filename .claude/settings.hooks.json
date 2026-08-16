@@ -78,6 +78,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bun \"$HOME/.claude/hooks/dangerous-cmd-guard.ts\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
             "command": "bun \"$HOME/.claude/hooks/secret-output-guard.ts\""
           }
         ]

@@ -198,6 +198,7 @@ the server with the SDK's own stdio client - no `claude` binary needed.
 | `ascii-punctuation-guard.ts` | HOOK | `PreToolUse` (Edit\|Write\|Bash) | upgrade: auto-rewrite via `updatedInput` instead of block-and-resubmit. |
 | `confidential-write-guard.ts` | HOOK | `PreToolUse` (Edit\|Write\|Bash) | deny + reason; core is the term-scanner. |
 | `git-gh-gate.ts` | HOOK | `PreToolUse` (Bash) | deny mutating git/gh; CC has no apply_patch to also guard, simpler. |
+| `dangerous-cmd-guard.ts` | HOOK | `PreToolUse` (Bash) | deny destructive shell (rm -rf outside scratch, block-device writes, fork bombs); added 2026-08 after the ~/infra/ai data-loss incident. |
 | `tool-guard.ts` | HOOK | `PreToolUse` (multi) | anti-pattern blocks; drop the apply_patch/pi-tool-name cases. |
 | `bash-error-hints.ts` | HOOK | `PostToolUse` (Bash) | `additionalContext` with the footgun hint (pi decorates result text; CC annotates). |
 | `entity-qualifier-nudge.ts` | HOOK | `PreToolUse` (Edit\|Write) | nudge via `additionalContext`, or deny. |
@@ -307,6 +308,7 @@ already provides it · SKIP = pi TUI/session internals, no CC analogue.
 | web-research | FOLD -> exa | overlaps exa; expose one |
 | confidential-write-guard | DONE (HOOK) | PreToolUse deny |
 | git-gh-gate | DONE (HOOK) | PreToolUse deny (Bash|Write|Edit|MultiEdit) |
+| dangerous-cmd-guard | DONE (HOOK) | PreToolUse deny (Bash) critical+confirm tiers |
 | tool-guard | DONE (HOOK) | PreToolUse anti-patterns (Bash|WebFetch) |
 | bash-error-hints | DONE (HOOK) | PostToolUse Bash additionalContext |
 | entity-qualifier-nudge | DONE (HOOK) | PreToolUse additionalContext (live-verified) |
