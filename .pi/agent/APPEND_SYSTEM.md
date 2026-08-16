@@ -88,7 +88,7 @@ the Documentation / General-computer-use sections once (appended below).
 
 ## Documentation
 
-Docs server at `docs.erfi.io` — 260+ sources (docs + API specs), searchable markdown over SSH. Check docs before implementing/debugging.
+Docs server at `docs.erfi.io` - 300+ sources (docs + API specs + the full IETF RFC corpus), searchable markdown over SSH. Check docs before implementing/debugging.
 
 **Always use custom `docs_search`, `docs_read`, `docs_grep`, `docs_find`, `docs_summary`, `docs_sources` tools.** No raw `ssh` or `Bash` for docs access.
 
