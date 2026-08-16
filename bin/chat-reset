@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# chat-reset [email] - reset the Open WebUI (chat.erfi.io) password.
+# No SMTP on the stack, so this writes a bcrypt hash straight into webui.db.
+# Prints a fresh temp password; change it in Settings -> Account afterwards.
+set -euo pipefail
+
+EMAIL="${1:-erfi.anugrah@gmail.com}"
+PASS="$(openssl rand -base64 18 | tr -d '=+/[:space:]' | cut -c1-20)"
+
+ROWS="$(ssh servarr "docker exec -i open-webui python3 - '$EMAIL' '$PASS'" <<'PY'
+import sys, sqlite3, bcrypt
+email, pw = sys.argv[1], sys.argv[2]
+h = bcrypt.hashpw(pw.encode(), bcrypt.gensalt(12)).decode()
+db = sqlite3.connect('/app/backend/data/webui.db')
+cur = db.execute('UPDATE auth SET password=? WHERE email=?', (h, email))
+db.commit()
+print(cur.rowcount)
+PY
+)"
+
+if [ "$ROWS" != "1" ]; then
+  echo "ERROR: update touched $ROWS rows (expected 1) - is $EMAIL the right account?" >&2
+  exit 1
+fi
+
+# Verify through the edge. HTTP/2 curl POSTs hang here - force 1.1.
+CODE="$(curl -s -o /dev/null -w '%{http_code}' --http1.1 \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}" \
+  https://chat.erfi.io/api/v1/auths/signin)"
+
+if [ "$CODE" = "200" ]; then
+  echo "OK - verified signin via chat.erfi.io"
+else
+  echo "WARN: DB updated but signin check returned HTTP $CODE (edge hiccup? try the browser)" >&2
+fi
+
+echo "email:    $EMAIL"
+echo "temp pw:  $PASS"
+echo "-> change it in Settings -> Account once you're in"
