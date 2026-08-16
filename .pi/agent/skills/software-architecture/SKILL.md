@@ -5,7 +5,7 @@ description: Use when making system-level design decisions for a backend service
 
 # Software architecture — system shape
 
-`superpowers` covers the *process* (brainstorm → plan → TDD → review). `frontend-stack` and `supabase` cover *framework choices*. This skill covers the **system shape** between them: how modules talk, how the API is laid out, how data flows, how you observe failures.
+The methodology skills (`writing-specs`, `writing-plans`, the TDD rules, review) cover the *process*. `frontend-stack` and `supabase` cover *framework choices*. This skill covers the **system shape** between them: how modules talk, how the API is laid out, how data flows, how you observe failures.
 
 Grounded in the user's established Go pattern (`~/bonkled/`, `~/infra/ergo/caddy-compose/wafctl/`). Reads as opinionated defaults; deviate when justified.
 
@@ -307,13 +307,13 @@ Read `~/bonkled/AGENTS.md` for the canonical example.
 - Writing a one-off script or migration tool — full bounded-context skeleton is overkill.
 - Pure frontend work — see `frontend-stack`.
 - Pure DB design work — see `supabase-postgres-best-practices`.
-- Methodology (planning, TDD, review) — see `superpowers` skills.
+- Methodology (planning, TDD, review) - see the methodology skills (`writing-specs`, `writing-plans`, `systematic-debugging`).
 - Infra deployment shape — see `infrastructure-stack`.
 
 ## Related
 
-- **`superpowers/writing-plans`** — after this skill establishes shape, plans turn shape into ordered steps
-- **TDD (global agent rules)** — every implementation tier (`superpowers/test-driven-development` is disabled locally; the RED-GREEN-REFACTOR rules live in the global AGENTS.md)
+- **`writing-plans`** - after this skill establishes shape, plans turn shape into ordered steps
+- **TDD (global agent rules)** - every implementation tier (the RED-GREEN-REFACTOR rules live in the global agent rules, not a skill)
 - **`infrastructure-stack`** — how this service gets deployed
 - **`frontend-stack`** — when this service also has a frontend
 - **`supabase`** + **`supabase-postgres-best-practices`** — when persistence is Supabase rather than self-hosted Postgres

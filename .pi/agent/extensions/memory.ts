@@ -242,7 +242,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(memoryTool);
 
   // Kill switch for non-Anthropic providers (no prompt caching = per-turn
-  // cost). Mirrors SUPERPOWERS_OFF=1.
+  // cost).
   if (process.env.MEMORY_OFF === "1") return;
 
   // Inject memories as a system message at the top of every LLM call.

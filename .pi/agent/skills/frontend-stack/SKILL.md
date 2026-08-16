@@ -316,4 +316,4 @@ If backend includes Supabase, defer to the `supabase` skill for client setup, RL
 - `supabase` — backend when included
 - `supabase-postgres-best-practices` — DB schema decisions
 - `favicons-and-icons` — favicon set after scaffold
-- `superpowers/writing-plans` — methodology layer above (`brainstorming` is disabled locally)
+- `writing-specs` / `writing-plans` - methodology layer above (explicit-ask-only)

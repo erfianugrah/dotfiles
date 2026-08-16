@@ -120,7 +120,6 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `session-undo.ts` | `/undo` - opencode-style session revert (pi natively has only `/fork` + `/clone`). |
 | `slash-typo-guard.ts` | Catches typo'd slash commands (`/comapct`, `/qauit`) before they hit the LLM. |
 | `style-toggle.ts` | `/style` command for terse ↔ socratic output style; injects style prompt via `context` event. |
-| `superpowers.ts` | Intent-gated injection of obra/superpowers methodology. `SUPERPOWERS_OFF=1` to disable. |
 | `tool-activity.ts` | Live working message while any tool executes: `Working... <tool> <key-arg> · <elapsed>` updated 1/s via `ctx.ui.setWorkingMessage`, longest-running tool named + `+N more` when parallel; restores pi's default on idle / `agent_settled` / `session_shutdown`. Ends the multi-minute silent-spinner blackout on long tool calls. Tracker + label helpers (`lib/tool-label.ts`) unit-tested; born from the 2026-08-09 self-correcting-loop run. |
 | `tool-guard.ts` | Block-with-reason on common anti-patterns (`bash ls /docs/`, `webfetch <docs.erfi.io>`, etc) + per-session reformulation-loop detection. **Also inspects apply\_patch envelopes** so .env / lockfiles / .git / node\_modules can't be bypassed. |
 | `tool-output-prune.ts` | opencode-style surgical tool-output pruning to reclaim context from large tool results. |
@@ -163,6 +162,12 @@ Switch via `/settings` or set `"theme"` in `settings.json`.
 All skills live in `~/.pi/agent/skills/` (stow-linked from the repo).
 List loaded at startup; each has its own `SKILL.md` with the actual rules.
 
+Three layers, by how they fire:
+
+1. **Rules** - always-on system-prompt discipline (minimal-diff ladder, TDD-where-useful, verification-before-completion). Not skills.
+2. **Methodology** - explicit-ask-only, never auto-fire: `writing-specs`, `writing-plans`, `writing-skills`, `subagent-driven-development`, `systematic-debugging`, `verification-before-completion`, `requesting-code-review`, `self-correcting-loop`, `git-worktrees`.
+3. **Concrete-tech / domain** - auto-fire by trigger description: everything else in the table.
+
 | Skill | Purpose |
 |---|---|
 | `abuse-operations` | Anti-abuse / fraud-detection system design - risk scoring, indicator/signal design, blacklists, actor tracking, campaign/pivot detection for free-tier / signup / upload / API abuse. |
@@ -192,18 +197,24 @@ List loaded at startup; each has its own `SKILL.md` with the actual rules.
 | `mermaid-d2` | mermaid / d2 diagram authoring + render via local CLIs. |
 | `paste-formatting` | Get Markdown-drafted prose into rich-text destinations (Gmail / Docs / Slack / Notion) intact via the `mdclip` tool (Markdown -> HTML -> clipboard). |
 | `quarto` | Author / render / publish Quarto docs (`.qmd`, `_quarto.yml`) to HTML/PDF/Revealjs/Word/Typst; project types, code execution, freeze/cache, Reveal.js decks + self-verifying screenshots. |
+| `requesting-code-review` | Pre-merge code review pass via reviewer subagent with diff + plan context. Explicit-ask-only. |
 | `research` | SearXNG (`:8888`) + Playwright crawler (`:8889`) + OSINT (`:8890`). |
 | `pg-analyser` | Drive the `pg-analyser` CLI - Postgres performance auditor (formerly sbperf; advisors, SQL diagnostics, config, infra metrics -> self-contained HTML+PDF report, windowed trends). PAT-first + no-PAT customer-audit mode. |
 | `sbshift` | Drive the `sbshift` CLI - near-zero-downtime Postgres->Postgres migration via logical replication (cross-region / tier / self-hosted moves, cutover gate, checksum reconcile). |
 | `scaffold-new-project` | Orchestrate the concrete-tech skills (frontend-stack, infrastructure-stack, software-architecture, design-utilitarian, ...) to bootstrap a new project with the user's conventions baked in. |
 | `self-correcting-loop` | Sensor-gated autonomous loop driver (`loop` + `browser-assert` bins, `@erfianugrah/pi-loop`). Drives a fresh `pi -p` each iteration until deterministic sensors (build/lint/test/typecheck/structural/mutation/e2e) pass; governor with model-escalation ladder, git checkpoint/rollback, write-scope, per-sensor remediation hints, and freeze mode; dependency-free headless-Chromium behaviour sensor. |
 | `software-architecture` | DDD-lite system design for Go backends + full-stack apps. |
+| `subagent-driven-development` | Execute a large multi-task plan with a fresh subagent per task plus two-stage review. Heavyweight; explicit-ask-only. |
 | `supabase` | Supabase products (Database / Auth / Storage / Realtime / Edge Functions / pgvector / pgmq / Branching) + `@supabase/server` BFF patterns + RLS + migrations + connection pooling + Postgres extensions. |
 | `supabase-postgres-best-practices` | Postgres perf + index choice + connection management + RLS patterns. |
+| `systematic-debugging` | 4-phase root-cause investigation for recurring/intermittent bugs, after a first fix has failed. |
 | `tailscale-homelab` | SSH into and operate the homelab over Tailscale — identity-file convention, dual `10.0.X.Y` / `10.68.X.Y` alias pattern, MagicDNS, ACL grants, failure-mode diagnostic order. Cross-references every other infra skill. |
-| `terraform` | OpenTofu / Terraform — module structure, R2/S3 state backends, SOPS+age secrets, `import` blocks, Cloudflare provider patterns, `for_each` + `dynamic` block recipes. |
+| `terraform` | OpenTofu / Terraform - module structure, R2/S3 state backends, SOPS+age secrets, `import` blocks, Cloudflare provider patterns, `for_each` + `dynamic` block recipes. |
+| `verification-before-completion` | Evidence-before-assertions checklist: never claim done/fixed/passing without running the verification command and quoting output. |
 | `whisper` | whisper-transcribe HTTP API on `localhost:7860`. |
-| `superpowers/` | 14 subskills (obra/superpowers v5.1.0 via `superpowers-sync`): brainstorming, TDD, systematic-debugging, writing-plans, executing-plans, receiving / requesting code review, finishing-a-development-branch, using-git-worktrees, dispatching-parallel-agents, subagent-driven-development, verification-before-completion, writing-skills, using-superpowers. |
+| `writing-plans` | Implementation plan docs (`docs/plans/YYYY-MM-DD-<feature>.md`) with bite-sized tasks and per-file TDD checkpoints. Explicit-ask-only. |
+| `writing-skills` | Meta-skill: SKILL.md authoring conventions, description-trigger calibration, skill lifecycle policy. |
+| `writing-specs` | Spec docs (`docs/specs/YYYY-MM-DD-<feature>.md`) with EARS acceptance criteria + requirement IDs that flow into writing-plans tasks and loop sensors. Our SDD artifact; explicit-ask-only. |
 
 ## What's intentionally NOT in this directory
 
@@ -224,7 +235,7 @@ pi -c                       # continue most recent
 
 # Customize
 /style                      # toggle terse ↔ socratic
-/skill:test-driven-development  # explicitly load a skill
+/skill:writing-specs         # explicitly load a skill
 /session-name <label>       # name session for pi -r selector
 /bookmark [label]           # bookmark last assistant message
 /trigger-compact            # compact conversation now (auto at 100k)
@@ -288,10 +299,6 @@ imports.
 
 ```bash
 # Methodology / context injection
-SUPERPOWERS_OFF=1                 # disable superpowers methodology injection entirely
-SUPERPOWERS_MINIMAL=1             # inject the 4-essential-skill version (~250 tok, vs ~1.4k full)
-SUPERPOWERS_BOOTSTRAP=<path>      # custom using-superpowers SKILL.md path
-SUPERPOWERS_INTENT=<regex>        # override intent-match regex (forces inject on match)
 MEMORY_OFF=1                      # don't inject memories into context
 MEMORY_INJECT_MAX_BYTES=8000      # cap on injected memory block (oldest dropped)
 

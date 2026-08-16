@@ -167,4 +167,4 @@ If `.git/index` itself is corrupt: `rm .git/index && git reset` rebuilds it from
 
 - `gh` skill — GitHub-specific (PRs, issues, releases)
 - `gh-search` skill — cross-repo code/issue search
-- `superpowers/systematic-debugging` skill — general debugging methodology (this skill is the git-specific specialization)
+- `systematic-debugging` skill - general debugging methodology (this skill is the git-specific specialization)

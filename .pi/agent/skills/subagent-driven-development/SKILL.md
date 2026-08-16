@@ -141,7 +141,7 @@ Task 1: Hook installation script
 
 Implementer: "Before I begin - should the hook be installed at user or system level?"
 
-You: "User level (~/.config/superpowers/hooks/)"
+You: "User level (~/.config/myapp/hooks/)"
 
 Implementer: "Got it. Implementing now..."
 [Later] Implementer:
@@ -266,14 +266,14 @@ Done!
 
 ## Integration
 
-**Required workflow skills:**
-- **git-worktrees** (local skill) - Ensures isolated workspace (creates one or verifies existing)
-- **superpowers:writing-plans** - Creates the plan this skill executes
-- **superpowers:requesting-code-review** - Code review template for reviewer subagents
-- **Finish the development branch** - merge/PR after all tasks (superpowers:finishing-a-development-branch is disabled locally)
+**Workflow skills:**
+- **git-worktrees** - Ensures isolated workspace (creates one or verifies existing)
+- **writing-plans** - Creates the plan this skill executes
+- **requesting-code-review** - Code review template for reviewer subagents
+- Merge/PR after all tasks is a plain git/gh step (no dedicated skill locally)
 
 **Subagents should use:**
 - **TDD (global agent rules)** - Subagents follow TDD for each task
 
 **Alternative workflow:**
-- **superpowers:executing-plans** - disabled locally; run a parallel session manually instead
+- Inline execution - run the plan task-by-task in-session with checkpoints (no separate executing-plans skill locally)

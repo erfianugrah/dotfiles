@@ -3,8 +3,8 @@
 Cross-platform dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/).
 Targets Arch Linux (native + WSL2), macOS, and Steam Deck (SteamOS via Nix).
 
-The pi coding-agent harness under `.pi/agent/` (65 extensions, 53 skills +
-superpowers subskills, 8 prompt templates, theme) is also packaged as a **pi package**
+The pi coding-agent harness under `.pi/agent/` (64 extensions, 61 skills,
+8 prompt templates, theme) is also packaged as a **pi package**
 (`@erfianugrah/pi-harness`, root `package.json`). Install it standalone on any
 machine - no stow required - with `pi install git:github.com/erfianugrah/dotfiles`.
 See [`.pi/agent/README.md`](.pi/agent/README.md) and the "Cross-machine install"
@@ -47,10 +47,6 @@ packages/
 
 bin/
   caddyfmt                     # Caddyfile formatter (Python, stdin/stdout)
-  superpowers-sync             # sync obra/superpowers skills/ into .pi/agent/skills/superpowers/
-                               # → see .pi/agent/skills/superpowers/.sync.json for ref/sha/timestamp
-                               # → conditional injection via pi's superpowers.ts extension
-                               # → run with --status, --check, --ref <tag|sha>, --main, or --help
 
 .config/
   atuin/config.toml            # Atuin shell history (self-hosted sync)
@@ -65,7 +61,7 @@ bin/
 
 .pi/agent/                     # pi AI coding agent (PRIMARY harness; canonical skills + resources)
   APPEND_SYSTEM.md             # appended: Commit/PR, Safety, Epistemic calibration, Confidential-IDs, Output
-  skills/                      # 53 skills + superpowers subskills (canonical since 2026-05-27)
+  skills/                      # 61 skills, flat (canonical since 2026-05-27; superpowers tree absorbed 2026-08-16)
   prompts/                     # markdown sources loaded by extensions
     local-model-rules.md       #   prepended only for gemma/qwen/llama-server models
     commit.md, pr.md, review.md, test.md, init.md, rollback.md, docs-reference.md
@@ -76,7 +72,7 @@ bin/
     exa.ts, webfetch.ts, oci-tags.ts, web-research.ts
     docs.ts, context7.ts, session-search.ts
     memory.ts, todowrite.ts, task.ts, question.ts
-    git-gh-gate.ts, superpowers.ts, local-model-rules.ts, lsp/
+    git-gh-gate.ts, local-model-rules.ts, lsp/
     render-diagram.ts          #   mermaid + d2 via local mmdc / d2 CLI
     build-favicon-set.ts       #   SVG/PNG → full PWA favicon set
   themes/                      # pi TUI themes (opencode-dark, etc.)
@@ -752,15 +748,15 @@ ast-grep for large edits, lockfile guards).
 
 ### Skills (`.pi/agent/skills/`)
 
-Harness audit 2026-05-25: superpowers methodology gates (using-superpowers,
-brainstorming, executing-plans, dispatching-parallel-agents,
-receiving-code-review, using-git-worktrees, test-driven-development,
-finishing-a-development-branch) renamed `SKILL.md.disabled` after the
-closed brainstorm → plan → execute loop was found to actively forbid handoff
-to the user's concrete-tech skills. Replaced by `scaffold-new-project`
-orchestrator + tightened descriptions on the survivors so they only fire
-on explicit invoke. See commit message of the audit refactor for full
-rationale.
+Harness audit 2026-05-25 disabled the superpowers methodology gates; the
+superpowers tree was fully removed 2026-08-16. The six surviving skills
+(`writing-plans`, `writing-skills`, `subagent-driven-development`,
+`systematic-debugging`, `verification-before-completion`,
+`requesting-code-review`) are now first-class top-level skills - vendored,
+locally curated, no upstream sync. TDD lives in the global agent rules, not
+a skill. `writing-specs` (added the same day) is the spec-driven-design
+artifact upstream of `writing-plans`: EARS acceptance criteria with
+requirement IDs that flow into plan tasks and loop sensors.
 
 **Scaffolding + process** (the orchestrators):
 
@@ -768,7 +764,7 @@ rationale.
 |---|---|
 | `scaffold-new-project` | Triggers on "start / build / scaffold a new X" - routes to the relevant concrete-tech skills below, asks at most 3 batched questions, produces project skeleton + repo-level AGENTS.md cross-referencing user-level skills. **No design doc, no plan doc** - just code with conventions baked in |
 | `software-architecture` | Backend/system design - DDD bounded contexts, interface-driven deps, REST+WS surface with correlation IDs, Postgres+Valkey persistence (with the user's signature flat-single-binary go:embed full-stack Go pattern documented), slog+Prometheus observability |
-| `superpowers` (residual) | obra/superpowers - only `verification-before-completion` (always-on), `writing-plans`, `subagent-driven-development`, `systematic-debugging`, `requesting-code-review`, `writing-skills` survive as 6 opt-in subskills. Conditional injection extension defaults to OFF; opt back in per-session via `SUPERPOWERS_ON=1` |
+| methodology skills | `writing-specs` / `writing-plans` / `writing-skills` / `subagent-driven-development` / `systematic-debugging` / `verification-before-completion` / `requesting-code-review` - explicit-ask-only process skills, vendored from the superpowers cut + our own additions. See `.pi/agent/README.md` for the three-layer taxonomy |
 | `sa-pov` | Solutions-Architect PoV / PoC methodology - scope + negotiate success criteria, validate each live (not from docs), solution runbook with real evidence, package for the customer |
 | `self-correcting-loop` | Unattended sensor-gated agent loop - runs a fresh `pi -p` per iteration until computational + inferential sensors (build / test / judge / visual) pass. Governor: wall-clock budgets per sensor + per agent (process-group kill, so a hang can't stall a run), optional `systemd-run` cgroup limits, git checkpoint/rollback, write-scope fence, bwrap jail, model-escalation ladder. Steering: `rules` + `guide` hot-reloaded from the manifest between iterations, and `--trial` verdicts the *harness* before you spend the budget. `judge --adversarial N` runs N independent reviewers (any reject = fail) |
 | `epistemics` | Answering-from-memory discipline - the provenance test, cheapest-verifier routing table per claim type, the four claim labels, calibrate-do-not-hedge, and the hold-ground-under-pushback protocol. Third leg beside `verification-before-completion` (own work) and `validating-empirically` (external runtime behaviour); companion to the `epistemic-guard` extension |
@@ -843,13 +839,6 @@ rationale.
 |---|---|
 | `git-troubleshooting` | Diagnostic battery for `git mv` / `git add` / pathspec failures - gitignore-first hypothesis, the symptom → cause table, recovery patterns |
 
-`bin/superpowers-sync` keeps `superpowers/` synced from
-obra/superpowers upstream; see `.pi/agent/skills/superpowers/.sync.json`
-for the pinned ref/sha. Run `--status`, `--check`, `--ref <tag|sha>`,
-`--main`. **Note**: the sync only refreshes upstream skills; it doesn't
-undo the `.disabled` renames from the audit - those are intentional
-local overrides.
-
 ### pi extensions (`.pi/agent/extensions/`)
 
 Custom TypeScript plugins that register tools, gates, TUI behaviour, and
@@ -913,7 +902,6 @@ DB access, session lifecycle hooks).
 |---|---|
 | `tool-routing.ts` | Prepends `prompts/tool-routing.md` (above the `tool-routing:end` marker; legacy-path fallback) with CRITICAL framing on every user prompt |
 | `local-model-rules.ts` | Per-model rules for gemma / qwen / llama-server |
-| `superpowers.ts` | Conditional injection of using-superpowers/SKILL.md on build/debug intent |
 | `style-toggle.ts` | Per-session output-style switcher |
 
 **Session lifecycle + UX:**

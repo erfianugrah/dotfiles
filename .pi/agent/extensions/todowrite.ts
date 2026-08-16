@@ -2,7 +2,7 @@
  * todowrite — session-scoped todo list, agent-managed.
  *
  * Pi philosophy is "use a TODO.md file, todos in chat context get stale".
- * But the user's existing skills (superpowers) reference TodoWrite by name
+ * But the user's existing methodology skills reference TodoWrite by name
  * and the workflow is established. This extension bridges that gap by
  * registering a `todowrite` tool with the opencode semantics — the agent
  * passes the full updated todo list each call, and we render it to a

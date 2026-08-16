@@ -95,10 +95,9 @@ verify with `git worktree list` first.
 
 ## Notes
 
-- The superpowers `using-git-worktrees` skill is disabled in this setup. It
-  framed worktrees as a branch-management convenience; the reason they are
-  mandatory here is concurrency safety, which is a different argument with
-  different mechanics.
+- Worktrees are often framed as a branch-management convenience; the reason
+  they are mandatory here is concurrency safety, which is a different argument
+  with different mechanics.
 - A worktree is also the right answer for "try a risky refactor without
   disturbing the main tree", but that case tolerates being wrong. The
   concurrent-agent case does not.

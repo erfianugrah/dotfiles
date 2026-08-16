@@ -15,7 +15,7 @@ You write test cases (pressure scenarios with subagents), watch them fail (basel
 
 **Core principle:** If you didn't watch an agent fail without the skill, you don't know if the skill teaches the right thing.
 
-**REQUIRED BACKGROUND:** You MUST understand the RED-GREEN-REFACTOR TDD cycle (global agent rules; `superpowers:test-driven-development` is disabled locally) before using this skill. This skill adapts TDD to documentation.
+**REQUIRED BACKGROUND:** You MUST understand the RED-GREEN-REFACTOR TDD cycle (it lives in the global agent rules, not a skill) before using this skill. This skill adapts TDD to documentation.
 
 **Official guidance:** For Anthropic's official skill authoring best practices, see anthropic-best-practices.md. This document provides additional patterns and guidelines that complement the TDD-focused approach in this skill.
 
@@ -56,7 +56,41 @@ The entire skill creation process follows RED-GREEN-REFACTOR.
 - One-off solutions
 - Standard practices well-documented elsewhere
 - Project-specific conventions (put in CLAUDE.md)
-- Mechanical constraints (if it's enforceable with regex/validation, automate it—save documentation for judgment calls)
+- Mechanical constraints (if it's enforceable with regex/validation, automate it - save documentation for judgment calls)
+
+## Skill Lifecycle (local policy)
+
+How skills are born, change, and die in this tree. Distilled from the
+2026-05-25 superpowers audit, the 2026-08-13 corpus review, and the
+2026-08-16 superpowers removal.
+
+- **Born from proven patterns, not speculation.** A skill generalizes
+  something that already worked by hand (sa-pov grew out of Supabase PoV
+  harness scripts; validating-empirically split out of sa-pov once the
+  discipline stood alone). If the pattern has happened once, it is not yet
+  a skill.
+- **Descriptions are trigger surfaces, not docs.** Lead with "Use when ..."
+  and the firing conditions; coverage/process summaries belong in the body.
+  Heavyweight process skills get "Use ONLY when the user explicitly asks" -
+  auto-fire is the recurring enemy.
+- **Skills track the system.** When the thing a skill describes changes,
+  update the skill in the same commit (the lexicanum dev-watcher pattern).
+  A stale skill is a defect, not a backlog item.
+- **Delete, don't disable.** `.disabled` files accumulate ghosts. Git
+  history is the archive - remove the skill and reference the removal
+  commit if the rationale matters.
+- **No upstream sync of vendored skills.** Once a third-party skill is
+  forked into this tree it is ours: curated locally, never re-synced. A
+  sync pipeline over locally-edited content is a merge conflict on a
+  schedule.
+- **Batch edits validate with a real YAML parser.** The 2026-08-13
+  description sweep broke two frontmatters with unquoted `: ` in plain
+  scalars while line-prefix checks passed. Parse, don't eyeball.
+- **Dated lessons self-prune.** Inline dated lesson entries (the
+  self-correcting-loop pattern) are institutional memory, but when a
+  lesson's warning becomes the documented default behavior, fold it into
+  the body and delete the dated entry. The file should not grow
+  monotonically.
 
 ## Skill Types
 
@@ -280,8 +314,8 @@ wc -w skills/path/SKILL.md
 **When writing documentation that references other skills:**
 
 Use skill name only, with explicit requirement markers:
-- ✅ Good: `**REQUIRED SUB-SKILL:** Use superpowers:test-driven-development`
-- ✅ Good: `**REQUIRED BACKGROUND:** You MUST understand superpowers:systematic-debugging`
+- ✅ Good: `**REQUIRED SUB-SKILL:** Use writing-plans`
+- ✅ Good: `**REQUIRED BACKGROUND:** You MUST understand systematic-debugging`
 - ❌ Bad: `See skills/testing/test-driven-development` (unclear if required)
 - ❌ Bad: `@skills/testing/test-driven-development/SKILL.md` (force-loads, burns context)
 

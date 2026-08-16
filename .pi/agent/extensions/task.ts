@@ -43,8 +43,7 @@ import { summarizeToolArgs, formatElapsed } from "./lib/tool-label.js";
 // `minimal` = pass --no-extensions --no-skills --no-prompt-templates so the
 // subagent process skips loading the parent's full extension surface. Only
 // the `--tools` whitelist is available. Big startup-tax saving for read-only
-// exploration: no FTS5 worker, no tool-routing inject, no memory inject, no
-// superpowers regex match, etc.
+// exploration: no FTS5 worker, no tool-routing inject, no memory inject.
 //
 // `loadExtensions` = explicit list of extension files to re-include via
 // `-e <path>` (still works alongside --no-extensions per pi --help). Use
@@ -63,14 +62,13 @@ const SUBAGENT_PRESETS: Record<
 		tools: [], // empty = no restriction (all tools available)
 		description: "General-purpose subagent with full tool access. Use for multi-step research + implementation tasks.",
 	},
-	// Alias for Claude Code-style subagent type names baked into obra/superpowers
-	// skills (`requesting-code-review/SKILL.md`, `subagent-driven-development/*`,
-	// `writing-plans/plan-document-reviewer-prompt.md`, etc.). Without this alias
-	// those skills fail schema validation when the model passes
+	// Alias for Claude Code-style subagent type names baked into the methodology
+	// skills (`requesting-code-review/SKILL.md`, `subagent-driven-development/*`).
+	// Without this alias those skills fail schema validation when the model passes
 	// subagent_type="general-purpose".
 	"general-purpose": {
 		tools: [],
-		description: "Alias for `general` - accepts Claude Code-style subagent type names from obra/superpowers skills.",
+		description: "Alias for `general` - accepts Claude Code-style subagent type names from the methodology skills.",
 	},
 };
 
