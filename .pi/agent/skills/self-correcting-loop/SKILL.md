@@ -397,6 +397,19 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
   prints PENDING HUMAN REVIEW and exits `3` instead of `0`, so CI can route
   green-but-high-blast-radius work through a human gate. The baseline-green
   early exit is unaffected.
+- **Judge-only-red endgame (operator policy, not a harness flag).** If every
+  computational sensor is green and the judge is the ONLY red sensor for 3
+  consecutive iterations, stop the run and land the judge's remaining list
+  by hand (or one frontier-worker pass) - do not burn the rest of the
+  iteration budget pleasing a fail-closed judge with a weaker writer.
+  Measured 2026-08-13: a local rung orbited a frontier judge for 6
+  iterations, each rewrite fixing the named items and inventing fresh
+  breakage; the operator landed the list first try. Two preconditions
+  before treating a run as judge-only-red: (1) add cheap computational
+  floor sensors for shape invariants first - kept-on-changed failure text
+  can let a strictly-worse diff survive when the judge is the sole red;
+  (2) confirm the judge's remaining asks are enumerable nits, not a real
+  design objection - this policy covers taste/schema nits, not substance.
 - `after` - names of sensors that must PASS in the same pass before this one
   runs. Cost control for expensive gates: on a real run the judge cost 147s of
   a frontier model per iteration while the other 22 sensors together took under

@@ -176,10 +176,15 @@ Three layers, by how they fire:
 | `ci-workflows` | GitHub / Gitea Actions workflows, action pinning, CI patterns. |
 | `cloudflare` | Cloudflare API + `wrangler` CLI (Workers / Pages / R2 / D1 / KV / Tunnels) + bulk Python automation + `cf-terraforming` import workflow. Pairs with `terraform`. |
 | `comfyui` | ComfyUI image-gen via llm-compose proxy on `localhost:11434`. |
+| `compose-backups` | Automated backup sidecars for docker-compose stacks (offen/docker-volume-backup), restore drills, retention pruning to R2/MinIO. |
 | `composer` | Self-hosted Docker Compose management platform (your deployed instance). |
 | `deck-screenshot` | Screenshot a reveal.js / Quarto revealjs deck (one slide or a whole-deck contact sheet) so the agent can SEE layout/overflow. Raw headless chromium + decktape. |
 | `design-utilitarian` | McMaster-Carr-style information-dense UI ethos. |
+| `discord-wipe` | Delete the user's own Discord messages (guild/channel/DM purge, rolling retention) via the discord-wipe-go CLI/daemon on servarr. |
 | `docker` | Dockerfile authoring, buildx (multi-arch + cache mounts + secrets), image inspection, registry workflows, container debugging. Companion to `infrastructure-stack` (Compose) and `composer` (GitOps). |
+| `drawbridge` | mTLS-gated, route-allowlisted, audited reverse proxy for the Docker Engine API; fronts servarr's docker.sock so composer manages it over the tailnet. |
+| `eaves` | Read-only CLI for the NixOS edge router - DHCP leases, NAT, conntrack, nftables, vnstat, doctor suite, committed fixtures for offline work. |
+| `epistemics` | Answering-from-memory discipline - provenance test, cheapest-verifier routing, claim labels, hold-ground-under-pushback. Companion to the `epistemic-guard` extension. |
 | `erfi-voice` | Draft replies / emails / PR comments in Erfi's voice (direct register, verifiable references) rather than generic-assistant tone. |
 | `favicons-and-icons` | Favicon + PWA icon set generation. |
 | `fly` | Fly.io app lifecycle via `flyctl` — deploy, secrets (Vaultwarden → flyctl set), certs + DNS, machines, volumes, scaling, debug, cost knobs. |
@@ -187,34 +192,45 @@ Three layers, by how they fire:
 | `gh` | Full GitHub CLI workflow — PR lifecycle, issue ops, releases with assets, Actions runs + cache, auth scopes, repo ops, extensions. Sibling to `gh-search`. |
 | `gh-search` | Cross-repo GitHub code/issue/PR search via `gh search`. Sibling to `gh` (which covers everything-but-search). |
 | `git-troubleshooting` | Diagnostic battery for git mv/add/rm/checkout failures - "pathspec did not match", "not under version control", gitignore traps, dirty-tree + detached-HEAD recovery. |
+| `git-worktrees` | Worktrees as the default for parallel agent work (loops, concurrent sessions); concurrency-safety argument, `.worktrees/<task>` convention, the `.git`-is-a-file exclude gotcha. |
 | `gloryhole` | Self-built DNS server `glory-hole` — Go binary + embedded Unbound + Astro/React dashboard. Pi-hole-style filtering, expr policy engine, sharded LRU cache, REST/WS API, DoT/DoH. Home + Fly deploy profiles. |
 | `gocurl` | Drive the `gocurl` CLI - HTTP latency measurement (DNS/TCP/TLS/server/transfer phase breakdown), load testing (p95/p99, RPS), streaming/SSE validation, Prometheus/JSON/CSV output. |
 | `infrastructure-stack` | Docker Compose with bridge-network + static-IP + host-mode-Caddy reverse-proxy conventions; per-stack AGENTS.md, subnet allocation, secrets, backups, when-to-graduate-to-k3s. |
 | `jellyfin` | Media-consumer stack on `servarr` - Jellyfin (NVENC transcoding), Jellyseerr (request routing into the arrs), Navidrome. Cross-stack `media` network. |
 | `knot-dns` | Self-hosted authoritative DNS — Knot DNS on Fly anycast, TSIG/rfc2136 to Caddy, CF→Knot migration. Sibling to `fly`, `cloudflare`, `caddy`. |
 | `knotctl` | Drive the `knotctl` CLI for live TSIG/RFC2136 DNS edits against the knotea authority (add/rm/set/ls/export/apply, declarative YAML reconcile). Sibling to knot-dns. |
+| `lexicanum` | Authoring/restructuring docs on the lexicanum site (~/lexicanum, erfi.dev) - taxonomy frontmatter, guide vs reference, IEEE-footnote citations, build/test debugging. |
 | `lora-train` | kohya sd-scripts LoRA training via proxy on `localhost:11434`. |
+| `memledger` | Cross-client session search (pi + opencode + claude) beyond the 30-day local retention, plus operating the memledger stack itself (ingester/prune CLI, schema, edge gate). |
 | `mermaid-d2` | mermaid / d2 diagram authoring + render via local CLIs. |
 | `paste-formatting` | Get Markdown-drafted prose into rich-text destinations (Gmail / Docs / Slack / Notion) intact via the `mdclip` tool (Markdown -> HTML -> clipboard). |
 | `quarto` | Author / render / publish Quarto docs (`.qmd`, `_quarto.yml`) to HTML/PDF/Revealjs/Word/Typst; project types, code execution, freeze/cache, Reveal.js decks + self-verifying screenshots. |
+| `relocating-repos` | Moving/renaming/consolidating directories or git repos on a machine - pre-move entanglement survey, cross-tree reference sweep, post-move verification. |
 | `requesting-code-review` | Pre-merge code review pass via reviewer subagent with diff + plan context. Explicit-ask-only. |
 | `research` | SearXNG (`:8888`) + Playwright crawler (`:8889`) + OSINT (`:8890`). |
+| `sa-pov` | Solutions-Architect PoV/PoC methodology - success-criteria scoping, kickoff doc, live validation on throwaway envs, solution runbook with real evidence. |
 | `pg-analyser` | Drive the `pg-analyser` CLI - Postgres performance auditor (formerly sbperf; advisors, SQL diagnostics, config, infra metrics -> self-contained HTML+PDF report, windowed trends). PAT-first + no-PAT customer-audit mode. |
+| `powershell` | Run/write pwsh scripts locally or on Windows machines over SSH; the powershell tool, Get-WinEvent/Get-CimInstance patterns, PSRemoting. |
 | `sbshift` | Drive the `sbshift` CLI - near-zero-downtime Postgres->Postgres migration via logical replication (cross-region / tier / self-hosted moves, cutover gate, checksum reconcile). |
 | `scaffold-new-project` | Orchestrate the concrete-tech skills (frontend-stack, infrastructure-stack, software-architecture, design-utilitarian, ...) to bootstrap a new project with the user's conventions baked in. |
 | `self-correcting-loop` | Sensor-gated autonomous loop driver (`loop` + `browser-assert` bins, `@erfianugrah/pi-loop`). Drives a fresh `pi -p` each iteration until deterministic sensors (build/lint/test/typecheck/structural/mutation/e2e) pass; governor with model-escalation ladder, git checkpoint/rollback, write-scope, per-sensor remediation hints, and freeze mode; dependency-free headless-Chromium behaviour sensor. |
 | `software-architecture` | DDD-lite system design for Go backends + full-stack apps. |
+| `souin` | Edge HTTP cache on the Caddy stack (cache-handler + nuts storage) - cache misses, Cache-Status anomalies, purge/reclaim, the test harness. |
 | `subagent-driven-development` | Execute a large multi-task plan with a fresh subagent per task plus two-stage review. Heavyweight; explicit-ask-only. |
 | `supabase` | Supabase products (Database / Auth / Storage / Realtime / Edge Functions / pgvector / pgmq / Branching) + `@supabase/server` BFF patterns + RLS + migrations + connection pooling + Postgres extensions. |
 | `supabase-postgres-best-practices` | Postgres perf + index choice + connection management + RLS patterns. |
 | `systematic-debugging` | 4-phase root-cause investigation for recurring/intermittent bugs, after a first fix has failed. |
 | `tailscale-homelab` | SSH into and operate the homelab over Tailscale — identity-file convention, dual `10.0.X.Y` / `10.68.X.Y` alias pattern, MagicDNS, ACL grants, failure-mode diagnostic order. Cross-references every other infra skill. |
 | `terraform` | OpenTofu / Terraform - module structure, R2/S3 state backends, SOPS+age secrets, `import` blocks, Cloudflare provider patterns, `for_each` + `dynamic` block recipes. |
+| `validating-empirically` | Test load-bearing claims about EXTERNAL systems on throwaway infra before asserting them; doc-reads are not runtime verification. |
 | `verification-before-completion` | Evidence-before-assertions checklist: never claim done/fixed/passing without running the verification command and quoting output. |
+| `waf-api` | wafctl WAF management API + waf-dashboard UI - endpoint CRUD, event export, store-vs-deploy split, adding event/rule/condition types end-to-end. |
 | `whisper` | whisper-transcribe HTTP API on `localhost:7860`. |
 | `writing-plans` | Implementation plan docs (`docs/plans/YYYY-MM-DD-<feature>.md`) with bite-sized tasks and per-file TDD checkpoints. Explicit-ask-only. |
 | `writing-skills` | Meta-skill: SKILL.md authoring conventions, description-trigger calibration, skill lifecycle policy. |
 | `writing-specs` | Spec docs (`docs/specs/YYYY-MM-DD-<feature>.md`) with EARS acceptance criteria + requirement IDs that flow into writing-plans tasks and loop sensors. Our SDD artifact; explicit-ask-only. |
+| `writing-structure` | Long-form structure (heading hierarchy, paragraph order, thesis placement) + citation conventions (Source lines, APA 7, RFC-style [TAG]). Not voice (erfi-voice) or paste mechanics (paste-formatting). |
+| `xikectl` | Read-only switch state (VLANs, interfaces, MAC table, MTU/jumbo, STP, LLDP, stats) from the XikeStor SKS8300-12E2T2X via the xikectl CLI; smoke/verify suites. |
 
 ## What's intentionally NOT in this directory
 

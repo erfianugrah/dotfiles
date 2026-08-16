@@ -123,7 +123,7 @@ Every step must contain the actual content an engineer needs. These are **plan f
 - **If the plan will be executed by the self-correcting loop** (`.pi/harness.json`
   in the target repo), OMIT the per-task commit steps. The loop owns git state
   (index checkpoints + ref-guard); a committing agent fights the governor and
-  pollutes its own attempt history. Per-task commits are for human/executing-plans
+  pollutes its own attempt history. Per-task commits are for human/inline
   execution only.
 
 ## Self-Review
@@ -146,7 +146,7 @@ After saving the plan, offer execution choice:
 
 **1. Subagent-Driven (recommended)** - I dispatch a fresh subagent per task, review between tasks, fast iteration
 
-**2. Inline Execution** - Execute tasks in this session using executing-plans, batch execution with checkpoints
+**2. Inline Execution** - Execute tasks in this session, batch execution with checkpoints
 
 **Which approach?"**
 

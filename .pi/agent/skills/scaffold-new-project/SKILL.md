@@ -1,6 +1,6 @@
 ---
 name: scaffold-new-project
-description: Use when the user asks to start, scaffold, build, create, or bootstrap a new project, app, service, tool, site, dashboard, or repo. Orchestrates the user's concrete-tech skills (frontend-stack, infrastructure-stack, software-architecture, design-utilitarian, supabase, terraform, cloudflare, fly, ci-workflows, docker, composer) so the user's conventions are applied without re-asking. Replaces the plan-doc methodology chain (brainstorm, write plan, execute) for greenfield work - no design doc artifact, no plan doc, just scaffolded code with the right defaults baked in.
+description: Use when the user asks to start, scaffold, build, create, or bootstrap a new project, app, service, tool, site, dashboard, or repo. Orchestrates the user's concrete-tech skills (frontend-stack, infrastructure-stack, software-architecture, design-utilitarian, supabase, terraform, cloudflare, fly, ci-workflows, docker, composer) so the user's conventions are applied without re-asking. Replaces the spec/plan doc chain (writing-specs, writing-plans) for greenfield work - no design doc artifact, no plan doc, just scaffolded code with the right defaults baked in.
 ---
 
 # scaffold-new-project — orchestrator for greenfield work

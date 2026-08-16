@@ -209,7 +209,7 @@ the server with the SDK's own stdio client - no `claude` binary needed.
 | `inline-bash.ts` | NATIVE | - | CC already expands `!` / `!{...}` in prompts. Verify syntax parity, else HOOK on `UserPromptSubmit`. |
 | `notify.ts` | HOOK | `Notification` / `Stop` | desktop ping; CC has a Notification hook already. |
 | `local-model-rules.ts` | SKIP | - | pi-specific (llama-server gemma/qwen). Irrelevant to CC's model set. |
-| `superpowers.ts` | REMOVED 2026-08-16 | - | Extension deleted with the superpowers tree; the methodology skills are plain top-level skills, 6 symlinked into `.claude/skills/`. |
+| `superpowers.ts` | REMOVED 2026-08-16 | - | Extension deleted with the superpowers tree; the methodology skills are plain top-level skills, 7 symlinked into `.claude/skills/`. |
 
 ### Bucket 1 - native in CC, skip
 
@@ -316,7 +316,7 @@ already provides it · SKIP = pi TUI/session internals, no CC analogue.
 | notify | DONE (HOOK) | Stop |
 | cd-agents-reload | DONE (HOOK) | PreToolUse Bash additionalContext (live-verified) |
 | secret-output-guard | DONE (HOOK) | PreToolUse Bash deny (env dumps) + PostToolUse (Bash\|Read\|Grep\|WebFetch) leak alarm - CC cannot mutate tool_response, so pi's redaction layer ports as detection-only additionalContext |
-| methodology skills | DONE (CMD) | 6 skills symlinked into .claude/skills |
+| methodology skills | DONE (CMD) | 7 skills symlinked into .claude/skills |
 | prompt templates | DONE (CMD) | commit/pr/test/rollback -> .claude/commands |
 | grep | NATIVE | CC Grep |
 | glob | NATIVE | CC Glob |
@@ -367,8 +367,8 @@ Hooks added (10): confidential-write-guard, git-gh-gate, tool-guard,
 bash-error-hints, entity-qualifier-nudge, skill-guard, lookup-before-ask,
 notify, cd-agents-reload, epistemic-guard - plus ascii-guard.
 
-**CMD group DONE:** the 6 ACTIVE methodology skills (writing-plans,
-writing-skills, subagent-driven-development, systematic-debugging,
+**CMD group DONE:** the 7 ACTIVE methodology skills (writing-specs,
+writing-plans, writing-skills, subagent-driven-development, systematic-debugging,
 verification-before-completion, requesting-code-review) symlinked into
 `.claude/skills/`; 4 portable prompt templates symlinked into
 `.claude/commands/` (commit, pr, test, rollback). Skipped by design: init/review

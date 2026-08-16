@@ -769,6 +769,9 @@ requirement IDs that flow into plan tasks and loop sensors.
 | `self-correcting-loop` | Unattended sensor-gated agent loop - runs a fresh `pi -p` per iteration until computational + inferential sensors (build / test / judge / visual) pass. Governor: wall-clock budgets per sensor + per agent (process-group kill, so a hang can't stall a run), optional `systemd-run` cgroup limits, git checkpoint/rollback, write-scope fence, bwrap jail, model-escalation ladder. Steering: `rules` + `guide` hot-reloaded from the manifest between iterations, and `--trial` verdicts the *harness* before you spend the budget. `judge --adversarial N` runs N independent reviewers (any reject = fail) |
 | `epistemics` | Answering-from-memory discipline - the provenance test, cheapest-verifier routing table per claim type, the four claim labels, calibrate-do-not-hedge, and the hold-ground-under-pushback protocol. Third leg beside `verification-before-completion` (own work) and `validating-empirically` (external runtime behaviour); companion to the `epistemic-guard` extension |
 | `abuse-operations` | Anti-abuse / fraud-detection system design - risk scoring, indicator design, actor / campaign tracking, false-positive handling |
+| `validating-empirically` | Probe load-bearing claims about EXTERNAL systems on throwaway infra before asserting them - doc-reads are not runtime verification. Sibling to `epistemics` (recalled specifics) and `verification-before-completion` (own work) |
+| `git-worktrees` | Worktrees as the default for parallel agent work (loops, concurrent sessions) - concurrency-safety argument, `.worktrees/<task>` convention |
+| `relocating-repos` | Move/rename/consolidate repos safely - pre-move entanglement survey, cross-tree reference sweep, post-move verification |
 
 **Frontend + UI**:
 
@@ -787,6 +790,8 @@ requirement IDs that flow into plan tasks and loop sensors.
 | `paste-formatting` | Get Markdown prose into WYSIWYG (Gmail / Docs / Notion) or chat (Slack / Discord / Telegram) targets intact via `mdclip` |
 | `quarto` | Quarto documents + projects - multi-format output (HTML / PDF / Revealjs / Typst), freeze/cache, and reveal.js deck building |
 | `deck-screenshot` | Screenshot or contact-sheet a reveal.js / Quarto deck to view + visually verify it inside a session |
+| `writing-structure` | Long-form structure (headings, paragraph order, thesis placement) + citation conventions (Source lines, APA 7, RFC-style [TAG]) |
+| `lexicanum` | Authoring/restructuring docs on the lexicanum site (~/lexicanum, erfi.dev) - taxonomy frontmatter, guide vs reference, IEEE-footnote citations |
 
 **Infrastructure + deploy**:
 
@@ -806,6 +811,12 @@ requirement IDs that flow into plan tasks and loop sensors.
 | `knotctl` | `knotctl` CLI for live DNS edits (TSIG RFC 2136 over TCP) against the merged knotea authority |
 | `gloryhole` | Self-built DNS resolver `glory-hole` (Go + embedded Unbound + loopback knotd + dashboard); also authoritative NS for the zones post-cutover |
 | `tailscale-homelab` | SSH into + operate the tailscale-routed homelab (servarr etc.) - per-host identity convention, subnet routing, the `ssh servarr docker ...` operator idiom |
+| `compose-backups` | Automated backup sidecars for compose stacks (offen/docker-volume-backup) - restore drills, retention pruning to R2/MinIO |
+| `drawbridge` | mTLS-gated route-allowlisted reverse proxy for the Docker Engine API - fronts servarr's docker.sock for composer over the tailnet |
+| `eaves` | Read-only CLI for the NixOS edge router - DHCP leases, NAT, conntrack, nftables, vnstat, doctor suite, offline fixtures |
+| `xikectl` | Read-only CLI for the XikeStor SKS8300 switch - VLANs, interfaces, MAC table, jumbo MTU, smoke/verify suites |
+| `souin` | Edge HTTP cache on the Caddy stack (cache-handler + nuts) - cache misses, Cache-Status anomalies, purge/reclaim |
+| `waf-api` | wafctl WAF management API + waf-dashboard - endpoint CRUD, event export, store-vs-deploy split, adding rule/event types end-to-end |
 
 **Database + data**:
 
@@ -825,6 +836,7 @@ requirement IDs that flow into plan tasks and loop sensors.
 | `lora-train` | LoRA fine-tuning for SDXL / Flux via kohya sd-scripts |
 | `whisper` | WhisperX audio/video transcription (YouTube, local files) |
 | `gocurl` | `gocurl` CLI - HTTP performance measurement: httptrace phase breakdown (DNS / TCP / TLS / TTFB / transfer), load testing, streaming analysis |
+| `memledger` | Cross-client session store + search (pi + opencode + claude) beyond the 30-day local retention; ingester/prune CLI, compose stack |
 
 **Homelab media (servarr)**:
 
@@ -832,12 +844,14 @@ requirement IDs that flow into plan tasks and loop sensors.
 |---|---|
 | `arr-stack` | The *arr pipeline on servarr (radarr / sonarr / prowlarr / bazarr + sabnzbd / qbittorrent / flaresolverr), TRaSH guides, quality profiles |
 | `jellyfin` | Media-consumer stack on servarr - Jellyfin + Jellyseerr + Navidrome, NVENC transcoding on the GTX 1070 |
+| `discord-wipe` | Delete the user's own Discord messages (guild/DM purge, rolling retention) via the discord-wipe-go daemon on servarr |
 
 **Diagnostics**:
 
 | Skill | Purpose |
 |---|---|
 | `git-troubleshooting` | Diagnostic battery for `git mv` / `git add` / pathspec failures - gitignore-first hypothesis, the symptom → cause table, recovery patterns |
+| `powershell` | Run/write pwsh locally or on Windows machines over SSH - Get-WinEvent / Get-CimInstance patterns, PSRemoting, the `powershell` tool |
 
 ### pi extensions (`.pi/agent/extensions/`)
 
