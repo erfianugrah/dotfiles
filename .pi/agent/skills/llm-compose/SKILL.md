@@ -15,7 +15,7 @@ identifiers in tracked files). All Docker; only one GPU workload at a time;
 ```bash
 export PATH="$HOME/infra/ai/llm-compose/bin:$PATH"
 llmc status / models / switch <preset> / health
-llmc lock <preset> --owner <id>   # pin against evicting swaps; ALWAYS lock before unattended loops, one owner per concurrent loop
+llmc lock <preset> --owner <id> --wait   # pin against evicting swaps; ALWAYS lock before unattended loops, one owner per concurrent loop. --wait queues FIFO when another preset is pinned (contended lock NEVER hijacks since 2026-08-17); drop --wait for fail-fast 409.
 llmc unlock [--owner id]          # ownerless = force-clear all
 make up / down / restart / test   # restart = force-recreate proxy+webui
 make build-proxy                  # after ANY llmc/ code change (proxy bakes it)
@@ -48,6 +48,14 @@ needs a canary + `llmc bench tasks --verify-only` before scoring models).
 - whisper GPU services hold ~5.6GB - `llmc bench perf` stops+restarts them.
 - Locks are restart-safe (persisted to state volume). A client POSTing a
   different model gets 503 "model lock active" while locked.
+- Lock queue (2026-08-17): a contended `llmc lock` 409s (never hijacks the
+  running model); `--wait` joins the proxy's FIFO queue (202 + position; the
+  head's next poll gets the grant once owners drain; swap to the granted
+  preset is lazy). Unlocking drops your queue entry too. The queue is
+  IN-MEMORY only - a proxy restart drops it and pollers re-enqueue
+  automatically; the lock itself stays restart-safe. `llmc status` shows
+  `Lock queue`. Bench modules (owner `bench`) fail fast on contention -
+  rerun when the GPU is free.
 - llmc models indexes by model_id (GGUF stem), llmc bench re-indexes by
   preset name - don't confuse the two keyings.
 - `loop run` workdir must be clean (commit .pi/harness.json into baseline).

@@ -468,7 +468,8 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
     / 8 min vs `llama-server/qwen36-moe`'s 3 iterations / 15 min - the MoE
     generation-speed and instruction-following edge shows up as wall-clock.
     Two operational requirements, both observed live on 2026-08-12: **lock the
-    preset first** (`llmc lock loop --owner "$PI_SESSION_ID"`) or any other
+    preset first** (`llmc lock loop --owner "$PI_SESSION_ID" --wait` -
+    `--wait` queues FIFO if another preset is pinned) or any other
     client of the proxy (Open WebUI re-POSTs the previously-selected model)
     evicts the worker's model mid-iteration; and keep the judge on a hosted
     frontier model - the local rung writes, the frontier judges, so the only
@@ -522,7 +523,11 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
   - **Concurrent loops (llm-compose).** The proxy lock is a SHARED lock with
     named owners: each loop `llmc lock loop --owner <session-id>`, unlock
     releases only that owner. Concurrent loops must share ONE preset (the
-    `loop` preset runs `parallel_slots = 2`, 2x98K ctx); same-repo loops need
+    `loop` preset runs `parallel_slots = 2`, 2x98K ctx); loops on DIFFERENT
+    presets queue instead of fighting - `llmc lock <preset> --wait` joins a
+    FIFO and the grant lands when the current owners drain (a contended
+    lock without --wait 409s; it NEVER hijacks the running model - the
+    pre-2026-08-17 hijack killed a loop mid-iteration). Same-repo loops need
     a separate git worktree each; and loop sensors must never rebuild/restart
     the stack that serves them (a proxy restart kills the other loop's
     in-flight request). Since 2026-08-12 (llm-compose a566af5) the lock is

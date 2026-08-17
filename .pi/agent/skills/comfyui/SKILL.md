@@ -97,7 +97,7 @@ curl -s http://localhost:11434/comfyui/history | jq -r '
 - Negative defaults are loaded from `comfyui.local.env`
 - The proxy returns immediately after submitting prompt; image generation runs async. Use `comfyui/history/{prompt_id}` to fetch when ready.
 - **WARNING**: Triggers GPU mode swap — llama-server stops for 20-60s.
-- **Model lock**: if a swap/comfyui/train call 503s with "model lock active", an unattended loop has pinned the LLM preset (`llmc lock`). Do NOT `llmc unlock` without asking - check `curl -s localhost:11434/mode` (lock_owners shows who holds it) and wait or coordinate.
+- **Model lock**: if a swap/comfyui/train call 503s with "model lock active", an unattended loop has pinned the LLM preset (`llmc lock`). Do NOT `llmc unlock` without asking - check `curl -s localhost:11434/mode` (lock_owners shows who holds it, lock_queue shows who is waiting) and wait or coordinate.
 - Do NOT call Read on the returned PNG path — viewing inlines base64 image data that exceeds the model's input limit. Generation creates the image for the human user; only Read it if explicitly asked to analyse.
 
 ## Related
