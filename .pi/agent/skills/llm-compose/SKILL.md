@@ -52,17 +52,48 @@ needs a canary + `llmc bench tasks --verify-only` before scoring models).
   preset name - don't confuse the two keyings.
 - `loop run` workdir must be clean (commit .pi/harness.json into baseline).
 - Eval image: bfcl-eval needs `--no-deps` + relaxed faiss-cpu (PyPI dropped
-  its pinned 1.11.0). BFCL has no working subset flag.
+  its pinned 1.11.0), lives in its own venv (/opt/venv-bfcl) with a
+  sitecustomize shim registering local model ids. BFCL has no working
+  subset flag; the category is `non_live` (the old `ast` is gone).
 - python stdout through tee/pipes is block-buffered - bin/llmc sets
   PYTHONUNBUFFERED=1.
 
-## Model eval state (2026-08-17)
+## Model eval state (2026-08-17) - COMPLETE, decisions adopted
 
-Qwen3.8-27B (qwen38 preset, 196608x2) vs Gemma 4 loop engine: tied on the
-task suite (both one-shot scoped edits, both stall writing NEW tests),
-Gemma 2.7x faster decode + fails 3-7x cheaper. MTP draft-mtp spike queued
-(bench/p4-mtp.sh; current Q4_K_M GGUF has the nextn MTP head baked in).
-Small track for gumshoe/1070: qwen35-9b incumbent vs qwen35-4b, lfm25-8b,
-gemma4-12b (12B deploy-fit deferred to planned 3080 Ti). Decision rules +
-results: repo docs/plans/2026-08-15-local-model-bench-framework.md and
-2026-08-17-mtp-speed-track.md. Pause/resume: bench/p3-resume.sh.
+Final numbers: repo docs/plans/2026-08-16-p3-matrix-results.md. Harness
+internals + the six bfcl-eval landmines: docs/reference/eval-harness.md.
+Public writeup: https://erfi.dev/reference/local-model-bench/
+
+Adopted:
+- loop engine: loop preset stays (tasks 12/18 tie with qwen38; 2.7x decode,
+  3-7x cheaper failure; write-new-tests is the suite ceiling, not a
+  differentiator)
+- interactive coding/chat/vision: qwen38 with MTP ON (`spec_type =
+  "draft-mtp"` in models/qwen38.toml; gen +15.1%, pp +38.1%, TTFT -20%,
+  ctx ceiling holds at 31.9GB, guard 4/4). Registered in pi models.json
+  (dotfiles ddc51fe) - pick it in /model.
+- small track: gemma4-12b ties qwen35-9b incumbent (0.944 hit) with fewer
+  steps (1.67 vs 2.30); swap gated on 3080 Ti deploy-fit. g15-chain is 0/3
+  for everything - the discriminator case.
+- BFCL dropped: five harness fixes committed (see reference doc), sixth
+  crash is inside bfcl's own leaderboard CSV formatter; per-category score
+  files are the fix path if revisited.
+
+Numbers: humaneval loop 0.116 / gemma4 0.293 / qwen38 0.451
+(harness-relative, xhigh effort). Perf gen tok/s: loop 199 / gemma4 63 /
+qwen38 74 / qwen38-mtp 85.
+
+reasoning_effort lever (2026-08-17): preset key `reasoning_effort =
+"medium"` -> CHAT_TEMPLATE_KWARGS env -> --chat-template-kwargs (compact
+JSON - the entrypoint word-splits, no spaces allowed). xhigh (default)
+injects 'think carefully' language = 15k-40k thinking tokens/prompt
+(community-reported); medium injects nothing. ALL bench numbers are xhigh;
+qwen38.toml carries the lever commented pending an A/B. pi sends no
+per-request effort (supportsReasoningEffort: false) - preset default is
+the only lever.
+
+Ops gotchas added this run: presets dedup by model_id (GGUF stem) - two
+presets on one GGUF crash-loop the proxy; an A/B preset needs a hardlinked
+GGUF filename (see bench/p4-mtp.sh). Killed bench runs leave a stale
+`bench` lock -> `llmc unlock --owner bench`. Empty-metrics eval records in
+runs.jsonl = broken harness run; patch or drop them.
