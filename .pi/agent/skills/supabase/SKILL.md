@@ -276,6 +276,17 @@ if (!success) return c.json({ error: { code: 'rate_limited' }}, 429, { 'Retry-Af
 
 In-memory per-isolate maps don't coordinate across the 200+ CF colos. Always use the binding.
 
+## Measured platform behaviors (supabase-lab edge-resilience battery, 2026-08)
+
+All from the 25-module drill battery (<https://github.com/erfianugrah/supabase-lab/tree/main/experiments/edge-resilience> - RUNLOG has every number):
+
+- **PostgREST treats unknown query params as column filters and 400s.** A `?_bust=` cache-buster forwarded to the origin 400s every request. Strip probe-only params before the origin fetch; keep them only in the cache key.
+- **The spend cap is not a request-path circuit breaker.** 105 renders against the 100-transform Pro quota all returned 200 - the documented "further usage disallowed" rides the billing path (notification -> grace period -> Fair Use 402 restrictions), not the API response at quota+1.
+- **Fresh-project Storage lags ACTIVE_HEALTHY.** The storage API answers `TenantNotFound` until the tenant provisions, then 429 SlowDown while the pool settles - retry with backoff for the first minutes, don't fail.
+- **Auth config defaults differ across project generations** (`custom_oauth_max_providers` 32767 vs 3 on two projects created months apart). Config-parity checks must diff only the keys you set, or record platform drift as evidence.
+- **`auth.*` and `storage.*` never replicate** managed->managed at any size (custom schemas replicate in ~4s). Standby auth posture = TPA token portability + SQL backfill or forced re-login.
+- **Storage render path**: 400 InvalidRequest on an invalid source, SVG passes through unchanged, and the plain URL always serves the original - never a 5xx.
+
 ## PostgREST error handling
 
 - **`PGRST116`** ("Cannot coerce the result to a single JSON object") on `.single()` = zero rows. **Not** an error. Short-circuit:

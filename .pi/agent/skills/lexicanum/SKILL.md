@@ -55,6 +55,15 @@ aliases:                  # optional: old URLs -> redirects (on rename/move)
 - Literal `$` in prose is parsed as math: escape as `\$`. Exempt: frontmatter,
   fences, inline code. Deliberate-math docs carry
   `{/* prose-dollar: math-intentional */}`.
+- Pins are for corrections, not content. `tests/pins.test.ts` guards claims a
+  review round PROVED wrong; pinning every new fact makes legitimate rephrases
+  break the build (the 2026-08-17 pin inflation). When a review corrects the
+  doc, pin the correction - and when a build fails on a pin, ask whether the
+  pin earned its place before rewriting prose to fit it.
+- Deployed HTML can be stale per-PoP: the Workers assets platform serves
+  `cf-cache-status: HIT` on HTML even at `max-age=0, must-revalidate`.
+  `bun run deploy` purges the zone after `wrangler deploy` (see
+  scripts/purge-cache.ts); verify a fresh deploy by content, not by 200.
 - A `dist/` path can be a redirect stub from a doc's `aliases`, not a doc.
 - Citations are IEEE-numbered GFM footnotes, never APA; every `[^slug]` def
   must be referenced inline at least once or it does not render.
