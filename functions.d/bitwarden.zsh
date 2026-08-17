@@ -209,6 +209,39 @@ _bw_get() {
     print -r -- "$val"
 }
 
+# _bw_bulk_warm_cache [bw_item_name ...] - fetch the full vault in one
+# /list/object/items call and seed _BW_CACHE/_BW_CACHE_TS, so a batch of
+# _bw_get calls all hit the in-process cache. Fixes the old N+1: one
+# ?search= HTTP round-trip per secret (~20 sequential curls on a cold
+# shell). With args, only those item names are decoded (jq-side filter -
+# decoding base64 per line for a full ~970-item vault costs ~3s of forks;
+# decoding the ~20 we want costs ~50ms). Without args, warms everything.
+# Names+notes are base64'd in transit because notes can contain newlines
+# (SOPS_AGE_*). Failure is non-fatal: callers fall back to the per-item
+# _bw_get path transparently.
+_bw_bulk_warm_cache() {
+    emulate -L zsh
+    local listing now b64name b64notes decoded val names_json="[]"
+    (( $# > 0 )) && names_json=$(print -l -- "$@" | jq -Rn '[inputs]')
+    listing=$(curl -sf --max-time 5 "${BW_SERVE_ADDR}/list/object/items" 2>/dev/null \
+        | jq -r --argjson names "$names_json" '
+            .data.data[] | select(.deletedDate == null)
+            | select(($names | length) == 0 or (.name as $n | $names | index($n)))
+            | [(.name | @base64), ((.notes // "") | @base64)] | @tsv') || return 1
+
+    now=$(date +%s)
+    while IFS=$'\t' read -r b64name b64notes; do
+        [[ -n $b64name ]] || continue
+        decoded=$(base64 -d <<<"$b64name" 2>/dev/null) || continue
+        # first match wins - same semantics as _bw_api_get_note's head -1
+        (( ${+_BW_CACHE[$decoded]} )) && continue
+        val=$(base64 -d <<<"$b64notes" 2>/dev/null) || continue
+        [[ -n $val ]] || continue
+        _BW_CACHE[$decoded]=$val
+        _BW_CACHE_TS[$decoded]=$now
+    done <<<"$listing"
+}
+
 # ---------------------------------------------------------------------------
 # bw serve lifecycle management
 # ---------------------------------------------------------------------------
@@ -420,6 +453,17 @@ _bw_load_items() {
         print -u2 "[bw] sync failed, using stale cache"
         clear_bw_cache >/dev/null 2>&1
     }
+
+    # Bulk-warm the cache with one HTTP call so the _bw_get loop below
+    # doesn't do one round-trip per item (N+1). Skipped when every name is
+    # already cached; non-fatal on failure.
+    local -a bw_names
+    bw_names=("${(@)items[@]%%|*}")
+    local n warm_needed=0
+    for n in "${bw_names[@]}"; do
+        (( ${+_BW_CACHE[$n]} )) || { warm_needed=1; break }
+    done
+    (( warm_needed )) && { _bw_bulk_warm_cache "${bw_names[@]}" || true; }
 
     for item in "${items[@]}"; do
         bw_name=${item%|*}
