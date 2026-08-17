@@ -45,6 +45,22 @@
           }
         },
         {
+          "id": "qwen38",
+          "name": "Qwen3.8 27B Dense + MTP - interactive coding, vision, thinking (P3 winner 2026-08-17)",
+          "contextWindow": 196608,
+          "input": [
+            "text",
+            "image"
+          ],
+          "reasoning": true,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        {
           "id": "qwen3-coder",
           "name": "Qwen3 Coder 30B \u2014 coding, fast, direct",
           "contextWindow": 131072,
