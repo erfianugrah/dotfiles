@@ -33,6 +33,7 @@ async function run(args: string[]): Promise<number> {
 		cwd: dir,
 		stdout: "pipe",
 		stderr: "pipe",
+		env: { ...process.env, LOOP_JOURNAL: join(tmpdir(), "loop-journal-freeze.jsonl") },
 	});
 	await new Response(p.stdout).text();
 	return await p.exited;

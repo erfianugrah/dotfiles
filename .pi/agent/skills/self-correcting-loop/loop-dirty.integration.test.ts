@@ -41,6 +41,7 @@ async function run(args: string[]): Promise<{ code: number; out: string }> {
 		cwd: repo,
 		stdout: "pipe",
 		stderr: "pipe",
+		env: { ...process.env, LOOP_JOURNAL: join(tmpdir(), "loop-journal-dirty.jsonl") },
 	});
 	const [stdout, stderr, code] = await Promise.all([
 		new Response(p.stdout).text(),

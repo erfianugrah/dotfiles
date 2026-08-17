@@ -22,6 +22,9 @@
  *   - escalation ladder: start on the cheapest model, climb a rung after
  *     `stallPatience` consecutive no-progress iterations.
  *   - report: per-iteration record written to .pi/harness-report.json.
+ *   - journal: one JSON line per completed run appended to the cross-repo
+ *     store (~/.local/share/loop/runs.jsonl, $LOOP_JOURNAL override) -
+ *     the longitudinal model-x-task-x-outcome record; `loop history`.
  *
  * The model never decides completion - sensor exit codes do.
  *
@@ -30,16 +33,19 @@
  */
 
 import {
+	appendFileSync,
 	closeSync,
 	existsSync,
 	mkdirSync,
 	openSync,
+	readFileSync,
 	readdirSync,
 	realpathSync,
 	statSync,
 	writeFileSync,
 	writeSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import * as os from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import {
@@ -80,6 +86,13 @@ const SCRIPT_DIR = dirname(Bun.fileURLToPath(import.meta.url));
 const PRESET_DIR = join(SCRIPT_DIR, "presets");
 const DEFAULT_MANIFEST = ".pi/harness.json";
 const REPORT_PATH = ".pi/harness-report.json";
+/** Append-only cross-repo run journal: one JSON line per completed run.
+ * Per-machine (never committed - same convention as the session ledger DB),
+ * so outcomes aggregate across every repo and session that drives the loop.
+ * Override in tests via $LOOP_JOURNAL. */
+const JOURNAL_PATH =
+	process.env.LOOP_JOURNAL ??
+	join(os.homedir(), ".local", "share", "loop", "runs.jsonl");
 const RUN_LOG_PATH = ".pi/harness-run.log";
 /**
  * Exact prompt handed to the agent each iteration, one file per iteration.
@@ -538,7 +551,7 @@ async function runAgent(
 	tools: string[],
 	sandboxed: boolean,
 	timeoutMs: number,
-): Promise<{ code: number; timedOut: boolean }> {
+): Promise<{ code: number; timedOut: boolean; durationMs: number }> {
 	const args = ["-p", prompt, "--tools", tools.join(","), "-a"];
 	if (model) args.push("--model", model);
 	const cmd = sandboxed ? [bwrap()!, ...sandboxArgs(process.cwd())] : [];
@@ -563,6 +576,7 @@ async function runAgent(
 	return {
 		code,
 		timedOut: durationMs >= timeoutMs * 0.95 && (proc.killed || isTimeoutExit(code)),
+		durationMs,
 	};
 }
 
@@ -585,6 +599,8 @@ interface IterationRecord {
 	promptChars: number;
 	/** the agent exceeded agentTimeoutMs and was killed. */
 	agentTimedOut: boolean;
+	/** wall-clock the agent ran this iteration (journal: time-to-green analysis). */
+	agentMs: number;
 	sensors: {
 		name: string;
 		ok: boolean;
@@ -679,6 +695,13 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 		if (!Number.isInteger(trial) || trial < 1) trial = 2;
 		m.maxIterations = Math.min(m.maxIterations, trial);
 	}
+
+	runCtx = {
+		trial: trial > 0,
+		humanGate: m.humanGate === true,
+		maxIterations: m.maxIterations,
+		headSha: await headSha(),
+	};
 
 	console.log(`loop: ${manifestPath}`);
 	console.log(`  models:  ${m.models.map((x) => x || "(pi default)").join(" -> ")}`);
@@ -785,6 +808,16 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 				? "\nno failures beyond the frozen baseline (nothing for the loop to do)."
 				: "\nall sensors green (nothing for the loop to do).",
 		);
+		// Trivially-green runs are outcomes too (e.g. the harness outlived the
+		// task) - journal them with zero iterations.
+		journalRun({
+			startedAt: new Date().toISOString(),
+			finishedAt: new Date().toISOString(),
+			task: m.task,
+			models: m.models,
+			result: "already-green",
+			iterations: [],
+		});
 		return 0;
 	}
 	if (dry) {
@@ -971,6 +1004,7 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 		report.iterations.push({
 			iteration: i,
 			model,
+			agentMs: agent.durationMs,
 			failingBefore: prevFailing,
 			failingAfter: curFailing,
 			// The counts drive the keep/rollback decision; these say WHICH sensor
@@ -1101,6 +1135,98 @@ async function writeReport(report: RunReport): Promise<void> {
 		await Bun.$`mkdir -p ${dirname(REPORT_PATH)}`.quiet();
 		await Bun.write(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
 		console.log(`  report: ${REPORT_PATH}`);
+	} catch {
+		/* best-effort */
+	}
+	// finishedAt is set only on the FINAL write - per-iteration flushes skip
+	// the journal, so every completed run appends exactly one line.
+	if (report.finishedAt) journalRun(report);
+}
+
+/** Run-level context the journal needs but the report does not carry. */
+interface RunCtx {
+	trial: boolean;
+	humanGate: boolean;
+	maxIterations: number;
+	headSha: string | null;
+}
+let runCtx: RunCtx | null = null;
+
+async function headSha(): Promise<string | null> {
+	try {
+		return (await Bun.$`git rev-parse HEAD`.quiet().text()).trim() || null;
+	} catch {
+		return null; // not a git repo (feed-forward run)
+	}
+}
+
+/**
+ * Append one JSON line per completed run to the cross-repo journal
+ * ($LOOP_JOURNAL, default ~/.local/share/loop/runs.jsonl). This is the
+ * longitudinal record the per-repo report cannot be: model x task x outcome
+ * over time, across every repo and driving session. Query with jq/duckdb or
+ * `loop history`. Deliberately NOT journaled: premise/manifest refusals and
+ * dry runs (harness-authoring events, not model outcomes), and token counts
+ * (the llm-compose proxy counters are shared across clients - a delta would
+ * be mis-attribution; wall-clock + iterations is the honest perf proxy).
+ * Best-effort: journaling must never crash or fail a run.
+ */
+function journalRun(report: RunReport): void {
+	if (!runCtx) return;
+	// Scripted-fake-agent runs (LOOP_PI_CMD set) are tests - keep them out of
+	// the longitudinal store unless the test explicitly opts in by pointing
+	// $LOOP_JOURNAL somewhere (as the journal's own integration test does).
+	if (process.env.LOOP_PI_CMD && !process.env.LOOP_JOURNAL) return;
+	try {
+		const iters = report.iterations.map((it) => ({
+			i: it.iteration,
+			model: it.model,
+			kept: it.kept,
+			progressed: it.progressed,
+			escalated: it.escalated,
+			agentTimedOut: it.agentTimedOut,
+			agentMs: it.agentMs,
+			failing: [it.failingBefore, it.failingAfter],
+			changed: it.changedFiles.length,
+			scopeViolations: it.scopeViolations.length,
+		}));
+		const last = report.iterations.at(-1);
+		const sum = (f: (it: (typeof report.iterations)[0]) => number) =>
+			report.iterations.reduce((a, it) => a + f(it), 0);
+		const line = {
+			v: 1,
+			ts: report.finishedAt,
+			startedAt: report.startedAt,
+			durationMs: Date.parse(report.finishedAt) - Date.parse(report.startedAt),
+			cwd: process.cwd(),
+			repo: basename(process.cwd()),
+			headSha: runCtx.headSha,
+			models: report.models,
+			modelUsed: [...new Set(report.iterations.map((i) => i.model))],
+			trial: runCtx.trial,
+			humanGate: runCtx.humanGate,
+			maxIterations: runCtx.maxIterations,
+			result: report.result,
+			iterations: report.iterations.length,
+			kept: report.iterations.filter((i) => i.kept).length,
+			escalations: report.iterations.filter((i) => i.escalated).length,
+			agentTimeouts: report.iterations.filter((i) => i.agentTimedOut).length,
+			agentMs: sum((i) => i.agentMs),
+			sensorsMs: sum((i) =>
+				i.sensors.reduce((a, s) => a + (s.durationMs ?? 0), 0),
+			),
+			initialFailing: report.iterations[0]?.failingBefore ?? 0,
+			finalFailing: last?.failingAfter ?? 0,
+			finalFailingNames: last
+				? last.sensors.filter((s) => !s.ok).map((s) => s.name)
+				: [],
+			taskSha: createHash("sha256").update(report.task).digest("hex").slice(0, 12),
+			taskExcerpt: report.task.slice(0, 160),
+			iter: iters,
+		};
+		mkdirSync(dirname(JOURNAL_PATH), { recursive: true });
+		appendFileSync(JOURNAL_PATH, `${JSON.stringify(line)}\n`);
+		console.log(`  journal: ${JOURNAL_PATH}`);
 	} catch {
 		/* best-effort */
 	}
@@ -1404,6 +1530,55 @@ async function cmdInit(
 	return 0;
 }
 
+/**
+ * `loop history` - print the cross-repo run journal (newest last).
+ * `--last N` caps the rows (default 20); `--json` dumps the raw journal
+ * objects for piping into jq/duckdb.
+ */
+function cmdHistory(flags: Record<string, string | boolean>): number {
+	const last =
+		typeof flags.last === "string"
+			? Math.max(1, Number.parseInt(flags.last, 10) || 20)
+			: 20;
+	let lines: string[];
+	try {
+		lines = readFileSync(JOURNAL_PATH, "utf8").trim().split("\n").filter(Boolean);
+	} catch {
+		console.log(`no runs logged yet (${JOURNAL_PATH})`);
+		return 0;
+	}
+	const rows = lines
+		.slice(-last)
+		.map((l) => {
+			try {
+				return JSON.parse(l);
+			} catch {
+				return null;
+			}
+		})
+		.filter((r) => r !== null);
+	if (flags.json === true) {
+		for (const r of rows) console.log(JSON.stringify(r));
+		return 0;
+	}
+	for (const r of rows) {
+		const when = String(r.ts ?? "").slice(5, 16).replace("T", " ");
+		const ms = Number(r.durationMs ?? 0);
+		const dur =
+			ms >= 3600e3
+				? `${(ms / 3600e3).toFixed(1)}h`
+				: ms >= 60e3
+					? `${Math.round(ms / 60e3)}m`
+					: `${Math.round(ms / 1e3)}s`;
+		const models = (r.modelUsed?.length ? r.modelUsed : (r.models ?? [])).join(",");
+		console.log(
+			`${when}  ${String(r.repo ?? "?").padEnd(24)} ${String(r.result ?? "?").padEnd(14)} ` +
+				`${String(r.iterations ?? 0).padStart(2)} it (${r.kept ?? 0} kept)  ${dur.padStart(6)}  ${models}`,
+		);
+	}
+	return 0;
+}
+
 async function main(): Promise<void> {
 	const { cmd, positional, flags } = parseArgs(Bun.argv.slice(2));
 	let code: number;
@@ -1421,9 +1596,12 @@ async function main(): Promise<void> {
 		case "report":
 			code = await cmdReport(flags);
 			break;
+		case "history":
+			code = cmdHistory(flags);
+			break;
 		default:
 			console.error(
-				`unknown command "${cmd}"\nusage: bun loop.ts [run|init|verify-sensors|report] ...`,
+				`unknown command "${cmd}"\nusage: bun loop.ts [run|init|verify-sensors|report|history] ...`,
 			);
 			code = 2;
 	}

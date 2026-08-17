@@ -49,7 +49,12 @@ async function run(
 		cwd: dir,
 		stdout: "pipe",
 		stderr: "pipe",
-		env: { ...process.env, LOOP_SANDBOX: "off", ...env },
+		env: {
+			...process.env,
+			LOOP_SANDBOX: "off",
+			LOOP_JOURNAL: join(tmpdir(), "loop-journal-timeout.jsonl"),
+			...env,
+		},
 	});
 	const [stdout, stderr, code] = await Promise.all([
 		new Response(p.stdout).text(),

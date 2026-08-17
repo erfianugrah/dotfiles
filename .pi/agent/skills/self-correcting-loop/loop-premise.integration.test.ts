@@ -60,7 +60,12 @@ async function manifest(sensors: unknown[]): Promise<void> {
 }
 
 async function run(args: string[]): Promise<{ code: number; out: string }> {
-	const p = Bun.spawn(["bun", LOOP, "run", ...args], { cwd: dir, stdout: "pipe", stderr: "pipe" });
+	const p = Bun.spawn(["bun", LOOP, "run", ...args], {
+		cwd: dir,
+		stdout: "pipe",
+		stderr: "pipe",
+		env: { ...process.env, LOOP_JOURNAL: join(tmpdir(), "loop-journal-premise.jsonl") },
+	});
 	const [stdout, stderr] = await Promise.all([
 		new Response(p.stdout).text(),
 		new Response(p.stderr).text(),

@@ -864,6 +864,38 @@ projects:
 - A canary that cannot be expressed is a smell: it usually means the sensor
   asserts something too vague to fault deliberately.
 
+### Run journal: outcomes across repos over time
+
+Every completed run also appends ONE JSON line to a per-machine, append-only
+cross-repo journal at `~/.local/share/loop/runs.jsonl` (override with
+`$LOOP_JOURNAL`; never committed - same convention as the session-ledger
+DB). The per-repo report answers "what happened in THIS run"; the journal
+answers "how does this model do across a variety of real tasks over time" -
+whoever drove the run, whichever repo it ran in.
+
+```bash
+loop history                 # last 20 runs: when, repo, result, iters, kept, duration, models
+loop history --last 100 --json | jq 'select(.result=="pass") | [.modelUsed[0], .iterations]'
+duckdb -c "select modelUsed[1] m, result, count(*) n, avg(iterations) iters,
+           avg(agentMs)/60000 agent_min from read_json_auto('$HOME/.local/share/loop/runs.jsonl')
+           group by all order by m, n desc"
+```
+
+Each line: `v, ts, startedAt, durationMs, cwd, repo, headSha, models
+(ladder), modelUsed, trial, humanGate, maxIterations, result
+(pass|fail|already-green|trial-stalled|trial-partial), iterations, kept,
+escalations, agentTimeouts, agentMs, sensorsMs, initialFailing,
+finalFailing, finalFailingNames, taskSha, taskExcerpt`, plus `iter[]` with
+per-iteration model/kept/progressed/escalated/agentMs/failing-delta.
+
+Deliberately NOT captured: premise/manifest refusals and dry runs
+(harness-authoring events, not model outcomes), and token counts - the
+llm-compose proxy's token counters are shared across clients, so a
+before/after delta mis-attributes. Wall-clock + iterations-to-green is the
+honest perf proxy at this granularity. Scripted-fake-agent runs
+($LOOP_PI_CMD without an explicit $LOOP_JOURNAL) never journal - tests do
+not pollute the store.
+
 ### Reading a run: `.pi/harness-run.log` and `loop report`
 
 You do not need to redirect anything. Every run tees its console output to
