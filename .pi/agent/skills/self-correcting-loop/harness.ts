@@ -1286,3 +1286,78 @@ export function falsePremises(
 export function gatingSensors(sensors: Sensor[]): Sensor[] {
 	return sensors.filter((s) => s.kind !== "premise");
 }
+
+/**
+ * Failure-mode signals for one iteration, mapped from loop.ts's
+ * IterationRecord (kept structural so harness.ts stays free of the
+ * loop.ts concrete types).
+ */
+export interface IterationSignals {
+	/** process exit code of the agent (pi -p) this iteration. */
+	agentExit: number;
+	/** the agent was killed at agentTimeoutMs. */
+	agentTimedOut: boolean;
+	/** the iteration's changes survived the governor. */
+	kept: boolean;
+	/** the failing-sensor count dropped this iteration. */
+	progressed: boolean;
+	/** the governor escalated to a higher rung after this iteration. */
+	escalated: boolean;
+	/** files the agent touched (pre-revert). */
+	changed: number;
+	/** out-of-scope writes the fence reverted. */
+	scopeViolations: number;
+	/** any sensor this iteration hit its timeoutMs. */
+	sensorTimedOut: boolean;
+}
+
+/**
+ * Classify WHY a run ended the way it did - the failure-mode taxonomy the
+ * journal carries so failure patterns are measurable across tasks over time
+ * (a scoreboard of pass/fail alone can't tell "model too weak" from "the
+ * gateway was down"). Returns ALL tags that apply, most damning first.
+ *
+ * On green runs the only tag possible is "needed-escalation" (the cheap rung
+ * stalled and a higher rung did the work - a cost signal, not a failure).
+ * On failed runs, with no tag firing, the catch-all is "no-progress":
+ * iterations produced changes that simply never moved the sensors.
+ *
+ * The tags, and the real incidents they exist for:
+ * - agent-error: agent exited non-zero WITHOUT a timeout - the gateway was
+ *   down (opencode-zen 401 CreditsError, 2026-08-08/10), the GPU lock
+ *   evicted the model mid-run (422, 2026-08-17), the sandbox died. The run
+ *   report says "stalled" but the model never actually ran.
+ * - agent-timeout: killed at agentTimeoutMs - task too big for one window,
+ *   or a thinking model that never stops reasoning (qwen xhigh: 15-40k
+ *   thinking tokens per turn).
+ * - agent-silent: exit 0, no timeout, ZERO files changed - the agent read,
+ *   "thought", and acted not at all. Distinct from agent-error: the
+ *   plumbing worked and the model still produced no work product.
+ * - thrash: 2+ iterations with real changes, ALL rolled back - the model is
+ *   doing work and the work is wrong, repeatedly. One rolled-back iteration
+ *   is normal exploration; two is a pattern.
+ * - scope-fighting: the fence reverted writes - the task as scoped fights
+ *   the task as sensed (usually a sensor demanding a path outside
+ *   writeScope, or the agent editing tests/config it was fenced off from).
+ * - sensor-timeout: a sensor (not the agent) hit its deadline on the final
+ *   iteration - the gate itself is too slow to evaluate the work.
+ * - budget-exhausted: the LAST iteration was still making progress when the
+ *   iteration budget ran out - the answer was more iterations, not a better
+ *   model. Distinct from every stall mode.
+ */
+export function classifyRun(result: string, iters: IterationSignals[]): string[] {
+	if (result === "pass" || result === "already-green") {
+		return iters.some((i) => i.escalated) ? ["needed-escalation"] : [];
+	}
+	const modes: string[] = [];
+	if (iters.some((i) => i.agentExit !== 0 && !i.agentTimedOut)) modes.push("agent-error");
+	if (iters.some((i) => i.agentTimedOut)) modes.push("agent-timeout");
+	if (iters.some((i) => i.agentExit === 0 && !i.agentTimedOut && i.changed === 0))
+		modes.push("agent-silent");
+	if (iters.filter((i) => i.changed > 0 && !i.kept).length >= 2) modes.push("thrash");
+	if (iters.some((i) => i.scopeViolations > 0)) modes.push("scope-fighting");
+	if (iters.at(-1)?.sensorTimedOut) modes.push("sensor-timeout");
+	if (iters.at(-1)?.progressed) modes.push("budget-exhausted");
+	if (modes.length === 0) modes.push("no-progress");
+	return modes;
+}

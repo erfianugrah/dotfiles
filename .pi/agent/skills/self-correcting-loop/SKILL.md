@@ -885,8 +885,19 @@ Each line: `v, ts, startedAt, durationMs, cwd, repo, headSha, models
 (ladder), modelUsed, trial, humanGate, maxIterations, result
 (pass|fail|already-green|trial-stalled|trial-partial), iterations, kept,
 escalations, agentTimeouts, agentMs, sensorsMs, initialFailing,
-finalFailing, finalFailingNames, taskSha, taskExcerpt`, plus `iter[]` with
+finalFailing, finalFailingNames, failureModes, taskSha, taskExcerpt`, plus `iter[]` with
 per-iteration model/kept/progressed/escalated/agentMs/failing-delta.
+
+`failureModes` is the WHY (computed by `classifyRun` in harness.ts, unit-
+tested per tag): `agent-error` (non-zero exit, no timeout - gateway 401,
+GPU-lock 422, sandbox death; the run says "stalled" but the model never
+ran), `agent-timeout`, `agent-silent` (clean exit, zero files changed),
+`thrash` (2+ changed-but-rolled-back iterations - doing work, work is
+wrong), `scope-fighting` (fence reversions), `sensor-timeout` (final
+iteration), `budget-exhausted` (last iteration was STILL progressing -
+wanted more iterations, not a better model), `no-progress` (catch-all).
+Green runs get `[]` or `needed-escalation` (a higher rung did the work -
+a cost signal). Tags compose; `loop history` shows them bracketed.
 
 Deliberately NOT captured: premise/manifest refusals and dry runs
 (harness-authoring events, not model outcomes), and token counts - the

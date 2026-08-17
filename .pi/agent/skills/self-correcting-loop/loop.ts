@@ -64,6 +64,7 @@ import {
 	gatingSensors,
 	nonDiscriminating,
 	buildPrompt,
+	classifyRun,
 	countFailing,
 	decide,
 	detectPreset,
@@ -599,6 +600,8 @@ interface IterationRecord {
 	promptChars: number;
 	/** the agent exceeded agentTimeoutMs and was killed. */
 	agentTimedOut: boolean;
+	/** the agent process's exit code (0 = ran to completion, even if silent). */
+	agentExit: number;
 	/** wall-clock the agent ran this iteration (journal: time-to-green analysis). */
 	agentMs: number;
 	sensors: {
@@ -1005,6 +1008,7 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 			iteration: i,
 			model,
 			agentMs: agent.durationMs,
+			agentExit: agent.code,
 			failingBefore: prevFailing,
 			failingAfter: curFailing,
 			// The counts drive the keep/rollback decision; these say WHICH sensor
@@ -1220,6 +1224,19 @@ function journalRun(report: RunReport): void {
 			finalFailingNames: last
 				? last.sensors.filter((s) => !s.ok).map((s) => s.name)
 				: [],
+			failureModes: classifyRun(
+				report.result,
+				report.iterations.map((it) => ({
+					agentExit: it.agentExit,
+					agentTimedOut: it.agentTimedOut,
+					kept: it.kept,
+					progressed: it.progressed,
+					escalated: it.escalated,
+					changed: it.changedFiles.length,
+					scopeViolations: it.scopeViolations.length,
+					sensorTimedOut: it.sensors.some((s) => s.timedOut === true),
+				})),
+			),
 			taskSha: createHash("sha256").update(report.task).digest("hex").slice(0, 12),
 			taskExcerpt: report.task.slice(0, 160),
 			iter: iters,
@@ -1571,9 +1588,11 @@ function cmdHistory(flags: Record<string, string | boolean>): number {
 					? `${Math.round(ms / 60e3)}m`
 					: `${Math.round(ms / 1e3)}s`;
 		const models = (r.modelUsed?.length ? r.modelUsed : (r.models ?? [])).join(",");
+		const modes = (r.failureModes ?? []).join("+");
 		console.log(
 			`${when}  ${String(r.repo ?? "?").padEnd(24)} ${String(r.result ?? "?").padEnd(14)} ` +
-				`${String(r.iterations ?? 0).padStart(2)} it (${r.kept ?? 0} kept)  ${dur.padStart(6)}  ${models}`,
+				`${String(r.iterations ?? 0).padStart(2)} it (${r.kept ?? 0} kept)  ${dur.padStart(6)}  ${models}` +
+				(modes ? `  [${modes}]` : ""),
 		);
 	}
 	return 0;

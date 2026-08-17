@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+	type IterationSignals,
+	classifyRun,
 	type LadderState,
 	type SensorResult,
 	advanceLadder,
@@ -1141,5 +1143,69 @@ describe("formatAttemptHistory: why the attempt was rejected", () => {
 		expect(formatAttemptHistory([attempt(5, ["build", "test"])])).toContain("broke build, test");
 		expect(formatAttemptHistory([attempt(2)])).toContain("failing 1 -> 2");
 		expect(formatAttemptHistory([attempt(2)])).not.toContain("broke");
+	});
+});
+
+describe("classifyRun (failure-mode taxonomy)", () => {
+	const iter = (over: Partial<IterationSignals> = {}): IterationSignals => ({
+		agentExit: 0,
+		agentTimedOut: false,
+		kept: false,
+		progressed: false,
+		escalated: false,
+		changed: 1,
+		scopeViolations: 0,
+		sensorTimedOut: false,
+		...over,
+	});
+
+	test("green runs carry no failure modes; escalation is a cost note", () => {
+		expect(classifyRun("pass", [iter({ kept: true })])).toEqual([]);
+		expect(classifyRun("already-green", [])).toEqual([]);
+		expect(classifyRun("pass", [iter(), iter({ kept: true, escalated: true })])).toEqual([
+			"needed-escalation",
+		]);
+	});
+
+	test("agent-error: non-zero exit without timeout (gateway/lock/infra death)", () => {
+		expect(classifyRun("fail", [iter({ agentExit: 1, changed: 0 })])).toEqual(["agent-error"]);
+	});
+
+	test("agent-timeout: killed at the deadline", () => {
+		expect(
+			classifyRun("fail", [iter({ agentTimedOut: true, agentExit: -1 })]),
+		).toEqual(["agent-timeout"]);
+	});
+
+	test("agent-silent: clean exit, zero files touched", () => {
+		expect(classifyRun("trial-stalled", [iter({ changed: 0 })])).toEqual(["agent-silent"]);
+	});
+
+	test("thrash needs TWO changed-but-rolled-back iterations", () => {
+		expect(classifyRun("fail", [iter(), iter()])).toEqual(["thrash"]);
+		expect(classifyRun("fail", [iter()])).toEqual(["no-progress"]); // one rollback is exploration
+	});
+
+	test("scope-fighting: fence reversions recorded", () => {
+		expect(classifyRun("fail", [iter({ scopeViolations: 2 })])).toEqual(["scope-fighting"]);
+	});
+
+	test("sensor-timeout only counts on the FINAL iteration", () => {
+		expect(classifyRun("fail", [iter({ sensorTimedOut: true })])).toEqual(["sensor-timeout"]);
+		// Timed out on iteration 1 but not the last: no sensor-timeout tag.
+		expect(
+			classifyRun("fail", [
+				iter({ sensorTimedOut: true, kept: true, progressed: true }),
+				iter({ kept: true, progressed: true }),
+			]),
+		).toEqual(["budget-exhausted"]);
+	});
+
+	test("modes compose across iterations; order is most-damning first", () => {
+		const modes = classifyRun("fail", [
+			iter({ agentExit: 1, changed: 0 }), // infra death
+			iter({ changed: 0 }), // then a silent clean run
+		]);
+		expect(modes).toEqual(["agent-error", "agent-silent"]);
 	});
 });
