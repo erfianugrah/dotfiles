@@ -236,6 +236,10 @@ loop run --trial            # or --trial 3
 # 5. run the loop
 loop run
 loop run --model claude-sonnet-5 --max 15    # weak-model test
+
+# 6. afterwards: outcomes across repos over time
+loop history              # cross-repo journal: result, failure modes, per-model perf
+loop history --json | jq .
 loop run --allow-dirty                        # skip the clean-tree guard
 ```
 
