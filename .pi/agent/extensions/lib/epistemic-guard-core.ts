@@ -24,7 +24,15 @@ import * as path from "node:path";
 
 // -- claim model -------------------------------------------------------------
 
-export type ClaimClass = "version" | "url" | "cve" | "perf" | "flag" | "syspath" | "date";
+export type ClaimClass =
+  | "version"
+  | "url"
+  | "cve"
+  | "perf"
+  | "flag"
+  | "syspath"
+  | "date"
+  | "price";
 
 export interface Claim {
   cls: ClaimClass;
@@ -87,6 +95,7 @@ export interface Corpus {
   flag: Set<string>;
   syspath: Set<string>;
   date: Set<string>;
+  price: Set<string>;
 }
 
 export function newCorpus(): Corpus {
@@ -98,6 +107,7 @@ export function newCorpus(): Corpus {
     flag: new Set(),
     syspath: new Set(),
     date: new Set(),
+    price: new Set(),
   };
 }
 
@@ -113,6 +123,9 @@ export const VERIFY_HINT: Record<ClaimClass, string> = {
   date:
     "memledger_search / search_ledger / session_search - a date about the user's own history " +
     "lives in the session stores, not in your head",
+  price:
+    "fetch the retailer/listing page THIS session (webfetch / research crawler) and cite the URL " +
+    "with an as-of date - prices and stock perish weekly, a recalled price fails like a recalled version",
 };
 
 // -- regex sources (built fresh per use; /g + lastIndex is a footgun) --------
@@ -142,6 +155,22 @@ const RE_PERF_UNIT = String.raw`(?<![\w.])(\d+(?:\.\d+)?)\s?(ms|µs|us|ns|rps|qp
 const RE_PERF_FACTOR = String.raw`(?<![\w.])(\d+(?:\.\d+)?)\s?x\s+(faster|slower|speedup|throughput)`;
 const RE_FLAG = String.raw`(?<![\w-])--([a-z][a-z0-9-]{2,})(?![\w-])`;
 const RE_SYSPATH = String.raw`(?<![\w])(~/[\w.\-/]{3,}|/(?:etc|usr|opt|var|srv|proc|sys|boot|lib|lib64|run)/[\w.\-/]{2,})`;
+
+// Money. The EXPLICIT-currency form is safe in code too: SGD/USD/EUR directly
+// followed by digits never appears as an identifier (PRICE_USD350 has no word
+// boundary before USD, so no match). The BARE-dollar form is prose-only - in
+// code, `$5` is a positional parameter half the time. Keys normalize to the
+// numeric amount (commas stripped, parseFloat canonicalized), currency-
+// insensitive: S$1299 in a fetched listing proves $1299 in the answer; the
+// flip side (two products at the same price colliding) resolves to "seen",
+// consistent with the loose-corpus philosophy.
+const RE_PRICE_EXPLICIT = String.raw`\b(?:US\$|S\$|A\$|HK\$|NZ\$|C\$|USD|SGD|EUR|GBP|AUD|CAD|HKD|JPY)\s?(\d[\d,]*(?:\.\d{1,2})?)(?![\d,])`;
+const RE_PRICE_BARE = String.raw`(?<![\w$\\])\$(\d[\d,]*(?:\.\d{1,2})?)(?![\d,])`;
+
+/** Canonical comparison key for an amount: "1,299.00" -> "1299", "45.90" -> "45.9". */
+function priceKey(amount: string): string {
+  return String(Number(amount.replace(/,/g, "")));
+}
 
 // ISO date. The trailing `\b` is the whole trick for excluding timestamps:
 // in `2026-08-10T04:03:48Z` both the last digit and the following `T` are
@@ -361,11 +390,20 @@ export function absorb(corpus: Corpus, text: string): void {
   for (const m of all(t, RE_SYSPATH)) add(corpus.syspath, trimTrailingPunct(m[1]).replace(/\/+$/, ""));
   for (const m of all(t, RE_DATE_ISO)) add(corpus.date, m[1]);
   for (const c of wordedDateCandidates(t)) add(corpus.date, c.key);
+  for (const m of all(t, RE_PRICE_EXPLICIT, "gi")) add(corpus.price, priceKey(m[1]));
+  for (const m of all(t, RE_PRICE_BARE)) add(corpus.price, priceKey(m[1]));
 }
 
 export function corpusSize(c: Corpus): number {
   return (
-    c.version.size + c.url.size + c.cve.size + c.perf.size + c.flag.size + c.syspath.size + c.date.size
+    c.version.size +
+    c.url.size +
+    c.cve.size +
+    c.perf.size +
+    c.flag.size +
+    c.syspath.size +
+    c.date.size +
+    c.price.size
   );
 }
 
@@ -503,6 +541,12 @@ function extractInto(
     pushUnique(out, seen, { cls: "cve", key: m[0].toUpperCase(), raw: m[0] }, text, m.index);
   }
 
+  // prices: currency-marked everywhere (bare `$` handled in the prose block
+  // below - in code, `$5` is a positional parameter half the time).
+  for (const m of all(text, RE_PRICE_EXPLICIT, "gi")) {
+    pushUnique(out, seen, { cls: "price", key: priceKey(m[1]), raw: m[0] }, text, m.index);
+  }
+
   // versions: pins everywhere; triples + worded only in prose (a bare triple in
   // code is as likely a coordinate/id as a dependency).
   const lineOf = (idx: number): string => {
@@ -530,6 +574,9 @@ function extractInto(
 
   if (mode !== "prose") return;
 
+  for (const m of all(text, RE_PRICE_BARE)) {
+    pushUnique(out, seen, { cls: "price", key: priceKey(m[1]), raw: m[0] }, text, m.index);
+  }
   for (const m of all(text, RE_URL)) {
     if (!isDeepUrl(m[0])) continue;
     const c: Claim = { cls: "url", key: normalizeUrl(m[0]), raw: trimTrailingPunct(m[0]) };
@@ -599,6 +646,8 @@ export function hasProvenance(corpus: Corpus, c: Claim): boolean {
       }
       return false;
     }
+    case "price":
+      return corpus.price.has(c.key);
   }
 }
 

@@ -4364,7 +4364,52 @@ describe("epistemic-guard.extractClaims / other classes", () => {
   });
 });
 
+describe("epistemic-guard.extractClaims / prices", () => {
+  const of = (t: string, m: "prose" | "code" = "prose") =>
+    extractClaims(t, m)
+      .filter((c) => c.cls === "price")
+      .map((c) => c.key);
+
+  test("explicit-currency amounts are claims in both modes", () => {
+    expect(of("lists at S$1,299, or USD 999 shipped")).toEqual(
+      expect.arrayContaining(["1299", "999"]),
+    );
+    expect(of('const msrp = "USD 45.90";', "code")).toEqual(["45.9"]);
+  });
+
+  test("bare-dollar amounts are prose-only claims", () => {
+    expect(of("goes for $429 new, $380 open-box")).toEqual(["429", "380"]);
+    expect(of("kill -9 $5; echo $12.50", "code")).toEqual([]);
+  });
+
+  test("identifiers and env assignments are not prices", () => {
+    expect(of("DEFAULT_USD350 = x; PLAN_PRICE_USD=5", "code")).toEqual([]);
+    expect(of('sed "s/a/b/$1/"', "code")).toEqual([]);
+    expect(of("escaped \\$5 in markdown")).toEqual([]);
+  });
+
+  test("amount normalization: 1,299.00 and 1299 are the same claim", () => {
+    expect(of("S$1,299.00 today")).toEqual(["1299"]);
+  });
+});
+
 describe("epistemic-guard.provenance", () => {
+  test("a fetched listing silences the price claim", () => {
+    const c = egNewCorpus();
+    egAbsorb(c, "Price: S$1,299.00 (in stock)");
+    expect(unprovenanced(c, extractClaims("it lists at S$1,299", "prose"), new Set())).toEqual([]);
+  });
+
+  test("a different amount is a fresh claim", () => {
+    const c = egNewCorpus();
+    egAbsorb(c, "listing says $999");
+    expect(
+      unprovenanced(c, extractClaims("actually it is $1,099 here", "prose"), new Set()).map(
+        (x) => x.key,
+      ),
+    ).toEqual(["1099"]);
+  });
+
   test("a tool result silences the matching claim", () => {
     const c = egNewCorpus();
     egAbsorb(c, "caddy version v2.11.4");
