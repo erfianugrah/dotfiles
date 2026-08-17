@@ -741,9 +741,11 @@ launch; Claude Code gets it only via deliberate per-skill promotion.
   post-compaction re-injection is automatic).
 
 The routing rules cover: search-family reformulation loop, web research
-escalation (Exa → fetch → research SearXNG / Playwright), docs.erfi.io
-pipeline (search → summary → read), LSP for code intel, subagent
-delegation, memory + session_search, bash discipline (no `find`, sd /
+escalation (Exa <-> research SearXNG bidirectional on 0-results, fetch ->
+crawler Playwright), docs.erfi.io
+pipeline (search -> summary -> read), LSP for code intel, subagent
+delegation (incl. the no-further-delegation rule for leaf research
+subagents), memory + session_search, bash discipline (no `find`, sd /
 ast-grep for large edits, lockfile guards).
 
 ### Skills (`.pi/agent/skills/`)
@@ -766,6 +768,7 @@ requirement IDs that flow into plan tasks and loop sensors.
 | `software-architecture` | Backend/system design - DDD bounded contexts, interface-driven deps, REST+WS surface with correlation IDs, Postgres+Valkey persistence (with the user's signature flat-single-binary go:embed full-stack Go pattern documented), slog+Prometheus observability |
 | methodology skills | `writing-specs` / `writing-plans` / `writing-skills` / `subagent-driven-development` / `systematic-debugging` / `verification-before-completion` / `requesting-code-review` - explicit-ask-only process skills, vendored from the superpowers cut + our own additions. See `.pi/agent/README.md` for the three-layer taxonomy |
 | `sa-pov` | Solutions-Architect PoV / PoC methodology - scope + negotiate success criteria, validate each live (not from docs), solution runbook with real evidence, package for the customer |
+| `open-ended-research` | Research METHOD for set-of-candidates questions (shopping, vendors, locations, visas) - breadth-first longlist, eliminate-don't-select, adversarial pass, per-cell provenance matrix, widen-on-pushback; curator-hunt query family + research-subagent prompt rules (no further delegation) |
 | `self-correcting-loop` | Unattended sensor-gated agent loop - runs a fresh `pi -p` per iteration until computational + inferential sensors (build / test / judge / visual) pass. Governor: wall-clock budgets per sensor + per agent (process-group kill, so a hang can't stall a run), optional `systemd-run` cgroup limits, git checkpoint/rollback, write-scope fence, bwrap jail, model-escalation ladder. Steering: `rules` + `guide` hot-reloaded from the manifest between iterations, and `--trial` verdicts the *harness* before you spend the budget. `judge --adversarial N` runs N independent reviewers (any reject = fail) |
 | `epistemics` | Answering-from-memory discipline - the provenance test, cheapest-verifier routing table per claim type, the four claim labels, calibrate-do-not-hedge, and the hold-ground-under-pushback protocol. Third leg beside `verification-before-completion` (own work) and `validating-empirically` (external runtime behaviour); companion to the `epistemic-guard` extension |
 | `abuse-operations` | Anti-abuse / fraud-detection system design - risk scoring, indicator design, actor / campaign tracking, false-positive handling |
@@ -831,7 +834,7 @@ requirement IDs that flow into plan tasks and loop sensors.
 
 | Skill | Purpose |
 |---|---|
-| `research` | Multi-engine search + Playwright crawler + OSINT (SearXNG :8888, crawler :8889, OSINT :8890) |
+| `research` | Multi-engine search + Playwright crawler + OSINT (SearXNG :8888, crawler :8889, OSINT :8890) - includes the platform access walls (Reddit bypass order: PullPush -> redlib -> crawler), the API-driven locator pattern (near-empty render = grep raw HTML for wp-json//api//.json), and the SearXNG silent-empty -> Exa escalation |
 | `comfyui` | SDXL / Illustrious / Flux image generation via llm-compose proxy |
 | `lora-train` | LoRA fine-tuning for SDXL / Flux via kohya sd-scripts |
 | `whisper` | WhisperX audio/video transcription (YouTube, local files) |

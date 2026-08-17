@@ -65,6 +65,13 @@ thing is not breadth:
   for purchases), not a product page
 - for non-purchase surveys (visa routes, vendors): the official/primary
   source's own enumeration of the options
+- curator hunt: for location/category surveys, search for ONE creator who
+  systematically reviews every candidate with a consistent rubric -
+  `site:lemon8-app.com <category> review`, a YouTube channel, a blogger
+  with a per-location series. One curator with a fixed rubric beats 20
+  scattered reviews because the rubric makes candidates directly
+  comparable. (2026-08-17: a single Lemon8 creator's per-outlet gym
+  reviews out-valued all scattered sources combined.)
 
 Use the `research` stack (SearXNG multi-engine, crawler for JS-heavy pages)
 or `web_research`; SearXNG's engine diversity is itself breadth.
@@ -106,6 +113,21 @@ user pick. If you do recommend: steelman the runner-up in two lines and name
 the concrete condition that would flip the pick ("if you need X, take Y
 instead"). A recommendation with no named flip-condition is a verdict in
 disguise.
+
+## Research subagents
+
+Parallel dispatch by source family works well (e.g. one subagent on
+Reddit/community sources, one on blogs/retailers) - it keeps raw search
+noise out of your context. Two rules learned the hard way:
+
+- Every research-subagent prompt MUST end with: "Do NOT dispatch further
+  subagents - execute the searches yourself. Your final message must
+  contain the findings, not a plan." (2026-08-17: an adversarial-pass
+  subagent returned "I'll dispatch 5 parallel research subagents" as its
+  final message and exited - pure plan, zero work.)
+- When the corpus is large, ask each subagent to leave a raw-dump
+  artifact (sources + snippets written to a file); it doubles as
+  provenance for the matrix.
 
 ## Pushback = widen, never defend
 

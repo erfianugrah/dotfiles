@@ -27,6 +27,7 @@ Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context
 - Local business / maps / reviews / opening hours → `web_research` with `mode: "local"` (forces Playwright on JS-heavy hosts).
 - Freshness-sensitive (<1 week) → `web_research` with `mode: "fresh"` (livecrawl=preferred + SearXNG cross-check).
 - Exa returns 0 useful results or errors twice → fall back to research SearXNG `:8888`.
+- Reverse: SearXNG returns 0/near-0 results on a long-tail local query → escalate to Exa `web_research` immediately (check `unresponsive_engines` once, max one reword). SearXNG silence has no error signal - "no results" and "engines declined" look identical.
 - Open-ended research where the answer is a SET of candidates (shopping, product comparison, vendor/tool/visa/location options, "alternatives to X", "should I buy") → the `open-ended-research` skill owns the METHOD (breadth-first longlist, eliminate-don't-select, adversarial pass, provenance matrix, widen-on-pushback). The first plausible answer is a lead, not a conclusion.
 - User says "use the research tools/stack", or the task is non-coding web research (shopping, product comparison, local recommendations) → the `research` skill's self-hosted stack: SearXNG `https://searxng.erfi.io/search?q=...&format=json` (multi-engine; stronger than Exa for SG-local and long-tail results) plus crawler `https://crawler.erfi.io/extract` for page content. Read the research SKILL.md and drive it via `bash curl`. Exa (`websearch` / `web_research`) alone does NOT satisfy an explicit "use the research tools" request. These two self-hosted hosts are the ONLY carve-out to the "never bash curl a search engine" rule.
 - OSINT (domain / IP / email / username / phone / CVE / VirusTotal) → research skill `:8890/osint/*`. Not in `websearch` scope.
@@ -60,6 +61,8 @@ Use `task` when:
 - Read-only deep dives where parent doesn't need every step.
 
 Don't use `task` for: reading 1-3 known files, simple `grep`, work needing parent-session memory.
+
+Leaf/research subagent prompts must forbid further delegation - end with: "Do NOT dispatch further subagents - execute the searches yourself. Your final message must contain the findings, not a plan." A subagent that returns a plan instead of findings did zero work (seen 2026-08-17).
 
 ## Memory & session search
 

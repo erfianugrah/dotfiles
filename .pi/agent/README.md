@@ -205,11 +205,12 @@ Three layers, by how they fire:
 | `lora-train` | kohya sd-scripts LoRA training via proxy on `localhost:11434`. |
 | `memledger` | Cross-client session search (pi + opencode + claude) beyond the 30-day local retention, plus operating the memledger stack itself (ingester/prune CLI, schema, edge gate). |
 | `mermaid-d2` | mermaid / d2 diagram authoring + render via local CLIs. |
+| `open-ended-research` | Research METHOD for set-of-candidates questions - breadth-first longlist, eliminate-don't-select, adversarial pass, provenance matrix, widen-on-pushback; curator-hunt query family + research-subagent no-delegation rule. Pairs with `research` (the tooling layer). |
 | `paste-formatting` | Get Markdown-drafted prose into rich-text destinations (Gmail / Docs / Slack / Notion) intact via the `mdclip` tool (Markdown -> HTML -> clipboard). |
 | `quarto` | Author / render / publish Quarto docs (`.qmd`, `_quarto.yml`) to HTML/PDF/Revealjs/Word/Typst; project types, code execution, freeze/cache, Reveal.js decks + self-verifying screenshots. |
 | `relocating-repos` | Moving/renaming/consolidating directories or git repos on a machine - pre-move entanglement survey, cross-tree reference sweep, post-move verification. |
 | `requesting-code-review` | Pre-merge code review pass via reviewer subagent with diff + plan context. Explicit-ask-only. |
-| `research` | SearXNG (`:8888`) + Playwright crawler (`:8889`) + OSINT (`:8890`). |
+| `research` | SearXNG (`:8888`) + Playwright crawler (`:8889`) + OSINT (`:8890`). Includes platform access walls (Reddit bypass order), the API-driven locator pattern, and the SearXNG silent-empty -> Exa escalation. |
 | `sa-pov` | Solutions-Architect PoV/PoC methodology - success-criteria scoping, kickoff doc, live validation on throwaway envs, solution runbook with real evidence. |
 | `pg-analyser` | Drive the `pg-analyser` CLI - Postgres performance auditor (formerly sbperf; advisors, SQL diagnostics, config, infra metrics -> self-contained HTML+PDF report, windowed trends). PAT-first + no-PAT customer-audit mode. |
 | `powershell` | Run/write pwsh scripts locally or on Windows machines over SSH; the powershell tool, Get-WinEvent/Get-CimInstance patterns, PSRemoting. |
