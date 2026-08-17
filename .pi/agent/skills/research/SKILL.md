@@ -58,6 +58,34 @@ curl -s "http://localhost:8888/search?q=cve+vulnerability&format=json&categories
 
 SearXNG result shape: `{ results: [ {title, url, content, engine}, ... ] }`.
 
+### Engine pool state (as of 2026-08-17)
+
+The pool CHANGES over time - upstream engines rate-limit / CAPTCHA /
+poison server-side, and SearXNG's reliability tracker self-suspends
+failing engines. Check before trusting a result set:
+`curl -s "https://searxng.erfi.io/config" | jq -r '.engines[] | select(.enabled) | .name'`
+and look at `unresponsive_engines` in any `/search?format=json` response.
+
+- **bing family DISABLED** (2026-08-17): Bing serves degraded SERPs to
+  SearXNG clients (first-token-only matching, CN/JP spam, NSFW junk -
+  upstream searxng/searxng#4964). Do not re-enable without running the
+  re-test protocol in `~/infra/research/docs/plans/2026-08-17-searxng-engine-resilience.md`.
+  Tell-tale junk signature: top titles share no token with the query.
+- **startpage via `startpage anubis`** (custom offline engine in the
+  repo): stock startpage is Anubis-PoW-walled; the custom engine solves
+  it in-process. Bang `!spa`.
+- **mwmbl, wiby, marginalia**: indie crawls, low volume but on-topic.
+- **duckduckgo + google cse**: the two main carriers.
+- **brave / qwant / mojeek**: intermittently IP-blocked (429/CAPTCHA/
+  403); the circuit breaker parks them automatically. qwant is a dead
+  end (DataDome). A `braveapi` engine ships in the image but needs a
+  Brave API key (not in the vault as of 2026-08-17) - settings.yml has
+  no env interpolation, so wiring it needs a key-in-settings decision.
+
+Working general-web set when healthy: ddg, google cse, startpage anubis,
+mwmbl, wiby, marginalia, wikipedia (+ API verticals: github, stackoverflow,
+arxiv etc., unaffected by IP blocks).
+
 ## Fetch clean content
 
 Endpoint is `POST /extract`; response field is `markdown`.
@@ -248,10 +276,14 @@ curl -s "http://localhost:8890/jobs/$JOB_ID"
 - **VirusTotal**: free tier is 500/day, 4/min. Save shotgun queries for paid plan.
 - **HIBP**: requires `HIBP_API_KEY` env on OSINT service. Without it, email
   endpoint skips breach check silently.
-- **Wayback fallback**: not in this skill — see the whisper-transcribe bot
+- **Wayback fallback**: not in this skill - see the whisper-transcribe bot
   scraper logic (commit 44da86c) for the 4-tier anti-bot pattern (Crawl4AI
-  → FlareSolverr → Wayback `archive.org/wayback/available` + `id_` raw form
-  → archive.ph).
+  -> FlareSolverr -> Wayback `archive.org/wayback/available` + `id_` raw form
+  -> archive.ph).
+- **FlareSolverr scope**: crawler-only. It does NOT fix SearXNG engine
+  walls (proven 2026-08-17: DataDome on qwant unsolvable, Anubis on
+  startpage not waited-out) - engine unblocking lives in custom engines
+  like `startpage_anubis.py`, not the solver sidecar.
 
 ## Related
 
