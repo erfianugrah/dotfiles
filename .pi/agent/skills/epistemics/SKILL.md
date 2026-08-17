@@ -76,6 +76,9 @@ Using it as a lane is how you ship a wrong version pin.
 | A date: when something shipped, broke, was tested or decided | `memledger_search` / `search_ledger` / `session_search`, or `git log`. Never infer a date from "I did that already" |
 | Which interface / host / container a past incident was about | re-read the record and match the identifier, not the label - see "Entity identity" below |
 | Current events, prices, "latest" anything | `web_research` (mode `fresh`) |
+| Product price / stock / "ships to X" | fetch the retailer or listing page THIS session (`webfetch` / research crawler with `force_js` for SPAs), cite URL + as-of date - these perish weekly |
+| Exact model number / SKU / spec-sheet figure | manufacturer's page via `webfetch`, not a review snippet |
+| "X is discontinued / no longer sold" | evidence this session: retailer 404, a discontinued notice, or `archive_lookup` on the old listing - never memory |
 | What a past session did / decided | `session_search`, `ledger_search`, `memledger_search` (older than ~30d or cross-client) |
 | Any fact about the USER's own machines | search the stores FIRST; asking them costs a turn on something already recorded |
 | Something in the user's docs corpus | `docs_search` -> `docs_summary` -> `docs_read`, and cite the path |
@@ -213,6 +216,7 @@ flapped on 2026-08-08" says when, not which box.
 
 `verification-before-completion` (own work), `validating-empirically` (external
 runtime behaviour), `systematic-debugging` (root cause after a failed fix),
+`open-ended-research` (the breadth-first method for survey questions),
 `research` / `docs_*` / `lsp` / `oci_tags` (the verifiers themselves).
 Extensions: `~/.pi/agent/extensions/epistemic-guard.ts` (provenance +
 derived-number marking), `lookup-before-ask.ts` (search the stores before
