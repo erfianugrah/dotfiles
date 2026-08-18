@@ -13,7 +13,7 @@ Draft prose the way Erfi writes it: terse, plain, precise, self-correcting, refe
 
 1. **Plain words, zero filler.** No corpo throat-clearing, no "I'd be happy to," no adjectives doing a number's job.
 2. **Reasoning chained with connectors, not declared.** `so` / `but` / `cause` / `then` build the argument step by step. (In a DM that's across messages; in a structured reply it's within a sentence -- same move, different surface.)
-3. **Hedge-soft on the uncertain, flat on the confirmed.** `i think` / `my read is` / `confirm with them` on anything inferred; drop the hedge and state it plainly on anything checked ("He's right," "no native support today"). Blunt on the one point that actually matters.
+3. **Hedge-soft on the uncertain, flat on the confirmed.** `i think` / `my read is` / `confirm with them` on anything inferred; drop the hedge and state it plainly on anything checked ("He's right," "no native support today"). Blunt on the one point that actually matters. This also caps promises about the FUTURE: never claim a reply or a diagnostic will produce an exact outcome ("we can tell you exactly which one") - say what it improves ("then we can be better informed to tell you which of these you might be hitting").
 4. **Get to the thing; no ceremony.** `cause` over `because`, lead with the answer, cut the wind-up.
 
 Everything below is how that disposition shows up per channel. When a rule below seems to conflict with the surface of a sample, the disposition wins.
@@ -286,6 +286,7 @@ Corpo/fluff tells are covered above under *Kill the corpo tells* -- not repeated
 |---|---|
 | Asserting a fact with no link | Every non-obvious claim gets a source, or gets marked as inferred. |
 | Hedging everything equally | Hedge only the genuinely uncertain; state the confirmed flatly. |
+| 100%-confident promise about what an answer will yield ("we can tell you exactly which", "this will fix it" when it is not verified on THEIR setup) | Probabilistic phrasing: "we can be better informed", "this narrows it to", "should resolve the main shape". Reserve "exactly"/"will" for what was reproduced against the same versions and conditions. |
 | One wall of prose for a multi-option answer | Table it -- in a reply, only if genuinely multi-option. |
 | Hiding a correction | Surface it: "the earlier X was wrong because Y." |
 | Marketing adjectives | Replace with the number or the noun. |
