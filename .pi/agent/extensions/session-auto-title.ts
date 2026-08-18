@@ -25,7 +25,7 @@
 // Root import, not /compat: the loader aliases root -> compat since 0.80.0,
 // and the explicit /compat subpath fails to resolve in the Homebrew Mac
 // build (crashes pi at launch). Root resolves on both platforms.
-import { complete, getModel } from "@earendil-works/pi-ai";
+import { getModel } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -192,7 +192,9 @@ export default function (pi: ExtensionAPI) {
       : userText;
 
     try {
-      const response = await complete(
+      // Runtime-dispatched complete (auth resolution + credential-resolved
+      // endpoints owned by the model runtime since 0.84.0).
+      const response = await ctx.modelRegistry.complete(
         picked.model,
         {
           messages: [
@@ -201,16 +203,13 @@ export default function (pi: ExtensionAPI) {
               content:
                 "Generate a 3-6 word title summarising this conversation request. " +
                 "Use plain text (no quotes, no markdown, no period at the end). " +
-                "Title only — no explanation.\n\n" +
+                "Title only - no explanation.\n\n" +
                 "---\n" +
                 userExcerpt,
             },
           ],
         },
-        {
-          apiKey: picked.auth.apiKey,
-          headers: picked.auth.headers,
-        },
+        { cacheRetention: "none" },
       );
 
       const rawTitle = response.content

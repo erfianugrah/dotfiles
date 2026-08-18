@@ -17,15 +17,15 @@
  * ENGINE producing it changes.
  *
  * Configurable via env:
- *   PI_COMPACT_PROVIDER   default "opencode"
- *   PI_COMPACT_MODEL      default "claude-haiku-4-5"
- *   PI_COMPACT_MAX_TOKENS default 8192
- *   PI_COMPACT_OFF        "1" disables (no-op — falls back to default)
+ *   PI_COMPACT_PROVIDER   default "llama-server"
+ *   PI_COMPACT_MODEL      default "qwen38"
+ *   PI_COMPACT_MAX_TOKENS default 16384 (headroom for local thinking models:
+ *                         reasoning eats the budget before text is emitted)
+ *   PI_COMPACT_OFF        "1" disables (no-op - falls back to default)
  *
  * Falls back to default compaction (return undefined) if:
  *   - The configured model isn't registered.
- *   - Auth resolution fails (no API key for that provider).
- *   - The summary call errors or returns empty content.
+ *   - The summary call errors (incl. auth failure) or returns empty content.
  *
  * Inspired by pi's own examples/extensions/custom-compaction.ts but uses the
  * same SUMMARY_TEMPLATE shape pi's default compactor produces, so existing
@@ -33,10 +33,10 @@
  * compatible.
  */
 
-// Root import, not /compat: the loader aliases root -> compat since 0.80.0,
-// and the explicit /compat subpath fails to resolve in the Homebrew Mac
-// build (crashes pi at launch). Root resolves on both platforms.
-import { complete } from "@earendil-works/pi-ai";
+// Note: the summary call goes through ctx.modelRegistry.complete (the
+// coding-agent model runtime), NOT pi-ai's complete() directly. Since 0.84.0
+// the runtime path preserves custom providers and credential-resolved
+// endpoints, and owns auth resolution - no manual getApiKeyAndHeaders.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   convertToLlm,
@@ -45,11 +45,11 @@ import {
 
 // ── tunables ──────────────────────────────────────────────────────────────
 
-const PROVIDER = process.env.PI_COMPACT_PROVIDER ?? "opencode";
-const MODEL_ID = process.env.PI_COMPACT_MODEL ?? "claude-haiku-4-5";
+const PROVIDER = process.env.PI_COMPACT_PROVIDER ?? "llama-server";
+const MODEL_ID = process.env.PI_COMPACT_MODEL ?? "qwen38";
 const MAX_TOKENS = Math.max(
   1024,
-  Number(process.env.PI_COMPACT_MAX_TOKENS ?? "8192"),
+  Number(process.env.PI_COMPACT_MAX_TOKENS ?? "16384"),
 );
 const DISABLED = process.env.PI_COMPACT_OFF === "1";
 
@@ -132,17 +132,6 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok || !auth.apiKey) {
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          `compaction-model: no auth for ${PROVIDER}, using default`,
-          "warning",
-        );
-      }
-      return;
-    }
-
     const allMessages = [
       ...(prep.messagesToSummarize ?? []),
       ...(prep.turnPrefixMessages ?? []),
@@ -179,7 +168,7 @@ ${conversationText}
     }
 
     try {
-      const response = await complete(
+      const response = await ctx.modelRegistry.complete(
         model,
         {
           messages: [
@@ -191,10 +180,10 @@ ${conversationText}
           ],
         },
         {
-          apiKey: auth.apiKey,
-          headers: auth.headers,
           maxTokens: MAX_TOKENS,
           signal: ev.signal,
+          // One-off summary call - don't pollute the provider's prompt cache.
+          cacheRetention: "none",
         },
       );
 

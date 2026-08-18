@@ -169,7 +169,6 @@ export function createTaskProgress(description: string, now?: () => number, dept
 			if (
 				e.type === "message" ||
 				e.type === "message_end" ||
-				e.type === "message_update" ||
 				e.type === "turn_end"
 			) {
 				const text = extractAssistantText(e.message);
