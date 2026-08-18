@@ -524,6 +524,59 @@ const dossierTool = defineTool({
   },
 });
 
+const flightNoiseTool = defineTool({
+  name: "sg_flight_noise",
+  label: "SG Flight Noise",
+  promptSnippet:
+    "sg_flight_noise - aircraft noise for an SG point from server-sampled ADS-B tracks: low passes (<3000ft), per-day rate, hours, altitude band.",
+  promptGuidelines: [
+    "Use for 'is this place under a flight path', aircraft-noise due diligence.",
+    "Data accrues from a 5-min sampler; early answers are thin - check the window and say so.",
+  ],
+  description: [
+    "Aircraft-noise profile for a Singapore point, from the stack's own ADS-B sampling",
+    "(adsb.lol every 5 min): low passes (<3000ft) within radius over trailing days,",
+    "per-day average, by-hour histogram, altitude band, sample flights.",
+  ].join(" "),
+  parameters: Type.Object({
+    lat: Type.Number({ description: "Latitude" }),
+    lon: Type.Number({ description: "Longitude" }),
+    radius_m: Type.Optional(Type.Number({ description: "Default 1500" })),
+    days: Type.Optional(Type.Number({ description: "Trailing window (default 14)" })),
+  }),
+  async execute(_id, params, signal) {
+    const data = await post<{
+      missing?: string; low_passes?: number; days?: number; radius_m?: number;
+      per_day_avg?: number; alt_median_ft?: number; alt_lowest_ft?: number;
+      by_hour_utc?: Record<string, number>; sample_flights?: string[];
+      samples_total?: number;
+    }>(
+      "/sg/flight-noise",
+      { lat: params.lat, lon: params.lon, radius_m: params.radius_m ?? 1500, days: params.days ?? 14 },
+      60_000,
+      signal,
+    );
+    if (data.missing) {
+      return { content: [{ type: "text" as const, text: `Flight noise: ${data.missing}` }] };
+    }
+    if (!data.low_passes) {
+      return { content: [{ type: "text" as const, text: `No low passes (<3000ft) within ${data.radius_m}m over ${data.days}d (${data.samples_total ?? 0} samples in store).` }] };
+    }
+    const hours = Object.entries(data.by_hour_utc ?? {}).map(([h, n]) => `${h}:00 UTC x${n}`).join(", ");
+    return {
+      content: [{
+        type: "text" as const,
+        text: [
+          `**Flight noise:** ${data.low_passes} low passes in ${data.days}d (~${data.per_day_avg}/day) within ${data.radius_m}m`,
+          `Altitude: median ${data.alt_median_ft}ft, lowest ${data.alt_lowest_ft}ft`,
+          `Hours: ${hours}`,
+          data.sample_flights?.length ? `Flights: ${data.sample_flights.join(", ")}` : "",
+        ].filter(Boolean).join("\n"),
+      }],
+    };
+  },
+});
+
 const refreshTool = defineTool({
   name: "sg_refresh",
   label: "SG Data Refresh",
@@ -562,5 +615,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(listingsTool);
   pi.registerTool(listingsHistoryTool);
   pi.registerTool(dossierTool);
+  pi.registerTool(flightNoiseTool);
   pi.registerTool(refreshTool);
 }
