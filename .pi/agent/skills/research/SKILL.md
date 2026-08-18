@@ -349,6 +349,12 @@ Master Plan zone grid (`sg-mp-grid.json`, built by
 `scripts/build_mp_grid.py` via `uv run`) live in the crawler's DATASET_DIR
 on servarr.
 
+Keyed tiers (SOPS `.env`, degrade silently when unset): `ONEMAP_TOKEN`
+(preferred SG geocoder; JWT expires ~3 days - set `ONEMAP_EMAIL` +
+`ONEMAP_PASSWORD` and the service refreshes it via getToken) and
+`LTA_DATAMALL_KEY` (bus-stops layer in /sg/nuisance, full stop set cached
+7 days).
+
 ```bash
 # Location hazards for a point (dengue / zoning / rail+expressway noise)
 curl -sX POST http://localhost:8889/sg/nuisance \
