@@ -1,17 +1,17 @@
 /**
- * sg_rent_comps / sg_refresh - Singapore rental market evidence from official data.
+ * SG rental research tools - one-call due diligence for Singapore rentals.
  *
- * HDB per-transaction rentals (block, flat type, monthly rent since 2021) and
- * URA per-project condo rental percentiles, compacted server-side by the
- * crawler service's /sg/* endpoints. Answers "is this listing overpriced" and
- * "what does a 4-room near X actually rent for" without touching portals.
+ *   sg_rent_comps        official rent comps (HDB transactions, URA condo %iles)
+ *   sg_nuisance          dengue / MP2025 zoning / rail+expressway / bus stops
+ *   sg_sun               direct-sun hours by month + west-sun verdict
+ *   place_reputation     community-complaint digest (gumshoe-distilled)
+ *   sg_listings          newest 99.co listings (structured, snapshots server-side)
+ *   sg_listings_history  price drops + re-list churn from snapshots
+ *   sg_dossier           all of the above in one call
+ *   sg_refresh           dataset rebuild (monthly composer pipeline also runs it)
  *
- * Radius comps need the block-coords map (scripts/geocode_hdb_blocks.py
- * output in the service's DATASET_DIR); without it the service degrades to
- * town-level comps and says so.
- *
- * Endpoint: https://crawler.erfi.io/sg/* (Caddy bearer, same gate as the
- * rest of the research stack). Override CRAWLER_URL for local dev at :8889.
+ * All thin wrappers over the crawler service's /sg/* + /reputation endpoints
+ * (https://crawler.erfi.io, Caddy bearer). Override CRAWLER_URL for local dev.
  */
 
 import { Type } from "@earendil-works/pi-ai";
