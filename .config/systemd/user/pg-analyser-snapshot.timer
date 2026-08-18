@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly pg-analyser snapshots of monitored Supabase projects
+
+[Timer]
+OnCalendar=hourly
+# catch up runs missed while the box was asleep
+Persistent=true
+
+[Install]
+WantedBy=timers.target

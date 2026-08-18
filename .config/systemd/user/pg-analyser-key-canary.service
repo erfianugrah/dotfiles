@@ -1,0 +1,6 @@
+[Unit]
+Description=Supabase metrics-endpoint credential canary (JWT vs sb_secret)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/pg-analyser-key-canary

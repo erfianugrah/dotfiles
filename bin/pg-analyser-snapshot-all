@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# pg-analyser snapshot for every monitored Supabase project (systemd timer).
+# Project list derives from the monitoring stack's SOPS .env - one source of
+# truth, so adding a project there adds it here. The PAT comes from bw serve;
+# if the vault is locked the run fails to the journal and the next hourly tick
+# (Persistent=true) retries.
+set -euo pipefail
+
+PAT=$(curl -sf --max-time 3 \
+  "http://127.0.0.1:8087/list/object/items?search=SUPABASE_MGMT_PAT" \
+  | jq -r '.data.data[] | select(.name == "SUPABASE_MGMT_PAT") | .notes // empty' | head -1)
+if [ -z "$PAT" ]; then
+  echo "pg-analyser-snapshot: vault locked or SUPABASE_MGMT_PAT missing - skipping run" >&2
+  exit 1
+fi
+export SUPABASE_ACCESS_TOKEN="$PAT"
+
+REFS=$(sops -d "$HOME/infra/monitoring-compose/.env" \
+  | grep '^SUPABASE_PROJECTS=' | cut -d= -f2- | tr ',' '\n' | cut -d: -f2)
+if [ -z "$REFS" ]; then
+  echo "pg-analyser-snapshot: no projects parsed from monitoring-compose .env" >&2
+  exit 1
+fi
+
+rc=0
+for ref in $REFS; do
+  if "$HOME/.local/bin/pg-analyser" snapshot --ref "$ref"; then
+    echo "snapshot ok: $ref"
+  else
+    echo "snapshot FAILED: $ref" >&2
+    rc=1
+  fi
+done
+exit $rc

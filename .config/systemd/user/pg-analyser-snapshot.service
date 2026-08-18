@@ -1,0 +1,6 @@
+[Unit]
+Description=pg-analyser snapshot of all monitored Supabase projects
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/pg-analyser-snapshot-all
