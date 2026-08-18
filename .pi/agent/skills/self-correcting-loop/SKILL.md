@@ -524,6 +524,30 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
     (5) A trial/run that dies mid-iteration leaves the governor's checkpoint
     staged in the index; recover the pre-run state with
     `git restore --source=HEAD --staged --worktree -- .`
+  - **Local-rung ceiling refined (measured 2026-08-17/18, supabase-lab
+    battery, 6 modules):** the single-file ceiling is really a
+    single-CONTRACT ceiling. X03 (one API claim, ~150 lines, live pair
+    already up) one-shotted probe-green in iteration 1. Anything with 4+
+    result rows, two systems (Supabase + a gateway), or ~400 lines (M01,
+    M02, L01) thrashed: mid-write regressions rolled back, malformed
+    `peg-gemma4` output, markdown bold leaked into a FILENAME, confessional
+    comments left in code ("typo I introduced", "fix in a second"), and a
+    fabricated error excuse ("project host unreachable") when the real bug
+    was its own wrong URL constant. Two of six drafts SMUGGLED SECRETS
+    (token values into serialized results via extra fields / raw 200 bodies
+    with rotated tokens) - the frontier judge caught both; never run the
+    local rung without a judge sensor on anything touching credentials.
+    Working pattern: let the loop reach probe-green, then the operator
+    lands judge nits by hand - every hand-landing was under 15 targeted
+    lines. Also: (1) check the new module's id against `pvlab --list`
+    BEFORE writing the manifest - two of my manifests hit pre-existing id
+    collisions (P01, I04) and the `registered` expect-fail sensor then
+    passes at baseline, refusing the run; (2) `loop run` needs a green
+    BASELINE - two sessions found pre-existing typecheck breakage in
+    sibling experiments that blocked every run until fixed by hand; (3)
+    bg_task tmux sessions do NOT inherit the caller's env - a probe that
+    reads secrets from the environment silently falls back to placeholders
+    and 401s unless wrapped in `bash -lc`.
   - **Concurrent loops (llm-compose).** The proxy lock is a SHARED lock with
     named owners: each loop `llmc lock loop --owner <session-id>`, unlock
     releases only that owner. Concurrent loops must share ONE preset (the
