@@ -430,6 +430,100 @@ const listingsHistoryTool = defineTool({
   },
 });
 
+const dossierTool = defineTool({
+  name: "sg_dossier",
+  label: "SG Rental Dossier",
+  promptSnippet:
+    "sg_dossier - one-call SG rental report for an address: identity, rent comps, nuisance (dengue/zoning/transport), sun model, listings, community reputation. Sections degrade independently.",
+  promptGuidelines: [
+    "Use for full rental due diligence on one address: 'should I rent X', 'tell me everything about this unit'.",
+    "Pass floor+facing to include the sun model; include_reputation=false to skip the slow harvest (1-3 min).",
+    "Each section reports status ok/error/skipped - surface errors as gaps, never hide them.",
+  ],
+  description: [
+    "Full rental dossier for a Singapore address: geocoded identity, HDB/condo rent comps,",
+    "dengue/zoning/transport nuisance layers, sun model (floor+facing), current 99.co listings,",
+    "and community-complaint digest. One call; sections degrade independently.",
+  ].join(" "),
+  parameters: Type.Object({
+    address: Type.String({ description: "SG address or block, e.g. 'Blk 105 Ang Mo Kio Ave 4'" }),
+    flat_type: Type.Optional(Type.String({ description: "HDB flat type filter, e.g. '4-ROOM'" })),
+    floor: Type.Optional(Type.Number({ description: "Unit floor (enables sun model, with facing)" })),
+    facing: Type.Optional(Type.Number({ description: "Window facing deg: 0=N 90=E 180=S 270=W" })),
+    project: Type.Optional(Type.String({ description: "Condo project name for URA comps + listings filter" })),
+    include_reputation: Type.Optional(Type.Boolean({ description: "Include complaint harvest (default true, adds 1-3 min)" })),
+  }),
+  async execute(_id, params, signal) {
+    type Sec = { status: string; reason?: string; kind?: string; message?: string; data?: any };
+    const data = await post<{
+      identity: { address: string; lat: number; lon: number; resolved: string };
+      sections: Record<string, Sec>;
+    }>(
+      "/sg/dossier",
+      {
+        address: params.address, flat_type: params.flat_type,
+        floor: params.floor, facing: params.facing, project: params.project,
+        include_reputation: params.include_reputation ?? true,
+      },
+      300_000,
+      signal,
+    );
+
+    const S = data.sections;
+    const lines: string[] = [
+      `# Dossier: ${data.identity.resolved}`,
+      `_${data.identity.lat.toFixed(5)}, ${data.identity.lon.toFixed(5)}_`,
+    ];
+    const fail = (name: string, s?: Sec) =>
+      s && s.status !== "ok" ? `_${name}: ${s.status}${s.reason ? ` (${s.reason})` : ""}${s.message ? ` - ${s.message}` : ""}_` : null;
+
+    const c = S.comps?.data;
+    if (c?.mode === "project" && c.matches?.length) {
+      const m = c.matches[0];
+      lines.push("", `**Comps (URA condo):** ${m.project} D${m.district} ${m.latest_qtr} - median $${m.psf_median} psf, p25-p75 $${m.psf_p25}-${m.psf_p75}, ${m.contracts} contracts`);
+    } else if (c?.flats) {
+      lines.push("", `**Comps (HDB ${c.mode}):** window ${c.window}`);
+      for (const [flat, s] of Object.entries<any>(c.flats)) {
+        lines.push(`- ${flat}: median $${s.median}, p25-p75 $${s.p25}-$${s.p75}, n=${s.n}, trend ${s.pct_change ?? "?"}%`);
+      }
+    }
+    const n = S.nuisance?.data;
+    if (n) {
+      const t = n.transport_1000m ?? {};
+      const tParts = Object.entries(t).filter(([k]) => k !== "bus_stops" && typeof t[k] === "number").map(([k, v]) => `${k} ${v}m`);
+      const stops = (t.bus_stops ?? []).slice(0, 2).map((s: any) => `${s.name} ${s.dist_m}m`);
+      lines.push(
+        "",
+        "**Nuisance:**",
+        `- Dengue: ${n.dengue_clusters?.length ? n.dengue_clusters.map((d: any) => `${d.locality} (${d.case_size})`).join("; ") : "no active cluster"}`,
+        `- Zoning here: ${(n.master_plan?.zone_here ?? []).join(", ") || "?"}; nearby: ${(n.master_plan?.zones_nearby ?? []).slice(0, 6).join(", ")}`,
+        `- Transport: ${tParts.join(" · ") || "none within 1km"}${stops.length ? ` · bus: ${stops.join(", ")}` : ""}`,
+      );
+    }
+    const sun = S.sun?.data;
+    if (sun) {
+      lines.push("", `**Sun:** ${sun.avg_direct_hours}h/day avg direct; west sun after 3pm: **${sun.west_sun_after_3pm.verdict ? "YES" : "no"}** (max ${sun.west_sun_after_3pm.max_hours}h)`);
+      if (sun.notes?.length) lines.push(`_${sun.notes.join(" ")}_`);
+    }
+    const l = S.listings?.data;
+    if (l) {
+      lines.push("", `**Listings (99.co newest):** ${l.listings.length} matching`);
+      for (const row of l.listings.slice(0, 5)) {
+        lines.push(`- ${row.price_formatted}/mo - ${row.project || row.address} (${row.listed})`);
+      }
+    }
+    const rep = S.reputation?.data;
+    if (rep?.summary) {
+      lines.push("", "**Community reputation:**", rep.summary);
+    }
+    for (const [name, s] of Object.entries(S)) {
+      const msg = fail(name, s);
+      if (msg) lines.push("", msg);
+    }
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  },
+});
+
 const refreshTool = defineTool({
   name: "sg_refresh",
   label: "SG Data Refresh",
@@ -467,5 +561,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(sunTool);
   pi.registerTool(listingsTool);
   pi.registerTool(listingsHistoryTool);
+  pi.registerTool(dossierTool);
   pi.registerTool(refreshTool);
 }

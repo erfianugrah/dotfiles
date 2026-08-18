@@ -409,6 +409,21 @@ curl -sX POST http://localhost:8889/sg/listings-history \
   -H 'content-type: application/json' -d '{"query":"ripple bay"}'
 ```
 
+## Dossier (crawler service)
+
+One-call rental report - identity + comps + nuisance + sun + listings +
+reputation, concurrent fan-out, each section degrades to a labelled
+error/skip entry instead of failing the report.
+
+```bash
+curl -sX POST http://localhost:8889/sg/dossier \
+  -H 'content-type: application/json' \
+  -d '{"address":"Blk 105 Ang Mo Kio Ave 4","flat_type":"4-ROOM","floor":8,"facing":270}'
+```
+
+pi tool (preferred): `sg_dossier`. `include_reputation:false` skips the
+slow harvest.
+
 ## Long-running jobs
 
 Endpoints that may exceed inline wait (`osint_domain`, `osint_email`,
