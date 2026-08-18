@@ -424,6 +424,22 @@ curl -sX POST http://localhost:8889/sg/dossier \
 pi tool (preferred): `sg_dossier`. `include_reputation:false` skips the
 slow harvest.
 
+## Flight noise (crawler service)
+
+Per-address aircraft noise from the stack's own ADS-B sampling (adsb.lol,
+keyless): a composer pipeline (`research-sg-flight-sample`, every 5 min)
+appends island-wide snapshots to `sg-flight-tracks.jsonl` (self-compacting
+to trailing 14d past 64MB); the query answers low passes (<3000ft) within
+radius, per-day rate, hour histogram, altitude band.
+
+```bash
+curl -sX POST http://localhost:8889/sg/flight-noise \
+  -H 'content-type: application/json' -d '{"lat":1.315,"lon":103.764}'
+```
+
+pi tool (preferred): `sg_flight_noise`. Thin until the sampler has days
+of accrual; Paya Lebar's move (~2030s) invalidates old windows.
+
 ## Long-running jobs
 
 Endpoints that may exceed inline wait (`osint_domain`, `osint_email`,
