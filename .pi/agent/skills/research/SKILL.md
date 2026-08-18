@@ -320,6 +320,32 @@ mode with a tight crop beats zero-shot text for specific visual features.
 - **Lemon8**: works via the plain static path (trafilatura, no
   `force_js`). Good source for SG-local reviews.
 
+## SG rental comps (crawler service)
+
+Official-data rental comparables, pre-compacted server-side (HDB
+per-transaction rentals since 2021, URA per-project condo rent
+percentiles, HDB block info). Data source survey + design:
+`~/infra/research/docs/plans/2026-08-18-sg-rental-research-tooling.md`.
+
+```bash
+# Rebuild assets (monthly; ~1-2 min)
+curl -sX POST http://localhost:8889/sg/refresh
+
+# HDB radius comps for an address (degrades to town-level if the
+# block-coords map is absent)
+curl -sX POST http://localhost:8889/sg/rent-comps \
+  -H 'content-type: application/json' \
+  -d '{"address":"Blk 105 Ang Mo Kio Ave 4","flat_type":"4-ROOM","radius_m":800,"months":12}'
+
+# Condo project percentile series
+curl -sX POST http://localhost:8889/sg/rent-comps \
+  -H 'content-type: application/json' -d '{"project":"18 WOODSVILLE"}'
+```
+
+pi tools (preferred): `sg_rent_comps`, `sg_refresh`. The block-coords map
+(`sg-block-coords.json`, built by `scripts/geocode_hdb_blocks.py`, a
+multi-hour Nominatim batch) lives in the crawler's DATASET_DIR on servarr.
+
 ## Long-running jobs
 
 Endpoints that may exceed inline wait (`osint_domain`, `osint_email`,
