@@ -162,6 +162,65 @@ const compsTool = defineTool({
   },
 });
 
+const nuisanceTool = defineTool({
+  name: "sg_nuisance",
+  label: "SG Nuisance Layers",
+  promptSnippet:
+    "sg_nuisance - official-data location hazards for an SG point: dengue clusters, URA Master Plan zoning (here + nearby), rail/expressway distances.",
+  promptGuidelines: [
+    "Use for rental due diligence: 'what is wrong with this location' - dengue, what can be built next door, MRT viaduct / expressway noise.",
+    "Layers degrade independently: a 'missing' note means that layer's asset is not on the box yet, not zero risk.",
+  ],
+  description: [
+    "Location-hazard check for a Singapore point: active NEA dengue clusters containing the point,",
+    "URA Master Plan 2025 zone of the plot and nearby plots (what may be built next door),",
+    "and nearest rail/expressway distances from OSM. Pass lat+lon (geocode first with osint_geo if needed).",
+  ].join(" "),
+  parameters: Type.Object({
+    lat: Type.Number({ description: "Latitude" }),
+    lon: Type.Number({ description: "Longitude" }),
+    radius_m: Type.Optional(Type.Number({ description: "Zoning nearby radius (default 250, max 2000)" })),
+  }),
+  async execute(_id, params, signal) {
+    const data = await post<{
+      dengue_clusters: { locality: string; case_size: number }[];
+      master_plan: { zone_here?: string[]; zones_nearby?: string[]; missing?: string };
+      transport_1000m: Record<string, number | string>;
+    }>(
+      "/sg/nuisance",
+      { lat: params.lat, lon: params.lon, radius_m: params.radius_m ?? 250 },
+      90_000,
+      signal,
+    );
+
+    const lines: string[] = [];
+    const dengue = data.dengue_clusters ?? [];
+    if (dengue.length === 0) {
+      lines.push("**Dengue:** no active cluster at this point");
+    } else {
+      lines.push("**Dengue clusters containing this point:**");
+      for (const c of dengue) lines.push(`- ${c.locality} (${c.case_size} cases)`);
+    }
+    const mp = data.master_plan ?? {};
+    if (mp.missing) {
+      lines.push(`\n**Master Plan zoning:** ${mp.missing}`);
+    } else {
+      lines.push(`\n**Master Plan 2025 zone here:** ${(mp.zone_here ?? []).join(", ") || "none"}`);
+      if (mp.zones_nearby?.length) {
+        lines.push(`Nearby (what could be built next door): ${mp.zones_nearby.join(", ")}`);
+      }
+    }
+    const t = data.transport_1000m ?? {};
+    if (typeof t.missing === "string") {
+      lines.push(`\n**Transport noise:** ${t.missing}`);
+    } else {
+      const parts = Object.entries(t).map(([k, v]) => `${k}: ${v}m`);
+      lines.push(`\n**Transport proximity (1km):** ${parts.length ? parts.join(" · ") : "none within 1km"}`);
+    }
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  },
+});
+
 const refreshTool = defineTool({
   name: "sg_refresh",
   label: "SG Data Refresh",
@@ -194,5 +253,6 @@ const refreshTool = defineTool({
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool(compsTool);
+  pi.registerTool(nuisanceTool);
   pi.registerTool(refreshTool);
 }

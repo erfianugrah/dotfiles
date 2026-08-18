@@ -342,9 +342,18 @@ curl -sX POST http://localhost:8889/sg/rent-comps \
   -H 'content-type: application/json' -d '{"project":"18 WOODSVILLE"}'
 ```
 
-pi tools (preferred): `sg_rent_comps`, `sg_refresh`. The block-coords map
-(`sg-block-coords.json`, built by `scripts/geocode_hdb_blocks.py`, a
-multi-hour Nominatim batch) lives in the crawler's DATASET_DIR on servarr.
+pi tools (preferred): `sg_rent_comps`, `sg_nuisance`, `sg_refresh`. The
+block-coords map (`sg-block-coords.json`, built by
+`scripts/geocode_hdb_blocks.py`, a multi-hour Nominatim batch) and the
+Master Plan zone grid (`sg-mp-grid.json`, built by
+`scripts/build_mp_grid.py` via `uv run`) live in the crawler's DATASET_DIR
+on servarr.
+
+```bash
+# Location hazards for a point (dengue / zoning / rail+expressway noise)
+curl -sX POST http://localhost:8889/sg/nuisance \
+  -H 'content-type: application/json' -d '{"lat":1.315,"lon":103.764}'
+```
 
 ## Long-running jobs
 
