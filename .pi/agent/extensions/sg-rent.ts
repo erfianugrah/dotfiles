@@ -270,6 +270,67 @@ const reputationTool = defineTool({
   },
 });
 
+const sunTool = defineTool({
+  name: "sg_sun",
+  label: "SG Sun Scorer",
+  promptSnippet:
+    "sg_sun - direct-sun hours on an SG unit's window by month + west-sun verdict, modelled from real building heights (HDB + OSM).",
+  promptGuidelines: [
+    "Use for 'does this unit get west sun', 'how much direct sun does floor N facing X get'.",
+    "facing: 0=N, 90=E, 180=S, 270=W. floor: the unit's floor number.",
+    "Read notes[]: missing height layers mean unshaded-sky results, not an unblocked window.",
+  ],
+  description: [
+    "Model direct sun on a Singapore unit's window by month: pysolar sun path vs a horizon built",
+    "from real building heights (HDB max_floor_lvl + OSM building:levels within 400-500m).",
+    "Returns monthly direct-sun hours, a west-sun-after-3pm verdict, and the biggest obstructions in view.",
+  ].join(" "),
+  parameters: Type.Object({
+    address: Type.Optional(Type.String({ description: "SG address/block (geocoded server-side)" })),
+    lat: Type.Optional(Type.Number({ description: "Latitude (with lon)" })),
+    lon: Type.Optional(Type.Number({ description: "Longitude (with lat)" })),
+    floor: Type.Optional(Type.Number({ description: "Unit floor number (default 10)" })),
+    facing: Type.Number({ description: "Window facing in degrees: 0=N, 90=E, 180=S, 270=W" }),
+  }),
+  async execute(_id, params, signal) {
+    const data = await post<{
+      monthly: { month: number; day: string; direct_hours: number; post_3pm_hours: number }[];
+      avg_direct_hours: number;
+      west_sun_after_3pm: { verdict: boolean; max_hours: number };
+      obstructions_in_view: { name: string; elev_deg: number; dist_m: number }[];
+      horizon_sources: Record<string, number>;
+      notes: string[];
+      resolved: string;
+    }>(
+      "/sg/sun",
+      {
+        address: params.address, lat: params.lat, lon: params.lon,
+        floor: params.floor ?? 10, facing: params.facing,
+      },
+      120_000,
+      signal,
+    );
+
+    const lines = [
+      `**Sun model** for floor ${params.floor ?? 10} facing ${params.facing} deg (${data.resolved})`,
+      `Average direct sun: **${data.avg_direct_hours}h/day** · West sun after 3pm: **${data.west_sun_after_3pm.verdict ? "YES" : "no"}** (up to ${data.west_sun_after_3pm.max_hours}h)`,
+      "",
+      "| month | direct h | post-3pm h |",
+      "| --- | --- | --- |",
+      ...data.monthly.map((m) => `| ${m.month} | ${m.direct_hours} | ${m.post_3pm_hours} |`),
+    ];
+    if (data.obstructions_in_view.length) {
+      lines.push("", "Biggest obstructions in view:");
+      for (const o of data.obstructions_in_view) {
+        lines.push(`- ${o.name} - ${o.elev_deg} deg up, ${o.dist_m}m away`);
+      }
+    }
+    const hs = data.horizon_sources;
+    lines.push("", `_Horizon: ${hs.hdb_blocks ?? 0} HDB blocks + ${hs.osm_buildings ?? 0} OSM buildings. ${(data.notes ?? []).join(" ")}_`);
+    return { content: [{ type: 'text' as const, text: lines.join("\n") }] };
+  },
+});
+
 const refreshTool = defineTool({
   name: "sg_refresh",
   label: "SG Data Refresh",
@@ -304,5 +365,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(compsTool);
   pi.registerTool(nuisanceTool);
   pi.registerTool(reputationTool);
+  pi.registerTool(sunTool);
   pi.registerTool(refreshTool);
 }
