@@ -440,6 +440,15 @@ curl -sX POST http://localhost:8889/sg/flight-noise \
 pi tool (preferred): `sg_flight_noise`. Thin until the sampler has days
 of accrual; Paya Lebar's move (~2030s) invalidates old windows.
 
+## Map UI (crawler service)
+
+`https://crawler.erfi.io/sg/map/` - Astro+Leaflet page over the SG layers
+(dengue polygons, 99.co listing markers, low-flight cells), click-to-probe
+a point for zoning/transport/flight stats. Same-origin API calls, so the
+edge LAN/tailnet gate covers it; WAN browsers 401 by design. Data:
+`GET /sg/map-data`. Source in `ui/` (bonkled conventions: Astro static,
+React island for the map only, IBM Plex Mono cream/ink tokens).
+
 ## Long-running jobs
 
 Endpoints that may exceed inline wait (`osint_domain`, `osint_email`,
