@@ -377,6 +377,22 @@ curl -sX POST http://localhost:8889/reputation \
 pi tool (preferred): `place_reputation`. Env: `SEARXNG_INTERNAL_URL`
 (compose-internal), `GUMSHOE_URL` (default http://10.0.71.2:18080).
 
+## Sun scoring (crawler service)
+
+Direct-sun model for a unit: pysolar sun path vs a horizon built from
+HDB `max_floor_lvl` (via the block-coords map, 500m) + OSM
+`building:levels` (400m). Buildings spread across their angular width;
+absent layers degrade with notes (unshaded-sky, NOT an unblocked window).
+
+```bash
+curl -sX POST http://localhost:8889/sg/sun \
+  -H 'content-type: application/json' \
+  -d '{"lat":1.315,"lon":103.764,"floor":8,"facing":270}'   # 0=N 90=E 180=S 270=W
+```
+
+pi tool (preferred): `sg_sun`. Returns monthly direct-sun hours, the
+west-sun-after-3pm verdict, and the biggest obstructions in view.
+
 ## Long-running jobs
 
 Endpoints that may exceed inline wait (`osint_domain`, `osint_email`,
