@@ -361,6 +361,22 @@ curl -sX POST http://localhost:8889/sg/nuisance \
   -H 'content-type: application/json' -d '{"lat":1.315,"lon":103.764}'
 ```
 
+## Place reputation (crawler service)
+
+Community-complaint digest for a named place: SearXNG discovery over
+reddit/HardwareZone/Lemon8/web, in-process extraction (reddit stays
+snippet-only - bot-walled), distilled to themes by gumshoe (local 9B on
+servarr; unreachable = raw sources, no summary).
+
+```bash
+curl -sX POST http://localhost:8889/reputation \
+  -H 'content-type: application/json' \
+  -d '{"place":"Tampines GreenVines","max_sources":8}'
+```
+
+pi tool (preferred): `place_reputation`. Env: `SEARXNG_INTERNAL_URL`
+(compose-internal), `GUMSHOE_URL` (default http://10.0.71.2:18080).
+
 ## Long-running jobs
 
 Endpoints that may exceed inline wait (`osint_domain`, `osint_email`,

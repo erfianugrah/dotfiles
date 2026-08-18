@@ -221,6 +221,55 @@ const nuisanceTool = defineTool({
   },
 });
 
+const reputationTool = defineTool({
+  name: "place_reputation",
+  label: "Place Reputation",
+  promptSnippet:
+    "place_reputation - community-complaint digest for a place (estate/condo/area): Reddit + HardwareZone + Lemon8 + web, distilled to themes by the local LLM.",
+  promptGuidelines: [
+    "Use for 'what do people complain about in <estate/condo>', rental due diligence, area red flags.",
+    "Works best with a specific name ('Tampines GreenVines', 'Blk 105 Ang Mo Kio') not a bare town.",
+    "Slow (~1-3 min): searches, fetches up to 8 pages, then summarizes. summarize:false for raw sources only.",
+  ],
+  description: [
+    "Harvest community complaints about a place (reddit, HardwareZone, Lemon8, web) and return a",
+    "distilled digest: complaint themes with counts, representative quotes, and an overall verdict.",
+    "Summarized server-side by the local 9B model; sources list included for drill-in.",
+  ].join(" "),
+  parameters: Type.Object({
+    place: Type.String({ description: "Estate/condo/area name, e.g. 'Tampines GreenVines'" }),
+    max_sources: Type.Optional(Type.Number({ description: "Pages to fetch (default 8, max 16)" })),
+    summarize: Type.Optional(Type.Boolean({ description: "LLM-distill themes (default true)" })),
+  }),
+  async execute(_id, params, signal) {
+    const data = await post<{
+      sources: { source: string; url: string; title: string; snippet_only: boolean }[];
+      summary: string | null;
+      note: string | null;
+    }>(
+      "/reputation",
+      { place: params.place, max_sources: params.max_sources ?? 8, summarize: params.summarize ?? true },
+      300_000,
+      signal,
+    );
+
+    const lines: string[] = [];
+    if (data.summary) {
+      lines.push(data.summary);
+    }
+    if (data.note) lines.push(`_${data.note}_`);
+    if (data.sources.length) {
+      lines.push("", "Sources:");
+      for (const s of data.sources) {
+        lines.push(`- [${s.source}${s.snippet_only ? ", snippet-only" : ""}] ${s.title} - ${s.url}`);
+      }
+    } else {
+      lines.push("No sources found for this place.");
+    }
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  },
+});
+
 const refreshTool = defineTool({
   name: "sg_refresh",
   label: "SG Data Refresh",
@@ -254,5 +303,6 @@ const refreshTool = defineTool({
 export default function (pi: ExtensionAPI) {
   pi.registerTool(compsTool);
   pi.registerTool(nuisanceTool);
+  pi.registerTool(reputationTool);
   pi.registerTool(refreshTool);
 }
