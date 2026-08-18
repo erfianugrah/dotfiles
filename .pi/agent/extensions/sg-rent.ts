@@ -331,6 +331,105 @@ const sunTool = defineTool({
   },
 });
 
+const listingsTool = defineTool({
+  name: "sg_listings",
+  label: "SG Listings",
+  promptSnippet:
+    "sg_listings - newest 99.co rental listings (structured: price, beds, sqft, postal, agent). query filters by project/address/postal substring.",
+  promptGuidelines: [
+    "Use for 'what is listed for rent at <project>', current asking rents.",
+    "The feed is newest island-wide (100 rows); a listing that is not recent may be missed - query again later, agents repost constantly.",
+    "Every call snapshots server-side; sg_listings_history reads the accumulated history.",
+  ],
+  description: [
+    "Search the newest 99.co rental listings (up to 200 island-wide, filtered locally by query).",
+    "Returns structured rows: project, address, postal, price, psf, beds, baths, sqft, listed age, agent, url.",
+    "Each call also snapshots to the history store for price-drop and re-list churn analysis.",
+  ].join(" "),
+  parameters: Type.Object({
+    query: Type.Optional(Type.String({ description: "Project/address/postal filter, e.g. 'Ripple Bay' or '560105'" })),
+    limit: Type.Optional(Type.Number({ description: "Max rows returned (default 30)" })),
+  }),
+  async execute(_id, params, signal) {
+    const data = await post<{
+      fetched: number;
+      listings: {
+        project: string; address: string; postal: string;
+        price: number; price_formatted: string; psf: number;
+        beds: number; baths: number; sqft: number; category: string;
+        listed: string; agent: string; url: string;
+      }[];
+    }>(
+      "/sg/listings",
+      { query: params.query, limit: params.limit ?? 30 },
+      240_000,
+      signal,
+    );
+
+    const lines = [
+      `**${data.listings.length} listings** (of ${data.fetched} newest island-wide${params.query ? `, filtered "${params.query}"` : ""})`,
+      "",
+      "| price | unit | sqft | project/address | listed |",
+      "| --- | --- | --- | --- | --- |",
+    ];
+    for (const l of data.listings) {
+      const unit = l.beds > 0 ? `${l.beds}bd/${l.baths}ba` : l.category;
+      lines.push(`| ${l.price_formatted}/mo | ${unit} | ${l.sqft ?? "?"} | ${l.project || l.address} | ${l.listed} |`);
+    }
+    if (data.listings[0]?.url) {
+      lines.push("", `First match: ${data.listings[0].url}`);
+    }
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  },
+});
+
+const listingsHistoryTool = defineTool({
+  name: "sg_listings_history",
+  label: "SG Listings History",
+  promptSnippet:
+    "sg_listings_history - price-drop and re-list churn for a project/address from accumulated 99.co snapshots.",
+  promptGuidelines: [
+    "Use for 'has the price on X dropped', 'does this unit keep getting re-listed' (tenant churn signal).",
+    "History accrues from sg_listings calls + the nightly snapshot; early on it will be thin - say so.",
+  ],
+  description: [
+    "Read the accumulated 99.co snapshot history for a project/address/postal: price observations",
+    "per listing over time (price drops = same id, lower price) and re-listed units (same unit, new ids).",
+  ].join(" "),
+  parameters: Type.Object({
+    query: Type.String({ description: "Project/address/postal, e.g. 'Ripple Bay'" }),
+  }),
+  async execute(_id, params, signal) {
+    const data = await post<{
+      matches: number; relisted_units: number;
+      listings: {
+        id: string; project: string; address: string; category: string;
+        first_seen: string; last_seen: string;
+        price_first: number; price_last: number; price_change?: number;
+        sightings: number;
+      }[];
+    }>(
+      "/sg/listings-history",
+      { query: params.query },
+      60_000,
+      signal,
+    );
+
+    const lines = [
+      `**History for "${params.query}"**: ${data.matches} listings, ${data.relisted_units} re-listed units`,
+    ];
+    if (data.matches === 0) {
+      lines.push("_No snapshots yet - history accrues from nightly snapshots and sg_listings calls._");
+    }
+    for (const l of data.listings.slice(0, 10)) {
+      const change = l.price_change !== undefined
+        ? ` (${l.price_change > 0 ? "+" : ""}$${l.price_change})` : "";
+      lines.push(`- ${l.project || l.address}: $${l.price_first} -> $${l.price_last}${change}, ${l.sightings} sightings ${l.first_seen.slice(0, 10)} to ${l.last_seen.slice(0, 10)}`);
+    }
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  },
+});
+
 const refreshTool = defineTool({
   name: "sg_refresh",
   label: "SG Data Refresh",
@@ -366,5 +465,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(nuisanceTool);
   pi.registerTool(reputationTool);
   pi.registerTool(sunTool);
+  pi.registerTool(listingsTool);
+  pi.registerTool(listingsHistoryTool);
   pi.registerTool(refreshTool);
 }

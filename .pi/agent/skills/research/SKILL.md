@@ -393,6 +393,22 @@ curl -sX POST http://localhost:8889/sg/sun \
 pi tool (preferred): `sg_sun`. Returns monthly direct-sun hours, the
 west-sun-after-3pm verdict, and the biggest obstructions in view.
 
+## Portal listings + churn history (crawler service)
+
+99.co newest island-wide rental listings via the v2 web search API
+(keyword params do NOT filter it - local substring filter; CF-challenged
+days fall back to FlareSolverr). Every fetch snapshots to
+`sg-listings.jsonl`: same id at a lower price = price drop; same unit
+under new ids = re-list (tenant churn). pi tools: `sg_listings`,
+`sg_listings_history`.
+
+```bash
+curl -sX POST http://localhost:8889/sg/listings \
+  -H 'content-type: application/json' -d '{"query":"ripple bay","limit":5}'
+curl -sX POST http://localhost:8889/sg/listings-history \
+  -H 'content-type: application/json' -d '{"query":"ripple bay"}'
+```
+
 ## Long-running jobs
 
 Endpoints that may exceed inline wait (`osint_domain`, `osint_email`,
