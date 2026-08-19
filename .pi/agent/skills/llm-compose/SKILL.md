@@ -39,18 +39,18 @@ loop-task suite (fixtures+manifests+canary solutions in bench/, every probe
 needs a canary + `llmc bench tasks --verify-only` before scoring models).
 `bench watch` = staleness report after pin bumps/preset edits.
 
-## proxy-go (Go rewrite, in soak since 2026-08-19)
+## proxy-go (Go rewrite, AUTHORITATIVE since 2026-08-19)
 
 `proxy-go/` = the v2 proxy in Go (spec `docs/specs/2026-08-19-model-proxy-v2.md`).
 Adds over the Python proxy: drain-before-swap (`LLMC_DRAIN_GRACE_S`, default 60s),
 capability serve-in-place (`X-LLM-Capability` header / `cap:<name>` model form;
 preset TOMLs carry `capabilities = [...]`), lock TTL (`LLMC_LOCK_TTL_S`, 900s) +
 durable FIFO queue in active.toml, and an Anthropic `/v1/messages` shim for
-Claude Code (`ANTHROPIC_BASE_URL=http://127.0.0.1:11435`). Soak service
-`model-proxy-go` on **127.0.0.1:11435**, own state dir `~/docker-volumes/state-go`.
+Claude Code (`ANTHROPIC_BASE_URL=http://127.0.0.1:11434`). `model-proxy-go`
+owns **127.0.0.1:11434** (all clients cut over 2026-08-19); own state dir
+`~/docker-volumes/state-go`. The Python proxy is stopped on :11436 as the
+rollback lane (swap published ports in compose.yaml to revert).
 Commands: `make build-proxy-go` / `make test-proxy-go` / `make smoke-proxy-go`.
-CLI against the Go proxy: `LLMC_PROXY_PORT=11435 llmc ...`. Cutover = repoint
-clients (or swap published ports), then retire `llmc/proxy.py`.
 
 ## Gotchas (all hit for real)
 
@@ -61,9 +61,11 @@ clients (or swap published ports), then retire `llmc/proxy.py`.
 - whisper GPU services hold ~5.6GB - `llmc bench perf` stops+restarts them.
 - Locks are restart-safe (persisted to state volume). A client POSTing a
   different model gets 503 "model lock active" while locked.
-- **llama-server degrades to sub-1 t/s after ~1h of churn** with
-  killed/abandoned large-context agent sessions (zombie KV; 100% GPU util at
-  low power, tg collapses). Fix: `docker restart llama_server`.
+- **qwen38 context cliff (2026-08-19 spike)**: 262144 x 1 slot is
+  pathological (0.37 t/s from a FRESH container - cliff is ctx SIZE, not
+  usage). 196608 x 1 slot is the sweet spot: 67 t/s, 29.4GB, 2x the old
+  per-slot ctx. The earlier "zombie KV" slowdown was this same cliff at
+  2x98304 under pressure, not abandoned sessions.
 - **Dispatching work TO the local model** (bg_task with llama-server/*):
   scope each dispatch to one deliverable and paste API contracts into the
   prompt with a "do NOT read other files" rule - monolithic read-everything
