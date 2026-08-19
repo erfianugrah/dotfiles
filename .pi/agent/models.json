@@ -1,13 +1,11 @@
 {
-  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open \u2014 no restart needed. Source of truth for llm-compose model list: ~/infra/ai/llm-compose/models/*.toml",
+  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open \u2014 no restart needed. Source of truth for llm-compose model list: ~/infra/ai/llm-compose/models/*.toml. NOTES: llama-server = llm-compose proxy on localhost:11434; apiKey ignored by proxy but Pi requires the field. compat block for llama-server: llama.cpp's OpenAI server has no developer role or reasoning_effort, both disabled at provider level. $comment keys inside provider/compat objects are NOT allowed - pi validates providers strictly (rejects with 'Unrecognized key'), so notes live at file root and in modelOverride roots only.",
   "providers": {
     "llama-server": {
-      "$comment": "llm-compose proxy on localhost:11434 \u2014 auto-swaps GPU between llama.cpp and ComfyUI. Models are llama.cpp via OpenAI-compatible API. apiKey ignored by proxy but Pi requires the field.",
       "baseUrl": "http://localhost:11434/v1",
       "api": "openai-completions",
       "apiKey": "llmc",
       "compat": {
-        "$comment": "llama.cpp's OpenAI server does not implement developer role or reasoning_effort. Disable both at provider level so Pi sends sane requests.",
         "supportsDeveloperRole": false,
         "supportsReasoningEffort": false,
         "supportsStrictMode": false
@@ -178,13 +176,12 @@
             "text",
             "image"
           ],
+          "$comment": "2026-08-19: k3 collapsed into pure-'!' thinking streams twice in one morning (OpenRouter upstream-node failure). repetition_penalty (heuristic value) makes the single-token attractor less likely; the degenerate-stream-guard extension is the hard containment. Not all upstreams honor repetition_penalty - remove if reasoning feels flattened. Routing prefers the official Moonshot AI deployment, falls back to the pool. NOTE: $comment is only safe at THIS level - samplingParams and openRouterRouting are forwarded verbatim to the API, a $comment inside them 400s the request.",
           "samplingParams": {
-            "$comment": "2026-08-19: k3 collapsed into pure-'!' thinking streams twice in one morning (OpenRouter upstream-node failure). Mild penalty (heuristic value) makes the single-token attractor less likely; the degenerate-stream-guard extension is the hard containment. Not all upstreams honor repetition_penalty. Remove if reasoning feels flattened.",
             "repetition_penalty": 1.05
           },
           "compat": {
             "openRouterRouting": {
-              "$comment": "Prefer the official Moonshot AI deployment (reference quality); fall back to the pool when it's unavailable rather than failing the turn.",
               "order": [
                 "Moonshot AI"
               ],
