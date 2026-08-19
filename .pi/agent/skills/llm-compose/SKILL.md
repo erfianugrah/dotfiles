@@ -76,10 +76,18 @@ Adopted:
 - loop engine: loop preset stays (tasks 12/18 tie with qwen38; 2.7x decode,
   3-7x cheaper failure; write-new-tests is the suite ceiling, not a
   differentiator)
-- interactive coding/chat/vision: qwen38 with MTP ON (`spec_type =
-  "draft-mtp"` in models/qwen38.toml; gen +15.1%, pp +38.1%, TTFT -20%,
-  ctx ceiling holds at 31.9GB, guard 4/4). Registered in pi models.json
-  (dotfiles ddc51fe) - pick it in /model.
+- interactive coding/chat/vision: qwen38, now (2026-08-19, P5)
+  `spec_type = "ngram-mod"` + `reasoning_effort = "medium"` in
+  models/qwen38.toml. MTP draft-mtp DISQUALIFIED for agentic churn
+  (decode degrades to ~0.5 tok/s after ~10 min of loop traffic,
+  reproduced on b10362+b10472; upstream #27151/#27296; restart restores).
+  MTP survives only as the `qwen38-xhigh` variant preset (xhigh + MTP)
+  for babysat interactive use. ngram-mod measured: +93-100% gen cold
+  pool, big warm-pool upside, no draft state to degrade; defaults
+  (24/48/64) beat small-n (4/8/32). llama.cpp pin b10472 fixed the
+  abandoned-stream slot-parking bug. Details:
+  docs/plans/2026-08-19-qwen38-p5-effort-spec.md +
+  docs/reference/speculative-decoding.md.
 - small track: gemma4-12b ties qwen35-9b incumbent (0.944 hit) with fewer
   steps (1.67 vs 2.30); swap gated on 3080 Ti deploy-fit. g15-chain is 0/3
   for everything - the discriminator case.
@@ -89,16 +97,19 @@ Adopted:
 
 Numbers: humaneval loop 0.116 / gemma4 0.293 / qwen38 0.451
 (harness-relative, xhigh effort). Perf gen tok/s: loop 199 / gemma4 63 /
-qwen38 74 / qwen38-mtp 85.
+qwen38 74 / qwen38-mtp 85 (short-burst MTP only - it degrades; treat the
+85 as interactive-only) / qwen38-ngram ~141 cold, higher warm.
 
-reasoning_effort lever (2026-08-17): preset key `reasoning_effort =
-"medium"` -> CHAT_TEMPLATE_KWARGS env -> --chat-template-kwargs (compact
-JSON - the entrypoint word-splits, no spaces allowed). xhigh (default)
-injects 'think carefully' language = 15k-40k thinking tokens/prompt
-(community-reported); medium injects nothing. ALL bench numbers are xhigh;
-qwen38.toml carries the lever commented pending an A/B. pi sends no
-per-request effort (supportsReasoningEffort: false) - preset default is
-the only lever.
+reasoning_effort (2026-08-19 P5 A/B, resolved): quality-neutral on the
+task suite (ceiling tasks fail identically xhigh vs medium), and medium
+kills the thinking-binge lottery (xhigh burned 1308s on a 19.7s task;
+medium: tight 10-31s band) - adopted as the qwen38 default.
+Mechanics: preset key `reasoning_effort = "medium"` -> CHAT_TEMPLATE_KWARGS
+env -> --chat-template-kwargs (compact JSON - the entrypoint word-splits,
+no spaces allowed). xhigh (server default) injects 'think carefully'
+language = 15k-40k thinking tokens/prompt (community-reported). pi sends
+no per-request effort (supportsReasoningEffort: false) - preset default
+is the only lever.
 
 Ops gotchas added this run: presets dedup by model_id (GGUF stem) - two
 presets on one GGUF crash-loop the proxy; an A/B preset needs a hardlinked
