@@ -39,6 +39,19 @@ loop-task suite (fixtures+manifests+canary solutions in bench/, every probe
 needs a canary + `llmc bench tasks --verify-only` before scoring models).
 `bench watch` = staleness report after pin bumps/preset edits.
 
+## proxy-go (Go rewrite, in soak since 2026-08-19)
+
+`proxy-go/` = the v2 proxy in Go (spec `docs/specs/2026-08-19-model-proxy-v2.md`).
+Adds over the Python proxy: drain-before-swap (`LLMC_DRAIN_GRACE_S`, default 60s),
+capability serve-in-place (`X-LLM-Capability` header / `cap:<name>` model form;
+preset TOMLs carry `capabilities = [...]`), lock TTL (`LLMC_LOCK_TTL_S`, 900s) +
+durable FIFO queue in active.toml, and an Anthropic `/v1/messages` shim for
+Claude Code (`ANTHROPIC_BASE_URL=http://127.0.0.1:11435`). Soak service
+`model-proxy-go` on **127.0.0.1:11435**, own state dir `~/docker-volumes/state-go`.
+Commands: `make build-proxy-go` / `make test-proxy-go` / `make smoke-proxy-go`.
+CLI against the Go proxy: `LLMC_PROXY_PORT=11435 llmc ...`. Cutover = repoint
+clients (or swap published ports), then retire `llmc/proxy.py`.
+
 ## Gotchas (all hit for real)
 
 - **Repo re-clone breaks the proxy's bind mount** (stale inode) - presets
@@ -48,6 +61,13 @@ needs a canary + `llmc bench tasks --verify-only` before scoring models).
 - whisper GPU services hold ~5.6GB - `llmc bench perf` stops+restarts them.
 - Locks are restart-safe (persisted to state volume). A client POSTing a
   different model gets 503 "model lock active" while locked.
+- **llama-server degrades to sub-1 t/s after ~1h of churn** with
+  killed/abandoned large-context agent sessions (zombie KV; 100% GPU util at
+  low power, tg collapses). Fix: `docker restart llama_server`.
+- **Dispatching work TO the local model** (bg_task with llama-server/*):
+  scope each dispatch to one deliverable and paste API contracts into the
+  prompt with a "do NOT read other files" rule - monolithic read-everything
+  prompts collapse throughput; scoped ones finish in minutes.
 - Lock queue (2026-08-17): a contended `llmc lock` 409s (never hijacks the
   running model); `--wait` joins the proxy's FIFO queue (202 + position; the
   head's next poll gets the grant once owners drain; swap to the granted
