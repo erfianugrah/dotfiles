@@ -76,18 +76,19 @@ Adopted:
 - loop engine: loop preset stays (tasks 12/18 tie with qwen38; 2.7x decode,
   3-7x cheaper failure; write-new-tests is the suite ceiling, not a
   differentiator)
-- interactive coding/chat/vision: qwen38, now (2026-08-19, P5)
-  `spec_type = "ngram-mod"` + `reasoning_effort = "medium"` in
-  models/qwen38.toml. MTP draft-mtp DISQUALIFIED for agentic churn
-  (decode degrades to ~0.5 tok/s after ~10 min of loop traffic,
-  reproduced on b10362+b10472; upstream #27151/#27296; restart restores).
-  MTP survives only as the `qwen38-xhigh` variant preset (xhigh + MTP)
-  for babysat interactive use. ngram-mod measured: +93-100% gen cold
-  pool, big warm-pool upside, no draft state to degrade; defaults
-  (24/48/64) beat small-n (4/8/32). llama.cpp pin b10472 fixed the
-  abandoned-stream slot-parking bug. Details:
-  docs/plans/2026-08-19-qwen38-p5-effort-spec.md +
-  docs/reference/speculative-decoding.md.
+- interactive coding/chat/vision: qwen38, now (2026-08-19, P5+P6)
+  `reasoning_effort = "medium"` and NO speculation in
+  models/qwen38.toml. BOTH speculators degrade under agentic churn on
+  this hybrid Gated DeltaNet model: MTP draft-mtp within ~10 min
+  (upstream #27151/#27296) and ngram-mod identically (p6 validation:
+  0.6-0.7 tok/s, GPU idle, restart restores). Hypothesis: rejected-draft
+  rollback of the recurrent state costs too much at 24k+ context. Only
+  no-spec sustained 55-66 tok/s through a 5433s task. ngram-mod short-
+  burst perf was +93-100% cold pool - worth re-testing on future pins.
+  MTP survives only as the `qwen38-xhigh` variant preset (babysat
+  interactive). llama.cpp pin b10472 fixed the abandoned-stream
+  slot-parking bug. Details: docs/plans/2026-08-19-qwen38-p5-effort-spec.md
+  + docs/reference/speculative-decoding.md.
 - small track: gemma4-12b ties qwen35-9b incumbent (0.944 hit) with fewer
   steps (1.67 vs 2.30); swap gated on 3080 Ti deploy-fit. g15-chain is 0/3
   for everything - the discriminator case.
@@ -97,8 +98,9 @@ Adopted:
 
 Numbers: humaneval loop 0.116 / gemma4 0.293 / qwen38 0.451
 (harness-relative, xhigh effort). Perf gen tok/s: loop 199 / gemma4 63 /
-qwen38 74 / qwen38-mtp 85 (short-burst MTP only - it degrades; treat the
-85 as interactive-only) / qwen38-ngram ~141 cold, higher warm.
+qwen38 74 / qwen38-mtp 85 / qwen38-ngram ~141 cold (both speculators
+short-burst only - they degrade under churn; treat spec numbers as
+interactive-only).
 
 reasoning_effort (2026-08-19 P5 A/B, resolved): quality-neutral on the
 task suite (ceiling tasks fail identically xhigh vs medium), and medium
