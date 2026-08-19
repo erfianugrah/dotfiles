@@ -112,7 +112,7 @@ machine; do NOT use both on the same machine or resources load twice.
    pi update --extensions                                 # reconcile later
    ```
 
-   This carries the 64 top-level + 3 directory extensions, 61 skills, 8
+   This carries the 67 top-level + 3 directory extensions, 61 skills, 8
    prompt templates and the theme. It does NOT carry
    user config (pi packages
    ship resources only): `settings.json`, `models.json`, `keybindings.json`,
