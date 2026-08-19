@@ -177,7 +177,20 @@
           "input": [
             "text",
             "image"
-          ]
+          ],
+          "samplingParams": {
+            "$comment": "2026-08-19: k3 collapsed into pure-'!' thinking streams twice in one morning (OpenRouter upstream-node failure). Mild penalty (heuristic value) makes the single-token attractor less likely; the degenerate-stream-guard extension is the hard containment. Not all upstreams honor repetition_penalty. Remove if reasoning feels flattened.",
+            "repetition_penalty": 1.05
+          },
+          "compat": {
+            "openRouterRouting": {
+              "$comment": "Prefer the official Moonshot AI deployment (reference quality); fall back to the pool when it's unavailable rather than failing the turn.",
+              "order": [
+                "Moonshot AI"
+              ],
+              "allow_fallbacks": true
+            }
+          }
         },
         "openrouter/auto": {
           "$comment": "OpenRouter prices its router pseudo-models at -1 ('variable, depends on routed model'). Pi multiplies it straight through, so every auto turn subtracts its token count from session cost (footer showed $-150685 on 2026-08-11). Zero it: unknown is honest, negative is wrong. Same -1 sentinel on auto-beta and fusion.",
