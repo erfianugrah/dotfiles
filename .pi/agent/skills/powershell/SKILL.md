@@ -1,6 +1,6 @@
 ---
 name: powershell
-description: Use when running or writing PowerShell (pwsh) scripts from pi, checking Windows machines (the LAPTOP-I002E42Q debugging work - bugcheck/Kernel-Power 41/RTD3), administering Windows over SSH/PSRemoting, or answering PowerShell syntax questions. Fires on 'pwsh', 'powershell', '.ps1', 'Get-WinEvent', 'Get-CimInstance', 'PSRemoting', 'run this on the Windows laptop'. NOT for bash scripting or Windows-app GUI troubleshooting with no shell component.
+description: Use when running or writing PowerShell (pwsh) scripts from pi, touching the Windows host of this WSL2 dev box (ERFI1, the 5090 desktop - filesystem via /mnt/c, binaries via WSL interop), hardware/event-log checks on Windows (Get-CimInstance/Get-WinEvent), or answering PowerShell syntax questions. Fires on 'pwsh', 'powershell', '.ps1', 'Get-WinEvent', 'Get-CimInstance', 'PSRemoting', 'check the Windows side'. NOT for bash scripting or Windows-app GUI troubleshooting with no shell component.
 ---
 
 # PowerShell
@@ -20,7 +20,7 @@ questions there with `docs_search`/`docs_grep`, source `powershell`.
 
 ```
 powershell({ script: "Get-Process | Select -First 5 Name,Id | ConvertTo-Json -Compress" })
-powershell({ script: "...", host: "laplaptop" })      # remote over SSH
+powershell({ script: "...", host: "somehost" })      # remote over SSH (alias in ~/.ssh/config)
 powershell({ script: "...", timeoutSec: 300 })        # default 120, max 600
 ```
 
@@ -34,32 +34,32 @@ powershell({ script: "...", timeoutSec: 300 })        # default 120, max 600
 - Never `bash pwsh -Command '...'` - that reintroduces the bash->pwsh quoting
   problem the tool exists to avoid.
 
-## Remote: the Windows laptop (LAPTOP-I002E42Q)
+## The Windows host: ERFI1 (this WSL2 instance lives on it)
 
-ASUS ROG 2022 (Ryzen 6000), Windows 11 Home 25H2. Recurring debugging target
-(Kernel-Power 41 crashes, AX210 wifi, RTD3/NHI 9003). Today commands get
-**pasted into an interactive session by the user** - there is no SSH route.
-To set one up (all on the laptop, elevated pwsh):
+pi runs in WSL2 (`*-microsoft-standard-WSL2` kernel) on the user's 5090 dev
+desktop - hostname **ERFI1**, Windows 10 Pro (build 19045), AMD Ryzen 7
+7800X3D, 64 GB RAM, RTX 5090, ASUS custom build (this is the llm-compose
+box). **You are already ON it** - no SSH, no remoting:
 
-```powershell
-Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
-Set-Service sshd -StartupType Automatic; Start-Service sshd
-# default shell -> pwsh (optional, nice for interactive ssh):
-New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell `
-  -Value "C:\Program Files\PowerShell\7\pwsh.exe" -PropertyType String -Force
-```
+- Windows filesystem: `/mnt/c/Users/Erfi Anugrah/...` (Downloads, Desktop,
+  etc. are directly readable/writable with normal bash tools).
+- Windows-side PowerShell via WSL interop: `powershell.exe` (5.1) is on PATH.
+  `pwsh.exe` is NOT on the interop path - invoke by full path
+  (`"/mnt/c/Program Files/PowerShell/7/pwsh.exe"` if installed). The
+  `powershell` TOOL always runs Linux pwsh - for Windows-side execution use
+  `bash` with the .exe, e.g. hardware/event checks:
+  `powershell.exe -NoProfile -Command "Get-CimInstance Win32_VideoController | Select Name,DriverVersion"`
+- Interop output is UTF-16-ish/CRLF; pipe through `tr -d '\r'` when parsing.
+- Any Windows binary on the interop path can be launched the same way
+  (both directions work). For hardware/system inventory prefer
+  `Get-CimInstance` over asking the user to run dxdiag.
 
-Then add an ssh alias locally (`Host laplaptop` -> its IP, user) and
-`powershell({ script, host: "laplaptop" })` works - the tool runs
-`ssh -- laplaptop pwsh -NoProfile -NonInteractive -Command -`.
-
-Notes:
-- **WinRM-based PSRemoting is not available on Windows Home** - SSH is the
-  only remoting path. (`Enter-PSSession -HostName` works too once the
-  `powershell` subsystem is in sshd_config; see
-  /docs/powershell/docs-conceptual/security/remoting/SSH-Remoting-in-PowerShell.md)
-- Windows 11 Home ships OpenSSH Server as an optional capability (above);
-  pwsh 7 itself must be installed separately (winget install Microsoft.PowerShell).
+If SSH access FROM another machine into ERFI1's Windows side is ever needed:
+OpenSSH Server is an optional capability (elevated pwsh on Windows:
+`Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0`,
+`Set-Service sshd -StartupType Automatic; Start-Service sshd`). Windows 10
+Pro also has full WinRM/PSRemoting, unlike Home. But for anything reachable
+from WSL2, interop + /mnt/c is simpler.
 
 ## Bash-native gotchas (quick reference)
 
@@ -79,7 +79,7 @@ Scripts: save as `.ps1`, run with `powershell({ script: ". ./foo.ps1" })` or
 paste the body directly. PSScriptAnalyzer (`Install-Module PSScriptAnalyzer`)
 is the linter; Pester is the test framework.
 
-## Windows debug recipes (proven on the laptop)
+## Windows debug recipes (run via `powershell.exe` interop from WSL2)
 
 ```powershell
 # Bugcheck reports (WER 1001) - what stop code crashed it
