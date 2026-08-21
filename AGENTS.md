@@ -112,7 +112,7 @@ machine; do NOT use both on the same machine or resources load twice.
    pi update --extensions                                 # reconcile later
    ```
 
-   This carries the 67 top-level + 3 directory extensions, 61 skills, 8
+   This carries the 69 top-level + 3 directory extensions, 61 skills, 8
    prompt templates and the theme. It does NOT carry
    user config (pi packages
    ship resources only): `settings.json`, `models.json`, `keybindings.json`,
@@ -229,6 +229,16 @@ work harness** - propagation there is opt-in and curated, never automatic.
 - Pure helpers go in unit tests. Side-effectful execute() paths get a
   /tmp/ integration test driven via the SDK preload mock (see
   `.pi/agent/tests/preload.ts` for the stub pattern).
+- Notable guards/limits: `tool-output-spill.ts` (oversized plain-text tool
+  results > PI_SPILL_MAX_BYTES, default 51200, are persisted to
+  `~/.pi/agent/spill/<session>/` and replaced inline with a bounded
+  head/tail preview + locator; kill switch PI_SPILL_OFF=1) and
+  `repeat-tool-guard.ts` (advisory loop-breaker: consecutive identical-args
+  tool calls get an escalating reminder appended to the result at
+  PI_REPEAT_THRESHOLDS, default 3,5,8; never blocks; kill switch
+  PI_REPEAT_GUARD_OFF=1). Both ported from deepseek-harness
+  (spill-policy / repeat-tool-reminder); plan + verified findings in
+  `docs/plans/2026-08-21-deepseek-harness-learnings.md`.
 
 ## Project trust (pi 0.79+)
 
