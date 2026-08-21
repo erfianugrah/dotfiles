@@ -17,6 +17,7 @@ export PATH="$HOME/infra/ai/llm-compose/bin:$PATH"
 llmc status / models / switch <preset> / health
 llmc lock <preset> --owner <id> --wait   # pin against evicting swaps; ALWAYS lock before unattended loops, one owner per concurrent loop. --wait queues FIFO when another preset is pinned (contended lock NEVER hijacks since 2026-08-17); drop --wait for fail-fast 409.
 llmc unlock [--owner id]          # ownerless = force-clear all
+llmc lock --renew [--owner id]    # heartbeat the 900s lock TTL - legs that go >TTL with no request lapse the lock silently; `llmc status` shows expires-in
 make up / down / restart / test   # restart = force-recreate proxy+webui
 make build-proxy                  # after ANY llmc/ code change (proxy bakes it)
 ```
@@ -45,7 +46,10 @@ needs a canary + `llmc bench tasks --verify-only` before scoring models).
 Adds over the Python proxy: drain-before-swap (`LLMC_DRAIN_GRACE_S`, default 60s),
 capability serve-in-place (`X-LLM-Capability` header / `cap:<name>` model form;
 preset TOMLs carry `capabilities = [...]`), lock TTL (`LLMC_LOCK_TTL_S`, 900s) +
-durable FIFO queue in active.toml, and an Anthropic `/v1/messages` shim for
+renewal (`llmc lock --renew` / POST /mode {"renew": true}; `lock_expires_at` in
+GET /mode + `llmc status`), liveness recovery (connection-level upstream death
+flips mode to idle, next acquire respawns - no more 502-loop), and a durable
+FIFO queue in active.toml, plus an Anthropic `/v1/messages` shim for
 Claude Code (`ANTHROPIC_BASE_URL=http://127.0.0.1:11434`). `model-proxy-go`
 owns **127.0.0.1:11434** (all clients cut over 2026-08-19); own state dir
 `~/docker-volumes/state-go`. The Python proxy is stopped on :11436 as the
