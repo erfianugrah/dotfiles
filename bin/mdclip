@@ -115,7 +115,12 @@ $cf   = ($hfmt -f $sh,$eh,$sf,$ef) + $pre + $frag + $post
 $do = New-Object System.Windows.Forms.DataObject
 $do.SetData([System.Windows.Forms.DataFormats]::Html, $false, $cf)
 $do.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $false, $text)
-[System.Windows.Forms.Clipboard]::SetDataObject($do, $true)
+# copy=$false renders eagerly. OleFlushClipboard persists the data to the OS
+# clipboard - without it the WSL bridge clears the clipboard when this process
+# exits, and the next app to touch it sees empty / a stale Bitmap.
+[System.Windows.Forms.Clipboard]::SetDataObject($do, $false)
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class OLEFlush{[DllImport("ole32.dll")]public static extern int OleFlushClipboard();}'
+[OLEFlush]::OleFlushClipboard() | Out-Null
 PSEOF
       powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$(wslpath -w "$tmpps")" "$(wslpath -w "$htmlfile")" "$(wslpath -w "$textfile")" >/dev/null
       ;;
@@ -152,7 +157,10 @@ $enc  = New-Object System.Text.UTF8Encoding($false)
 $text = [System.IO.File]::ReadAllText($TextPath, $enc)
 $do = New-Object System.Windows.Forms.DataObject
 $do.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $false, $text)
-[System.Windows.Forms.Clipboard]::SetDataObject($do, $true)
+# copy=$false + OleFlushClipboard: persist past process exit on WSL (see rich path)
+[System.Windows.Forms.Clipboard]::SetDataObject($do, $false)
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class OLEFlush2{[DllImport("ole32.dll")]public static extern int OleFlushClipboard();}'
+[OLEFlush2]::OleFlushClipboard() | Out-Null
 PSEOF
       powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$(wslpath -w "$tmpps")" "$(wslpath -w "$textfile")" >/dev/null
       ;;
