@@ -61,11 +61,10 @@ Commands: `make build-proxy-go` / `make test-proxy-go` / `make smoke-proxy-go`.
 - whisper GPU services hold ~5.6GB - `llmc bench perf` stops+restarts them.
 - Locks are restart-safe (persisted to state volume). A client POSTing a
   different model gets 503 "model lock active" while locked.
-- **qwen38 context cliff (2026-08-19 spike)**: 262144 x 1 slot is
-  pathological (0.37 t/s from a FRESH container - cliff is ctx SIZE, not
-  usage). 196608 x 1 slot is the sweet spot: 67 t/s, 29.4GB, 2x the old
-  per-slot ctx. The earlier "zombie KV" slowdown was this same cliff at
-  2x98304 under pressure, not abandoned sessions.
+- **qwen38 context ceiling = 196608 x 1 slot** (2026-08-20 occupancy sweep,
+  real KV fill): 196608 -> 59.8->42 t/s as occupancy rises; 229376 -> 4 t/s
+  (14x collapse, flat across occupancy); 245760 -> 0.31. Structural limit past
+  196608, NOT occupancy/VRAM. 196608 x 1 slot is the config.
 - **Dispatching work TO the local model** (bg_task with llama-server/*):
   scope each dispatch to one deliverable and paste API contracts into the
   prompt with a "do NOT read other files" rule - monolithic read-everything
