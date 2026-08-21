@@ -238,12 +238,13 @@ Erfi writes British English. Use it in every drafted surface:
 - "spoke" not "talked", British idiom over American ("reckon", not "figure"; "straight away" not "right away").
 - Technical identifiers are exempt - keep code/API names verbatim (`broadcast_changes`, `realtime.send`, `authorization`, `color` in CSS).
 
-**Scope: this rule is for reply/email/Slack/review surfaces.** Long-form docs
-authored inside a repo follow THAT repo's own style contract when one exists
-(its AGENTS.md) - e.g. the lexicanum docs corpus is American -ize
-(normalize/organize) and carries its own voice + skeleton rules; do not
-"correct" doc prose to British spellings there. When no repo contract exists,
-default to this skill.
+**Scope: British -ise applies on every surface, including long-form docs.**
+The lexicanum corpus used to exempt itself as American -ize; that divergence
+was retired 2026-08-21 - lexicanum's AGENTS.md now specifies British -ise
+(normalise/organise) too, with product/API terms exempt (Supabase
+"organization", OAuth "authorize"). Legacy docs still carry American
+spellings; normalise when touching a section, never bulk-rewrite for style
+alone.
 
 ## ASCII punctuation (hard rule)
 

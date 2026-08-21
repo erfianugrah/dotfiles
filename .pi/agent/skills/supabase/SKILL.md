@@ -724,6 +724,8 @@ supabase branches get feature-x
 
 **GitHub integration**: enable in dashboard → branches auto-create on PR open and tear down on PR close/merge. Each PR gets its own Supabase project with the PR's schema.
 
+**Cost**: branches are full projects billed per-hour ($0.01344/branch/hour on Pro+; branching is not available on the Free plan - the Free "limit of 2" is active projects, not branches). Persistent branches stay until manually deleted; preview branches auto-expire.
+
 **Detaching a persistent branch from its git branch without delete/recreate** (measured 2026-08-21, API + CLI): `PATCH /v1/branches/{branch_id}` with `{"git_branch":""}` clears the link - pushes to the git branch then produce a `Supabase Preview` check run with conclusion `skipped` and leave the branch untouched. `null` does NOT clear it (treated as field-absent, silently no-ops with a 200). CLI equivalent: `supabase branches update <name> --git-branch "" --project-ref <ref>`. Relink by setting the branch name back (validated against the connected repo). Adjacent: `DELETE` on a persistent branch 400s - PATCH `{"persistent":false}` first. Full guide: https://erfi.dev/guides/supabase-branch-detach-git-link/
 
 ## Auth flows quick reference
