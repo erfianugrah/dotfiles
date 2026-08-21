@@ -1,6 +1,6 @@
 ---
 name: llm-compose
-description: Use when working on or with the user's local LLM stack (llm-compose on the 5090 dev box) - switching/locking model presets, the llmc bench framework (perf/eval/gumshoe/tasks), adding a preset or GGUF, debugging the model_proxy, GPU mode sharing with comfyui/lora-train/whisper, or the Qwen3.8-vs-Gemma-4 model evaluation. Fires on 'llm-compose', 'llmc', 'llama-server', 'model preset', 'loop engine', 'llmc bench', 'qwen38', 'local model bench'. NOT for the servarr gumshoe/1070 stack (gumshoe/research skills), whisper transcription (whisper skill), image gen (comfyui skill), or LoRA training (lora-train skill).
+description: Use when working on or with the user's local LLM stack (llm-compose on the 5090 dev box) - switching/locking model presets, the llmc bench framework (perf/eval/gumshoe/tasks), adding a preset or GGUF, debugging the model_proxy_go, GPU mode sharing with comfyui/lora-train/whisper, or the Qwen3.8-vs-Gemma-4 model evaluation. Fires on 'llm-compose', 'llmc', 'llama-server', 'model preset', 'loop engine', 'llmc bench', 'qwen38', 'local model bench'. NOT for the servarr gumshoe/1070 stack (gumshoe/research skills), whisper transcription (whisper skill), image gen (comfyui skill), or LoRA training (lora-train skill).
 ---
 
 # llm-compose
@@ -8,7 +8,7 @@ description: Use when working on or with the user's local LLM stack (llm-compose
 Local LLM + image + LoRA-train stack on the WSL2 dev box (RTX 5090 32GB,
 sm_120). Repo `~/infra/ai/llm-compose` (PUBLIC GitHub repo - no internal
 identifiers in tracked files). All Docker; only one GPU workload at a time;
-`model_proxy` (:11434, OpenAI-compatible) owns container lifecycle.
+`model_proxy_go` (:11434, OpenAI-compatible) owns container lifecycle.
 
 ## Daily commands
 
@@ -55,7 +55,7 @@ Commands: `make build-proxy-go` / `make test-proxy-go` / `make smoke-proxy-go`.
 ## Gotchas (all hit for real)
 
 - **Repo re-clone breaks the proxy's bind mount** (stale inode) - presets
-  404 on switch until `docker restart model_proxy`.
+  404 on switch until `docker restart model_proxy_go`.
 - **Preset schema changes need `make build-proxy`** - the running proxy
   validates TOMLs from baked code and crash-loops on unknown keys.
 - whisper GPU services hold ~5.6GB - `llmc bench perf` stops+restarts them.
