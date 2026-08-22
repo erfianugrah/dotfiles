@@ -465,6 +465,20 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
     (`anthropic/claude-sonnet-5`) completed the 2026-08-11 memledger run after
     both gateways hit their balance limits. Add these ids to the ladder so the
     loop automatically traverses gateways when one is drained.
+  - **Gotcha: Kimi K3 reasoning cliff on OpenRouter (since 2026-08-19/20).**
+    K3's per-turn think-rate dropped from 87-99% to 23-30%, scaling with
+    context (>150k prompt tokens: 4-15% vs 88-100% before). A judge that is
+    not thinking rubber-stamps iterations, so treat the K3 judge-rung and
+    escalation-pairing recommendations above as suspended for
+    `openrouter/moonshotai/kimi-k3` until confirmed fixed.
+    `deepseek-v4-pro` held 97% at >=100k on the same days - use it as the
+    OpenRouter judge instead. Single-turn probes still reason (suppression
+    is specific to long multi-turn session shape), so a smoke test will not
+    catch it; verify via the session-jsonl reasoning-vs-context cross-tab
+    (method: https://erfi.dev/guides/diagnosing-llm-reasoning-cliffs/).
+    opencode-zen's K3 path reasoned in a 163k single-shot probe on 2026-08-23
+    but is untested in long sessions - cross-tab it before trusting it as a
+    judge.
   - **$0 local rung (llama-server provider, llm-compose proxy on the 5090).**
     `llama-server/loop` (Gemma 4 26B-A4B MoE, agentic-tuned preset) is a real
     worker rung for judged loops, not just a toy: A/B on the same scoped task
