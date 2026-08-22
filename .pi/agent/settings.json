@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.84.2",
   "defaultProvider": "openrouter",
-  "defaultModel": "z-ai/glm-5.3",
+  "defaultModel": "qwen/qwen3.8-max",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
   "externalEditor": "nvim",
