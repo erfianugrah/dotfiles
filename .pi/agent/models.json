@@ -176,7 +176,7 @@
             "text",
             "image"
           ],
-          "$comment": "Routing prefers the official Moonshot AI deployment, falls back to the pool. repetition_penalty was removed 2026-08-23: A/B probe against the live API showed it suppressing reasoning tokens (19/39/29 with, 37/173/93 without on the same prompt). The 2026-08-19 '!' degenerate streams it was added for are now contained by the degenerate-stream-guard extension instead. NOTE: $comment is only safe at THIS level - samplingParams and openRouterRouting are forwarded verbatim to the API, a $comment inside them 400s the request.",
+          "$comment": "Routing prefers the official Moonshot AI deployment, falls back to the pool. repetition_penalty was removed 2026-08-23 during the reasoning-cliff investigation: a short-prompt A/B suggested suppression (19/39/29 with vs 37/173/93 without) but long-context probes did not reproduce it, and the cliff's degradation predated the penalty's addition, so it was not the cause. The 2026-08-19 '!' degenerate streams it was added for are contained by the degenerate-stream-guard extension instead. NOTE: $comment is only safe at THIS level - samplingParams and openRouterRouting are forwarded verbatim to the API, a $comment inside them 400s the request.",
           "compat": {
             "openRouterRouting": {
               "order": [
