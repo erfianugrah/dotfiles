@@ -176,10 +176,7 @@
             "text",
             "image"
           ],
-          "$comment": "2026-08-19: k3 collapsed into pure-'!' thinking streams twice in one morning (OpenRouter upstream-node failure). repetition_penalty (heuristic value) makes the single-token attractor less likely; the degenerate-stream-guard extension is the hard containment. Not all upstreams honor repetition_penalty - remove if reasoning feels flattened. Routing prefers the official Moonshot AI deployment, falls back to the pool. NOTE: $comment is only safe at THIS level - samplingParams and openRouterRouting are forwarded verbatim to the API, a $comment inside them 400s the request.",
-          "samplingParams": {
-            "repetition_penalty": 1.05
-          },
+          "$comment": "Routing prefers the official Moonshot AI deployment, falls back to the pool. repetition_penalty was removed 2026-08-23: A/B probe against the live API showed it suppressing reasoning tokens (19/39/29 with, 37/173/93 without on the same prompt). The 2026-08-19 '!' degenerate streams it was added for are now contained by the degenerate-stream-guard extension instead. NOTE: $comment is only safe at THIS level - samplingParams and openRouterRouting are forwarded verbatim to the API, a $comment inside them 400s the request.",
           "compat": {
             "openRouterRouting": {
               "order": [

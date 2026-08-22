@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.84.2",
   "defaultProvider": "openrouter",
-  "defaultModel": "moonshotai/kimi-k3",
+  "defaultModel": "z-ai/glm-5.3",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
   "externalEditor": "nvim",
