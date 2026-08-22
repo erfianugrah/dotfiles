@@ -89,7 +89,10 @@ export default function (pi: ExtensionAPI) {
 				fireSync(["sync"], fullThrottle, true);
 			}
 		} catch {
-			throttle.done(); /* best-effort */
+			// best-effort: release whichever throttle may hold in-flight state
+			// (a leak here would disable that sync path for the session).
+			throttle.done();
+			fullThrottle.done();
 		}
 	});
 
@@ -105,7 +108,8 @@ export default function (pi: ExtensionAPI) {
 			const trackFull = fullThrottle.fireFinal();
 			fireSync(["sync"], fullThrottle, trackFull);
 		} catch {
-			/* best-effort */
+			throttle.done();
+			fullThrottle.done();
 		}
 	});
 }
