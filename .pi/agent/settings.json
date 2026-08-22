@@ -16,12 +16,12 @@
     "maxRetries": 3,
     "baseDelayMs": 2000,
     "provider": {
-      "timeoutMs": 120000,
+      "timeoutMs": 600000,
       "maxRetries": 2,
       "maxRetryDelayMs": 60000
     }
   },
-  "hideThinkingBlock": false,
+  "hideThinkingBlock": true,
   "packages": [
     "git:github.com/erfianugrah/pi-mcp-bridge"
   ],
