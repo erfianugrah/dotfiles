@@ -9,10 +9,9 @@ The Forgejo Actions runtime is a deliberate compatibility layer over GitHub Acti
 
 > **2026-08-23:** the user's self-hosted forge moved from Gitea (servarr)
 > to Forgejo 16.0.3 (MS-01 router, `git.erfi.io`). See
-> `~/infra/forgejo-compose/AGENTS.md`. Claims in this file that were
-> originally verified against Gitea are labelled [unverified] until
-> re-checked on the Forgejo 16 instance. The runner is Forgejo Runner
-> v13 with labels `ubuntu-latest`/`ubuntu-22.04` -> `ghcr.io/catthehacker/ubuntu:act-22.04`, capacity 2.
+> `~/infra/forgejo-compose/AGENTS.md`. The runner is Forgejo Runner
+> v13 with labels `ubuntu-latest`/`ubuntu-22.04` ->
+> `ghcr.io/catthehacker/ubuntu:act-22.04`, capacity 2.
 
 All versions below were queried from `api.github.com/repos/<owner>/<action>/releases/latest` on 2026-08-05, and every floating major tag was separately confirmed to resolve via `git/matching-refs/tags/<major>`. Re-verify before pinning in a new project if it's been >3 months.
 
@@ -231,7 +230,7 @@ jobs:
 
 ## Forgejo Actions - what's different
 
-Forgejo Actions is **mostly drop-in compatible** with GitHub Actions YAML, but the following fields are **silently ignored** [unverified - re-verify against Forgejo 16]:
+Forgejo Actions is **mostly drop-in compatible** with GitHub Actions YAML, but the following fields are **silently ignored**:
 
 | Field | Status |
 |---|---|
@@ -265,7 +264,7 @@ Use the `full` image only when you need GitHub-runner-parity (rare). Default `ca
 Forgejo downloads non-fully-qualified actions from **github.com** by default (). So `uses: actions/checkout@v7` resolves to `https://github.com/actions/checkout.git`. To pin to a Forgejo-hosted action, use the absolute URL:
 
 ```yaml
-- uses: https://code.forgejo.org/actions/checkout [unverified]@v4
+- uses: https://code.forgejo.org/actions/checkout@v4
 - uses: https://your-forgejo.example.com/owner/action@v1
 ```
 
@@ -273,7 +272,7 @@ To restrict to self-only (air-gapped instance), set `[actions].DEFAULT_ACTIONS_U
 
 ### Context - github vs forgejo
 
-`${{ github.* }}` and `${{ github.*} [unverified: forgejo.* context]` both work. Prefer `github.*` for new workflows (future-proofing; platform-neutral [unverified: forgejo.* context]). For shared workflows running on both platforms, stick with `github.*`.
+`${{ github.* }}` and `${{ forgejo.* }}` both work. Prefer `github.*` for new workflows (platform-neutral). For shared workflows running on both platforms, stick with `github.*`.
 
 ### GITEA_TOKEN limitations
 
@@ -404,11 +403,11 @@ GitHub deprecated v3 in 2024 and **breaks running workflows** when artifacts are
 
 `actions/checkout@v7`, `actions/setup-node@v7`, `docker/*@v4+`, `softprops/action-gh-release@v3` all use the Node 24 actions runtime. Self-hosted runners must be **Actions Runner ≥ 2.327.1**. Older self-hosted runners hang or fail on these. Either upgrade the runner or pin to the previous major (v5/v3/v2.6.2 respectively).
 
-### Forgejo `concurrency [unverified]:` doesn't queue
+### Forgejo `concurrency:` doesn't queue
 
-If your repo relies on `concurrency:` groups to serialize deploys, Forgejo will run them in parallel [unverified]. Workaround: use a self-hosted runner with `--max-parallelism 1`, or implement file-locking in the workflow itself.
+If your repo relies on `concurrency:` groups to serialize deploys, Forgejo will run them in parallel. Workaround: use a self-hosted runner with capacity 1, or implement file-locking in the workflow itself.
 
-### Forgejo `id-token [unverified]` for cloud auth
+### Forgejo `id-token` for cloud auth
 
 OIDC trust to AWS/GCP/Azure is not supported. Fall back to long-lived access keys stored as secrets (rotate manually) or use a self-hosted runner with native cloud-instance credentials.
 
@@ -416,9 +415,13 @@ OIDC trust to AWS/GCP/Azure is not supported. Fall back to long-lived access key
 
 Forgejo Actions has its own cache backend (`actions/cache` works), but cache scope is per-runner-group, not org-wide like GitHub. Cross-job cache hits work; cross-repo cache hits don't.
 
+### Runner job containers can't reach Forgejo (per-workflow bridge isolation)
+
+act (the runner's job executor) creates a per-workflow bridge network on a random subnet. Docker's inter-bridge isolation blocks traffic between this network and the Forgejo bridge, so `git fetch` against `http://forgejo:3000` times out. Fix: set `container.network: <forgejo-bridge>` in the runner's `config.yml` (joins job containers to the forgejo network directly) and optionally add `--add-host forgejo:<ip>` to `container.options`. See `~/infra/forgejo-compose/AGENTS.md` for the user's setup.
+
 ### `runs-on:` on Forgejo must match a registered label
 
-If your workflow says `runs-on: ubuntu-24.04` but the registered runner only has `ubuntu-22.04, ubuntu-latest` labels, the job sits in pending forever. Check with `forgejo-runner list [unverified]` on the runner host. The user's setup uses `ubuntu-latest` (→ `act-22.04`) by default.
+If your workflow says `runs-on: ubuntu-24.04` but the registered runner only has `ubuntu-22.04, ubuntu-latest` labels, the job sits in pending forever. Check the runner's registered labels in Forgejo admin > Actions > Runners. The user's setup uses `ubuntu-latest` (-> `act-22.04`) by default.
 
 ### Matrix strategies
 
@@ -443,6 +446,6 @@ steps:
 
 ## Related
 
-- **Docs sources**: `github` (GitHub product docs incl. Actions YAML reference), `gitea` (self-hosted instance docs), `gitea-api`
+- **Docs sources**: `github` (GitHub product docs incl. Actions YAML reference), `gitea` (self-hosted instance docs), `gitea-api`. Forgejo docs are not on docs.erfi.io yet -- use `https://forgejo.org/docs/latest/` directly.
 - `frontend-stack` — when scaffolding a project that needs CI on day one
 - the pi `oci_tags` tool — query for current versions of container images you build/push
