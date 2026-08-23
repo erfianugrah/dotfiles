@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.84.2",
   "defaultProvider": "openrouter",
-  "defaultModel": "deepseek/deepseek-v4-pro",
+  "defaultModel": "z-ai/glm-5.3",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
   "externalEditor": "nvim",
@@ -21,7 +21,7 @@
       "maxRetryDelayMs": 60000
     }
   },
-  "hideThinkingBlock": true,
+  "hideThinkingBlock": false,
   "packages": [
     "git:github.com/erfianugrah/pi-mcp-bridge"
   ],
