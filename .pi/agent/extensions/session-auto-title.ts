@@ -121,6 +121,24 @@ export function markerState(markers: MarkerData[]): TitleState {
   return { kind: "retry", attempts };
 }
 
+// First user message on the branch - the stable title source regardless of
+// which turn the attempt fires on.
+function firstUserText(ctx: ExtensionContext): string {
+  try {
+    const entries = ctx.sessionManager.getBranch();
+    for (const e of entries) {
+      if (e.type !== "message") continue;
+      const m = (e as { message?: { role?: string; content?: unknown } }).message;
+      if (m?.role !== "user") continue;
+      const t = extractText(m.content).trim();
+      if (t) return t;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
 function getMarkerState(ctx: ExtensionContext): TitleState {
   const markers: MarkerData[] = [];
   try {
@@ -220,11 +238,16 @@ export default function (pi: ExtensionAPI) {
     if (state.kind === "done") return;
     if (state.attempts >= MAX_ATTEMPTS) return;
 
-    // event.messages contains the messages from THIS prompt - find the user message
-    const messages = (event as { messages?: Array<{ role?: string; content?: unknown }> }).messages ?? [];
-    const userMsg = messages.find((m) => m.role === "user");
-    if (!userMsg) return;
-    const userText = extractText(userMsg.content).trim();
+    // Title from the session's FIRST user message, not the current turn's -
+    // on a retry the current message is often a low-signal "ok"/"continue"
+    // (observed: retro-titled a resumed session "Short headline for next
+    // conversation" because the resume prompt was "ok").
+    let userText = firstUserText(ctx);
+    if (!userText) {
+      const messages = (event as { messages?: Array<{ role?: string; content?: unknown }> }).messages ?? [];
+      const userMsg = messages.find((m) => m.role === "user");
+      if (userMsg) userText = extractText(userMsg.content).trim();
+    }
     if (!userText) return;
 
     const candidates = await pickTitleCandidates(ctx);
