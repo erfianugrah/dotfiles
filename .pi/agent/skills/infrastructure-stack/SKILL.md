@@ -279,4 +279,4 @@ The user's pattern (from servarr `MIGRATION_PLAN_ZFS.md`):
 - `supabase` — when the project uses Supabase instead of self-hosted Postgres
 - `ci-workflows` — to deploy this stack via CI
 - **Docs sources**: `docker`, `kubernetes`, `k3s`, `caddy`, `traefik`, `cloudflare`, `ansible`, `terraform`, `helm`
-- **User's reference repos**: `~/infra/ergo/caddy-compose/AGENTS.md`, `~/infra/servarr-compose/AGENTS.md`, `~/infra/keycloak-compose/`, `~/infra/vaultwarden-compose/`, `~/infra/gitea-compose/`, `~/infra/immich-compose/` — read these for canonical examples
+- **User's reference repos**: `~/infra/ergo/caddy-compose/AGENTS.md`, `~/infra/servarr-compose/AGENTS.md`, `~/infra/keycloak-compose/`, `~/infra/vaultwarden-compose/`, `~/infra/forgejo-compose/AGENTS.md`, `~/infra/immich-compose/` — read these for canonical examples

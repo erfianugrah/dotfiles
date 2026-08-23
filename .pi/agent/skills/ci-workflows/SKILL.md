@@ -1,18 +1,25 @@
 ---
 name: ci-workflows
-description: Use when adding or reviewing CI/CD workflow YAML for GitHub Actions or Gitea Actions (self-hosted), pinning action versions, migrating workflows between GitHub and Gitea, building/pushing Docker images in CI, setting up language toolchains (node/python/go/java/bun/deno), deploying Pages, or cutting GitHub Releases in CI.
+description: Use when adding or reviewing CI/CD workflow YAML for GitHub Actions or Forgejo Actions (self-hosted), pinning action versions, migrating workflows between GitHub and Forgejo, building/pushing Docker images in CI, setting up language toolchains (node/python/go/java/bun/deno), deploying Pages, or cutting GitHub Releases in CI.
 ---
 
-# CI workflows — GitHub Actions + Gitea Actions
+# CI workflows - GitHub Actions + Forgejo Actions
 
-The Gitea Actions runtime (`act_runner`) is a deliberate compatibility layer over GitHub Actions YAML. Workflows mostly copy across, but several fields are silently ignored and the runner image model differs. This skill encodes both platforms with verified-current action versions and the gitea-specific gotchas.
+The Forgejo Actions runtime is a deliberate compatibility layer over GitHub Actions YAML. Workflows mostly copy across, but several fields are silently ignored and the runner image model differs. This skill encodes both platforms with verified-current action versions and the Forgejo-specific gotchas.
+
+> **2026-08-23:** the user's self-hosted forge moved from Gitea (servarr)
+> to Forgejo 16.0.3 (MS-01 router, `git.erfi.io`). See
+> `~/infra/forgejo-compose/AGENTS.md`. Claims in this file that were
+> originally verified against Gitea are labelled [unverified] until
+> re-checked on the Forgejo 16 instance. The runner is Forgejo Runner
+> v13 with labels `ubuntu-latest`/`ubuntu-22.04` -> `ghcr.io/catthehacker/ubuntu:act-22.04`, capacity 2.
 
 All versions below were queried from `api.github.com/repos/<owner>/<action>/releases/latest` on 2026-08-05, and every floating major tag was separately confirmed to resolve via `git/matching-refs/tags/<major>`. Re-verify before pinning in a new project if it's been >3 months.
 
 ## When to use what
 
 - `.github/workflows/*.yml` for repos hosted on github.com
-- `.gitea/workflows/*.yml` for repos on a self-hosted Gitea instance
+- `.forgejo/workflows/*.yml` for repos on a self-hosted Forgejo instance
 - Both directories can co-exist; pick whichever runner is registered
 - Filenames: `ci.yml`, `release.yml`, `deploy.yml` — concise, one workflow per concern
 
@@ -222,9 +229,9 @@ jobs:
           files: dist/*
 ```
 
-## Gitea Actions — what's different
+## Forgejo Actions - what's different
 
-Gitea Actions is **mostly drop-in compatible** with GitHub Actions YAML, but the following fields are **silently ignored** as of Gitea 1.26 / act_runner 0.2.11 (verified from `docs.gitea.com/usage/actions/comparison`):
+Forgejo Actions is **mostly drop-in compatible** with GitHub Actions YAML, but the following fields are **silently ignored** [unverified - re-verify against Forgejo 16]:
 
 | Field | Status |
 |---|---|
@@ -232,7 +239,7 @@ Gitea Actions is **mostly drop-in compatible** with GitHub Actions YAML, but the
 | `jobs.<id>.continue-on-error` | **IGNORED** |
 | `jobs.<id>.environment` | **IGNORED** (no environment protection rules) |
 | `concurrency:` (groups) | **IGNORED** |
-| `permissions:` | Different model — Gitea scopes (`code`, `releases`, `wiki`, `projects`); GitHub-only scopes (`statuses`, `checks`, `deployments`, `id-token`, `security-events`, `pages`) not supported |
+| `permissions:` | Different model - Forgejo scopes (`code`, `releases`, `wiki`, `projects`); GitHub-only scopes (`statuses`, `checks`, `deployments`, `id-token`, `security-events`, `pages`) not supported [unverified] |
 | Problem Matchers | IGNORED |
 | Error annotations | IGNORED |
 | Expressions | Only `always()` supported (no `failure()`, `success()`, etc.) |
@@ -245,28 +252,28 @@ Default labels in `act_runner` map to docker images:
 
 | Label | Image | Notes |
 |---|---|---|
-| `ubuntu-latest` | `catthehacker/ubuntu:act-24.04` | "default" — most tools, recommended |
-| `ubuntu-24.04` | `catthehacker/ubuntu:act-24.04` | |
+| `ubuntu-latest` | `catthehacker/ubuntu:act-22.04` | "default" — most tools, recommended |
+| `ubuntu-24.04` | `catthehacker/ubuntu:act-22.04` | |
 | `ubuntu-22.04` | `catthehacker/ubuntu:act-22.04` | |
 | `ubuntu-latest-slim` | `node:20-bookworm-slim` | "slim" — Node only, ~200MB |
 | `ubuntu-latest-full` | `catthehacker/ubuntu:full-24.04` | "full" — all GH tools, ~70GB, **amd64 only** |
 
-Use the `full` image only when you need GitHub-runner-parity (rare). Default `catthehacker/ubuntu:act-24.04` covers ~95% of workflows.
+Use the `full` image only when you need GitHub-runner-parity (rare). Default `catthehacker/ubuntu:act-22.04` covers ~95% of workflows.
 
 ### Action source
 
-Gitea downloads non-fully-qualified actions from **github.com** by default (since v1.21). So `uses: actions/checkout@v7` resolves to `https://github.com/actions/checkout.git`. To pin to a Gitea-hosted action, use the absolute URL:
+Forgejo downloads non-fully-qualified actions from **github.com** by default (). So `uses: actions/checkout@v7` resolves to `https://github.com/actions/checkout.git`. To pin to a Forgejo-hosted action, use the absolute URL:
 
 ```yaml
-- uses: https://gitea.com/actions/checkout@v4
-- uses: https://your-gitea.example.com/owner/action@v1
+- uses: https://code.forgejo.org/actions/checkout [unverified]@v4
+- uses: https://your-forgejo.example.com/owner/action@v1
 ```
 
 To restrict to self-only (air-gapped instance), set `[actions].DEFAULT_ACTIONS_URL = self` in `app.ini`. Then absolute URLs are still required for external actions.
 
-### Context — github vs gitea
+### Context - github vs forgejo
 
-`${{ github.* }}` and `${{ gitea.* }}` both work. Prefer `gitea.*` for new workflows (future-proofing; Gitea may diverge). For shared workflows running on both platforms, stick with `github.*`.
+`${{ github.* }}` and `${{ github.*} [unverified: forgejo.* context]` both work. Prefer `github.*` for new workflows (future-proofing; platform-neutral [unverified: forgejo.* context]). For shared workflows running on both platforms, stick with `github.*`.
 
 ### GITEA_TOKEN limitations
 
@@ -274,11 +281,11 @@ To restrict to self-only (air-gapped instance), set `[actions].DEFAULT_ACTIONS_U
 - **Cross-repo**: GITEA_TOKEN is clamped to the running repo. For cross-repo access use PATs.
 - **Fork PRs**: GITEA_TOKEN is read-only for fork PRs (same as GitHub).
 
-## Workflow templates — Gitea Actions
+## Workflow templates — Forgejo Actions
 
-Same YAML as GitHub but in `.gitea/workflows/` and avoiding the ignored fields.
+Same YAML as GitHub but in `.forgejo/workflows/` and avoiding the ignored fields.
 
-### Node + Bun + Biome + tests (Gitea)
+### Node + Bun + Biome + tests (Forgejo)
 
 ```yaml
 name: CI
@@ -290,7 +297,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest    # → catthehacker/ubuntu:act-24.04
+    runs-on: ubuntu-latest    # → catthehacker/ubuntu:act-22.04
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -301,7 +308,7 @@ jobs:
       - run: bun test
 ```
 
-### Docker build + push to Gitea container registry
+### Docker build + push to Forgejo container registry
 
 ```yaml
 name: Build and Push
@@ -321,15 +328,15 @@ jobs:
 
       - uses: docker/login-action@v4
         with:
-          registry: ${{ vars.REGISTRY }}        # e.g. gitea.example.com
-          username: ${{ gitea.actor }}
+          registry: ${{ vars.REGISTRY }}        # e.g. git.erfi.io
+          username: ${{ github.*} [unverified: forgejo.* context]
           password: ${{ secrets.PACKAGE_TOKEN }}  # PAT, not GITEA_TOKEN
-            # GITEA_TOKEN can't push packages (see Gitea quirks above)
+            # GITEA_TOKEN can't push packages (see Forgejo quirks above)
 
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ vars.REGISTRY }}/${{ gitea.repository }}
+          images: ${{ vars.REGISTRY }}/${{ github.*} [unverified: forgejo.* context]
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -343,11 +350,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 ```
 
-Note the explicit `vars.REGISTRY` — Gitea has no equivalent of GitHub's `ghcr.io/${{ github.repository_owner }}` shortcut. Set `REGISTRY` as a repo or org variable.
+Note the explicit `vars.REGISTRY` — Forgejo has no equivalent of GitHub's `ghcr.io/${{ github.repository_owner }}` shortcut. Set `REGISTRY` as a repo or org variable.
 
 ## Cross-platform workflow (works on both)
 
-Stick to GitHub-compatible syntax, avoid ignored Gitea fields:
+Stick to GitHub-compatible syntax, avoid ignored Forgejo fields:
 
 ```yaml
 name: CI
@@ -367,7 +374,7 @@ jobs:
       - run: bun test
 ```
 
-Copy this same file to both `.github/workflows/ci.yml` and `.gitea/workflows/ci.yml`.
+Copy this same file to both `.github/workflows/ci.yml` and `.forgejo/workflows/ci.yml`.
 
 ## Common pitfalls
 
@@ -397,25 +404,25 @@ GitHub deprecated v3 in 2024 and **breaks running workflows** when artifacts are
 
 `actions/checkout@v7`, `actions/setup-node@v7`, `docker/*@v4+`, `softprops/action-gh-release@v3` all use the Node 24 actions runtime. Self-hosted runners must be **Actions Runner ≥ 2.327.1**. Older self-hosted runners hang or fail on these. Either upgrade the runner or pin to the previous major (v5/v3/v2.6.2 respectively).
 
-### Gitea `concurrency:` doesn't queue
+### Forgejo `concurrency [unverified]:` doesn't queue
 
-If your repo relies on `concurrency:` groups to serialize deploys, Gitea will run them in parallel. Workaround: use a self-hosted runner with `--max-parallelism 1`, or implement file-locking in the workflow itself.
+If your repo relies on `concurrency:` groups to serialize deploys, Forgejo will run them in parallel [unverified]. Workaround: use a self-hosted runner with `--max-parallelism 1`, or implement file-locking in the workflow itself.
 
-### Gitea `id-token` for cloud auth
+### Forgejo `id-token [unverified]` for cloud auth
 
 OIDC trust to AWS/GCP/Azure is not supported. Fall back to long-lived access keys stored as secrets (rotate manually) or use a self-hosted runner with native cloud-instance credentials.
 
 ### Caching across runners
 
-Gitea Actions has its own cache backend (`actions/cache` works), but cache scope is per-runner-group, not org-wide like GitHub. Cross-job cache hits work; cross-repo cache hits don't.
+Forgejo Actions has its own cache backend (`actions/cache` works), but cache scope is per-runner-group, not org-wide like GitHub. Cross-job cache hits work; cross-repo cache hits don't.
 
-### `runs-on:` on Gitea must match a registered label
+### `runs-on:` on Forgejo must match a registered label
 
-If your workflow says `runs-on: ubuntu-24.04` but the registered runner only has `ubuntu-22.04, ubuntu-latest` labels, the job sits in pending forever. Check with `act_runner list` on the runner host. The user's setup uses `ubuntu-latest` (→ `act-24.04`) by default.
+If your workflow says `runs-on: ubuntu-24.04` but the registered runner only has `ubuntu-22.04, ubuntu-latest` labels, the job sits in pending forever. Check with `forgejo-runner list [unverified]` on the runner host. The user's setup uses `ubuntu-latest` (→ `act-22.04`) by default.
 
 ### Matrix strategies
 
-Both platforms support `strategy.matrix`. Verified working on Gitea since 1.21. Use it for multi-Node-version / multi-OS tests:
+Both platforms support `strategy.matrix`.  Use it for multi-Node-version / multi-OS tests:
 
 ```yaml
 strategy:

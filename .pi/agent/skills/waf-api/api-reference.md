@@ -264,7 +264,7 @@ to stay in band).
 
 ```bash
 curl -sS -H "Authorization: Bearer $WAF_AUTH_TOKEN" \
-  'http://localhost:8080/api/events?export=true&event_type=challenge_failed&service=gitea.erfi.io&hours=48&limit=10000'
+  'http://localhost:8080/api/events?export=true&event_type=challenge_failed&service=git.erfi.io&hours=48&limit=10000'
 ```
 
 Gotchas: explicit `limit=10000` required (default 50 even in export mode); `offset`

@@ -15,7 +15,7 @@ Two physical sites stitched together by site routers running IPsec/GRE and adver
 
 | Role | Notes |
 |---|---|
-| `servarr` (primary host) | Unraid server. Runs the Docker Compose stacks managed by `composer` (GitOps): media stack, Immich, Vaultwarden, Keycloak, Gitea, MinIO. The host-mode Caddy edge + ACME moved to the MS-01 router (2026-07); Authelia is retired. |
+| `servarr` (primary host) | Unraid server. Runs the Docker Compose stacks managed by `composer` (GitOps): media stack, Immich, Vaultwarden, Keycloak, MinIO. The host-mode Caddy edge + ACME moved to the MS-01 router (2026-07); Forgejo (git.erfi.io + Actions runner) moved to the MS-01 router 2026-08-23. Authelia is retired. |
 | Site routers (×2) | IPsec/GRE site-to-site, plus tailscale subnet advertisement. One site has the public IP. |
 | OOB management | PiKVMs — recovery when SSH/network is dead. |
 | SBC cluster | ARM compute modules + BMC. |

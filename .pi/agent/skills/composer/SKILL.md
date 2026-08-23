@@ -61,7 +61,7 @@ curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 
 ## Multi-host docker daemons (v0.17.0+/v0.18.0+)
 
-One composerd now manages stacks across MULTIPLE docker daemons. Live registry (verified 2026-07-31): ONE remote host, `{"id":1,"name":"servarr","endpoint":"tcp://100.69.69.7:2376","cert_dir":"/certs/servarr"}` - that endpoint is **drawbridge**, the mTLS+allowlist+audit proxy in front of servarr's `/var/run/docker.sock` (see the drawbridge skill). 19 stacks registered: 7 local (atuin, docs-ssh, edge-services, httpbin-bun, joplin, knotea, vaultwarden) + 12 pinned to servarr (bonkled, copyparty, discord-wipe, draw, gitea, gumshoe, immich, keycloak, minio, research, revista, servarr).
+One composerd now manages stacks across MULTIPLE docker daemons. Live registry (verified 2026-07-31): ONE remote host, `{"id":1,"name":"servarr","endpoint":"tcp://100.69.69.7:2376","cert_dir":"/certs/servarr"}` - that endpoint is **drawbridge**, the mTLS+allowlist+audit proxy in front of servarr's `/var/run/docker.sock` (see the drawbridge skill). 19 stacks registered: 8 local (forgejo added 2026-08-23) (atuin, docs-ssh, edge-services, httpbin-bun, joplin, knotea, vaultwarden) + 11 pinned to servarr (forgejo moved to the router 2026-08-23) (bonkled, copyparty, discord-wipe, draw, gumshoe, immich, keycloak, minio, research, revista, servarr).
 
 TLS plumbing internals (do not regress):
 - Per-host SDK clients use `TLSConfig{CertDir}` -> `dockerclient.WithTLSClientConfig(ca, cert, key)` with docker-CLI file naming. `FromEnv` BEFORE `WithHost(host)` in `internal/infra/docker/client.go` is load-bearing (the moby SDK does not apply env TLS implicitly; explicit host still wins).
@@ -91,7 +91,7 @@ Composer can upgrade ITSELF: a `_system` sentinel stack + release webhook trigge
 
 ## Instance - on the MS-01 edge router (moved off servarr 2026-07)
 
-The production composer instance runs on the MS-01 NixOS router (ssh alias `nixos`): `https://composer.erfi.io`, key in `COMPOSER_API_KEY` (shell-init exported, works there). Stacks: 7 local + 12 on the servarr docker host (exact list in the multi-host section).
+The production composer instance runs on the MS-01 NixOS router (ssh alias `nixos`): `https://composer.erfi.io`, key in `COMPOSER_API_KEY` (shell-init exported, works there). Stacks: 8 local (forgejo added 2026-08-23) + 12 on the servarr docker host (exact list in the multi-host section).
 
 The old servarr instance is RETIRED (phase 3c, 2026-07-30): container removed, `composer.servarr.erfi.io` deleted from the edge Caddyfile + DNS. Any reference to it in older notes is historical. (The pre-move `COMPOSER_EDGE_API_KEY` / `composer.edge.erfi.io` edge-instance setup is likewise superseded.)
 
@@ -291,7 +291,7 @@ The `.env` is **gitignored in the repo by design** - it lives in composer's encr
 
 Unraid's stock environment ships `grep` / `awk` / `sed` but **not ripgrep**. Don't pipe `ssh servarr 'rg ...'` — it returns `rg: command not found`. Use `grep -E` / `grep -P` over SSH; ripgrep is fine on the dev box.
 
-Webhook delivery (incoming): `POST /api/v1/hooks/{id}` (public, HMAC-validated). Supports GitHub (`X-Hub-Signature-256`), GitLab (`X-Gitlab-Token`), Gitea (`X-Gitea-Signature`), Generic.
+Webhook delivery (incoming): `POST /api/v1/hooks/{id}` (public, HMAC-validated). Supports GitHub (`X-Hub-Signature-256`), GitLab (`X-Gitlab-Token`), Forgejo (`X-Forgejo-Signature` [unverified]), Generic.
 
 Webhook CRUD: `GET/POST /webhooks`, `GET/PUT/DELETE /webhooks/{id}`, `GET /webhooks/{id}/deliveries`. Secret returned plaintext **once** on POST, redacted to `****<last4>` after.
 
