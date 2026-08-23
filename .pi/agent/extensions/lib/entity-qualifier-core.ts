@@ -231,7 +231,7 @@ export const NUDGE_LINE =
   "entity-qualifier-nudge: a device identifier was cited as evidence with no host qualifier. " +
   "eth0/br0/nvme0n1/etc. are not unique across boxes - a fact about one interface can silently " +
   "become an argument about a different one on a different host. Name the box (\"servarr's eth0\", " +
-  "\"on nixos\") before drawing a conclusion from it. A date does not qualify - \"on 2026-08-08\" " +
+  "\"on router\") before drawing a conclusion from it. A date does not qualify - \"on 2026-08-08\" " +
   "says when, not which box. (PI_ENTITY_NUDGE_OFF=1)";
 
 // -- assistant-message text extraction (shared shape between harnesses) -------

@@ -9,7 +9,7 @@ Self-hosted compose-mgmt platform. Go + Astro. REST API only — no end-user CLI
 
 ## When this skill does NOT apply
 
-Composer (on the **MS-01 NixOS router**, ssh alias `nixos`, public URL `https://composer.erfi.io`; moved off servarr 2026-07) manages stacks across TWO docker daemons: the MS-01 local socket AND servarr's daemon via the drawbridge mTLS proxy (see the multi-host section). It does NOT see:
+Composer (on the **MS-01 NixOS router**, ssh alias `router`, public URL `https://composer.erfi.io`; moved off servarr 2026-07) manages stacks across TWO docker daemons: the MS-01 local socket AND servarr's daemon via the drawbridge mTLS proxy (see the multi-host section). It does NOT see:
 - Local dev compose stacks (`~/infra/ai/llm-compose/`, `~/infra/composer/deploy/`, `~/infra/knot-fly/`, any compose file the user is editing on the dev box).
 - Stacks on other servers not registered in the docker-hosts registry.
 - Anything reached via plain `docker ...` on the dev machine.
@@ -91,7 +91,7 @@ Composer can upgrade ITSELF: a `_system` sentinel stack + release webhook trigge
 
 ## Instance - on the MS-01 edge router (moved off servarr 2026-07)
 
-The production composer instance runs on the MS-01 NixOS router (ssh alias `nixos`): `https://composer.erfi.io`, key in `COMPOSER_API_KEY` (shell-init exported, works there). Stacks: 8 local (forgejo added 2026-08-23) + 12 on the servarr docker host (exact list in the multi-host section).
+The production composer instance runs on the MS-01 NixOS router (ssh alias `router`): `https://composer.erfi.io`, key in `COMPOSER_API_KEY` (shell-init exported, works there). Stacks: 8 local (forgejo added 2026-08-23) + 12 on the servarr docker host (exact list in the multi-host section).
 
 The old servarr instance is RETIRED (phase 3c, 2026-07-30): container removed, `composer.servarr.erfi.io` deleted from the edge Caddyfile + DNS. Any reference to it in older notes is historical. (The pre-move `COMPOSER_EDGE_API_KEY` / `composer.edge.erfi.io` edge-instance setup is likewise superseded.)
 
@@ -102,9 +102,9 @@ The image tag lives in `~/infra/router/configuration.nix` (the flake control pla
 **Router-local access**: API also at `localhost:8080` on the router:
 
 ```bash
-ssh nixos "curl -s -H \"X-API-Key: $COMPOSER_API_KEY\" localhost:8080/api/v1/stacks" | jq -r '.stacks[].name'
+ssh router "curl -s -H \"X-API-Key: $COMPOSER_API_KEY\" localhost:8080/api/v1/stacks" | jq -r '.stacks[].name'
 # deploy the knotea stack (edge builds from the monorepo checkout):
-ssh nixos "curl -s -X POST -H \"X-API-Key: $COMPOSER_API_KEY\" 'localhost:8080/api/v1/stacks/knotea/up?async=true'"
+ssh router "curl -s -X POST -H \"X-API-Key: $COMPOSER_API_KEY\" 'localhost:8080/api/v1/stacks/knotea/up?async=true'"
 ```
 
 If the key 401s, it was rotated - ASK the user for the current key; do NOT improvise manual git surgery as a first resort. Known-good manual fallback when no key is available (used for the v1.1.5/v1.1.6 edge deploys before the key was at hand): generate a throwaway ed25519 keypair inside the stack checkout, `gh repo deploy-key add` it read-only, `git -c core.sshCommand="ssh -i <key> -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" pull --ff-only`, `docker compose up -d --build` from the checkout, then delete the GH deploy key + `shred -u` the keypair. Why this is needed at all: composerd's startup hook **AES-encrypts every key under its ssh dir at rest** (`/var/lib/composer/ssh/id_github*`), so interactive git/ssh with those keys fails with "invalid format" - only composerd can decrypt and use them. The API is the intended path.
@@ -151,7 +151,7 @@ For async ops, poll `GET /api/v1/jobs/{id}`. Jobs auto-cleanup after 1h. Max 100
 
 ## WAF in front of composer - mutating requests with credential-shaped bodies are blocked
 
-(This section was written for the pre-move servarr deployment at composer.servarr.erfi.io. The same edge Caddy/WAF now fronts composer.erfi.io on the router, so the behavior likely still applies - but the internal-network bypass is now simply `ssh nixos` + `localhost:8080`.)
+(This section was written for the pre-move servarr deployment at composer.servarr.erfi.io. The same edge Caddy/WAF now fronts composer.erfi.io on the router, so the behavior likely still applies - but the internal-network bypass is now simply `ssh router` + `localhost:8080`.)
 
 Caddy WAF in front of composer has a credential-detection rule that returns 403 (HTML page) on PUT/POST bodies containing token-like or password-like strings. **The request never reaches composerd.** This bites on:
 
@@ -163,14 +163,14 @@ Caddy WAF in front of composer has a credential-detection rule that returns 403 
 
 ```bash
 # router-local access, no WAF in the path
-ssh nixos "curl -sf -X PUT \
+ssh router "curl -sf -X PUT \
   -H 'X-API-Key: $COMPOSER_API_KEY' \
   -H 'Content-Type: application/json' \
   --data-binary @- \
   http://localhost:8080/api/v1/stacks/<name>/env" <<< "$PAYLOAD"
 ```
 
-(The pre-move variant of this trick reached the servarr container's bridge IP via `ssh servarr`; that instance is retired. The servarr STACKS are still managed fine - through the public API or `ssh nixos` - because composerd talks to servarr's daemon over drawbridge, not through any on-servarr composer.)
+(The pre-move variant of this trick reached the servarr container's bridge IP via `ssh servarr`; that instance is retired. The servarr STACKS are still managed fine - through the public API or `ssh router` - because composerd talks to servarr's daemon over drawbridge, not through any on-servarr composer.)
 
 GETs work fine through the public WAF. Only PUT/POST/DELETE with credential-like bodies trip it. There's a separate, looser WAF rule that adding `User-Agent: Mozilla/5.0` + `Origin: https://composer.servarr.erfi.io` headers bypasses — use that first; only fall through to the internal-network workaround when the credential-detection rule fires.
 
@@ -239,12 +239,12 @@ Two paths, easy to confuse:
 
 | Path | What it is |
 |---|---|
-| `/var/lib/composer/stacks/<name>/` | **Router (post-move) layout** - host source-of-truth on the MS-01 router (`ssh nixos`). |
+| `/var/lib/composer/stacks/<name>/` | **Router (post-move) layout** - host source-of-truth on the MS-01 router (`ssh router`). |
 | `/mnt/user/composer/stacks/<name>/` | **PRE-MOVE (servarr) layout** - retired with the old servarr instance. Do not use. |
 | `/opt/stacks/<name>/` | **In-container view** - composer's container bind-mounts `/var/lib/composer/stacks` to `/opt/stacks` (`COMPOSER_STACKS_DIR=/opt/stacks` inside). The API's stack-object `path` field reports this in-container path. |
 | `/mnt/user/appdata/<name>/` | **NOT used.** That's a generic Unraid template-app convention; composer doesn't write here. Don't go looking. |
 
-Verify the bind-mount on the current (router) deployment: `ssh nixos 'docker inspect composer --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}"'`.
+Verify the bind-mount on the current (router) deployment: `ssh router 'docker inspect composer --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}"'`.
 
 ### Creating a git-backed stack
 

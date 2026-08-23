@@ -38,7 +38,7 @@ describe("entity-qualifier-core / stays quiet", () => {
   });
 
   test("host named via preposition", () => {
-    expect(needsHostQualifier("we saw errors on nixos eth0 during the outage")).toBe(false);
+    expect(needsHostQualifier("we saw errors on router eth0 during the outage")).toBe(false);
   });
 
   test("host:iface addressing", () => {
@@ -75,7 +75,7 @@ describe("entity-qualifier-core / adversarial", () => {
 describe("entity-qualifier-core / helpers", () => {
   test("hasHostQualifier recognises possessive and preposition", () => {
     expect(hasHostQualifier("servarr's eth0")).toBe(true);
-    expect(hasHostQualifier("on nixos eth0")).toBe(true);
+    expect(hasHostQualifier("on router eth0")).toBe(true);
     expect(hasHostQualifier("eth0 on 2026-08-08")).toBe(false);
   });
 

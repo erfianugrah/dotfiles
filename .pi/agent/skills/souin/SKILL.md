@@ -84,7 +84,7 @@ go run . purge <site|all> # rm /data/cache/nuts/<site> + docker restart caddy
   returns `[]` and admin PURGE is a no-op (admin server provisions before
   the cache app and snapshots an empty Storers list); direct `PURGE <url>`
   is a passthrough that evicts only if the ORIGIN answers PURGE with 2xx.
-- Env overrides: `SSH_HOST` (default nixos), `CONTAINER`, `EDGE_IP`.
+- Env overrides: `SSH_HOST` (default router), `CONTAINER`, `EDGE_IP`.
 
 ## Reading Cache-Status (the live diagnostic surface)
 

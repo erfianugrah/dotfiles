@@ -18,7 +18,7 @@ old configuration.nix/router.nix manual-mirror workflow is dead).
 `/etc/nixos` on the router is a read-only checkout; NEVER edit files
 on the router. All changes: edit in `~/infra/router`, commit, `make deploy`
 (push -> router fast-forwards -> `nixos-rebuild switch --flake
-.#nixos` -> `eaves doctor` gate). `make diff` = dry-build. nixpkgs
+.#router` -> `eaves doctor` gate). `make diff` = dry-build. nixpkgs
 and eaves are rev-pinned in flake.nix; bump deliberately. The router
 authenticates with read-only deploy keys (see ~/infra/router/README.md).
 
@@ -30,22 +30,25 @@ Implementation plan + fixture contract: `~/infra/eaves/docs/plans/2026-07-24-eav
 | Want to ... | Reach for |
 |---|---|
 | Answer a router question WITHOUT touching the router | `cd ~/infra/eaves && EAVES_FIXTURE_DIR=testdata/fixtures go run . <cmd>` (fixtures are a sanitized snapshot) |
-| Live answer (leases, conntrack, NAT, ruleset) | `ssh nixos 'sudo -n eaves <cmd>'` (eaves is on PATH) |
+| Live answer (leases, conntrack, NAT, ruleset) | `ssh router 'sudo -n eaves <cmd>'` (eaves is on PATH) |
 | Post-rebuild regression gate ("did I break the router?") | `eaves doctor` - full suite: kea/nft/NAT/conntrack + nixos-checkout drift + trunk NIC health (trunk-errors WARNs on nonzero counters - a static value after a tcpdump session is the i40e promisc-toggle artifact, not hardware) |
 | Verify the flake / test a change end-to-end | `go test ./...` + `bash scripts/smoke-fixtures.sh` (offline) |
 | Change firewall/DHCP/VLAN config | `~/infra/router` + `make deploy` - NEVER eaves (it can't), NEVER edit /etc/nixos on the router |
-| Raw packet forensics eaves doesn't cover | `ssh nixos` + tcpdump/conntrack by hand (`tailscale-homelab` skill) |
+| Raw packet forensics eaves doesn't cover | `ssh router` + tcpdump/conntrack by hand (`tailscale-homelab` skill) |
 
 ## Binary availability (ADOPTED 2026-08-01)
 
 eaves IS on the router's PATH (`/run/current-system/sw/bin/eaves`),
 installed via the `~/infra/router` flake input (`eaves.nixosModules.default`
 = systemPackages). The old rsync + /tmp/nix-build pattern is RETIRED.
-Run: `ssh nixos 'sudo -n eaves doctor'`. Rolling out a NEW eaves rev:
-bump the `?rev=` pin in `~/infra/router/flake.nix`, `make deploy` - the pin
-means a broken eaves main never reaches the router by accident.
+Run: `ssh router 'sudo -n eaves doctor'`. Rolling out a NEW eaves rev:
+`nix flake update eaves` in `~/infra/router` (or the router /tmp-clone flow
+from its README when the dev box has no nix), commit flake.lock,
+`make deploy` - the lock pin means a broken eaves main never reaches the
+router by accident. eaves builds against the ROUTER's nixpkgs
+(`inputs.nixpkgs.follows`), so an update can't drag in a toolchain bump.
 Most commands need root (conntrack/nft) - run via `sudo -n`
-(passwordless sudo is already configured for the `nixos` ssh user, so
+(passwordless sudo is already configured for the `router` ssh user, so
 `sudo -n` never goes interactive).
 
 ## Command patterns
@@ -110,7 +113,7 @@ Re-capture when topology changes (read-only ssh, re-sanitizes):
   fixture mode; that's expected, not a bug.
 - **Exit codes**: 0 ok, 1 runtime/doctor-FAIL, 2 usage (unknown/ambiguous
   command prints candidates).
-- **Remote shell is zsh on `nixos`** - `echo ===` separators explode
+- **Remote shell is zsh on `router`** - `echo ===` separators explode
   ("== not found"); use `echo ---`.
 - **Filters are positional pairs**, not flags: `leases host foo ip 10.0.69.6`
   works; `--filter ip=...` / `--ip` do not exist. Invalid values exit 1.

@@ -5,7 +5,7 @@ description: Use when working on the user's custom Caddy edge reverse-proxy stac
 
 # caddy — custom build + WAF management stack
 
-Repo: `~/infra/ergo/caddy-compose/`. Deployed to the **MS-01 NixOS router** (ssh alias `nixos`) as the `edge-services` composer stack since 2026-07-30 - the servarr host-mode caddy AND the servarr composer are RETIRED (containers, `/mnt/user/composer`, `/mnt/cache/caddy`, `/mnt/user/data/authelia` all deleted). The deployed file is **`deploy/edge/Caddyfile`**; the repo-root `Caddyfile` is the legacy servarr config - never edit it for prod changes. Checkout on the router at `/var/lib/composer/stacks/edge-services`, data at `/var/lib/caddy/{data,config,log,waf}` (certs under `data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<host>/`). Caddy runs `network_mode: host`; wafctl on its own bridge. **No deploy webhook on edge-services** - after pushing, sync+up manually (`POST /api/v1/stacks/edge-services/{sync,up}`) and `docker restart caddy` on the router for Caddyfile changes: the single-file bind mount goes stale-inode on git sync, so `caddy reload` would adapt the OLD inode (restart re-resolves it).
+Repo: `~/infra/ergo/caddy-compose/`. Deployed to the **MS-01 NixOS router** (ssh alias `router`) as the `edge-services` composer stack since 2026-07-30 - the servarr host-mode caddy AND the servarr composer are RETIRED (containers, `/mnt/user/composer`, `/mnt/cache/caddy`, `/mnt/user/data/authelia` all deleted). The deployed file is **`deploy/edge/Caddyfile`**; the repo-root `Caddyfile` is the legacy servarr config - never edit it for prod changes. Checkout on the router at `/var/lib/composer/stacks/edge-services`, data at `/var/lib/caddy/{data,config,log,waf}` (certs under `data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<host>/`). Caddy runs `network_mode: host`; wafctl on its own bridge. **No deploy webhook on edge-services** - after pushing, sync+up manually (`POST /api/v1/stacks/edge-services/{sync,up}`) and `docker restart caddy` on the router for Caddyfile changes: the single-file bind mount goes stale-inode on git sync, so `caddy reload` would adapt the OLD inode (restart re-resolves it).
 
 **Project-truth: `~/infra/ergo/caddy-compose/AGENTS.md`** — read first for current versions, counts, and the full gotcha list. This skill is the pattern layer.
 
@@ -81,7 +81,7 @@ Internal admin proxy on a high port IP-restricts to the wafctl bridge subnet and
 Verify post-restart that the plaintext actually loaded (not the ciphertext):
 
 ```bash
-ssh nixos 'docker inspect caddy --format "{{range .Config.Env}}{{println .}}{{end}}" | grep TSIG_'
+ssh router 'docker inspect caddy --format "{{range .Config.Env}}{{println .}}{{end}}" | grep TSIG_'
 ```
 
 Rotation order (see `knot-dns` skill for the full procedure): rotate on Knot first, then here, else any ACME renewal in the gap returns `BADSIG`.
@@ -187,28 +187,28 @@ Check status checkboxes in each PLAN before claiming anything beyond "in design"
 - **`knot-dns` skill** + `~/infra/knot-fly/AGENTS.md` — upstream of rfc2136; owner of TSIG rotation procedure and force-renewal recipe.
 - **`composer` skill** — composer API endpoints (`stacks/<name>/{sync,up}`, `stacks/<name>/env`), the WAF UA gotcha for PUT/POST, SOPS-decrypt-on-deploy contract.
 - **`infrastructure-stack` skill** — SOPS+age, compose conventions, Unraid+cache patterns, healthchecks, read-only rootfs, cap_drop.
-- **`tailscale-homelab` skill** — every `ssh nixos` invocation below assumes this works.
+- **`tailscale-homelab` skill** — every `ssh router` invocation below assumes this works.
 - **NOT Fly** — this stack doesn't deploy to Fly. Only Knot does.
 
-## Operator recipes — `ssh nixos` snippets
+## Operator recipes — `ssh router` snippets
 
 ```bash
 # Inspect a live cert (substitute your hostname)
 HOST=caddy.example.com
 CERT_DIR=/var/lib/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/$HOST
-ssh nixos "openssl x509 -in $CERT_DIR/$HOST.crt -noout -dates -issuer"
+ssh router "openssl x509 -in $CERT_DIR/$HOST.crt -noout -dates -issuer"
 
 # Force-renew a single site (delete + restart, NOT reload)
-ssh nixos "rm $CERT_DIR/$HOST.{crt,key,json}"
-ssh nixos "docker restart caddy"
-ssh nixos "docker logs --since 1m caddy 2>&1 | grep -iE '$HOST|acme'"
+ssh router "rm $CERT_DIR/$HOST.{crt,key,json}"
+ssh router "docker restart caddy"
+ssh router "docker logs --since 1m caddy 2>&1 | grep -iE '$HOST|acme'"
 
 # Watch ACME activity live
-ssh nixos 'docker logs -f caddy 2>&1 | grep -E "tls.obtain|authorization|finalize|obtained|BADSIG|BADKEY"'
+ssh router 'docker logs -f caddy 2>&1 | grep -E "tls.obtain|authorization|finalize|obtained|BADSIG|BADKEY"'
 
 # Verify TSIG plaintext actually loaded
-ssh nixos 'docker inspect caddy --format "{{range .Config.Env}}{{println .}}{{end}}" | grep TSIG_'
+ssh router 'docker inspect caddy --format "{{range .Config.Env}}{{println .}}{{end}}" | grep TSIG_'
 
 # wafctl health (replace with current bridge IP from compose.yaml)
-ssh nixos 'curl -sf http://<wafctl-bridge-ip>:8080/api/v1/health | jq'
+ssh router 'curl -sf http://<wafctl-bridge-ip>:8080/api/v1/health | jq'
 ```

@@ -62,7 +62,7 @@ describe("entity-qualifier-nudge / stays quiet", () => {
   test("a host qualifier satisfies it", () => {
     expect(needsHostQualifier("servarr's eth0 flapped and downshifted on 2026-08-08")).toBe(false);
     expect(needsHostQualifier("we saw eth0 flap on servarr last week")).toBe(false);
-    expect(needsHostQualifier("the eth0 outage at nixos was never root-caused")).toBe(false);
+    expect(needsHostQualifier("the eth0 outage at router was never root-caused")).toBe(false);
   });
 
   test("a date is not a host qualifier", () => {
@@ -98,7 +98,7 @@ describe("entity-qualifier-nudge / adversarial", () => {
 
   test("a hostname directly before the interface qualifies", () => {
     expect(needsHostQualifier("servarr eth0 flapped last week")).toBe(false);
-    expect(needsHostQualifier("nixos enp2s0f0np0 dropped packets last week")).toBe(false);
+    expect(needsHostQualifier("router enp2s0f0np0 dropped packets last week")).toBe(false);
   });
 
   test("a verb before the interface is not a hostname", () => {

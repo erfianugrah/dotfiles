@@ -5,7 +5,7 @@ description: Use when deleting Discord messages the user owns (purge a guild/cha
 
 # discord-wipe
 
-Drive the user's self-bot bulk deleter: repo `~/discord-wipe-go` (cobra CLI, image `ghcr.io/erfianugrah/discord-wipe-go`), prod = composer stack `discord-wipe` (checkout on nixos `/var/lib/composer/stacks/discord-wipe`, container on servarr via drawbridge). Deep operational corpus = the repo's own AGENTS.md (auto-loaded when cwd is the repo) - this skill is the cross-cwd subset.
+Drive the user's self-bot bulk deleter: repo `~/discord-wipe-go` (cobra CLI, image `ghcr.io/erfianugrah/discord-wipe-go`), prod = composer stack `discord-wipe` (checkout on router `/var/lib/composer/stacks/discord-wipe`, container on servarr via drawbridge). Deep operational corpus = the repo's own AGENTS.md (auto-loaded when cwd is the repo) - this skill is the cross-cwd subset.
 
 ## Hard rules (every violation has burned us)
 
@@ -32,10 +32,10 @@ Drive the user's self-bot bulk deleter: repo `~/discord-wipe-go` (cobra CLI, ima
 This stack has `auto_sync=true` but **NO auto-deploy**: a push auto-syncs the checkout (and git-cleans it, wiping `.env`) but never recreates the container. Deploy sequence:
 
 1. Commit + push `main` (release.yml rebuilds `:main`; tag `v*` for releases).
-2. `pull` via composer API on nixos, key piped on stdin (one curl per pipe - stdin is consumed):
-   `printf 'header = "X-API-Key: %s"\n' "$COMPOSER_API_KEY" | ssh nixos 'curl -s --config - -X POST "http://localhost:8080/api/v1/stacks/discord-wipe/pull?async=true"'`
+2. `pull` via composer API on router, key piped on stdin (one curl per pipe - stdin is consumed):
+   `printf 'header = "X-API-Key: %s"\n' "$COMPOSER_API_KEY" | ssh router 'curl -s --config - -X POST "http://localhost:8080/api/v1/stacks/discord-wipe/pull?async=true"'`
 3. **Recreate `.env`** - every git-sync (the push-triggered auto-sync, or a manual pull/up) git-cleans untracked files, wiping it; `up` then fails `.env not found`. Pipe BOTH keys container -> file cross-host, verify `grep -c '^DISCORD_TOKEN='` = 1:
-   `ssh servarr 'docker inspect discord-wipe --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -E "^(DISCORD_TOKEN|RETENTION_OVERRIDES)=" | tr -d "\r"' | ssh nixos 'cat > /var/lib/composer/stacks/discord-wipe/.env; chmod 600 /var/lib/composer/stacks/discord-wipe/.env'`
+   `ssh servarr 'docker inspect discord-wipe --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -E "^(DISCORD_TOKEN|RETENTION_OVERRIDES)=" | tr -d "\r"' | ssh router 'cat > /var/lib/composer/stacks/discord-wipe/.env; chmod 600 /var/lib/composer/stacks/discord-wipe/.env'`
 4. `up?async=true` same as pull, then poll `GET /api/v1/jobs/<id>`.
 5. Verify: `ssh servarr 'docker inspect discord-wipe --format "{{index .Config.Labels \"org.opencontainers.image.revision\"}}"'` matches the pushed SHA; logs show `pass start cutoff=` ~RETENTION_DAYS ago, NOT "now".
 
