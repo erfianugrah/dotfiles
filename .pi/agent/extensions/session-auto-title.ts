@@ -1,22 +1,29 @@
 /**
- * session-auto-title — auto-generate session names via LLM after first user
+ * session-auto-title - auto-generate session names via LLM after first user
  * message (opencode parity / improvement).
  *
  * Opencode runs a dedicated "title" agent after the first real user message
  * lands. Pi has only the manual `/session-name <name>` command. Without
  * auto-naming, sessions appear in the picker as their first message
- * truncated — noisy when the first message is short ("yes", "continue",
+ * truncated - noisy when the first message is short ("yes", "continue",
  * "see screenshot").
  *
  * This extension:
  *   1. Hooks `agent_end` (fires once per user prompt).
- *   2. On the FIRST agent_end of a session, checks for our marker entry.
- *      If absent, generates a title from the first user message.
- *   3. Picks a small/cheap model from the registry. Tries (in order):
- *      anthropic/claude-haiku-* → openai/gpt-5-mini → current session
- *      model as fallback.
+ *   2. Walks branch entries for our marker. A success marker (or a
+ *      manual-name marker) is terminal. A FAILURE marker records the
+ *      attempt count - we retry on later agent_ends until MAX_ATTEMPTS,
+ *      because failures are usually transient (empty completion from the
+ *      cheap model, momentary auth hiccup) and the old behaviour of
+ *      tombstoning on first failure permanently locked sessions out of
+ *      ever getting a title.
+ *   3. Builds an ordered list of small/cheap authenticated candidate
+ *      models from models.json (local llama-server first, then
+ *      haiku/mini/flash name patterns, current session model last) and
+ *      tries each in turn - an empty response or error falls through to
+ *      the next candidate instead of giving up.
  *   4. Asks the model: "Generate a 3-6 word title". Strips quotes.
- *   5. Calls pi.setSessionName(title) and records a marker via
+ *   5. Calls pi.setSessionName(title) and records a success marker via
  *      pi.appendEntry so we never re-name (manual /session-name wins).
  *
  * To disable: rename file to .ts.disabled or comment out the registration.
@@ -50,6 +57,10 @@ function loadModelsJson(): unknown {
 const MARKER_TYPE = "session-auto-title";
 const MAX_INPUT_CHARS = 4000;
 const MAX_TITLE_WORDS = 8;
+// Total failed attempts across the session before we stop retrying.
+const MAX_ATTEMPTS = 3;
+// Cap on how many candidate models we authenticate per trigger.
+const MAX_CANDIDATES = 4;
 
 type ContentBlock = { type?: string; text?: string };
 
@@ -66,16 +77,16 @@ function extractText(content: unknown): string {
   return parts.join("\n");
 }
 
-function cleanTitle(raw: string): string {
+export function cleanTitle(raw: string): string {
   let t = raw.trim();
   // Strip surrounding quotes (single or double, possibly with whitespace)
   t = t.replace(/^["'`\s]+|["'`\s]+$/g, "");
   // Strip leading "Title: " / "title - " / similar
   t = t.replace(/^(?:title|name|topic)\s*[-:]\s*/i, "");
-  // Collapse whitespace
-  t = t.replace(/\s+/g, " ");
   // Take only first line (model sometimes adds explanation)
   t = t.split("\n")[0].trim();
+  // Collapse whitespace
+  t = t.replace(/\s+/g, " ");
   // Cap word count
   const words = t.split(/\s+/);
   if (words.length > MAX_TITLE_WORDS) t = words.slice(0, MAX_TITLE_WORDS).join(" ");
@@ -84,20 +95,64 @@ function cleanTitle(raw: string): string {
   return t;
 }
 
-// Try to find a small/cheap model. Returns undefined if no auth available.
+// Marker payload shapes we write. Anything that isn't a success or
+// manual-name skip counts as a failed (retryable) attempt - this also
+// covers the legacy `skipped: "no-model" | "empty-response"` and
+// `{error}` markers written by the pre-retry version, so sessions
+// tombstoned by that bug get retried instead of staying nameless forever.
+export type MarkerData = {
+  title?: string;
+  skipped?: string;
+  failed?: boolean;
+  attempts?: number;
+  error?: string;
+};
+
+export type TitleState =
+  | { kind: "done" } // success or manual name: never touch again
+  | { kind: "retry"; attempts: number }; // failed before; attempts so far
+
+export function markerState(markers: MarkerData[]): TitleState {
+  let attempts = 0;
+  for (const m of markers) {
+    if (m.title || m.skipped === "manual-name-set") return { kind: "done" };
+    attempts++;
+  }
+  return { kind: "retry", attempts };
+}
+
+function getMarkerState(ctx: ExtensionContext): TitleState {
+  const markers: MarkerData[] = [];
+  try {
+    const entries = ctx.sessionManager.getBranch();
+    for (const e of entries) {
+      if (e.type !== "custom") continue;
+      const c = e as { customType?: string; data?: unknown };
+      if (c.customType === MARKER_TYPE) markers.push((c.data ?? {}) as MarkerData);
+    }
+  } catch {
+    /* ignore */
+  }
+  return markerState(markers);
+}
+
+// Ordered small/cheap model candidates. Returns ALL authenticated
+// candidates (capped), not just the first - the caller tries each in
+// turn, so one model returning an empty response doesn't sink the title.
 //
 // Discovery strategy (handles user's models.json changing over time without
-// hardcoded IDs going stale — prior version hard-coded model IDs that the
+// hardcoded IDs going stale - prior version hard-coded model IDs that the
 // user never had):
 //
 //   1. Read ~/.pi/agent/models.json directly to enumerate all configured
 //      provider/model pairs.
-//   2. Score each by 'smallness heuristic' — prefer local llama-server,
+//   2. Score each by 'smallness heuristic' - prefer local llama-server,
 //      then haiku/mini/flash/nano name patterns, then anything else.
-//   3. Try each in priority order. First one with valid auth wins.
-//   4. Fall back to current session model only if no small model found.
-async function pickTitleModel(ctx: ExtensionContext) {
-  // Pattern → priority weight (lower = better)
+//   3. Authenticate each in priority order, keep the first MAX_CANDIDATES.
+//   4. Append the current session model as last resort (heavyweight, but
+//      always works).
+async function pickTitleCandidates(ctx: ExtensionContext) {
+  // Pattern -> priority weight (lower = better)
   const PROVIDER_WEIGHTS: Array<[RegExp, number]> = [
     [/llama-server|ollama|lmstudio|vllm/i, 0],   // local & free
     [/anthropic/i, 30],
@@ -121,8 +176,10 @@ async function pickTitleModel(ctx: ExtensionContext) {
     return pw + nw;
   }
 
-  type Candidate = { provider: string; id: string; weight: number };
-  const candidates: Candidate[] = [];
+  type Model = NonNullable<ReturnType<typeof getModel>>;
+  type Picked = { model: Model; auth: unknown };
+
+  const candidates: Array<{ provider: string; id: string; weight: number }> = [];
   const data = loadModelsJson() as
     | { providers?: Record<string, { models?: Array<{ id?: string }> }> }
     | null;
@@ -136,54 +193,43 @@ async function pickTitleModel(ctx: ExtensionContext) {
   }
   candidates.sort((a, b) => a.weight - b.weight);
 
+  const picked: Picked[] = [];
   for (const c of candidates) {
+    if (picked.length >= MAX_CANDIDATES) break;
     const m = getModel(c.provider, c.id);
     if (!m) continue;
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
-    if (auth?.ok && auth.apiKey) return { model: m, auth };
+    if (auth?.ok && auth.apiKey) picked.push({ model: m, auth });
   }
+
   // Last resort: current session model (heavyweight, but always works)
   const current = (ctx as { model?: { id: string; provider: string } }).model;
   if (current) {
     const m = getModel(current.provider, current.id);
-    if (m) {
+    if (m && !picked.some((p) => p.model.id === m.id && p.model.provider === m.provider)) {
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
-      if (auth?.ok && auth.apiKey) return { model: m, auth };
+      if (auth?.ok && auth.apiKey) picked.push({ model: m, auth });
     }
   }
-  return undefined;
-}
-
-async function alreadyAutoTitled(ctx: ExtensionContext): Promise<boolean> {
-  // Walk current branch entries; if we see our marker, skip
-  try {
-    const entries = ctx.sessionManager.getBranch();
-    for (const e of entries) {
-      if (e.type === "custom" && (e as { customType?: string }).customType === MARKER_TYPE) return true;
-    }
-  } catch {
-    /* ignore */
-  }
-  return false;
+  return picked;
 }
 
 export default function (pi: ExtensionAPI) {
   pi.on("agent_end", async (event, ctx) => {
-    // Only act on the very first user-prompt agent_end
-    // Sessions can branch; only auto-title the root session
-    if (await alreadyAutoTitled(ctx)) return;
+    const state = getMarkerState(ctx);
+    if (state.kind === "done") return;
+    if (state.attempts >= MAX_ATTEMPTS) return;
 
-    // event.messages contains the messages from THIS prompt — find the user message
+    // event.messages contains the messages from THIS prompt - find the user message
     const messages = (event as { messages?: Array<{ role?: string; content?: unknown }> }).messages ?? [];
     const userMsg = messages.find((m) => m.role === "user");
     if (!userMsg) return;
     const userText = extractText(userMsg.content).trim();
     if (!userText) return;
 
-    const picked = await pickTitleModel(ctx);
-    if (!picked) {
-      // Mark as attempted even when we couldn't run — avoid repeated retries
-      pi.appendEntry(MARKER_TYPE, { skipped: "no-model", at: Date.now() });
+    const candidates = await pickTitleCandidates(ctx);
+    if (candidates.length === 0) {
+      pi.appendEntry(MARKER_TYPE, { failed: true, reason: "no-model", attempts: state.attempts + 1, at: Date.now() });
       return;
     }
 
@@ -191,36 +237,37 @@ export default function (pi: ExtensionAPI) {
       ? userText.slice(0, MAX_INPUT_CHARS) + "\n[... truncated]"
       : userText;
 
-    try {
-      // Runtime-dispatched complete (auth resolution + credential-resolved
-      // endpoints owned by the model runtime since 0.84.0).
-      const response = await ctx.modelRegistry.complete(
-        picked.model,
-        {
-          messages: [
-            {
-              role: "user",
-              content:
-                "Generate a 3-6 word title summarising this conversation request. " +
-                "Use plain text (no quotes, no markdown, no period at the end). " +
-                "Title only - no explanation.\n\n" +
-                "---\n" +
-                userExcerpt,
-            },
-          ],
-        },
-        { cacheRetention: "none" },
-      );
+    const prompt =
+      "Generate a 3-6 word title summarising this conversation request. " +
+      "Use plain text (no quotes, no markdown, no period at the end). " +
+      "Title only - no explanation.\n\n" +
+      "---\n" +
+      userExcerpt;
 
-      const rawTitle = response.content
-        .filter((c: { type: string }): c is { type: "text"; text: string } => c.type === "text")
-        .map((c: { text: string }) => c.text)
-        .join("\n");
-
-      const title = cleanTitle(rawTitle);
+    // Try each candidate in turn; empty response or error falls through.
+    let lastError = "empty-response";
+    for (const c of candidates) {
+      let title = "";
+      try {
+        // Runtime-dispatched complete (auth resolution + credential-resolved
+        // endpoints owned by the model runtime since 0.84.0).
+        const response = await ctx.modelRegistry.complete(
+          c.model,
+          { messages: [{ role: "user", content: prompt }] },
+          { cacheRetention: "none" },
+        );
+        const rawTitle = response.content
+          .filter((b: { type: string }): b is { type: "text"; text: string } => b.type === "text")
+          .map((b: { text: string }) => b.text)
+          .join("\n");
+        title = cleanTitle(rawTitle);
+      } catch (err) {
+        lastError = (err as Error).message || "error";
+        continue;
+      }
       if (!title || title.length < 2) {
-        pi.appendEntry(MARKER_TYPE, { skipped: "empty-response", at: Date.now() });
-        return;
+        lastError = "empty-response";
+        continue;
       }
 
       // Don't override an existing manual name (user may have run /session-name first)
@@ -234,11 +281,13 @@ export default function (pi: ExtensionAPI) {
       pi.setSessionName(title);
       pi.appendEntry(MARKER_TYPE, {
         title,
-        model: `${picked.model.providerID ?? picked.model.provider}/${picked.model.id}`,
+        model: `${c.model.providerID ?? c.model.provider}/${c.model.id}`,
         at: Date.now(),
       });
-    } catch (err) {
-      pi.appendEntry(MARKER_TYPE, { error: (err as Error).message, at: Date.now() });
+      return;
     }
+
+    // Every candidate failed - record a retryable failure marker.
+    pi.appendEntry(MARKER_TYPE, { failed: true, reason: lastError, attempts: state.attempts + 1, at: Date.now() });
   });
 }
