@@ -70,7 +70,7 @@ export default function (pi: ExtensionAPI) {
       name: "memledger_search",
       label: "memledger search",
       description:
-        "Full-text search across ALL agent session histories (pi/opencode/claude messages, work-ledger summaries, memories) in the central memledger store. Use for anything older than ~30 days (local logs are pruned) or cross-client; prefer session_search for recent pi-only lookups.",
+        "Full-text search across ALL agent session histories (pi/opencode/claude messages, work-ledger summaries, memories) in the central memledger store. Use for anything older than ~30 days (local logs are pruned) or cross-client; prefer session_search for recent pi-only lookups. The current session's own messages are excluded from results; over-constrained queries are auto-retried OR-broadened (the result says when). Keep queries to 2-3 terms - terms are ANDed per message.",
       parameters: Type.Object({
         q: Type.String({ description: "Search query (websearch syntax: words, \"phrases\", OR, -negation)" }),
         source: Type.Optional(Type.String({ description: "Filter messages to one client: pi | opencode | claude" })),
@@ -94,7 +94,7 @@ export default function (pi: ExtensionAPI) {
       name: "search_messages",
       label: "memledger messages",
       description:
-        "Full-text search across ALL agent session messages (pi/opencode/claude). Websearch syntax: phrases, OR, -negation.",
+        "Full-text search across ALL agent session messages (pi/opencode/claude). Websearch syntax: phrases, OR, -negation. Current session's own messages are excluded; keep queries to 2-3 terms (terms are ANDed per message).",
       parameters: Type.Object({
         q: Type.String({ description: "Search query" }),
         source: Type.Optional(Type.String({ description: "pi | opencode | claude" })),

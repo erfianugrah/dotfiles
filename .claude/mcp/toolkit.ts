@@ -256,6 +256,9 @@ server.registerTool(
     },
   },
   async ({ q, source, limit }) => {
+    // No selfSession here: CC gives this tool no session identity, so
+    // self-hit exclusion (the pi extension's fix for a session out-ranking
+    // the sources it's searching for) does not apply on this surface.
     const { text, isError } = await runSearchMessages({ q, source, limit });
     return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
   },
