@@ -114,6 +114,12 @@ Adopted:
   interactive). llama.cpp pin b10472 fixed the abandoned-stream
   slot-parking bug. Details: docs/plans/2026-08-19-qwen38-p5-effort-spec.md
   + docs/reference/speculative-decoding.md.
+- **Chat template** (2026-08-23): qwen38 presets use
+  froggeric/Qwen-Fixed-Chat-Templates v22.3, saved as
+  `templates/qwen38-fixed.jinja` + `[template] file =` in each TOML.
+  Fixes empty-think poisoning, tool-call crash on JSON-string args,
+  mid-dialogue system-message drops, and hallucinated user instructions
+  during thinking. Same template on all three qwen38 presets.
 - small track: gemma4-12b ties qwen35-9b incumbent (0.944 hit) with fewer
   steps (1.67 vs 2.30); swap gated on 3080 Ti deploy-fit. g15-chain is 0/3
   for everything - the discriminator case.
