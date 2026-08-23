@@ -24,6 +24,7 @@
  * adapter that maps the core's { text, details } to the pi tool-result shape.
  */
 
+import { hostname } from "node:os";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -43,6 +44,26 @@ function toPiResult(r: MemledgerResult) {
   return { content: [{ type: "text" as const, text: r.text }], details: r.details };
 }
 
+/**
+ * The caller's own memledger session key ("pi:HOST:UUID" - same shape the
+ * ingester builds). Passed to the core runners so this session's own
+ * messages are excluded from results: a session searching history ranks
+ * its own synthesis/echo of the query vocabulary highest, which drowned out
+ * the original sources (2026-08-23). Returns undefined when the session id
+ * can't be resolved (ephemeral sessions, non-pi harnesses) - filtering then
+ * no-ops and behaviour is unchanged.
+ */
+function selfSessionKey(ctx: unknown): string | undefined {
+  try {
+    const id = (
+      ctx as { sessionManager?: { getSessionId?: () => string | undefined } } | undefined
+    )?.sessionManager?.getSessionId?.();
+    return id ? `pi:${hostname()}:${id}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   pi.registerTool(
     defineTool({
@@ -60,8 +81,8 @@ export default function (pi: ExtensionAPI) {
         ),
         limit: Type.Optional(Type.Number({ description: "Max rows (default 10, max 50)" })),
       }),
-      async execute(_id, params, signal) {
-        return toPiResult(await runMemledgerSearch(params, signal));
+      async execute(_id, params, signal, _onUpdate, ctx) {
+        return toPiResult(await runMemledgerSearch({ ...params, selfSession: selfSessionKey(ctx) }, signal));
       },
     }),
   );
@@ -79,8 +100,8 @@ export default function (pi: ExtensionAPI) {
         source: Type.Optional(Type.String({ description: "pi | opencode | claude" })),
         limit: Type.Optional(Type.Number({ description: "Max rows (default 10, max 50)" })),
       }),
-      async execute(_id, params, signal) {
-        return toPiResult(await runSearchMessages(params, signal));
+      async execute(_id, params, signal, _onUpdate, ctx) {
+        return toPiResult(await runSearchMessages({ ...params, selfSession: selfSessionKey(ctx) }, signal));
       },
     }),
   );
@@ -97,8 +118,8 @@ export default function (pi: ExtensionAPI) {
         source: Type.Optional(Type.String({ description: "Filter messages to one client: pi | opencode | claude" })),
         limit: Type.Optional(Type.Number({ description: "Max rows (default 10, max 50)" })),
       }),
-      async execute(_id, params, signal) {
-        return toPiResult(await runSemanticSearch(params, signal));
+      async execute(_id, params, signal, _onUpdate, ctx) {
+        return toPiResult(await runSemanticSearch({ ...params, selfSession: selfSessionKey(ctx) }, signal));
       },
     }),
   );
@@ -143,8 +164,8 @@ export default function (pi: ExtensionAPI) {
         source: Type.Optional(Type.String({ description: "pi | opencode | claude" })),
         limit: Type.Optional(Type.Number({ description: "Max rows (default 10, max 50)" })),
       }),
-      async execute(_id, params, signal) {
-        return toPiResult(await runListSessions(params, signal));
+      async execute(_id, params, signal, _onUpdate, ctx) {
+        return toPiResult(await runListSessions({ ...params, selfSession: selfSessionKey(ctx) }, signal));
       },
     }),
   );

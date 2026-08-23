@@ -20,6 +20,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { hostname } from "node:os";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { searchFts, indexStats } from "./session-fts";
@@ -252,7 +253,7 @@ const sessionSearchTool = defineTool({
 		limit: Type.Optional(Type.Number({ description: "Max results (default: 10, max: 50)" })),
 	}),
 
-	async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 		const root = join(getAgentDir(), "sessions");
 		if (!existsSync(root)) {
 			return {
@@ -294,8 +295,18 @@ const sessionSearchTool = defineTool({
 		// errors fall through to the rg path silently.
 		if (hits.length === 0) {
 			try {
-				const ml = await searchMessages(toOrQuery(params.query), "pi", limit, signal);
-				if (ml.length > 0) {
+			let ml = await searchMessages(toOrQuery(params.query), "pi", limit, signal);
+			// Exclude this session's own rows: the current session re-echoes the
+			// query vocabulary, so it out-ranks the original sources in memledger
+			// too (2026-08-23). Searched sessions only make sense as history.
+			const selfId = (
+				ctx as { sessionManager?: { getSessionId?: () => string | undefined } } | undefined
+			)?.sessionManager?.getSessionId?.();
+			if (selfId) {
+				const selfKey = `pi:${hostname()}:${selfId}`;
+				ml = ml.filter((m) => m.session_key !== selfKey);
+			}
+			if (ml.length > 0) {
 					hits = ml.map((m) => ({
 						sessionPath: `${m.session_key}#${m.ordinal}`,
 						date: m.ts ? m.ts.slice(0, 10) : "?",

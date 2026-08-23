@@ -189,21 +189,65 @@ async function fetchJson(url: string, timeoutMs: number, signal?: AbortSignal): 
   return resp.json();
 }
 
-/** Full-text message search (PostgREST rpc/search_messages). */
+/**
+ * Full-text message search (PostgREST rpc/search_messages).
+ *
+ * selfSession is the CALLER'S OWN session_key ("pi:HOST:UUID"). Rows from it
+ * are excluded - a session searching history for context repeatedly ranks
+ * its own synthesis/echo messages highest (they repeat the query vocabulary),
+ * which drowns out the original sources (2026-08-23 incident).
+ *
+ * When the exact query leaves nothing after self-filtering, we retry:
+ *   1. the same query with a deeper limit (good hits may sit just past the
+ *      self-hit block), then
+ *   2. OR-broadened via toOrQuery - websearch_to_tsquery ANDs every term at
+ *      message granularity, so 5+-term queries only match messages that
+ *      contain ALL terms; the original sources usually don't.
+ * Retries only fire when self-filtering actually dropped rows or the exact
+ * query matched nothing, so precision-first behaviour is unchanged otherwise.
+ */
 export async function runSearchMessages(
-  params: { q: string; source?: string; limit?: number },
+  params: { q: string; source?: string; limit?: number; selfSession?: string },
   signal?: AbortSignal,
 ): Promise<MemledgerResult> {
   const limit = clampLimit(params.limit);
   const url = buildUrl(baseUrl(), "messages", params.q, params.source, limit);
+  const self = params.selfSession;
+  const dropSelf = (rows: MessageHit[]) => (self ? rows.filter((r) => r.session_key !== self) : rows);
   try {
-    const rows = await searchMessages(params.q, params.source, limit, signal);
+    const raw = await searchMessages(params.q, params.source, limit, signal);
+    let rows = dropSelf(raw);
+    let note = "";
+    if (rows.length === 0) {
+      if (self && raw.length > 0) {
+        const deep = dropSelf(await searchMessages(params.q, params.source, 50, signal));
+        if (deep.length > 0) {
+          rows = deep.slice(0, limit);
+          note = "\n(top hits were the current session's own messages - showing deeper matches)";
+        }
+      }
+      if (rows.length === 0) {
+        const orQ = toOrQuery(params.q);
+        if (orQ !== params.q.trim()) {
+          const retry = dropSelf(await searchMessages(orQ, params.source, limit, signal));
+          if (retry.length > 0) {
+            rows = retry;
+            note = `\n(no exact matches - OR-broadened to "${orQ}")`;
+          }
+        }
+      }
+    }
     const lines = rows.map(
       (r) => `${r.source} | ${r.session_key}#${r.ordinal} | ${r.ts ?? "?"} | ${oneLine(r.headline ?? "", 160)}`,
     );
+    const text = lines.length
+      ? lines.join("\n") + note
+      : self && raw.length > 0
+        ? `all matches for "${params.q}" were the current session's own messages (excluded) - try fewer or broader terms`
+        : `no message matches for "${params.q}"`;
     return {
-      text: lines.length ? lines.join("\n") : `no message matches for "${params.q}"`,
-      details: { url, count: lines.length },
+      text,
+      details: { url, count: lines.length, ...(self ? { selfSession: self } : {}), ...(note ? { broadened: true } : {}) },
     };
   } catch (e) {
     return { isError: true, text: `memledger unreachable: ${e instanceof Error ? e.message : String(e)}`, details: { url } };
@@ -212,7 +256,7 @@ export async function runSearchMessages(
 
 /** Semantic (pgvector) similarity search via the embedder service. */
 export async function runSemanticSearch(
-  params: { q: string; kind?: string; source?: string; limit?: number },
+  params: { q: string; kind?: string; source?: string; limit?: number; selfSession?: string },
   signal?: AbortSignal,
 ): Promise<MemledgerResult> {
   const limit = clampLimit(params.limit);
@@ -222,7 +266,15 @@ export async function runSemanticSearch(
   const url = buildSemanticUrl(baseUrl(), params.q, kind, params.source, limit);
   try {
     const data = (await fetchJson(url, 15_000, signal)) as { results?: SemanticHit[] };
-    const lines = formatSemanticRows(kind, data.results ?? []);
+    let results = data.results ?? [];
+    // Self-session messages rank high here for the same reason as FTS: the
+    // querying session's own synthesis text is semantically closest to its
+    // query. Exclude them (kind=messages only; other kinds have no session).
+    const self = params.selfSession;
+    if (self && kind === "messages") {
+      results = results.filter((r) => r.session_key !== self);
+    }
+    const lines = formatSemanticRows(kind, results);
     return {
       text: lines.length
         ? lines.join("\n")
@@ -280,14 +332,18 @@ export async function runSearchMemories(
 
 /** List recent sessions, optionally filtered by project basename and/or client. */
 export async function runListSessions(
-  params: { project?: string; source?: string; limit?: number },
+  params: { project?: string; source?: string; limit?: number; selfSession?: string },
   signal?: AbortSignal,
 ): Promise<MemledgerResult> {
   const limit = clampLimit(params.limit);
   const url = buildListSessionsUrl(baseUrl(), params.project, params.source, limit);
   try {
-    const rows = (await fetchJson(url, 10_000, signal)) as Record<string, unknown>[];
-    const lines = Array.isArray(rows) ? formatRows("sessions", rows) : [];
+    let rows = (await fetchJson(url, 10_000, signal)) as Record<string, unknown>[];
+    if (!Array.isArray(rows)) rows = [];
+    // The current session is always the newest pi row - pure noise when
+    // listing history.
+    if (params.selfSession) rows = rows.filter((r) => r.session_key !== params.selfSession);
+    const lines = rows.length ? formatRows("sessions", rows) : [];
     return {
       text: lines.length ? lines.join("\n") : "no sessions found",
       details: { url, count: lines.length },
@@ -299,10 +355,12 @@ export async function runListSessions(
 
 /**
  * Combined one-call variant (the memledger_search tool). kind selects which
- * store to hit; semantic routes to the embedder service.
+ * store to hit; semantic routes to the embedder service. selfSession (the
+ * caller's own "pi:HOST:UUID" session key) is excluded from message,
+ * session and semantic results - see runSearchMessages for why.
  */
 export async function runMemledgerSearch(
-  params: { q: string; source?: string; kind?: string; limit?: number },
+  params: { q: string; source?: string; kind?: string; limit?: number; selfSession?: string },
   signal?: AbortSignal,
 ): Promise<MemledgerResult> {
   const kind: SearchKind = (["messages", "ledger", "memories", "sessions", "semantic"] as string[]).includes(params.kind ?? "")
@@ -310,16 +368,50 @@ export async function runMemledgerSearch(
     : "messages";
   if (kind === "semantic") {
     // semantic over messages only for the combined variant (matches original)
-    return runSemanticSearch({ q: params.q, kind: "messages", source: params.source, limit: params.limit }, signal);
+    return runSemanticSearch(
+      { q: params.q, kind: "messages", source: params.source, limit: params.limit, selfSession: params.selfSession },
+      signal,
+    );
+  }
+  if (kind === "messages") {
+    // shares self-filter + fallback-broadening with the dedicated tool
+    const r = await runSearchMessages(
+      { q: params.q, source: params.source, limit: params.limit, selfSession: params.selfSession },
+      signal,
+    );
+    return { ...r, details: { ...r.details, kind } };
   }
   const limit = clampLimit(params.limit);
   const url = buildUrl(baseUrl(), kind, params.q, params.source, limit);
   try {
-    const rows = (await fetchJson(url, 10_000, signal)) as Record<string, unknown>[];
-    if (!Array.isArray(rows) || rows.length === 0) {
+    const raw = (await fetchJson(url, 10_000, signal)) as Record<string, unknown>[];
+    let rows = Array.isArray(raw) ? raw : [];
+    let note = "";
+    if (params.selfSession && kind === "sessions") {
+      const before = rows.length;
+      rows = rows.filter((r) => r.session_key !== params.selfSession);
+      if (rows.length === 0 && before > 0) {
+        // same over-constrained-query fallback as messages: the AND of all
+        // terms may only match this session's own echo of the vocabulary
+        const orQ = toOrQuery(params.q);
+        if (orQ !== params.q.trim()) {
+          const retryUrl = buildUrl(baseUrl(), kind, orQ, params.source, limit);
+          const retry = (await fetchJson(retryUrl, 10_000, signal)) as Record<string, unknown>[];
+          const filtered = (Array.isArray(retry) ? retry : []).filter((r) => r.session_key !== params.selfSession);
+          if (filtered.length > 0) {
+            rows = filtered;
+            note = `\n(no exact matches - OR-broadened to "${orQ}")`;
+          }
+        }
+      }
+    }
+    if (rows.length === 0) {
       return { text: `no ${kind} matches for "${params.q}"`, details: { url, count: 0, kind } };
     }
-    return { text: formatRows(kind, rows).join("\n"), details: { url, count: rows.length, kind } };
+    return {
+      text: formatRows(kind, rows).join("\n") + note,
+      details: { url, count: rows.length, kind, ...(note ? { broadened: true } : {}) },
+    };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const httpStatus = (e as { httpStatus?: number })?.httpStatus;

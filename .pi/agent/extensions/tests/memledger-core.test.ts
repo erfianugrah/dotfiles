@@ -191,10 +191,113 @@ describe("runMemledgerSearch (combined)", () => {
     expect(r.text).toBe('no ledger matches for "x"');
     expect(r.details.kind).toBe("ledger");
   });
-  test("HTTP error names the kind", async () => {
+  test("HTTP error surfaces the status", async () => {
     stubFetch({ "rpc/search_messages": [] }, 500);
     const r = await runMemledgerSearch({ q: "x" });
     expect(r.isError).toBe(true);
-    expect(r.text).toBe("memledger HTTP 500 for messages search");
+    expect(r.text).toContain("memledger unreachable");
+    expect(r.text).toContain("500");
+  });
+});
+
+// -- self-session exclusion + fallback broadening (2026-08-23 incident) ------
+
+describe("selfSession filtering", () => {
+  const SELF = "pi:ERFI1:self";
+  test("messages: self rows dropped, others kept", async () => {
+    stubFetch({
+      "rpc/search_messages": [
+        { session_key: SELF, ordinal: 1, source: "pi", role: "user", ts: "t", rank: 1, headline: "self echo" },
+        { session_key: "pi:ERFI1:other", ordinal: 2, source: "pi", role: "user", ts: "t", rank: 0.5, headline: "the source" },
+      ],
+    });
+    const r = await runSearchMessages({ q: "hit", selfSession: SELF });
+    expect(r.text).not.toContain("self echo");
+    expect(r.text).toContain("pi:ERFI1:other#2");
+    expect(r.details.count).toBe(1);
+  });
+  test("messages: all-self exact hits -> deeper same-query retry", async () => {
+    let calls = 0;
+    globalThis.fetch = ((input: unknown) => {
+      calls++;
+      const url = String(input);
+      // first call: only self hits; deeper retry (lim=50): real hits behind them
+      const onlySelf = calls === 1 || !url.includes("lim=50");
+      const body = onlySelf
+        ? [{ session_key: SELF, ordinal: 1, source: "pi", ts: "t", headline: "self" }]
+        : [
+            { session_key: SELF, ordinal: 1, source: "pi", ts: "t", headline: "self" },
+            { session_key: "pi:h:real", ordinal: 9, source: "pi", ts: "t", headline: "real hit" },
+          ];
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    }) as never;
+    const r = await runSearchMessages({ q: "hit", limit: 5, selfSession: SELF });
+    expect(calls).toBe(2);
+    expect(r.text).toContain("pi:h:real#9");
+    expect(r.text).toContain("current session");
+  });
+  test("messages: zero exact hits -> OR-broadened retry", async () => {
+    let calls = 0;
+    globalThis.fetch = ((input: unknown) => {
+      calls++;
+      const url = String(input);
+      const body = url.includes(encodeURIComponent("SATA OR cable"))
+        ? [{ session_key: "pi:h:real", ordinal: 3, source: "pi", ts: "t", headline: "real" }]
+        : [];
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    }) as never;
+    const r = await runSearchMessages({ q: "SATA cable", selfSession: SELF });
+    expect(calls).toBe(2);
+    expect(r.text).toContain("pi:h:real#3");
+    expect(r.text).toContain("OR-broadened");
+  });
+  test("messages: all-self and no fallback hits -> explicit narrative", async () => {
+    stubFetch({ "rpc/search_messages": [{ session_key: SELF, ordinal: 1, source: "pi", ts: "t", headline: "self" }] });
+    const r = await runSearchMessages({ q: "oneself", selfSession: SELF }); // single token: not broadenable
+    expect(r.text).toContain("current session's own messages");
+  });
+  test("semantic: self rows dropped from messages kind", async () => {
+    stubFetch({
+      "semantic/search": {
+        results: [
+          { session_key: SELF, ordinal: 1, text: "self echo", similarity: 0.9 },
+          { session_key: "pi:h:real", ordinal: 2, text: "real", similarity: 0.7 },
+        ],
+      },
+    });
+    const r = await runSemanticSearch({ q: "x", selfSession: SELF });
+    expect(r.text).toBe("0.700 | pi:h:real#2 | real");
+  });
+  test("list_sessions: current session hidden", async () => {
+    stubFetch({
+      "/sessions?": [
+        { session_key: SELF, source: "pi", project: "p", started_at: "t", title: "me", message_count: 1 },
+        { session_key: "pi:h:old", source: "pi", project: "p", started_at: "t2", title: "old", message_count: 2 },
+      ],
+    });
+    const r = await runListSessions({ selfSession: SELF });
+    expect(r.text).not.toContain("me");
+    expect(r.text).toContain("old");
+  });
+  test("combined sessions kind: all-self rows trigger OR broadening", async () => {
+    let calls = 0;
+    globalThis.fetch = ((input: unknown) => {
+      calls++;
+      const url = String(input);
+      const body = url.includes(encodeURIComponent("knots OR dns"))
+        ? [{ session_key: "pi:h:real", source: "pi", project: "p", started_at: "t", title: "real", message_count: 5, match_kind: "mentions", hits: 2 }]
+        : [{ session_key: SELF, source: "pi", project: "p", started_at: "t", title: "self", message_count: 1, match_kind: "mentions", hits: 1 }];
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    }) as never;
+    const r = await runMemledgerSearch({ q: "knots dns", kind: "sessions", selfSession: SELF });
+    expect(calls).toBe(2);
+    expect(r.text).toContain("real");
+    expect(r.text).toContain("OR-broadened");
+  });
+  test("combined messages kind carries selfSession through delegation", async () => {
+    stubFetch({ "rpc/search_messages": [{ session_key: SELF, ordinal: 1, source: "pi", ts: "t", headline: "h" }] });
+    const r = await runMemledgerSearch({ q: "oneself", selfSession: SELF });
+    expect(r.text).toContain("current session's own messages");
+    expect(r.details.kind).toBe("messages");
   });
 });
