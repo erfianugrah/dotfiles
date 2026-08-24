@@ -8,11 +8,13 @@
       "compat": {
         "supportsDeveloperRole": false,
         "supportsReasoningEffort": false,
-        "supportsStrictMode": false
+        "supportsStrictMode": false,
+        "thinkingTokenBudgetField": "thinking_budget_tokens"
       },
       "models": [
         {
           "id": "loop",
+          "reasoning": true,
           "name": "Loop Engine - Gemma 4 26B-A4B MoE, agentic coding (local, free)",
           "contextWindow": 196608,
           "input": [
