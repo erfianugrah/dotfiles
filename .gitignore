@@ -42,3 +42,6 @@ bin/memledger
 .pi/agent/.docs-topics.json
 .pi/agent/bin/
 .pi/agent/git/
+
+# Local hardware tooling (GPU fan curve), machine-specific
+bin/vfcurve
