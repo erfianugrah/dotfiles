@@ -10,7 +10,8 @@
  *   - A toast on completion: "compacted 850k → 12k in 38s".
  *
  * Implementation uses pi's documented compaction events
- * (session_before_compact / session_compact). No private APIs.
+ * (session_before_compact / session_compact / session_compact_failed).
+ * No private APIs.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -103,6 +104,24 @@ export default function (pi: ExtensionAPI) {
 		clear(ctx);
 		if (ctx.hasUI) {
 			ctx.ui.notify(`Compacted${tag} ${before} → ${after} in ${elapsed}s`, "info");
+		}
+	});
+
+	// pi 0.84.3+: explicit failure/abort event. Clears the spinner
+	// immediately instead of waiting for the isIdle/agent_end heuristics,
+	// and surfaces why the compaction died (previously invisible).
+	// Harmless no-op on older pi (handler simply never fires).
+	pi.on("session_compact_failed", async (event, ctx) => {
+		const e = event as { aborted?: boolean; errorMessage?: string; willRetry?: boolean };
+		const tag = label ? ` (${label})` : "";
+		clear(ctx);
+		if (ctx.hasUI) {
+			if (e.aborted) {
+				const retry = e.willRetry ? " (turn will retry)" : "";
+				ctx.ui.notify(`Compaction cancelled${tag}${retry}`, "info");
+			} else {
+				ctx.ui.notify(`Compaction failed${tag}: ${e.errorMessage ?? "unknown error"}`, "error");
+			}
 		}
 	});
 
