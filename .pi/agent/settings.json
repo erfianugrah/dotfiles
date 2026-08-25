@@ -1,7 +1,7 @@
 {
-  "lastChangelogVersion": "0.84.2",
+  "lastChangelogVersion": "0.84.3",
   "defaultProvider": "openrouter",
-  "defaultModel": "deepseek/deepseek-v4-pro",
+  "defaultModel": "z-ai/glm-5.3",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
   "externalEditor": "nvim",
