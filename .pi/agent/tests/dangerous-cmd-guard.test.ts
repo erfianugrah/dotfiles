@@ -263,3 +263,78 @@ describe("isScratchPath", () => {
     expect(isScratchPath("/home/erfi", ENV.home)).toBe(false);
   });
 });
+
+describe("infra mutations (local)", () => {
+  test("nixos-rebuild switch/boot/test prompt; build/dry-build do not", () => {
+    expect(rule("nixos-rebuild switch --flake /etc/nixos#servarr")).toBe("nixos_rebuild");
+    expect(rule("nixos-rebuild boot --flake .#servarr")).toBe("nixos_rebuild");
+    expect(rule("nixos-rebuild test --flake .#servarr")).toBe("nixos_rebuild");
+    expect(rule("nixos-rebuild build --flake .#servarr")).toBeNull();
+    expect(rule("nixos-rebuild dry-build --flake .#servarr")).toBeNull();
+    expect(rule("nixos-rebuild list-generations")).toBeNull();
+  });
+
+  test("zpool/zfs destroy and mdadm prompt", () => {
+    expect(rule("zpool destroy tank")).toBe("zpool_destroy");
+    expect(rule("zfs destroy -r tank/media@snap")).toBe("zfs_destroy");
+    expect(rule("mdadm --zero-superblock /dev/sdb")).toBe("mdadm");
+    expect(rule("zpool status")).toBeNull();
+    expect(rule("zfs list -t snapshot")).toBeNull();
+  });
+
+  test("docker prune family", () => {
+    expect(rule("docker system prune -af")).toBe("docker_system_prune");
+    expect(rule("docker volume prune")).toBe("docker_volume_op");
+    expect(rule("docker volume rm pgdata")).toBe("docker_volume_op");
+    expect(rule("docker compose up -d")).toBeNull();
+    expect(rule("docker ps")).toBeNull();
+  });
+});
+
+describe("ssh remote payloads", () => {
+  test("remote nixos-rebuild prompts and names the host", () => {
+    const d = classifyBashCommand("ssh root@10.0.71.3 'nixos-rebuild switch --flake /etc/nixos#servarr'", ENV);
+    expect(d.dangerous).toBe(true);
+    expect(d.rule).toBe("nixos_rebuild");
+    expect(d.tier).toBe("confirm");
+    expect(d.matched).toContain("10.0.71.3");
+  });
+
+  test("remote destructive rm keeps its tier and gets the REMOTE prefix", () => {
+    expect(rule("ssh nas 'rm -rf /tank/media'")).toBe("rm_recursive");
+    expect(tier("ssh nas 'rm -rf /tank/media'")).toBe("confirm");
+    expect(rule("ssh nas 'rm -rf ~'")).toBe("rm_home");
+    expect(tier("ssh nas 'rm -rf ~'")).toBe("critical");
+  });
+
+  test("ssh flags (with and without values) do not eat the destination", () => {
+    expect(rule("ssh -o ConnectTimeout=8 root@nas 'zpool destroy tank'")).toBe("zpool_destroy");
+    expect(rule("ssh -i ~/.ssh/id_ed25519 -p 22 root@nas 'zfs destroy -r tank/media'")).toBe("zfs_destroy");
+    expect(rule("ssh -t nas 'sudo nixos-rebuild boot'")).toBe("nixos_rebuild");
+  });
+
+  test("unquoted multi-token remote commands classify", () => {
+    expect(rule("ssh nas sudo reboot")).toBe("power_cycle");
+    expect(rule("ssh nas docker volume prune")).toBe("docker_volume_op");
+  });
+
+  test("compound remote payloads classify each sub-segment", () => {
+    expect(rule("ssh nas 'cd /etc/nixos && git pull && nixos-rebuild switch --flake .#servarr'")).toBe("nixos_rebuild");
+  });
+
+  test("benign remote reads stay unblocked", () => {
+    expect(rule("ssh nas 'uptime && zpool status'")).toBeNull();
+    expect(rule("ssh -o BatchMode=yes root@10.0.71.3 'ls /etc/nixos /root | head -20; which git nixos-rebuild'")).toBeNull();
+    expect(rule("ssh nas")).toBeNull(); // interactive / forward-only
+  });
+
+  test("nested ssh terminates (depth cap)", () => {
+    // Would infinitely recurse without the cap; any non-error result is a pass.
+    const d = classifyBashCommand("ssh a 'ssh b \"rm -rf /data\"'", ENV);
+    expect(typeof d.dangerous).toBe("boolean");
+  });
+
+  test("local danger still wins when mixed with remote", () => {
+    expect(rule("ls && ssh nas reboot")).toBe("power_cycle");
+  });
+});

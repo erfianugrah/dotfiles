@@ -22,7 +22,15 @@
  *     headless), CC denies with the reason. Recursive rm on any path outside
  *     the scratch allowlist (the ~/infra/ai case), unfiltered
  *     `find <path> -delete`, `xargs rm -r`, power-cycle commands, disk
- *     partition tools.
+ *     partition tools, infra mutations (nixos-rebuild switch/boot/test,
+ *     zpool/zfs destroy, mdadm, docker volume/system prune), and any of
+ *     those nested inside an `ssh host '<cmd>'` remote payload.
+ *
+ * ssh payloads: `ssh root@nas 'nixos-rebuild switch'` used to sail through
+ * both gates - the classifier saw only the harmless `ssh` base command. The
+ * remote command string is now recursively classified with a root-view env
+ * (remote cwd="/", home="/root"), depth-capped at 2 so `ssh a 'ssh b ...'`
+ * terminates.
  *
  * Scratch allowlist (recursive rm is routine, no prompt): /tmp, /var/tmp,
  * /dev/shm, /private/tmp, ~/.cache, and build-artifact basenames
@@ -343,11 +351,15 @@ function classifyRmTargets(parse: RmParse, env: GuardEnv, segment: string): Dang
 
 const DISK_DEV = String.raw`(?:sd[a-z]+|nvme\d+n\d+(?:p\d+)?|mmcblk\d+(?:p\d+)?|vd[a-z]+|xvd[a-z]+|disk\d+|loop\d+)`;
 
-function classifySegment(segment: string, env: GuardEnv): DangerDecision {
+function classifySegment(segment: string, env: GuardEnv, depth = 0): DangerDecision {
   const tokens = unwrapPrefixes(tokenize(segment));
   if (tokens.length === 0) return SAFE;
   const cmd = tokens[0].text;
   const cmdBase = cmd.split("/").pop() ?? cmd;
+
+  // Remote payloads: classify the command string sent to another host.
+  // Done first so everything below applies to the remote body, not `ssh`.
+  if (cmdBase === "ssh" && depth < 2) return classifySsh(tokens, segment, depth);
 
   // Block-device writes.
   if (cmdBase === "dd") {
@@ -462,7 +474,103 @@ function classifySegment(segment: string, env: GuardEnv): DangerDecision {
     return confirm("power_cycle", segment.trim(), "systemctl power/reboot/suspend action. Confirm this is intended and not a remote host typo.");
   }
 
+  // Infra mutations - gated both locally and inside ssh payloads.
+  if (cmdBase === "nixos-rebuild") {
+    const action = tokens[1]?.text;
+    if (action && ["switch", "boot", "test"].includes(action)) {
+      return confirm(
+        "nixos_rebuild",
+        segment.trim(),
+        `nixos-rebuild ${action} activates a NEW system configuration. Confirm the config is reviewed and this host is the intended target.`,
+      );
+    }
+    return SAFE; // build / dry-build / list-generations / edit are read-ish
+  }
+  if (cmdBase === "zpool" && tokens[1]?.text === "destroy") {
+    return confirm("zpool_destroy", segment.trim(), "zpool destroy deletes the pool's namespace. Confirm the pool name is exactly the one you mean.");
+  }
+  if (cmdBase === "zfs" && tokens[1]?.text === "destroy") {
+    return confirm("zfs_destroy", segment.trim(), "zfs destroy removes datasets/snapshots; a wrong dataset or -r semantics destroys data. Confirm the exact dataset.");
+  }
+  if (cmdBase === "mdadm") {
+    return confirm("mdadm", segment.trim(), "mdadm manages array membership; --zero-superblock / --remove / --create errors are unrecoverable. Confirm the array and device.");
+  }
+  if (cmdBase === "docker") {
+    const sub = tokens[1]?.text;
+    if (sub === "system" && tokens[2]?.text === "prune") {
+      return confirm("docker_system_prune", segment.trim(), "docker system prune removes stopped containers + unused networks/images (-a: ALL unused). Confirm.");
+    }
+    if (sub === "volume" && (tokens[2]?.text === "prune" || tokens[2]?.text === "rm")) {
+      return confirm(
+        "docker_volume_op",
+        segment.trim(),
+        "docker volume prune/rm deletes volume DATA, not just metadata - volumes often hold the only copy (databases). Confirm.",
+      );
+    }
+    return SAFE;
+  }
+
   return SAFE;
+}
+
+// -- ssh remote payloads ----------------------------------------------------------
+
+// Single-letter ssh flags that consume the NEXT token as their value
+// (-i key, -p port, -l user, -J jump, ...). Combined bare flags (-vVNnT)
+// consume nothing. Long opts (--) are treated as valueless - ssh's long
+// opts are rare in agent use and a false flag-skip only shifts which token
+// we call "destination", after which the rest is still classified.
+const SSH_VALUE_FLAGS = new Set("bDeEFiJlLmOopQrSwW".split(""));
+
+// Remote HOME/cwd are unknown; assume root's view. Relative paths resolve
+// against "/" so a remote `rm -rf foo` classifies against /foo - the
+// conservative direction for an unknown host.
+const REMOTE_ENV: GuardEnv = { cwd: "/", home: "/root" };
+
+function classifySsh(tokens: Token[], segment: string, depth: number): DangerDecision {
+  const args = tokens.slice(1);
+  let i = 0;
+  let flagsDone = false;
+  while (i < args.length && !flagsDone) {
+    const t = args[i].text;
+    if (t === "--") {
+      flagsDone = true;
+      i++;
+      continue;
+    }
+    if (t.startsWith("-") && t.length > 1) {
+      i++;
+      if (t.startsWith("--")) continue;
+      const letters = t.slice(1);
+      // `-p 2222` (value in next token) vs `-4AgnT` (combined bare flags).
+      if (letters.length === 1 && SSH_VALUE_FLAGS.has(letters)) i++;
+      continue;
+    }
+    break; // destination token reached
+  }
+  if (i >= args.length) return SAFE; // no destination - malformed, nothing to gate
+  const dest = args[i].text;
+  const remoteTokens = args.slice(i + 1);
+  if (remoteTokens.length === 0) return SAFE; // interactive ssh / forward-only
+
+  // The outer tokenize() already applied quote removal, so the remote
+  // command arrives as one-or-more tokens; rejoin and classify it as its
+  // own (possibly compound) bash command.
+  const remote = remoteTokens.map((t) => t.text).join(" ");
+  let firstConfirm: DangerDecision | null = null;
+  for (const sub of splitCommandSegments(remote)) {
+    if (!sub.trim()) continue;
+    const d = classifySegment(sub, REMOTE_ENV, depth + 1);
+    if (!d.dangerous) continue;
+    const tagged: DangerDecision = {
+      ...d,
+      matched: `ssh ${dest}: ${d.matched ?? ""}`,
+      reason: `REMOTE (ssh ${dest}): ${d.reason ?? ""}`,
+    };
+    if (d.tier === "critical") return tagged;
+    firstConfirm ??= tagged;
+  }
+  return firstConfirm ?? SAFE;
 }
 
 // xargs' own flags (-0, -I {}, -n 1, -P 4, -t, ...) precede the command it runs.
@@ -487,7 +595,7 @@ function argsAfterFlags(tokens: Token[]): Token[] {
  * deny). Returns the FIRST dangerous segment's decision; critical wins over
  * confirm regardless of position.
  */
-export function classifyBashCommand(command: string, env: GuardEnv): DangerDecision {
+export function classifyBashCommand(command: string, env: GuardEnv, depth = 0): DangerDecision {
   if (typeof command !== "string" || command.length === 0) return SAFE;
   // Fork bomb: :(){ :|:& };: (any function name variant). Checked on the FULL
   // command - segment splitting would shred it on the & | ; inside.
@@ -498,7 +606,7 @@ export function classifyBashCommand(command: string, env: GuardEnv): DangerDecis
   let firstConfirm: DangerDecision | null = null;
   for (const seg of segments) {
     if (!seg.trim()) continue;
-    const d = classifySegment(seg, env);
+    const d = classifySegment(seg, env, depth);
     if (!d.dangerous) continue;
     if (d.tier === "critical") return d;
     firstConfirm ??= d;
