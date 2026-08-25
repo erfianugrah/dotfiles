@@ -204,6 +204,7 @@ the server with the SDK's own stdio client - no `claude` binary needed.
 | `entity-qualifier-nudge.ts` | HOOK | `PreToolUse` (Edit\|Write) | nudge via `additionalContext`, or deny. |
 | `skill-guard.ts` | HOOK | `UserPromptSubmit` / `PreToolUse` | docblock cites anthropics/claude-code#30387 - the CC fix IS this hook. High value: CC skill auto-trigger is unreliable for trained-overlap skills. |
 | `lookup-before-ask.ts` | HOOK | `PreToolUse` (AskUserQuestion) | nudge to search memledger/session first. Depends on Bucket-2 memledger MCP existing. |
+| `history-first.ts` | HOOK | `UserPromptSubmit` | reminder to query memledger BEFORE starting a non-trivial task (2026-08-25: same problem re-solved in 2-4 sessions each). Disarm + fire-cap derived from `transcript_path` scan. |
 | `epistemic-guard.ts` | HOOK | `PostToolUse` / `Stop` | reads `transcript_path` as provenance corpus, annotates unverified specifics. Advanced; port last. |
 | `cd-agents-reload.ts` | HOOK | `CwdChanged` / `SessionStart` | inject repo `AGENTS.md`/`CLAUDE.md` via `additionalContext`. CC already reads CLAUDE.md at start; value is the mid-session `cd`. |
 | `tool-routing.ts` | HOOK or NATIVE | `SessionStart` | pi prepends routing rules; in CC put these in `CLAUDE.md` (native) unless dynamic. |
@@ -314,6 +315,7 @@ already provides it · SKIP = pi TUI/session internals, no CC analogue.
 | entity-qualifier-nudge | DONE (HOOK) | PreToolUse additionalContext (live-verified) |
 | skill-guard | DONE (HOOK) | PreToolUse additionalContext (live-verified) |
 | lookup-before-ask | DONE (HOOK) | PreToolUse additionalContext on AskUserQuestion |
+| history-first | DONE (HOOK) | UserPromptSubmit additionalContext; pi side is a native `context`-event extension (not a port - born dual-harness 2026-08-25) |
 | epistemic-guard | DONE (HOOK) | PostToolUse (Write|Edit|MultiEdit) transcript-provenance |
 | notify | DONE (HOOK) | Stop |
 | cd-agents-reload | DONE (HOOK) | PreToolUse Bash additionalContext (live-verified) |

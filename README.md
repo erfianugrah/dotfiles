@@ -3,7 +3,7 @@
 Cross-platform dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/).
 Targets Arch Linux (native + WSL2), macOS, and Steam Deck (SteamOS via Nix).
 
-The pi coding-agent harness under `.pi/agent/` (66 extensions, 61 skills,
+The pi coding-agent harness under `.pi/agent/` (73 extensions, 66 skills,
 8 prompt templates, theme) is also packaged as a **pi package**
 (`@erfianugrah/pi-harness`, root `package.json`). Install it standalone on any
 machine - no stow required - with `pi install git:github.com/erfianugrah/dotfiles`.
@@ -61,7 +61,7 @@ bin/
 
 .pi/agent/                     # pi AI coding agent (PRIMARY harness; canonical skills + resources)
   APPEND_SYSTEM.md             # appended: Commit/PR, Safety, Epistemic calibration, Confidential-IDs, Output
-  skills/                      # 61 skills, flat (canonical since 2026-05-27; superpowers tree absorbed 2026-08-16)
+  skills/                      # 66 skills, flat (canonical since 2026-05-27; superpowers tree absorbed 2026-08-16)
   prompts/                     # markdown sources loaded by extensions
     local-model-rules.md       #   prepended only for gemma/qwen/llama-server models
     commit.md, pr.md, review.md, test.md, init.md, rollback.md, docs-reference.md

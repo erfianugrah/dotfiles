@@ -26,6 +26,7 @@ description: Use when searching past agent sessions across pi + opencode + claud
 
 - "sessions about X" -> `memledger_search` kind=sessions (the `search_sessions` RPC, migration 009): unions attributed title/project/cwd ILIKE with message-FTS mentions, returns `match_kind` (attributed|mentions|both), `hits`, `last_hit`. The pi tool excludes the current session's rows and OR-broadens on empty.
 - `list_sessions` (pi tool: `project=ilike`; MCP tool: EXACT match - semantics differ!) is the narrow attributed-browser only.
+- **History-first is process, not fallback** (2026-08-25): before starting ANY non-trivial task, one `memledger_search` / `search_messages` with 2-3 terms from the task (component name, error text). The `history-first` extension (pi) / UserPromptSubmit hook (CC) enforces the reminder until a lookup fires.
 
 ## Querying (any client, reads are LAN/tailnet-open)
 

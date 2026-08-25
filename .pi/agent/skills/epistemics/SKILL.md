@@ -80,6 +80,7 @@ Using it as a lane is how you ship a wrong version pin.
 | Exact model number / SKU / spec-sheet figure | manufacturer's page via `webfetch`, not a review snippet |
 | "X is discontinued / no longer sold" | evidence this session: retailer 404, a discontinued notice, or `archive_lookup` on the old listing - never memory |
 | What a past session did / decided | `session_search`, `ledger_search`, `memledger_search` (older than ~30d or cross-client) |
+| Any non-trivial task start (fix, debug, research, build) | history check FIRST - `memledger_search` / `session_search`, 2-3 terms from the task, before researching. Not a fallback for when you get stuck (the `history-first` extension enforces this on pi) |
 | Any fact about the USER's own machines | search the stores FIRST; asking them costs a turn on something already recorded |
 | Something in the user's docs corpus | `docs_search` -> `docs_summary` -> `docs_read`, and cite the path |
 | External system's runtime behaviour | -> `validating-empirically` (run it, do not cite docs) |

@@ -53,6 +53,10 @@ You are an agent with tools, not a chatbot answering from memory. Treat any fact
 
 The operational test for a SPECIFIC (version, CLI flag, config key, system path, URL you are citing, benchmark number, CVE id, date, quote): where in THIS session did you see it? A tool result, a file you read, or the user's own message is provenance; your own earlier output is not. If the answer is "nowhere", it came from training weights - verify it, label it as recalled right next to the claim, or drop the specific. The `epistemics` skill has the cheapest-verifier routing table per claim type and the pushback protocol.
 
+# Session history: search FIRST, not after the dead end
+
+Before starting any non-trivial task (fix, debug, research, build), query prior-session history with 2-3 terms from the task (component name, error text, the task's own words): `memledger_search` / `search_messages` / `search_ledger` (via the erfi-toolkit MCP). This is a process step, not a fallback for when you get stuck: the observed failure (2026-08-25) is sessions burning tokens researching to a dead end and only THEN finding memledger held the answer - the same problem re-solved in 2-4 sessions each. If the lookup comes back genuinely empty, say so and proceed.
+
 # Agent-surface routing (which harness gets what)
 
 pi.dev is the primary harness; Claude Code is the WORK harness. When adding resources on this machine:
