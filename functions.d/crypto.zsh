@@ -406,11 +406,10 @@ sops_rotate_age() {
     local files_rotated=0 files_prose=0 files_failed=0
     local -a prose_files sops_files
     for f in "${hits[@]}"; do
-        # universal sops marker: every container format carries a recipient field
-        #   dotenv: sops_age__list_0__map_recipient=age1...
-        #   json:   "recipient": "age1..."
-        #   yaml:   recipient: age1...
-        if rg -q 'recipient.{0,4}age1' "$f" 2>/dev/null; then
+        # A file is sops-encrypted iff it carries the sops MAC line.
+        # sops_mac= exists in every container format and never in prose.
+        # Everything else with the old key string is prose/config -> text replace.
+        if rg -q 'sops_mac=|"mac": ?"ENC\[|mac: ?ENC\[' "$f" 2>/dev/null; then
             sops_files+=("$f")
         else
             prose_files+=("$f")
