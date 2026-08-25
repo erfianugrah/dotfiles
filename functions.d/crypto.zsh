@@ -220,6 +220,235 @@ decrypt_tf() {
 }
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# sops_rotate_age - rotate a compromised age key across everything it touches
+# ---------------------------------------------------------------------------
+#
+# Scans recursively for ANY file containing the old public key, classifies
+# each hit as sops-encrypted (rotate via updatekeys) or prose (text replace),
+# updates .sops.yaml recipients, and reports git state per repo so you can
+# commit. Optionally cross-checks GitHub for repos you don't have locally.
+#
+# Key safety note: `sops updatekeys` re-wraps the SAME data key (DEK) under
+# the new recipient. Sufficient when only the private key leaked (DEKs were
+# never exposed). If the ciphertext itself is also public, you need full
+# re-encryption instead: set SOPS_ROTATE_FULL=1 (slow; new DEK per file).
+#
+# Usage:
+#   sops_rotate_age <old_pubkey> [new_pubkey] [root]
+#
+#   old_pubkey   required. The compromised age public key.
+#   new_pubkey   optional. Resolved from SOPS_AGE_KEYS env var, else the first
+#                non-old key in SOPS_AGE_KEY_FILE / ~/.config/sops/age/keys.txt.
+#                If multiple candidates exist, prompts to pick one.
+#   root         optional, defaults to $HOME. Directories always skipped:
+#                .git, node_modules, pi session logs, Trash.
+#
+# Flags (env vars):
+#   SOPS_ROTATE_DRY=1      dry run (report only, change nothing)
+#   SOPS_ROTATE_FULL=1     full re-encrypt (new DEK), not just re-wrap
+#   SOPS_ROTATE_CHECK_GH=0 skip the GitHub missing-repo cross-check (default on)
+#   SOPS_ROTATE_PULL=1     auto-pull repos that are behind remote (default: prompt)
+sops_rotate_age() {
+    emulate -L zsh
+    setopt extended_glob null_glob
+
+    local old_key="$1" new_key="$2" root="${3:-$HOME}"
+    local dry="${SOPS_ROTATE_DRY:-0}"
+    local full="${SOPS_ROTATE_FULL:-0}"
+    local check_gh="${SOPS_ROTATE_CHECK_GH:-1}"
+
+    if [[ -z "$old_key" ]]; then
+        echo "Usage: sops_rotate_age <old_pubkey> [new_pubkey] [root]" >&2
+        return 1
+    fi
+
+    # --- resolve new key: arg -> env var -> keys file -> prompt ---
+    if [[ -z "$new_key" ]]; then
+        local -a candidates
+        if [[ -n "$SOPS_AGE_KEYS" ]]; then
+            candidates=(${(f)"$(print -r -- "$SOPS_AGE_KEYS" | grep -oE 'age1[a-z0-9]+' | grep -v "^$old_key$" | sort -u)"})
+        fi
+        if (( ${#candidates} == 0 )); then
+            local keyfile="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}"
+            [[ -f "$keyfile" ]] && candidates=(${(f)"$(grep -oE 'age1[a-z0-9]+' "$keyfile" | grep -v "^$old_key$" | sort -u)"})
+        fi
+        if (( ${#candidates} == 0 )); then
+            echo "[sops-rotate] No new key found in SOPS_AGE_KEYS or keys file." >&2
+            return 1
+        elif (( ${#candidates} == 1 )); then
+            new_key="${candidates[1]}"
+        else
+            if [[ -t 0 ]]; then
+                echo "[sops-rotate] Multiple candidate new keys:"
+                select k in "${candidates[@]}"; do
+                    [[ -n "$k" ]] && new_key="$k" && break
+                done
+            else
+                # non-interactive: refuse to guess - pass the key explicitly
+                echo "[sops-rotate] Multiple candidate new keys and no TTY to pick from:" >&2
+                printf '  %s\n' "${candidates[@]}" >&2
+                echo "[sops-rotate] Pass the new key as argument 2." >&2
+                return 1
+            fi
+        fi
+    fi
+    echo "[sops-rotate] old: $old_key"
+    echo "[sops-rotate] new: $new_key"
+    [[ "$dry" == "1" ]] && echo "[sops-rotate] DRY RUN - no changes will be made"
+    [[ "$full" == "1" ]] && echo "[sops-rotate] FULL re-encrypt mode (new DEK per file)"
+
+    # --- GitHub cross-check: repos with the key that aren't local ---
+    if [[ "$check_gh" == "1" ]] && (( $+commands[gh] )); then
+        echo ""
+        echo "[sops-rotate] Checking GitHub for repos with the old key..."
+        local gh_owner
+        gh_owner=$(gh api user --jq '.login' 2>/dev/null)
+        if [[ -n "$gh_owner" ]]; then
+            local -a gh_repos
+            gh_repos=(${(f)"$(gh search code "$old_key" --owner "$gh_owner" --json repository --jq '.[].repository.name' 2>/dev/null | sort -u)"})
+            local -a missing
+            for r in "${gh_repos[@]}"; do
+                # a repo counts as local if a dir with its name exists under ~ and is a git repo
+                local found=0
+                for d in "$root"/*(/N) "$root"/infra/*(/N) "$root"/work/*(/N); do
+                    if [[ "${d:t}" == "$r" && -d "$d/.git" ]]; then found=1; break; fi
+                done
+                (( found == 0 )) && missing+=("$r")
+            done
+            if (( ${#missing} > 0 )); then
+                echo "[sops-rotate] GitHub repos with the old key NOT found locally:"
+                for r in "${missing[@]}"; do echo "  - $gh_owner/$r"; done
+                echo "[sops-rotate] Clone them first, then re-run. Continuing with local files..."
+            fi
+        fi
+    fi
+
+    # --- scan: every file containing the old key ---
+    echo ""
+    echo "[sops-rotate] Scanning $root ..."
+    local -a hits
+    hits=(${(f)"$(rg -l --hidden "$old_key" "$root" 2>/dev/null \
+        | grep -v '/\.git/' \
+        | grep -v '/node_modules/' \
+        | grep -v '/\.pi/agent/sessions/' \
+        | grep -v '/\.local/share/Trash/' \
+        | grep -v '/memledger/' \
+        | grep -v '/\.config/sops/age/keys\.txt$' \
+        | sort)"})
+    if (( ${#hits} == 0 )); then
+        echo "[sops-rotate] No files contain the old key."
+        return 0
+    fi
+    echo "[sops-rotate] ${#hits} file(s) contain the old key"
+
+    # --- git pull check per affected repo ---
+    local -A repos
+    for f in "${hits[@]}"; do
+        local toplevel=
+        toplevel=$(git -C "${f:h}" rev-parse --show-toplevel 2>/dev/null)
+        [[ -n "$toplevel" ]] && repos[$toplevel]=1
+    done
+    for repo in ${(k)repos}; do
+        if git -C "$repo" fetch --quiet 2>/dev/null && git -C "$repo" status -sb 2>/dev/null | grep -q 'behind'; then
+            echo "[sops-rotate] $repo is BEHIND remote."
+            if [[ "${SOPS_ROTATE_PULL:-0}" == "1" ]]; then
+                git -C "$repo" pull --ff-only && echo "  pulled."
+            elif [[ -t 0 ]]; then
+                read -q "?  pull it now? [y/N] " && echo && git -C "$repo" pull --ff-only || echo "  skipped (uncommitted prose hits may be stale)"
+            fi
+        fi
+    done
+
+    # --- prose / .sops.yaml updates FIRST (rotation depends on .sops.yaml recipients) ---
+    local files_rotated=0 files_prose=0 files_failed=0
+    local -a prose_files sops_files
+    for f in "${hits[@]}"; do
+        if rg -q '^sops:' "$f" 2>/dev/null || rg -q '"sops":' "$f" 2>/dev/null; then
+            sops_files+=("$f")
+        else
+            prose_files+=("$f")
+        fi
+    done
+
+    for f in "${prose_files[@]}"; do
+        if [[ "$dry" == "1" ]]; then
+            echo "  DRY prose: $f"
+        else
+            sd "$old_key" "$new_key" "$f"
+            echo "  prose: $f"
+        fi
+        ((files_prose++))
+    done
+
+    # --- rotate sops-encrypted files ---
+    for f in "${sops_files[@]}"; do
+        # ensure a .sops.yaml exists somewhere up the tree; else drop a temp one beside the file
+            local dir="${f:h}" tempcfg=""
+            local cfgdir="$dir"
+            # absolutize: hits should be absolute, but guard against bare filenames (":h" -> "." loops forever)
+            [[ "$cfgdir" != /* ]] && cfgdir="$PWD/$cfgdir"
+            local prev=""
+            while [[ "$cfgdir" != "/" && ! -f "$cfgdir/.sops.yaml" && "$cfgdir" != "$prev" ]]; do
+                prev="$cfgdir"
+                cfgdir="${cfgdir:h}"
+            done
+            if [[ ! -f "$cfgdir/.sops.yaml" ]]; then
+                tempcfg="$dir/.sops.yaml"
+                if [[ "$dry" != "1" ]]; then
+                    printf 'creation_rules:\n  - age: %s\n' "$new_key" > "$tempcfg"
+                fi
+            fi
+            if [[ "$dry" == "1" ]]; then
+                echo "  DRY rotate: $f"
+                ((files_rotated++))
+            elif [[ "$full" == "1" ]]; then
+                # full re-encrypt: decrypt with old key, encrypt fresh (new DEK)
+                local ftype
+                case "${f:e:l}" in
+                    yaml|yml) ftype=yaml ;;
+                    json) ftype=json ;;
+                    env|conf|ini) ftype=dotenv ;;
+                    *) ftype=binary ;;
+                esac
+                if sops -d "$f" 2>/dev/null | sops -e --age "$new_key" --input-type "$ftype" --output-type "$ftype" /dev/stdin > "$f.rot.tmp" 2>/dev/null; then
+                    mv "$f.rot.tmp" "$f"
+                    echo "  re-encrypted: $f"
+                    ((files_rotated++))
+                else
+                    rm -f "$f.rot.tmp"
+                    echo "  FAILED (re-encrypt): $f" >&2
+                    ((files_failed++))
+                fi
+            else
+                if ( cd "$dir" && echo y | sops updatekeys "$f" >/dev/null 2>&1 ); then
+                    echo "  rotated: $f"
+                    ((files_rotated++))
+                else
+                    echo "  FAILED: $f" >&2
+                    ((files_failed++))
+                fi
+            fi
+            [[ -n "$tempcfg" && "$dry" != "1" ]] && rm -f "$tempcfg"
+    done
+
+    echo ""
+    echo "[sops-rotate] Done: $files_rotated rotated, $files_prose prose-updated, $files_failed failed."
+
+    # --- git state report ---
+    if (( files_rotated + files_prose > 0 )) && [[ "$dry" != "1" ]]; then
+        echo ""
+        echo "[sops-rotate] Repos with uncommitted rotation changes:"
+        for repo in ${(k)repos}; do
+            local dirty
+            dirty=$(git -C "$repo" status --porcelain 2>/dev/null | head -5)
+            [[ -n "$dirty" ]] && echo "  $repo"
+        done
+        echo "Commit each after verifying decryption works."
+    fi
+    (( files_failed > 0 )) && return 1
+    return 0
+}
 # GPG git-signing cache (key B9D283E8AE4E56B4)
 # ---------------------------------------------------------------------------
 # gpg-agent caches the passphrase (7d sliding / 30d hard, see
