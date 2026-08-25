@@ -12,6 +12,12 @@ OLD_PUB=$(grep -oE 'age1[a-z0-9]+' "$HERE/key-old.txt")
 NEW_PUB=$(grep -oE 'age1[a-z0-9]+' "$HERE/key-new.txt")
 export SOPS_AGE_KEY_FILE="$HERE/test-keys.txt"
 
+# new-key-only keyfile: the strongest corruption check available without
+# printing content. Extract the private line that follows the new pub comment.
+NEWKEY_ONLY="$HERE/test-keys-new-only.txt"
+awk -v pub="$NEW_PUB" 'index($0, pub) {getline; print}' "$HERE/key-new.txt" > "$NEWKEY_ONLY"
+if [ ! -s "$NEWKEY_ONLY" ]; then echo "SETUP FAIL: could not build new-key-only keyfile"; exit 1; fi
+
 fails=0
 
 # decrypt helper for unknown-extension files (sops errors on .local/.conf etc
@@ -30,6 +36,10 @@ decrypt_null() {
       else it=yaml; fi
       sops -d --input-type "$it" --output-type "$it" "$f" > /dev/null ;;
   esac
+}
+
+decrypt_null_newonly() {
+  SOPS_AGE_KEY_FILE="$NEWKEY_ONLY" decrypt_null "$1"
 }
 
 chk() { # chk <name> <condition...>
@@ -78,7 +88,7 @@ chk "format: json keeps structured keys" \
 
 # 5. decryptability (to /dev/null; content never printed)
 for f in $(find "$FIX" -type f ! -name '*.md' ! -name '.sops.yaml'); do
-  chk "decrypts: ${f#$FIX/}" decrypt_null "$f"
+  chk "decrypts(newkey-only): ${f#$FIX/}" decrypt_null_newonly "$f"
 done
 
 # 6. no fixture plaintext survived in encrypted files
@@ -117,7 +127,7 @@ chk "full mode: no FAILED lines" bash -c "! grep -q 'FAILED' <<<\"$out3\""
 for f in $(find "$FIX" -type f ! -name '*.md' ! -name '.sops.yaml'); do
   chk "full recipient only-new: ${f#$FIX/}" \
     bash -c "grep -oE 'age1[a-z0-9]+' '$f' | sort -u | grep -qx '$NEW_PUB'"
-  chk "full decrypts: ${f#$FIX/}" decrypt_null "$f"
+  chk "full decrypts(newkey-only): ${f#$FIX/}" decrypt_null_newonly "$f"
 done
 chk "full format: tfvars stays binary-container" \
   bash -c "head -c 4096 '$FIX/nested/a/secrets.tfvars' | grep -q '\"data\": \"ENC\['"

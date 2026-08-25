@@ -406,7 +406,11 @@ sops_rotate_age() {
     local files_rotated=0 files_prose=0 files_failed=0
     local -a prose_files sops_files
     for f in "${hits[@]}"; do
-        if rg -q '^sops:' "$f" 2>/dev/null || rg -q '"sops":' "$f" 2>/dev/null; then
+        # universal sops marker: every container format carries a recipient field
+        #   dotenv: sops_age__list_0__map_recipient=age1...
+        #   json:   "recipient": "age1..."
+        #   yaml:   recipient: age1...
+        if rg -q 'recipient.{0,4}age1' "$f" 2>/dev/null; then
             sops_files+=("$f")
         else
             prose_files+=("$f")
@@ -454,24 +458,24 @@ sops_rotate_age() {
                 #   ^sops: + env ext -> dotenv
                 #   ^sops:         -> yaml
                 local ftype=""
+                local meta
+                meta=$(head -c 4096 "$f"; tail -c 4096 "$f")
                 if head -c 4096 "$f" | grep -q '"data": "ENC\['; then
                     # binary container: {"data": "ENC[...]"} (line-break tolerant)
                     ftype=binary
-                elif head -c 4096 "$f" | grep -q '"sops":'; then
+                elif grep -q 'sops_age__list_' <<< "$meta"; then
+                    # dotenv container: metadata lines are sops_age__list_...= etc,
+                    # with NO ^sops: / "sops": marker (this was the blind spot that
+                    # prose-corrupted .env files and missed them in FULL mode)
+                    ftype=dotenv
+                elif grep -q '"sops":' <<< "$meta"; then
                     ftype=json
-                elif head -c 4096 "$f" | grep -q '^sops:'; then
+                elif grep -q '^sops:' <<< "$meta"; then
                     ftype=$(_sops_file_type "$f")
                 else
-                    # big files keep metadata at EOF - tail probe before giving up
-                    if tail -c 4096 "$f" | grep -q '"sops":'; then
-                        ftype=json
-                    elif tail -c 4096 "$f" | grep -q '^sops:'; then
-                        ftype=$(_sops_file_type "$f")
-                    else
-                        echo "  FAILED (no sops metadata): $f" >&2
-                        ((files_failed++))
-                        continue
-                    fi
+                    echo "  FAILED (no sops metadata): $f" >&2
+                    ((files_failed++))
+                    continue
                 fi
                 # unknown-extension files need explicit types on BOTH legs:
                 # decrypt reads by extension too, so sops -d alone 1s there
