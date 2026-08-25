@@ -1,60 +1,37 @@
 {
-  "task": "Surgical documentation update to .pi/agent/skills/self-correcting-loop/SKILL.md (the model-guidance section around lines 405-422, plus small additions elsewhere as noted). Four verified findings from the 2026-08-11 memledger-summarise loop run must be reflected; change NOTHING else. (1) The claim that Kimi K3 'is not in the opencode-zen catalog anyway' is STALE: kimi-k3 IS in the catalog (verified 2026-08-11 via ~/.pi/agent/models-store.json). Remove/correct that clause while KEEPING the frontier-priced warning (~$3/$15 per M, matches Opus 4.8 quality - not a cheap rung, but a good JUDGE). (2) Document the openrouter fallback ladder: when the opencode-zen balance is dry (signature: 401 CreditsError) the openrouter provider is a working fallback - worker deepseek/deepseek-v4-pro, judge moonshotai/kimi-k3 - because pi -p reads the same ~/.pi/agent/auth.json; openrouter's low-balance signature is 402 'lower max_tokens / prompt size', and a native anthropic rung (anthropic/claude-sonnet-5) completed the run after both gateways failed. (3) Record the judge-idiom evidence: in the 2026-08-11 memledger run the kimi-k3 judge caught a degenerate-filter threshold drift (40 -> 27) plus a fabricated 'the contract test pins this' justification comment that EVERY deterministic sensor missed - cite this as the worked example for why the judge sensor earns its cost. (4) Add the contract-authoring gotcha this exposed: keep contract-test fixtures far from any threshold you intend to freeze - a 27-char fake-LLM fixture silently pinned the threshold below the intended 40 and forced the implementation to drift. Surgical edits only; do not restructure the file; do not touch the frontmatter description.",
-  "maxIterations": 4,
-  "models": ["deepseek/deepseek-v4-pro", "anthropic/claude-sonnet-5"],
-  "stallPatience": 2,
-  "tools": ["read", "edit", "write", "grep", "glob"],
-  "writeScope": [".pi/agent/skills/self-correcting-loop/SKILL.md"],
-  "guide": [".pi/agent/skills/self-correcting-loop/SKILL.md"],
+  "task": "Fix the sops_rotate_age zsh function in functions.d/crypto.zsh until .tests/sops-rotate/test-rotation.sh passes fully. The function rotates a compromised age key across sops-encrypted files (updatekeys default; SOPS_ROTATE_FULL=1 = decrypt+re-encrypt with fresh DEK) and prose mentions. The sensor runs both modes against .tests/sops-rotate/fixtures (rebuilt per run by build-fixtures.sh) covering: binary-container sops ({\"data\": \"ENC[\"} tfvars/tfstate shape), yaml, dotenv, json, anchored repo with .sops.yaml, standalone files (no .sops.yaml; temp one must be created AND REMOVED after), prose docs, big files with metadata at EOF. Invariants: recipients become only the new key, container format is preserved exactly, every rotated file decrypts, no fixture plaintext survives, prose/.sops.yaml get the key string replaced, second run is a no-op reporting 'No files contain the old key'. Do NOT modify anything under .tests/ (sensor + fixtures are the judge). Key facts: zsh ${(f)\"$(cmd)\"} needs inner quotes to split lines; bare 'local x' re-echoes a previously-set var (use 'local x='); sops binary container wraps any plaintext as {\"data\": \"ENC[...]\"} and dotenv/yaml/json keep their own metadata styles; updatekeys reads recipients from the nearest .sops.yaml UP the tree, so .sops.yaml must be updated BEFORE rotating anchored files; updatekeys prompts (y/n) - pipe 'echo y'; the function must work with stdin as a pipe (no TTY reads except where explicitly guarded).",
+  "maxIterations": 15,
+  "models": ["llama-server/loop", "anthropic/claude-sonnet-5"],
+  "stallPatience": 3,
+  "tools": ["read", "edit", "write", "bash"],
+  "writeScope": ["functions.d/crypto.zsh"],
+  "timeoutMs": 600000,
+  "agentTimeoutMs": 3600000,
+  "guide": [".tests/sops-rotate/build-fixtures.sh", ".tests/sops-rotate/test-rotation.sh"],
   "rules": [
-    "Surgical edits only - fix the four findings, do not restructure or reformat the file",
-    "NEVER move, edit, restore or delete .pi/harness.json or any .pi/harness-* file. They are loop machinery and the judge has been told to ignore them.",
-    "Do NOT edit anything under .pi/agent/tests/ - the test files are the contract.",
-    "Do not touch the YAML frontmatter description (a lint test caps it at 1024 chars).",
-    "ASCII punctuation only - no em/en dashes, smart quotes, or ellipsis characters (a pre-write guard hard-blocks them anyway).",
-    "Keep the Kimi-K3-is-frontier-priced warning; only the not-in-the-catalog claim is stale.",
-    "Do not run git commit, git reset, git stash, git checkout, or any other git ref/index mutation."
+    "do NOT edit, delete, or weaken anything under .tests/ - the sensor and fixtures are the objective judge; a sensor made green by editing it is a FAILED iteration",
+    "do NOT weaken the function's security properties: no printing decrypted secrets, no skipping files silently, no 'just make the test pass' stubs",
+    "make the smallest change that fixes the named failing checks; re-run bash .tests/sops-rotate/build-fixtures.sh then bash .tests/sops-rotate/test-rotation.sh after every edit to see the current check list",
+    "zsh idioms that already bit this code: ${(f)\"$(cmd)\"} (inner quotes required), local x= (bare local re-echoes), no TTY reads when stdin is a pipe",
+    "if you need a paragraph-long comment to justify a workaround, the code is wrong - fix the code",
+    "do not run git commit / git reset / git checkout - the harness owns git state"
   ],
   "sensors": [
     {
-      "name": "premise-stale-claim-present",
-      "kind": "premise",
-      "cmd": "rg -Uq 'not in\\s+the\\s+opencode-zen\\s+catalog' .pi/agent/skills/self-correcting-loop/SKILL.md"
+      "name": "rotation-suite",
+      "cmd": "bash .tests/sops-rotate/build-fixtures.sh >/dev/null 2>&1 && bash .tests/sops-rotate/test-rotation.sh",
+      "timeoutMs": 600000,
+      "hint": "read the FAIL lines - each names an invariant (recipient/format/decrypt/leak/prose/cleanup/idempotency/full-mode). Fix the function, not the fixtures."
     },
     {
-      "name": "tests",
-      "cmd": "./.pi/agent/tests/run.sh",
-      "canary": "sd '^description: .+$' 'description:' .pi/agent/skills/self-correcting-loop/SKILL.md",
-      "hint": "the unit + integration + manifest suites must stay green; the manifest suite lints skill descriptions (non-empty, <=1024 chars)"
+      "name": "zsh-syntax",
+      "cmd": "zsh -n functions.d/crypto.zsh",
+      "hint": "syntax error - run zsh -n yourself and read the line number"
     },
     {
-      "name": "prose",
-      "cmd": "prose-lint .pi/agent/skills/self-correcting-loop/SKILL.md --max 0.05",
-      "canary": "printf '\\nUnlock seamless synergy: our cutting-edge solution delves into leveraging robust, game-changing paradigms to effortlessly supercharge your workflow journey. Elevate and streamline with this powerful, comprehensive, best-in-class toolkit crafted to empower teams.\\n' >> .pi/agent/skills/self-correcting-loop/SKILL.md",
-      "hint": "marketing/AI-slop voice crept into the doc - rewrite the addition as factual, specific prose (baseline is 0.02/100w)"
-    },
-    {
-      "name": "openrouter-ids-documented",
-      "expect": "fail",
-      "cmd": "rg -q 'deepseek/deepseek-v4-pro' .pi/agent/skills/self-correcting-loop/SKILL.md",
-      "hint": "finding (2): the openrouter fallback ids (deepseek/deepseek-v4-pro, moonshotai/kimi-k3) must appear in the model guidance"
-    },
-    {
-      "name": "stale-catalog-claim-gone",
-      "expect": "fail",
-      "cmd": "! rg -Uq 'not in\\s+the\\s+opencode-zen\\s+catalog' .pi/agent/skills/self-correcting-loop/SKILL.md",
-      "hint": "finding (1): the stale 'not in the opencode-zen catalog' clause must be removed/corrected - kimi-k3 IS in the catalog"
-    },
-    {
-      "name": "evidence-cited",
-      "expect": "fail",
-      "cmd": "rg -q '2026-08-11' .pi/agent/skills/self-correcting-loop/SKILL.md",
-      "hint": "finding (3): the judge-idiom worked example must cite the 2026-08-11 run (threshold drift 40->27 + fabricated justification comment)"
-    },
-    {
-      "name": "judge",
-      "after": ["tests", "prose", "openrouter-ids-documented", "stale-catalog-claim-gone", "evidence-cited"],
-      "cmd": "judge --base HEAD --spec 'Surgical SKILL.md model-guidance update with exactly four changes: (1) stale Kimi-K3-not-in-zen-catalog claim corrected (kimi-k3 IS in the catalog) while keeping the frontier-priced warning; (2) openrouter fallback ladder documented (deepseek/deepseek-v4-pro worker, moonshotai/kimi-k3 judge, shared auth.json, 401/402 balance signatures); (3) judge-idiom worked example citing the 2026-08-11 memledger run (40->27 threshold drift + fabricated justification comment caught by the judge, missed by deterministic sensors); (4) contract-fixture-vs-threshold gotcha. Reject: restructuring, removed content beyond the stale clause, marketing voice, touched tests/harness files, non-ASCII punctuation.' --model moonshotai/kimi-k3"
+      "name": "no-plaintext-fixture-secrets-in-function",
+      "cmd": "! grep -E 'fixture-(cf-key|token|json-key|anchored-pass|kube-token|gate-secret)' functions.d/crypto.zsh | grep -q .",
+      "hint": "fixture secret values must never be hardcoded into the function - generalize instead"
     }
   ]
 }

@@ -324,23 +324,36 @@ sops_rotate_age() {
         fi
     fi
 
-    # --- scan: every file containing the old key ---
+    # --- scan ---
+    # FULL mode: every sops-encrypted file (fresh DEK for all; old-DEK trust is gone)
+    # default:   every file containing the old key (encrypted -> updatekeys, prose -> sd)
     echo ""
     echo "[sops-rotate] Scanning $root ..."
     local -a hits
-    hits=(${(f)"$(rg -l --hidden "$old_key" "$root" 2>/dev/null \
-        | grep -v '/\.git/' \
-        | grep -v '/node_modules/' \
-        | grep -v '/\.pi/agent/sessions/' \
-        | grep -v '/\.local/share/Trash/' \
-        | grep -v '/memledger/' \
-        | grep -v '/\.config/sops/age/keys\.txt$' \
-        | sort)"})
-    if (( ${#hits} == 0 )); then
-        echo "[sops-rotate] No files contain the old key."
-        return 0
+    if [[ "$full" == "1" ]]; then
+        # ENC[ marker distinguishes real sops ciphertext from docs that merely mention '^sops:'
+        hits=(${(f)"$(rg -l --hidden 'ENC\[AES256_GCM' "$root" 2>/dev/null \
+            | grep -v '/\.git/' \
+            | grep -v '/node_modules/' \
+            | grep -v '/\.pi/agent/sessions/' \
+            | grep -v '/\.local/share/Trash/' \
+            | grep -v '/memledger/' \
+            | grep -v '/\.config/sops/age/keys\.txt$' \
+            | sort)"})
+        (( ${#hits} == 0 )) && { echo "[sops-rotate] No sops-encrypted files found."; return 0; }
+        echo "[sops-rotate] ${#hits} sops-encrypted file(s) to re-encrypt"
+    else
+        hits=(${(f)"$(rg -l --hidden "$old_key" "$root" 2>/dev/null \
+            | grep -v '/\.git/' \
+            | grep -v '/node_modules/' \
+            | grep -v '/\.pi/agent/sessions/' \
+            | grep -v '/\.local/share/Trash/' \
+            | grep -v '/memledger/' \
+            | grep -v '/\.config/sops/age/keys\.txt$' \
+            | sort)"})
+        (( ${#hits} == 0 )) && { echo "[sops-rotate] No files contain the old key."; return 0; }
+        echo "[sops-rotate] ${#hits} file(s) contain the old key"
     fi
-    echo "[sops-rotate] ${#hits} file(s) contain the old key"
 
     # --- git pull check per affected repo ---
     local -A repos
@@ -403,17 +416,43 @@ sops_rotate_age() {
                 echo "  DRY rotate: $f"
                 ((files_rotated++))
             elif [[ "$full" == "1" ]]; then
-                # full re-encrypt: decrypt with old key, encrypt fresh (new DEK)
-                local ftype
-                case "${f:e:l}" in
-                    yaml|yml) ftype=yaml ;;
-                    json) ftype=json ;;
-                    env|conf|ini) ftype=dotenv ;;
-                    *) ftype=binary ;;
-                esac
+                # full re-encrypt: decrypt, re-encrypt fresh (new DEK).
+                # Preserve the file's own container type, detected from the
+                # ENCRYPTED file (decrypted-content probing misfires: sops
+                # binary-type wraps any plaintext as {"data": "ENC[...]"}):
+                #   ^{"data":      -> binary   (unknown-ext files, e.g. tfvars/tfstate)
+                #   "sops":        -> json
+                #   ^sops: + env ext -> dotenv
+                #   ^sops:         -> yaml
+                local ftype=""
+                if head -c 4096 "$f" | grep -q '"data": "ENC\['; then
+                    # binary container: {"data": "ENC[...]"} (line-break tolerant)
+                    ftype=binary
+                elif head -c 4096 "$f" | grep -q '"sops":'; then
+                    ftype=json
+                elif head -c 4096 "$f" | grep -q '^sops:'; then
+                    case "${f:e:l}" in
+                        env|conf|ini) ftype=dotenv ;;
+                        *) ftype=yaml ;;
+                    esac
+                else
+                    # big files keep metadata at EOF - tail probe before giving up
+                    if tail -c 4096 "$f" | grep -q '"sops":'; then
+                        ftype=json
+                    elif tail -c 4096 "$f" | grep -q '^sops:'; then
+                        case "${f:e:l}" in
+                            env|conf|ini) ftype=dotenv ;;
+                            *) ftype=yaml ;;
+                        esac
+                    else
+                        echo "  FAILED (no sops metadata): $f" >&2
+                        ((files_failed++))
+                        continue
+                    fi
+                fi
                 if sops -d "$f" 2>/dev/null | sops -e --age "$new_key" --input-type "$ftype" --output-type "$ftype" /dev/stdin > "$f.rot.tmp" 2>/dev/null; then
                     mv "$f.rot.tmp" "$f"
-                    echo "  re-encrypted: $f"
+                    echo "  re-encrypted ($ftype): $f"
                     ((files_rotated++))
                 else
                     rm -f "$f.rot.tmp"
@@ -444,7 +483,9 @@ sops_rotate_age() {
             dirty=$(git -C "$repo" status --porcelain 2>/dev/null | head -5)
             [[ -n "$dirty" ]] && echo "  $repo"
         done
-        echo "Commit each after verifying decryption works."
+        echo "Commit each after verifying rotation: recipient grep (no decrypt) --"
+        echo "  grep -o 'age1[a-z0-9]*' <file> | sort -u   # new key present, old absent"
+        echo "  (decrypt-to-file spot-check only after --full-re-encrypt: sops -d -o /dev/null <file>)"
     fi
     (( files_failed > 0 )) && return 1
     return 0
