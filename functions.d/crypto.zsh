@@ -249,6 +249,35 @@ decrypt_tf() {
 #   SOPS_ROTATE_FULL=1     full re-encrypt (new DEK), not just re-wrap
 #   SOPS_ROTATE_CHECK_GH=0 skip the GitHub missing-repo cross-check (default on)
 #   SOPS_ROTATE_PULL=1     auto-pull repos that are behind remote (default: prompt)
+# _sops_file_type <file> -> yaml|json|dotenv|binary (stdout)
+# sops guesses type from extension and ERRORS on unknown ones (.local, .new,
+# .conf, .tfvars-as-yaml, ...). Known extensions map through; unknown content
+# is sniffed: { or [ -> json, KEY=VAL shape -> dotenv, else yaml.
+# Note: a sops binary CONTAINER ({"data": "ENC[..."}) is detected separately
+# by the caller from the encrypted file itself - this helper is for plaintext
+# / content typing of unknown-extension files.
+_sops_file_type() {
+    local f="$1"
+    case "${f:e:l}" in
+        yaml|yml) echo yaml; return ;;
+        json) echo json; return ;;
+        env) echo dotenv; return ;;
+        ini) echo ini; return ;;
+    esac
+    local head2k
+    head2k=$(head -c 2048 "$f" 2>/dev/null)
+    local trimmed="${head2k##[[:space:]]#}"
+    case "${trimmed:0:1}" in
+        "{"|"[") echo json; return ;;
+    esac
+    # dotenv: every non-comment non-blank line looks like KEY=... (no colon-space)
+    if [[ -n "$head2k" ]] && ! grep -qE '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space]]*:[[:space:]]' <<< "$head2k" \
+        && grep -qE '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=' <<< "$head2k"; then
+        echo dotenv; return
+    fi
+    echo yaml
+}
+
 sops_rotate_age() {
     emulate -L zsh
     setopt extended_glob null_glob
@@ -431,26 +460,27 @@ sops_rotate_age() {
                 elif head -c 4096 "$f" | grep -q '"sops":'; then
                     ftype=json
                 elif head -c 4096 "$f" | grep -q '^sops:'; then
-                    case "${f:e:l}" in
-                        env|conf|ini) ftype=dotenv ;;
-                        *) ftype=yaml ;;
-                    esac
+                    ftype=$(_sops_file_type "$f")
                 else
                     # big files keep metadata at EOF - tail probe before giving up
                     if tail -c 4096 "$f" | grep -q '"sops":'; then
                         ftype=json
                     elif tail -c 4096 "$f" | grep -q '^sops:'; then
-                        case "${f:e:l}" in
-                            env|conf|ini) ftype=dotenv ;;
-                            *) ftype=yaml ;;
-                        esac
+                        ftype=$(_sops_file_type "$f")
                     else
                         echo "  FAILED (no sops metadata): $f" >&2
                         ((files_failed++))
                         continue
                     fi
                 fi
-                if sops -d "$f" 2>/dev/null | sops -e --age "$new_key" --input-type "$ftype" --output-type "$ftype" /dev/stdin > "$f.rot.tmp" 2>/dev/null; then
+                # unknown-extension files need explicit types on BOTH legs:
+                # decrypt reads by extension too, so sops -d alone 1s there
+                local dtype="$ftype"
+                case "${f:e:l}" in
+                    yaml|yml|json|env|ini|tfvars|tfstate) ;;
+                    *) dtype=$(_sops_file_type "$f") ;;
+                esac
+                if sops -d --input-type "$dtype" --output-type "$dtype" "$f" 2>/dev/null | sops -e --age "$new_key" --input-type "$dtype" --output-type "$ftype" /dev/stdin > "$f.rot.tmp" 2>/dev/null; then
                     mv "$f.rot.tmp" "$f"
                     echo "  re-encrypted ($ftype): $f"
                     ((files_rotated++))
@@ -460,7 +490,9 @@ sops_rotate_age() {
                     ((files_failed++))
                 fi
             else
-                if ( cd "$dir" && echo y | sops updatekeys "$f" >/dev/null 2>&1 ); then
+                local intype
+                intype=$(_sops_file_type "$f")
+                if ( cd "$dir" && echo y | sops updatekeys --input-type "$intype" "$f" >/dev/null 2>&1 ); then
                     echo "  rotated: $f"
                     ((files_rotated++))
                 else

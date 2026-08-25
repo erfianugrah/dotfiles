@@ -13,6 +13,25 @@ NEW_PUB=$(grep -oE 'age1[a-z0-9]+' "$HERE/key-new.txt")
 export SOPS_AGE_KEY_FILE="$HERE/test-keys.txt"
 
 fails=0
+
+# decrypt helper for unknown-extension files (sops errors on .local/.conf etc
+# without explicit types; mirrors the content sniff, kept independent on purpose)
+decrypt_null() {
+  local f="$1" ext="${f##*.}" it
+  case "$ext" in
+    yaml|yml|json|env|ini) sops -d --output /dev/null "$f" ;;
+    *)
+      local h t
+      h=$(head -c 2048 "$f" 2>/dev/null)
+      t="${h##[[:space:]]#}"
+      if [[ "${t:0:1}" == "{" || "${t:0:1}" == "[" ]]; then it=json
+      elif grep -qE '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=' <<< "$h" \
+        && ! grep -qE '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*:[[:space:]]' <<< "$h"; then it=dotenv
+      else it=yaml; fi
+      sops -d --input-type "$it" --output-type "$it" "$f" > /dev/null ;;
+  esac
+}
+
 chk() { # chk <name> <condition...>
   local name="$1"; shift
   if "$@" >/dev/null 2>&1; then
@@ -59,7 +78,7 @@ chk "format: json keeps structured keys" \
 
 # 5. decryptability (to /dev/null; content never printed)
 for f in $(find "$FIX" -type f ! -name '*.md' ! -name '.sops.yaml'); do
-  chk "decrypts: ${f#$FIX/}" sops -d -o /dev/null "$f"
+  chk "decrypts: ${f#$FIX/}" decrypt_null "$f"
 done
 
 # 6. no fixture plaintext survived in encrypted files
@@ -98,7 +117,7 @@ chk "full mode: no FAILED lines" bash -c "! grep -q 'FAILED' <<<\"$out3\""
 for f in $(find "$FIX" -type f ! -name '*.md' ! -name '.sops.yaml'); do
   chk "full recipient only-new: ${f#$FIX/}" \
     bash -c "grep -oE 'age1[a-z0-9]+' '$f' | sort -u | grep -qx '$NEW_PUB'"
-  chk "full decrypts: ${f#$FIX/}" sops -d -o /dev/null "$f"
+  chk "full decrypts: ${f#$FIX/}" decrypt_null "$f"
 done
 chk "full format: tfvars stays binary-container" \
   bash -c "head -c 4096 '$FIX/nested/a/secrets.tfvars' | grep -q '\"data\": \"ENC\['"
