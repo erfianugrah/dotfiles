@@ -1,0 +1,14 @@
+# gitleaks config - dotfiles repo.
+#
+# .tests/sops-rotate/ holds THROWAWAY age keypairs generated for the
+# sops_rotate_age loop-harness fixtures (commit 44fdec6). Verified 2026-08-25:
+# their public halves (age1w94elsc6..., age16chghzgfj...) match none of the
+# real fleet keys. Allowlist the whole fixture dir so the pre-push secret
+# backstop stops false-positiving on them.
+useDefault = true
+
+[allowlist]
+description = "sops-rotate test fixture keys (throwaway keypairs)"
+paths = [
+  '''(^|/)\.tests/sops-rotate/''',
+]
