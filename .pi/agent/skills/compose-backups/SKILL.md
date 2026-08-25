@@ -20,7 +20,7 @@ Validated end-to-end on vaultwarden-compose 2026-08-09 (encrypted upload, restor
       - BACKUP_EXCLUDE_REGEXP=icon_cache         # see typo trap below
       - BACKUP_RETENTION_DAYS=30
       - BACKUP_PRUNING_PREFIX=<stack>-backup-    # MANDATORY, see below
-      - AGE_PUBLIC_KEYS=age1yd6fnsq24uz4rx3rk7srrazqh6xkjnaxl44g9jrraa4d69034usqkmp8zs
+      - AGE_PUBLIC_KEYS=age132gmayefg7mq9t7fdfh9ppczn009uqyql49yje89fcjcp74v84aq36gu87
       - AWS_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
       - AWS_ENDPOINT=<host-only-no-scheme>
