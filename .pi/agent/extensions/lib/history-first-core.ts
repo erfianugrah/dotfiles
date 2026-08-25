@@ -22,7 +22,18 @@ import { LOOKUP_TOOLS } from "./lookup-before-ask-core.ts";
 
 export { LOOKUP_TOOLS };
 
-export const HISTORY_FIRST_MARKER = "<!-- history-first -->";
+/**
+ * Injection shape (empirically verified 2026-08-25): pi's AgentMessage
+ * union has NO `role: "system"` - a system-role message appended to the
+ * context event's array is silently dropped before the provider request,
+ * and `before_agent_start`'s message injection (customType) ALSO does not
+ * reach the model in pi 0.84.x. The only mutation of the context-event
+ * messages array that provably reaches the model is a `role: "user"`
+ * message. The reminder is therefore injected as a user-role message at
+ * the END of the array (max recency salience), tagged with the marker so
+ * the model can tell it is harness-injected guidance, not a human turn.
+ */
+export const HISTORY_FIRST_MARKER = "[history-first]";
 
 /** Fires (turns) the reminder re-appears while undisarmed. Env-overridable. */
 export const DEFAULT_MAX_FIRES = 3;
@@ -35,17 +46,16 @@ export function isSubstantive(text: string): boolean {
   return text.trim().length >= 20;
 }
 
-export const HISTORY_FIRST_REMINDER = `${HISTORY_FIRST_MARKER}
-history-first: this session has not queried prior-session history yet. BEFORE
+export const HISTORY_FIRST_REMINDER = `${HISTORY_FIRST_MARKER} (harness reminder, not the user): this session has not queried prior-session history yet. BEFORE
 researching, fixing, or building anything, run one search for prior work:
 memledger_search (cross-session, all clients, only full copy past 30d) or
-session_search (pi-only, recent) - 2-3 terms: component name, error text, or
+session_search (pi-only, recent) - 2-3 terms ONLY (single terms are ANDed at
+message granularity; 5+ terms match nothing): component name, error text, or
 the task's own words. The known failure (observed 2026-08-25): fresh sessions
 skip this, burn tokens researching to a dead end, and only THEN find memledger
-already held the answer - the same problem was re-solved in 2-4 sessions each
-(pi thinking-render, secret-output-guard age-key rule, claude binary
-migration). A 5s search beats re-deriving. If the lookup comes back genuinely
-empty, say so and proceed.`;
+already held the answer - the same problem was re-solved in 2-4 sessions each.
+A 5s search beats re-deriving. If the lookup comes back genuinely empty, say
+so and proceed.`;
 
 export interface HistoryFirstState {
   /** True once any LOOKUP_TOOLS call happened this session. Disarms. */
@@ -68,11 +78,9 @@ export function isLookupTool(toolName: string): boolean {
 type PiMessage = { role: string; content: unknown };
 
 function isInjected(m: PiMessage): boolean {
-  return (
-    m.role === "system" &&
-    typeof m.content === "string" &&
-    m.content.includes(HISTORY_FIRST_MARKER)
-  );
+  // Exact-content match on the full reminder: only our own injection
+  // carries it, so a user merely QUOTING the marker never gets stripped.
+  return textContent(m) === HISTORY_FIRST_REMINDER;
 }
 
 function textContent(m: PiMessage): string {
@@ -124,7 +132,7 @@ export function decideContext(
   return {
     messages: [
       ...messages.filter((m) => !isInjected(m)),
-      { role: "system" as const, content: HISTORY_FIRST_REMINDER },
+      { role: "user" as const, content: HISTORY_FIRST_REMINDER },
     ],
   };
 }

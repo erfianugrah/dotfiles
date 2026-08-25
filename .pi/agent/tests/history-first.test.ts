@@ -32,7 +32,7 @@ describe("decideContext", () => {
     const out = decideContext(state, msgs);
     expect(out).toBeDefined();
     const last = out!.messages[out!.messages.length - 1];
-    expect(last.role).toBe("system");
+    expect(last.role).toBe("user");
     expect((last.content as string).includes(HISTORY_FIRST_MARKER)).toBe(true);
     expect(state.fires).toBe(1);
   });
@@ -58,10 +58,10 @@ describe("decideContext", () => {
     // Second turn: the messages array may or may not carry our previous
     // injected copy (depends on pi's persistence semantics).
     const without = decideContext(state, [TASK]);
-    expect(without!.messages.filter((m) => (typeof m.content === "string" ? m.content.includes(HISTORY_FIRST_MARKER) : false))).toHaveLength(1);
+    expect(without!.messages.filter((m) => (typeof m.content === "string" && m.content.includes(HISTORY_FIRST_MARKER)))).toHaveLength(1);
     const withStale = decideContext(state, [...first.messages]);
     const marks = withStale!.messages.filter((m) =>
-      typeof m.content === "string" ? m.content.includes(HISTORY_FIRST_MARKER) : false,
+      typeof m.content === "string" && m.content.includes(HISTORY_FIRST_MARKER),
     );
     expect(marks).toHaveLength(1);
     expect(state.fires).toBe(3);

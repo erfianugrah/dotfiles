@@ -1,5 +1,5 @@
 /**
- * local-model-rules — model-aware system prompt injection for local models.
+ * local-model-rules - model-aware system prompt injection for local models.
  *
  * When the active model is from the llm-compose proxy (gemma, qwen families
  * via llama-server provider), prepend the local-model-specific rules from
@@ -11,16 +11,20 @@
  * - Reasoning loops on retry
  * - Tool selection confusion (bash vs native tools)
  *
- * The opencode fork applied this via per-model gemma.txt prompt routing in
- * packages/opencode/src/session/system.ts. In Pi the equivalent is hooking
- * the `context` event and conditionally prepending a system message based
- * on `ctx.model`.
+ * Mechanism (fixed 2026-08-25): `before_agent_start` -> systemPrompt prepend,
+ * the same pattern tool-routing.ts uses (proven to reach the model). The
+ * previous implementation returned a `{role:"system"}` message from the
+ * `context` event - but pi's AgentMessage union has no system role, so the
+ * message was SILENTLY DROPPED before the provider request (empirically
+ * verified 2026-08-25 via a probe extension; local-model rules likely never
+ * reached the model at all in any session).
  *
- * Model family detection — applies when:
+ * Model family detection - applies when:
  *   - provider === "llama-server" (our custom proxy provider), OR
  *   - model id matches /gemma|qwen/i (covers cases where the same model is
  *     used through a different provider, e.g. Anthropic / OpenAI inference
  *     of an open-weight via API).
+ *   - PI_LOCAL_MODEL_RULES_FORCE=1 forces injection regardless (testing).
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -49,17 +53,17 @@ function loadRules(): string | null {
 }
 
 function shouldApply(provider: string, modelId: string): boolean {
+  if (process.env.PI_LOCAL_MODEL_RULES_FORCE === "1") return true;
   if (provider === "llama-server") return true;
   if (/gemma|qwen/i.test(modelId)) return true;
   return false;
 }
 
-type PiMessage = { role: string; content: unknown };
-
 export default function (pi: ExtensionAPI) {
-  pi.on("context", async (event, ctx) => {
-    const messages = (event as { messages: PiMessage[] }).messages;
-    if (!messages?.length) return undefined;
+  pi.on("before_agent_start", async (event, ctx) => {
+    // Idempotency: earlier before_agent_start handlers chain the system
+    // prompt, so check what we've been handed before prepending.
+    if (event.systemPrompt.includes(MARKER)) return undefined;
 
     // Pi exposes ctx.model as a getter that calls into the active session.
     // After a session reload (/reload, /resume, switchSession, fork) the
@@ -67,7 +71,7 @@ export default function (pi: ExtensionAPI) {
     // .model throws an `assertActive` error
     // (see opencode-fork ctx lifecycle: a getter on the captured ctx may
     // outlive the session it was captured against). Guard the access so
-    // a stale-ctx call doesn't crash the extension — we just skip the
+    // a stale-ctx call doesn't crash the extension - we just skip the
     // injection on this turn; the next event call gets a fresh ctx.
     let provider = "";
     let modelId = "";
@@ -85,14 +89,6 @@ export default function (pi: ExtensionAPI) {
     const rules = loadRules();
     if (!rules) return undefined;
 
-    // Idempotency
-    const alreadyInjected = messages.some((m) => {
-      if (m.role !== "system") return false;
-      const c = m.content;
-      return typeof c === "string" && c.includes(MARKER);
-    });
-    if (alreadyInjected) return undefined;
-
-    return { messages: [{ role: "system" as const, content: rules }, ...messages] };
+    return { systemPrompt: `${rules}\n\n${event.systemPrompt}` };
   });
 }
