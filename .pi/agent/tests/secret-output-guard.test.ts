@@ -106,6 +106,17 @@ describe("redactSecrets", () => {
     expect(text).toContain("after");
   });
 
+  test("masks age secret keys (sops keys.txt incident)", () => {
+    // Shape: AGE-SECRET-KEY-1 + exactly 58 chars from the bech32 alphabet.
+    const ageKey = "AGE-SECRET-KEY-1" + "QWERTYUIOPASDFGHJKLZXCVBNM23456789QWERTYUIOPASDFGHJKLZXCVBN".slice(0, 58);
+    const input = `# created: 2026-07-24T13:08:44+08:00\n# public key: age1yd6fn...\n${ageKey}\n`;
+    const { text, redactions } = redactSecrets(input, []);
+    expect(redactions).toBe(1);
+    expect(text).not.toContain(ageKey);
+    expect(text).toContain("age-secret-key");
+    expect(text).toContain("# public key: age1yd6fn..."); // comment lines survive
+  });
+
   test("is idempotent - masked output does not re-mask", () => {
     const once = redactSecrets(KEY64, secrets).text;
     const twice = redactSecrets(once, secrets);

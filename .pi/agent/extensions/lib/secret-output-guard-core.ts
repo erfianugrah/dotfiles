@@ -123,6 +123,14 @@ export const FORMAT_RULES: FormatRule[] = [
       /-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----/g,
     prefixLen: 40,
   },
+  // Age secret keys (sops). AGE-SECRET-KEY-1 + 58 uppercase bech32 chars.
+  // Incident (2026-08-24): `cat ~/.config/sops/age/keys.txt | head -5` printed
+  // a key into the transcript; no rule existed for the format until now.
+  {
+    id: "age-secret-key",
+    pattern: /\bAGE-SECRET-KEY-1[0-9A-Z]{58}\b/g,
+    prefixLen: 20,
+  },
   { id: "composer-api-key", pattern: /\bck_[a-f0-9]{32,}\b/g, prefixLen: 8 },
   { id: "github-pat", pattern: /\bgithub_pat_[A-Za-z0-9_]{22,}\b/g, prefixLen: 14 },
   { id: "github-token", pattern: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, prefixLen: 7 },
