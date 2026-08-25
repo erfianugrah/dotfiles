@@ -3,6 +3,11 @@
 # Update with: save_packages
 asn-git
 asnmap
+# AUR-pinned, NOT npm-global: 2.1.242+ native binaries segfault at startup on
+# ERFI1 (WSL2, 5090); maintainer holds 2.1.241. Smoke-test new versions before bumping:
+#   curl -sL https://downloads.claude.ai/claude-code-releases/<v>/linux-x64/claude -o /tmp/cc-test
+#   && chmod +x /tmp/cc-test && /tmp/cc-test --version
+claude-code
 comby-bin
 flyctl-bin
 google-chrome

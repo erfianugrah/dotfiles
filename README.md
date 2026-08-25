@@ -721,6 +721,14 @@ symlinks (see AGENTS.md "Agent-surface routing"). opencode (the earlier
 custom fork at `~/opencode`) was RETIRED 2026-08-15: its `.config/opencode/`
 tree is deleted from this repo - git history is the archive.
 
+**Claude Code install**: on Arch it's the AUR `claude-code` package
+(`packages/arch-aur.txt`) - `/opt/claude-code/bin/claude` + a `/usr/bin/claude`
+wrapper that sets `DISABLE_UPDATES=1`, so updates flow only through
+`paru -Syu`. NOT npm-global: 2.1.242+ native binaries segfault at startup on
+ERFI1 (WSL2, 5090 - not the missing-AVX bug class), so the AUR pin at 2.1.241
+is deliberate; smoke-test new releases before bumping (see arch-aur.txt). On
+macOS use the native installer (`curl -fsSL https://claude.ai/install.sh | bash`).
+
 ### Shared surface
 
 The tool-routing rules live once at `.pi/agent/prompts/tool-routing.md`

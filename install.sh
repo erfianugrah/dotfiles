@@ -139,9 +139,13 @@ do_local_bin() {
 # platform-native optional dependency (postinstall skipped via
 # --ignore-scripts / --omit=optional, or the auto-updater re-dropping the stub
 # binary); the symptom is "claude native binary not installed" at startup.
-# Same failure and same repair on macos/nixos/steamos/arch - the only variance
+# Same failure and same repair on macos/nixos/steamos - the only variance
 # is where npm's global root lives and whether it's user-writable, so resolve
 # via `npm root -g` and branch on writability.
+# On arch the npm-global route is retired: claude is the AUR `claude-code`
+# package (/opt/claude-code/bin/claude, updates via paru -Syu only). A
+# pacman-owned claude is skipped here - the AUR wrapper sets DISABLE_UPDATES=1
+# so its binary can't self-clobber.
 claude_native_ok() {
   local out
   out="$(DISABLE_AUTOUPDATER=1 claude --version 2>&1)"
@@ -152,6 +156,12 @@ claude_native_ok() {
 }
 
 claude_repair_native() {
+  # AUR-managed claude (arch): nothing for npm to repair - the pacman package
+  # owns /usr/bin/claude and its wrapper disables self-updates.
+  if command -v pacman >/dev/null 2>&1 && pacman -Q claude-code >/dev/null 2>&1; then
+    echo "!! claude-code is pacman-managed - repair via: paru -S claude-code" >&2
+    return 1
+  fi
   if ! command -v npm >/dev/null 2>&1; then
     echo "!! npm not found - reinstall claude manually" >&2
     return 1
@@ -180,10 +190,17 @@ claude_repair_native() {
 }
 
 _claude_native_installer_hint() {
-  # The npm package keeps self-clobbering via its autoupdater; the native
-  # installer (~/.local/bin/claude, background auto-update) is the durable fix.
-  echo "!! durable fix - migrate to the native installer:" >&2
-  echo "!!   npm uninstall -g @anthropic-ai/claude-code && curl -fsSL https://claude.ai/install.sh | bash" >&2
+  # The npm package keeps self-clobbering via its autoupdater; the durable fix
+  # differs by platform.
+  if command -v pacman >/dev/null 2>&1 && pacman -Q claude-code >/dev/null 2>&1; then
+    echo "!! claude is the AUR claude-code package - repair via: paru -S claude-code" >&2
+    echo "!!   (rollback: sudo pacman -U /var/cache/pacman/pkg/claude-code-*.pkg.tar.zst)" >&2
+  else
+    # The npm package keeps self-clobbering via its autoupdater; the native
+    # installer (~/.local/bin/claude, background auto-update) is the durable fix.
+    echo "!! durable fix - migrate to the native installer:" >&2
+    echo "!!   npm uninstall -g @anthropic-ai/claude-code && curl -fsSL https://claude.ai/install.sh | bash" >&2
+  fi
 }
 
 # Claude Code dual-harness wiring. stow already links .claude/ (skills, hooks,
