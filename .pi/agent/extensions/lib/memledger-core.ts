@@ -229,9 +229,16 @@ export async function runSearchMessages(
       if (rows.length === 0) {
         const orQ = toOrQuery(params.q);
         if (orQ !== params.q.trim()) {
-          const retry = dropSelf(await searchMessages(orQ, params.source, limit, signal));
+          // Fetch DEEP here too (same reason as the deep retry above): the
+          // querying session's own messages contain every query term, so at
+          // shallow depth the OR-broadened ranking is also dominated by
+          // self-hits that dropSelf then removes - the 2026-08-25 tailscale
+          // session hit exactly this: the OR retry silently failed and the
+          // tool reported "all matches were the current session's own
+          // messages" while the prior sessions sat below the self-block.
+          const retry = dropSelf(await searchMessages(orQ, params.source, 50, signal));
           if (retry.length > 0) {
-            rows = retry;
+            rows = retry.slice(0, limit);
             note = `\n(no exact matches - OR-broadened to "${orQ}")`;
           }
         }
@@ -390,18 +397,51 @@ export async function runMemledgerSearch(
     if (params.selfSession && kind === "sessions") {
       const before = rows.length;
       rows = rows.filter((r) => r.session_key !== params.selfSession);
-      if (rows.length === 0 && before > 0) {
-        // same over-constrained-query fallback as messages: the AND of all
-        // terms may only match this session's own echo of the vocabulary
-        const orQ = toOrQuery(params.q);
-        if (orQ !== params.q.trim()) {
-          const retryUrl = buildUrl(baseUrl(), kind, orQ, params.source, limit);
-          const retry = (await fetchJson(retryUrl, 10_000, signal)) as Record<string, unknown>[];
-          const filtered = (Array.isArray(retry) ? retry : []).filter((r) => r.session_key !== params.selfSession);
-          if (filtered.length > 0) {
-            rows = filtered;
-            note = `\n(no exact matches - OR-broadened to "${orQ}")`;
+      if (rows.length === 0) {
+        // Fallbacks whenever the result is empty - EITHER because the
+        // AND of all terms matched only this session's own echo of the
+        // vocabulary, or because it matched nothing at all (a 5+-term
+        // AND at message granularity usually matches nothing - see
+        // runSearchMessages). Deep fetch (50): self-hits dominate the
+        // shallow ranking too, so a shallow OR retry can fail purely
+        // because the non-self answers sit below the self-block
+        // (2026-08-25 tailscale session: tool reported "all matches were
+        // the current session's own messages" while prior sessions sat
+        // in the store, unreachable).
+        if (before > 0 && before < 50) {
+          const deepUrl = buildUrl(baseUrl(), kind, params.q, params.source, 50);
+          const deep = (await fetchJson(deepUrl, 10_000, signal)) as Record<string, unknown>[];
+          const deepFiltered = (Array.isArray(deep) ? deep : []).filter((r) => r.session_key !== params.selfSession);
+          if (deepFiltered.length > 0) {
+            rows = deepFiltered.slice(0, limit);
+            note = "\n(top hits were the current session's own rows - showing deeper matches)";
           }
+        }
+        if (rows.length === 0) {
+          const orQ = toOrQuery(params.q);
+          if (orQ !== params.q.trim()) {
+            const retryUrl = buildUrl(baseUrl(), kind, orQ, params.source, 50);
+            const retry = (await fetchJson(retryUrl, 10_000, signal)) as Record<string, unknown>[];
+            const filtered = (Array.isArray(retry) ? retry : []).filter(
+              (r) => r.session_key !== params.selfSession,
+            );
+            if (filtered.length > 0) {
+              rows = filtered.slice(0, limit);
+              note = `\n(no exact matches - OR-broadened to "${orQ}")`;
+            }
+          }
+        }
+      }
+    } else if (rows.length === 0 && !params.selfSession) {
+      // No self-filter context (e.g. Claude Code toolkit): still broaden an
+      // over-constrained AND that matched nothing.
+      const orQ = toOrQuery(params.q);
+      if (orQ !== params.q.trim()) {
+        const retryUrl = buildUrl(baseUrl(), kind, orQ, params.source, limit);
+        const retry = (await fetchJson(retryUrl, 10_000, signal)) as Record<string, unknown>[];
+        if (Array.isArray(retry) && retry.length > 0) {
+          rows = retry;
+          note = `\n(no exact matches - OR-broadened to "${orQ}")`;
         }
       }
     }
