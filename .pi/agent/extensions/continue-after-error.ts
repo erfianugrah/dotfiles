@@ -43,6 +43,11 @@ const DISABLED = process.env.PI_NO_CONTINUE_AFTER_ERROR === "1";
 
 // HTTP statuses we care about. 401 = unauthorized, 402 = payment-required
 // (some providers map credits exhaustion here), 429 = rate-limited.
+// 402 has two flavors: balance exhausted (openrouter_credits) vs in-flight
+// budget exhausted (openrouter_in_flight_budget - concurrent requests
+// would exceed remaining credits, balance is fine). The event carries
+// status + headers only (no body), so Retry-After - which OpenRouter sets
+// on the in-flight variant per its remedy_hint - is the discriminator.
 const RECOVERABLE_STATUSES = new Set([401, 402, 429]);
 
 // Session-scoped state. Keyed by session file path so /resume / /fork
@@ -89,7 +94,8 @@ function sessionKey(ctx: ExtensionContext): string {
   }
 }
 
-function describeStatus(
+// Exported for unit tests (tests/continue-after-error.test.ts).
+export function describeStatus(
   status: number,
   headers: Record<string, string | undefined>,
   consecutive: number,
@@ -111,12 +117,25 @@ function describeStatus(
           "If credits stay 0 and you need to keep working, /model to swap to a non-opencode-zen provider" +
           switchHint,
       };
-    case 402:
+    case 402: {
+      const retryAfter = headers["retry-after"] ?? headers["x-ratelimit-reset"];
+      if (retryAfter) {
+        return {
+          headline: `Provider 402 (in-flight budget exhausted). Retry-After: ${retryAfter}s.`,
+          suggest:
+            "Concurrent in-flight requests would exceed the remaining-credit budget - balance is likely fine. " +
+            `Wait the Retry-After window (${retryAfter}s) for in-flight requests to settle, then /continue` +
+            " (reduce parallel sessions to stop it recurring). Adding credits at " +
+            "https://openrouter.ai/settings/credits raises the in-flight budget" +
+            switchHint,
+        };
+      }
       return {
         headline: "Provider 402 (payment required).",
         suggest:
           "Credits exhausted. Top up at the gateway OR /model to switch providers" + switchHint,
       };
+    }
     case 429: {
       const retryAfter = headers["retry-after"] ?? headers["x-ratelimit-reset"];
       const hint = retryAfter ? ` Retry-After: ${retryAfter}s.` : "";
