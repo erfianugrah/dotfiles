@@ -501,11 +501,11 @@ load_sops_age_keys() {
     print "Loading SOPS Age keys"
 
     local public_key secret_key combined
-    public_key=$(_bw_get "SOPS_AGE_PUB_KEY_2") || {
+    public_key=$(_bw_get "SOPS_AGE_PUB_KEY_3") || {
         print -u2 "Failed to retrieve SOPS Age public key."
         return 1
     }
-    secret_key=$(_bw_get "SOPS_AGE_SECRET_KEY_2") || {
+    secret_key=$(_bw_get "SOPS_AGE_SECRET_KEY_3") || {
         print -u2 "Failed to retrieve SOPS Age secret key."
         return 1
     }
