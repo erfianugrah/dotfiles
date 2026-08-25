@@ -17,11 +17,11 @@
  *      cheap model, momentary auth hiccup) and the old behaviour of
  *      tombstoning on first failure permanently locked sessions out of
  *      ever getting a title.
- *   3. Builds an ordered list of small/cheap authenticated candidate
- *      models from models.json (local llama-server first, then
- *      haiku/mini/flash name patterns, current session model last) and
- *      tries each in turn - an empty response or error falls through to
- *      the next candidate instead of giving up.
+ *   3. Builds the candidate list with the CURRENT SESSION MODEL FIRST
+ *      (2026-08-25: local llama-server candidates fail whenever the GPU
+ *      stack is busy or mode-swapped), then up to 3 cheap fallbacks from
+ *      models.json - an empty response or error falls through to the next
+ *      candidate instead of giving up.
  *   4. Asks the model: "Generate a 3-6 word title". Strips quotes.
  *   5. Calls pi.setSessionName(title) and records a success marker via
  *      pi.appendEntry so we never re-name (manual /session-name wins).
@@ -59,8 +59,9 @@ const MAX_INPUT_CHARS = 4000;
 const MAX_TITLE_WORDS = 8;
 // Total failed attempts across the session before we stop retrying.
 const MAX_ATTEMPTS = 3;
-// Cap on how many candidate models we authenticate per trigger.
-const MAX_CANDIDATES = 4;
+// Cap on how many FALLBACK candidates we authenticate per trigger (the
+// current session model is tried first and does not count against this).
+const MAX_FALLBACKS = 3;
 
 type ContentBlock = { type?: string; text?: string };
 
@@ -197,6 +198,22 @@ async function pickTitleCandidates(ctx: ExtensionContext) {
   type Model = NonNullable<ReturnType<typeof getModel>>;
   type Picked = { model: Model; auth: unknown };
 
+  // Current session model FIRST (user directive 2026-08-25: same session, not
+  // the local model - all-local candidate lists tombstoned most of the
+  // 2026-08-25 sessions with empty-response when llama-server was busy or
+  // GPU-mode-swapped). It just served this turn, so it is authenticated,
+  // reachable, and not mid-swap.
+  const picked: Picked[] = [];
+  const current = (ctx as { model?: { id: string; provider: string } }).model;
+  if (current) {
+    const m = getModel(current.provider, current.id);
+    if (m) {
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
+      if (auth?.ok && auth.apiKey) picked.push({ model: m, auth });
+    }
+  }
+
+  // Cheap fallbacks: for heavyweight current models or auth failure.
   const candidates: Array<{ provider: string; id: string; weight: number }> = [];
   const data = loadModelsJson() as
     | { providers?: Record<string, { models?: Array<{ id?: string }> }> }
@@ -211,23 +228,13 @@ async function pickTitleCandidates(ctx: ExtensionContext) {
   }
   candidates.sort((a, b) => a.weight - b.weight);
 
-  const picked: Picked[] = [];
   for (const c of candidates) {
-    if (picked.length >= MAX_CANDIDATES) break;
+    if (picked.length >= 1 + MAX_FALLBACKS) break;
+    if (picked.some((p) => p.model.id === c.id && p.model.provider === c.provider)) continue;
     const m = getModel(c.provider, c.id);
     if (!m) continue;
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
     if (auth?.ok && auth.apiKey) picked.push({ model: m, auth });
-  }
-
-  // Last resort: current session model (heavyweight, but always works)
-  const current = (ctx as { model?: { id: string; provider: string } }).model;
-  if (current) {
-    const m = getModel(current.provider, current.id);
-    if (m && !picked.some((p) => p.model.id === m.id && p.model.provider === m.provider)) {
-      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
-      if (auth?.ok && auth.apiKey) picked.push({ model: m, auth });
-    }
   }
   return picked;
 }
