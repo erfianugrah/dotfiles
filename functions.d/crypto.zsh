@@ -366,18 +366,36 @@ sops_rotate_age() {
             | grep -v '/node_modules/' \
             | grep -v '/\.pi/agent/sessions/' \
             | grep -v '/\.local/share/Trash/' \
-            | grep -v '/memledger/' \
+            | grep -v '/memledger/data/' \
+            | grep -v '/memledger/db/' \
             | grep -v '/\.config/sops/age/keys\.txt$' \
             | sort)"})
-        (( ${#hits} == 0 )) && { echo "[sops-rotate] No sops-encrypted files found."; return 0; }
-        echo "[sops-rotate] ${#hits} sops-encrypted file(s) to re-encrypt"
+        # also sweep prose/config mentions of the old key - updatekeys reads
+        # .sops.yaml for recipients, so a stale one would re-wrap to the OLD key
+        local -a keyhits
+        keyhits=(${(f)"$(rg -l --hidden "$old_key" "$root" 2>/dev/null \
+            | grep -v '/\.git/' \
+            | grep -v '/node_modules/' \
+            | grep -v '/\.pi/agent/sessions/' \
+            | grep -v '/\.local/share/Trash/' \
+            | grep -v '/memledger/data/' \
+            | grep -v '/memledger/db/' \
+            | grep -v '/\.config/sops/age/keys\.txt$' \
+            | sort)"})
+        # merge: encrypted files first, then any old-key files not already covered
+        local -A in_hits
+        for f in "${hits[@]}"; do in_hits[$f]=1; done
+        for f in "${keyhits[@]}"; do [[ -z "${in_hits[$f]:-}" ]] && hits+=("$f"); done
+        (( ${#hits} == 0 )) && { echo "[sops-rotate] Nothing to rotate."; return 0; }
+        echo "[sops-rotate] ${#hits} file(s) to process (${#keyhits} with old key refs)"
     else
         hits=(${(f)"$(rg -l --hidden "$old_key" "$root" 2>/dev/null \
             | grep -v '/\.git/' \
             | grep -v '/node_modules/' \
             | grep -v '/\.pi/agent/sessions/' \
             | grep -v '/\.local/share/Trash/' \
-            | grep -v '/memledger/' \
+            | grep -v '/memledger/data/' \
+            | grep -v '/memledger/db/' \
             | grep -v '/\.config/sops/age/keys\.txt$' \
             | sort)"})
         (( ${#hits} == 0 )) && { echo "[sops-rotate] No files contain the old key."; return 0; }
@@ -429,81 +447,49 @@ sops_rotate_age() {
     # --- rotate sops-encrypted files ---
     for f in "${sops_files[@]}"; do
         # ensure a .sops.yaml exists somewhere up the tree; else drop a temp one beside the file
-            local dir="${f:h}" tempcfg=""
-            local cfgdir="$dir"
-            # absolutize: hits should be absolute, but guard against bare filenames (":h" -> "." loops forever)
-            [[ "$cfgdir" != /* ]] && cfgdir="$PWD/$cfgdir"
-            local prev=""
-            while [[ "$cfgdir" != "/" && ! -f "$cfgdir/.sops.yaml" && "$cfgdir" != "$prev" ]]; do
-                prev="$cfgdir"
-                cfgdir="${cfgdir:h}"
-            done
-            if [[ ! -f "$cfgdir/.sops.yaml" ]]; then
-                tempcfg="$dir/.sops.yaml"
-                if [[ "$dry" != "1" ]]; then
-                    printf 'creation_rules:\n  - age: %s\n' "$new_key" > "$tempcfg"
-                fi
+        local dir="${f:h}" tempcfg=""
+        local cfgdir="$dir"
+        # absolutize: hits should be absolute, but guard against bare filenames (":h" -> "." loops forever)
+        [[ "$cfgdir" != /* ]] && cfgdir="$PWD/$cfgdir"
+        local prev=""
+        while [[ "$cfgdir" != "/" && ! -f "$cfgdir/.sops.yaml" && "$cfgdir" != "$prev" ]]; do
+            prev="$cfgdir"
+            cfgdir="${cfgdir:h}"
+        done
+        if [[ ! -f "$cfgdir/.sops.yaml" ]]; then
+            tempcfg="$dir/.sops.yaml"
+            if [[ "$dry" != "1" ]]; then
+                printf 'creation_rules:\n  - age: %s\n' "$new_key" > "$tempcfg"
             fi
-            if [[ "$dry" == "1" ]]; then
-                echo "  DRY rotate: $f"
+        fi
+        # unknown extensions: sops guesses type from extension and errors on
+        # unknown ones (.local, .new, .conf) - sniff content for those
+        local typeflag=()
+        case "${f:e:l}" in
+            yaml|yml|json|env|ini) ;;
+            *) typeflag=(--input-type "$(_sops_file_type "$f")") ;;
+        esac
+        if [[ "$dry" == "1" ]]; then
+            echo "  DRY rotate: $f"
+            ((files_rotated++))
+        else
+            # sops-native: updatekeys re-wraps the DEK to the new recipient
+            # (reads .sops.yaml / temp cfg), then --rotate issues a FRESH DEK
+            # (FULL mode). Format and structure are sops's problem, not ours.
+            local ok=1
+            ( cd "$dir" && echo y | sops updatekeys "${typeflag[@]}" "$f" >/dev/null 2>&1 ) || ok=0
+            if (( ok )) && [[ "$full" == "1" ]]; then
+                sops rotate --in-place "${typeflag[@]}" "$f" >/dev/null 2>&1 || ok=0
+            fi
+            if (( ok )); then
+                [[ "$full" == "1" ]] && echo "  re-encrypted: $f" || echo "  rotated: $f"
                 ((files_rotated++))
-            elif [[ "$full" == "1" ]]; then
-                # full re-encrypt: decrypt, re-encrypt fresh (new DEK).
-                # Preserve the file's own container type, detected from the
-                # ENCRYPTED file (decrypted-content probing misfires: sops
-                # binary-type wraps any plaintext as {"data": "ENC[...]"}):
-                #   ^{"data":      -> binary   (unknown-ext files, e.g. tfvars/tfstate)
-                #   "sops":        -> json
-                #   ^sops: + env ext -> dotenv
-                #   ^sops:         -> yaml
-                local ftype=""
-                local meta
-                meta=$(head -c 4096 "$f"; tail -c 4096 "$f")
-                if head -c 4096 "$f" | grep -q '"data": "ENC\['; then
-                    # binary container: {"data": "ENC[...]"} (line-break tolerant)
-                    ftype=binary
-                elif grep -q 'sops_age__list_' <<< "$meta"; then
-                    # dotenv container: metadata lines are sops_age__list_...= etc,
-                    # with NO ^sops: / "sops": marker (this was the blind spot that
-                    # prose-corrupted .env files and missed them in FULL mode)
-                    ftype=dotenv
-                elif grep -q '"sops":' <<< "$meta"; then
-                    ftype=json
-                elif grep -q '^sops:' <<< "$meta"; then
-                    ftype=$(_sops_file_type "$f")
-                else
-                    echo "  FAILED (no sops metadata): $f" >&2
-                    ((files_failed++))
-                    continue
-                fi
-                # unknown-extension files need explicit types on BOTH legs:
-                # decrypt reads by extension too, so sops -d alone 1s there
-                local dtype="$ftype"
-                case "${f:e:l}" in
-                    yaml|yml|json|env|ini|tfvars|tfstate) ;;
-                    *) dtype=$(_sops_file_type "$f") ;;
-                esac
-                if sops -d --input-type "$dtype" --output-type "$dtype" "$f" 2>/dev/null | sops -e --age "$new_key" --input-type "$dtype" --output-type "$ftype" /dev/stdin > "$f.rot.tmp" 2>/dev/null; then
-                    mv "$f.rot.tmp" "$f"
-                    echo "  re-encrypted ($ftype): $f"
-                    ((files_rotated++))
-                else
-                    rm -f "$f.rot.tmp"
-                    echo "  FAILED (re-encrypt): $f" >&2
-                    ((files_failed++))
-                fi
             else
-                local intype
-                intype=$(_sops_file_type "$f")
-                if ( cd "$dir" && echo y | sops updatekeys --input-type "$intype" "$f" >/dev/null 2>&1 ); then
-                    echo "  rotated: $f"
-                    ((files_rotated++))
-                else
-                    echo "  FAILED: $f" >&2
-                    ((files_failed++))
-                fi
+                echo "  FAILED: $f" >&2
+                ((files_failed++))
             fi
-            [[ -n "$tempcfg" && "$dry" != "1" ]] && rm -f "$tempcfg"
+        fi
+        [[ -n "$tempcfg" && "$dry" != "1" ]] && rm -f "$tempcfg"
     done
 
     echo ""
