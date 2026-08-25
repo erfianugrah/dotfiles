@@ -1,4 +1,5 @@
 {
   "app.interrupt": ["escape"],
-  "app.clear": ["ctrl+c"]
+  "app.clear": ["ctrl+c"],
+  "app.clipboard.pasteImage": ["ctrl+v"]
 }
