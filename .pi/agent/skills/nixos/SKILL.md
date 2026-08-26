@@ -147,6 +147,23 @@ Fleet-repo commands: `make check` (eval both arches), **`make cache`**
   `programs.zsh.package` (does not exist - use `users.defaultUserShell`),
   though that one at least fails at eval.
 
+### Dotfiles on an adopted host
+
+The `shell` profile ships BINARIES; config comes from `~/dotfiles` cloned on
+the host. Two traps, both hit on hearth 2026-08-26:
+
+- Clone over **https**, not `git@github.com:`. A host's existing keys are
+  repo-scoped GitHub DEPLOY keys and cannot be reused for another repo;
+  dotfiles is public so no key is needed anyway.
+- **Never `stow .` on a fleet host.** dotfiles carries `.ssh`, `.kube`,
+  `.gnupg`, `.pi`, `.claude`; stowing `.ssh` replaces the host's real
+  `~/.ssh/config` and destroys the `gh-fleet` alias that
+  `nix flake update fleet` depends on. Link only `.zshrc .p10k.zsh
+  .tmux.conf .vimrc .gitconfig`, then `zsh -i -c exit` once to let zinit
+  bootstrap (omz snippets + p10k) and
+  `~/.tmux/plugins/tpm/bin/install_plugins` for tmux. Verify afterwards that
+  `~/.ssh/config` is still a real file.
+
 ## Not this skill
 
 Read-only router ops queries (DHCP leases, NAT, conntrack) -> `eaves`.
