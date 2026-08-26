@@ -90,28 +90,62 @@ ssh <host> 'cd /etc/nixos && git log --oneline -1'   # clone at the pushed commi
 ssh router 'sudo -n eaves doctor'                    # router only
 ```
 
-## nixos-fleet monorepo (scaffolded, no host migrated yet)
+## nixos-fleet: a shared LIBRARY, not a monorepo
 
-Repo `~/infra/nixos-fleet` exists with `flake.nix` (mkHost helper, no hosts
-declared yet), `Makefile` (`check`/`diff`/`deploy`/`gate`/`rollback` with
-`HOST=`), and profiles extracted from real host content: `base` (locale/tz/
-nix/gc), `shell` (the zsh+tmux+atuin+direnv+fzf+zoxide + modern-CLI set that
-was duplicated router<->servarr and **entirely missing on hearth**), `admin`
-(sshd key-only, erfi + root backstop, tailscale), `net` (the explicit-MTU
-doctrine as a `fleet.net.defaultMtu` option). `nix flake check` passes.
+`~/infra/nixos-fleet` (private GitHub) exports reusable profiles as
+`nixosModules`. It owns NO host - no `nixosConfigurations`, no deploy target.
+Each host repo keeps its own config, deploy path and nixpkgs pin:
 
-**Read `~/infra/nixos-fleet/PLAN.md` before migrating anything.** Migration
-order is hearth -> servarr -> nixpkgs-pin unification -> router LAST (its
-940-line `configuration.nix` holds nftables/kea/VLANs and splits into modules
-as part of the move). Until a host's step lands, its ORIGINAL repo is
-authoritative and the monorepo must not declare it in `nixosConfigurations`.
+```nix
+inputs.fleet = {
+  url = "git+ssh://git@gh-fleet/erfianugrah/nixos-fleet";
+  inputs.nixpkgs.follows = "nixpkgs";   # profiles build against the HOST's pin
+};
+modules = [ fleet.nixosModules.default ./configuration.nix ];
+# then: fleet.admin.keys = [...]; fleet.admin.rootSsh = true;  # hearth: false
+```
 
-Known blocker: the three repos pin different nixpkgs (router a specific
-commit chosen for a no-op closure diff, the other two `nixos-26.05`). One
-`flake.lock` cannot honour all three, so the router's first monorepo deploy
-is a mass rebuild - schedule it as its own step. Per-host inputs that must
-survive the merge: `eaves` + `nixpkgs-tailscale` (router), `disko` +
-`sops-nix` (servarr).
+Profiles: `base` (tz/locale incl. the en_GB ssh-LANG workaround, nix+gc),
+`shell` (zsh+tmux+atuin+direnv+fzf+zoxide+nvim+delta+modern-CLI - BINARIES
+only; the stow dotfiles and zinit/omz/p10k/TPM do the rest), `admin` (sshd
+key-only, erfi+wheel, opt-in root key backstop, tailscale), `net`
+(`fleet.net.defaultMtu` + explicit-MTU doctrine).
+
+**A monorepo was tried and rejected the same day (2026-08-26).** Almost
+nothing in these configs is reusable - hearth's `iot.nix` is 2266 lines of HA
+templates/dashboards, the router's value is nftables/kea/VLANs, servarr's is
+ZFS/disko/nvidia. `nixpkgs.follows` also dissolves the shared-lock blocker:
+the router keeps the commit it pins for a no-op closure diff, and per-host
+inputs (`eaves`, `nixpkgs-tailscale`, `disko`, `sops-nix`) stay put. Per-host
+skew becomes the feature - the Pi wanting a CLI tool cannot drag the router
+into a rebuild.
+
+**Adoption status**: hearth DONE (2026-08-26, verified live: 0 failed units,
+HA+ESPHome 200, zsh is the login shell). servarr and router pending, each on
+its own schedule.
+
+Fleet-repo commands: `make check` (eval both arches), **`make cache`**
+(aarch64 substitute check - run this whenever `shell.nix` gains a package),
+`make attrs`, `make fmt`.
+
+### Adoption gotchas (all paid for on hearth)
+
+- **`nixos-rebuild` runs as root**, so a `git+ssh` input needs the `gh-fleet`
+  alias in `/root/.ssh/config`, not just the login user's. First deploy died
+  on `Could not resolve hostname gh-fleet`.
+- **GitHub deploy keys are unique per repo** - a host with a key for its own
+  repo needs a SECOND key for nixos-fleet.
+- **Use `lib.mkDefault`** for anything a host may tighten (hearth sets
+  `PermitRootLogin = "no"` over the profile; otherwise it is a conflict).
+- **aarch64 source-builds are a real gate.** `glances` 4.5.5 has no aarch64
+  substitute, so the Pi compiled it and its test suite failed (14 failures),
+  killing `nixos-rebuild` - while `nix flake check`, both eval arches AND a
+  whole-host eval were green. Arch inventory: x86_64 = router + servarr,
+  aarch64 = hearth + RK1 nodes; both permanent.
+- **Eval cannot catch a wrong package attr**: `git-delta` evaluates fine in a
+  list, fails at build. The attr is `delta`. Nor can it catch
+  `programs.zsh.package` (does not exist - use `users.defaultUserShell`),
+  though that one at least fails at eval.
 
 ## Not this skill
 
