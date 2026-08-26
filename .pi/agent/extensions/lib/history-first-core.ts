@@ -23,15 +23,25 @@ import { LOOKUP_TOOLS } from "./lookup-before-ask-core.ts";
 export { LOOKUP_TOOLS };
 
 /**
- * Injection shape (empirically verified 2026-08-25): pi's AgentMessage
- * union has NO `role: "system"` - a system-role message appended to the
- * context event's array is silently dropped before the provider request,
- * and `before_agent_start`'s message injection (customType) ALSO does not
- * reach the model in pi 0.84.x. The only mutation of the context-event
- * messages array that provably reaches the model is a `role: "user"`
- * message. The reminder is therefore injected as a user-role message at
- * the END of the array (max recency salience), tagged with the marker so
- * the model can tell it is harness-injected guidance, not a human turn.
+ * Injection shape (empirically verified 2026-08-25, refined 2026-08-26):
+ * pi's AgentMessage union has NO `role: "system"` (docs/session-format.md
+ * lists user | assistant | toolResult | bashExecution | custom |
+ * branchSummary | compactionSummary), so a system-role message appended to
+ * the context event's array is silently dropped before the provider
+ * request. The only mutation of the context-event messages array that
+ * provably reaches the model is a `role: "user"` message. The reminder is
+ * therefore injected as a user-role message at the END of the array (max
+ * recency salience), tagged with the marker so the model can tell it is
+ * harness-injected guidance, not a human turn.
+ *
+ * CORRECTION (2026-08-26): the 2026-08-25 note here also claimed
+ * `before_agent_start`'s message injection (customType) does NOT reach the
+ * model in 0.84.x. That is WRONG - re-probed on 0.84.3 two ways (a
+ * before_provider_request payload dump showed the customType content
+ * PRESENT in the serialized body; a behavioural trigger-word probe showed
+ * the model obeying it on two different models). Only `role: "system"` is
+ * dead. This matters because skill-guard.ts's intent path uses customType -
+ * it works, and must not be "fixed" on the strength of the old claim.
  */
 export const HISTORY_FIRST_MARKER = "[history-first]";
 

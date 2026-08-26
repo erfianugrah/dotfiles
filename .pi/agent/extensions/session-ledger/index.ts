@@ -554,24 +554,32 @@ export default function (pi: ExtensionAPI) {
 		memledgerBlock = injectionEnabled ? fetchMemledgerBrief(sessionProject) : null;
 	});
 
-	// ── context: prepend cached system block with recent project summaries
-	pi.on("context", async (event: { messages: Array<{ role: string; content: unknown }> }) => {
+	// ── before_agent_start: PREPEND cached block with recent project summaries
+	//
+	// Mechanism (fixed 2026-08-26): systemPrompt prepend, the same pattern
+	// tool-routing.ts uses (proven to reach the model). This previously
+	// returned a `{role:"system"}` message from the `context` event - but
+	// pi's AgentMessage union has no system role (docs/session-format.md),
+	// so it was SILENTLY DROPPED before the provider request.
+	//
+	// Verified 2026-08-26 two independent ways on pi 0.84.3: a
+	// before_provider_request payload dump showed the injected role:"system"
+	// content MISSING from the serialized body, and a behavioural probe
+	// showed a role:"system" instruction had no effect while the same text
+	// via systemPrompt prepend did. Consequence: per-project session
+	// summaries reached the model in NO session, so fresh sessions
+	// rediscovered known context by trial and error.
+	pi.on("before_agent_start", async (event: { systemPrompt: string }) => {
 		if (!injectionEnabled || (injectRows.length === 0 && !memledgerBlock)) return undefined;
-		const first = event.messages[0];
-		if (
-			first?.role === "system" &&
-			typeof first.content === "string" &&
-			first.content.includes(INJECT_HEADER)
-		) {
-			return undefined;
-		}
+		// Idempotency - earlier handlers chain the system prompt.
+		if (event.systemPrompt.includes(INJECT_HEADER)) return undefined;
 		let block = buildInjectionBlock(injectRows);
 		if (memledgerBlock) {
 			const brief = await Promise.race([memledgerBlock, new Promise<string>((r) => setTimeout(() => r(""), 600))]);
-			if (brief) block = block ? `${block}\n${brief}` : `# Recent work in this project (from past sessions)\n${brief}`;
+			if (brief) block = block ? `${block}\n${brief}` : `${INJECT_HEADER}\n${brief}`;
 		}
 		if (!block) return undefined;
-		return { messages: [{ role: "system" as const, content: block }, ...event.messages] };
+		return { systemPrompt: `${block}\n\n${event.systemPrompt}` };
 	});
 
 	// ── session_compact: persist the free LLM-written summary (filtered)

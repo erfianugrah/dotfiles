@@ -76,8 +76,6 @@ function promptFor(style: Style): string {
   return style === "socratic" ? SOCRATIC_PROMPT : TERSE_PROMPT;
 }
 
-type PiMessage = { role: string; content: unknown };
-
 // ── extension ─────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
@@ -115,25 +113,28 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Inject the active style prompt as a system message at the top of every
-  // LLM call. Anthropic prompt caching means the cost is paid once and
-  // amortised across the session.
-  pi.on("context", async (event, _ctx) => {
-    const messages = (event as { messages: PiMessage[] }).messages;
-    if (!messages?.length) return undefined;
+  // Inject the active style prompt by PREPENDING to the system prompt.
+  //
+  // Mechanism (fixed 2026-08-26): `before_agent_start` -> systemPrompt
+  // prepend, the same pattern tool-routing.ts uses (proven to reach the
+  // model). This previously returned a `{role:"system"}` message from the
+  // `context` event - but pi's AgentMessage union has no system role
+  // (docs/session-format.md), so it was SILENTLY DROPPED before the
+  // provider request, and /style was a no-op on model behaviour.
+  //
+  // Verified 2026-08-26 two independent ways on pi 0.84.3 (payload dump +
+  // behavioural trigger-word probe).
+  pi.on("before_agent_start", async (event) => {
+    const prompt = promptFor(loadStyle());
+    if (!prompt) return undefined;
 
-    const style = loadStyle();
-    const prompt = promptFor(style);
+    // Idempotency - earlier handlers chain the system prompt. Check both
+    // markers so a style SWITCH mid-session still re-injects.
+    if (event.systemPrompt.includes(MARKER_TERSE) || event.systemPrompt.includes(MARKER_SOCRATIC)) {
+      return undefined;
+    }
 
-    // Idempotency — skip if already injected for current style.
-    const alreadyInjected = messages.some((m) => {
-      if (m.role !== "system") return false;
-      const c = m.content;
-      return typeof c === "string" && (c.includes(MARKER_TERSE) || c.includes(MARKER_SOCRATIC));
-    });
-    if (alreadyInjected) return undefined;
-
-    return { messages: [{ role: "system" as const, content: prompt }, ...messages] };
+    return { systemPrompt: `${prompt}\n\n${event.systemPrompt}` };
   });
 
   // Clear status when session ends.

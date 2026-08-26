@@ -213,6 +213,10 @@ const memoryTool = defineTool({
 // Build the system-message block. If total content exceeds INJECT_MAX_BYTES,
 // drop oldest memories first (sort by id which is ULID-like timestamp-prefixed)
 // and prepend a truncation note so the model knows the list isn't complete.
+
+/** Header of the injected block - also the idempotency sentinel. */
+const MEMORY_BLOCK_HEADER = "# Memories (from past sessions)";
+
 function memoryBlock(memories: Memory[]): string {
   if (memories.length === 0) return "";
   // Newest first, then trim until under the cap.
@@ -235,7 +239,7 @@ function memoryBlock(memories: Memory[]): string {
   // Re-sort kept oldest-first for stable presentation
   kept.sort((a, b) => (a.id < b.id ? -1 : 1));
   const lines = kept.map((m) => `- ${m.content}`).join("\n");
-  return `# Memories (from past sessions)\n${lines}${truncNote}`;
+  return `${MEMORY_BLOCK_HEADER}\n${lines}${truncNote}`;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -245,23 +249,32 @@ export default function (pi: ExtensionAPI) {
   // cost).
   if (process.env.MEMORY_OFF === "1") return;
 
-  // Inject memories as a system message at the top of every LLM call.
-  // Anthropic + OpenAI prompt caching means the cost is paid once per session
-  // and amortized across all subsequent turns.
-  pi.on("context", async (event, _ctx) => {
+  // Inject memories by PREPENDING to the system prompt.
+  //
+  // Mechanism (fixed 2026-08-26): `before_agent_start` -> systemPrompt
+  // prepend, the same pattern tool-routing.ts uses (proven to reach the
+  // model). The previous implementation returned a `{role:"system"}`
+  // message from the `context` event - but pi's AgentMessage union has no
+  // system role (see docs/session-format.md: user | assistant | toolResult
+  // | bashExecution | custom | branchSummary | compactionSummary), so the
+  // message was SILENTLY DROPPED before the provider request.
+  //
+  // Verified 2026-08-26 two independent ways on pi 0.84.3:
+  //   1. before_provider_request payload dump - the injected role:"system"
+  //      content was MISSING from the serialized request body.
+  //   2. Behavioural probe - a role:"system" message instructing the model
+  //      to emit a trigger word produced no trigger word, while the same
+  //      instruction via systemPrompt prepend did.
+  // Consequence: stored memories reached the model in NO session while the
+  // context-event injection was in place.
+  pi.on("before_agent_start", async (event) => {
     const memories = load();
     if (memories.length === 0) return undefined;
 
-    const block = memoryBlock(memories);
-    const memorySystem = { role: "system" as const, content: block };
+    // Idempotency - earlier before_agent_start handlers chain the system
+    // prompt, so check what we've been handed before prepending.
+    if (event.systemPrompt.includes(MEMORY_BLOCK_HEADER)) return undefined;
 
-    // If first message is already a system message and contains our block, skip.
-    const first = event.messages[0];
-    if (first?.role === "system" && typeof first.content === "string" && first.content.includes("# Memories (from past sessions)")) {
-      return undefined;
-    }
-
-    // Otherwise prepend our memory block as a synthetic system message.
-    return { messages: [memorySystem, ...event.messages] };
+    return { systemPrompt: `${memoryBlock(memories)}\n\n${event.systemPrompt}` };
   });
 }

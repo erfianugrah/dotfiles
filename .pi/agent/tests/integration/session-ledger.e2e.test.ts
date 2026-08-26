@@ -2,7 +2,7 @@
  * session-ledger END-TO-END: drives the REAL extension hooks + tools through
  * a fake pi runtime, exercising the full lifecycle in one process:
  *   session_start → session_compact (good + degenerate) → session_start
- *   (loads inject rows) → context (inject block) → ledger_search → ledger_sql
+ *   (loads inject rows) → before_agent_start (inject block) → ledger_search → ledger_sql
  *   (read + rejected write) → session_shutdown (raw capture) → session_start
  *   (lazy-summarise the pending raw row via mocked complete()).
  *
@@ -138,22 +138,25 @@ describe("session-ledger e2e", () => {
 		expect(r.content[0].text).toContain("Rejected");
 	});
 
-	test("next session_start loads inject rows; context hook prepends a cached system block", async () => {
+	// Injection is a systemPrompt PREPEND via before_agent_start, not a
+	// role:"system" context message. pi's AgentMessage union has no system
+	// role, so the old mechanism was silently dropped before the provider
+	// request (verified 2026-08-26 on pi 0.84.3 via a before_provider_request
+	// payload dump + a behavioural trigger-word probe).
+	test("next session_start loads inject rows; before_agent_start prepends the cached block to the system prompt", async () => {
 		await emit("session_start", { reason: "new" }, ctx); // captured flag reset; injectRows loaded
-		const msgs = [{ role: "user", content: "hi" }];
-		const res = (await emit("context", { messages: msgs }, ctx)) as { messages: Array<{ role: string; content: string }> };
-		expect(res?.messages?.[0]?.role).toBe("system");
-		expect(res.messages[0].content).toContain("# Recent work in this project");
-		expect(res.messages[0].content).toContain("re-read named files");
-		expect(res.messages[0].content).toContain("Knot over PowerDNS");
+		const res = (await emit("before_agent_start", { systemPrompt: "BASE_PROMPT" }, ctx)) as { systemPrompt: string };
+		expect(res?.systemPrompt).toContain("# Recent work in this project");
+		expect(res.systemPrompt).toContain("re-read named files");
+		expect(res.systemPrompt).toContain("Knot over PowerDNS");
+		// The base prompt must survive, with our block ahead of it.
+		expect(res.systemPrompt).toContain("BASE_PROMPT");
+		expect(res.systemPrompt.indexOf("# Recent work in this project")).toBeLessThan(res.systemPrompt.indexOf("BASE_PROMPT"));
 	});
 
-	test("context hook is idempotent (no double-inject)", async () => {
-		const already = [
-			{ role: "system", content: "# Recent work in this project (from past sessions)\n..." },
-			{ role: "user", content: "hi" },
-		];
-		const res = await emit("context", { messages: already }, ctx);
+	test("before_agent_start is idempotent (no double-inject when chained)", async () => {
+		const already = "# Recent work in this project (from past sessions)\n...\n\nBASE_PROMPT";
+		const res = await emit("before_agent_start", { systemPrompt: already }, ctx);
 		expect(res).toBeUndefined();
 	});
 
@@ -177,7 +180,7 @@ describe("session-ledger e2e", () => {
 
 	test("/ledger off disables injection", async () => {
 		await commands.ledger.handler("off", ctx);
-		const res = await emit("context", { messages: [{ role: "user", content: "hi" }] }, ctx);
+		const res = await emit("before_agent_start", { systemPrompt: "BASE_PROMPT" }, ctx);
 		expect(res).toBeUndefined();
 	});
 });
