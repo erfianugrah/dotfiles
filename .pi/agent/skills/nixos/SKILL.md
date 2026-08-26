@@ -1,6 +1,6 @@
 ---
 name: nixos
-description: Use when changing, evaluating, or deploying ANY of the user's NixOS hosts - router/edge (~/infra/router, flake .#router), hearth/erfipie Pi (~/infra/hearth, .#erfipie), servarr NAS (~/infra/servarr-nixos, .#servarr), or the future turing-pi RK1 cluster. Covers the uniform `make deploy` interface, per-host GitHub deploy keys, eval gates, rollback, the fleet conventions (explicit MTU, clone-force-reset, never-edit-on-host), and the planned nixos-fleet monorepo. Fires on 'deploy the router/NAS/Pi', 'nixos-rebuild', 'flake update', 'add a module to <host>', 'NixOS config'. NOT for read-only router ops queries (eaves), compose stacks on those hosts (composer/infrastructure-stack), or non-NixOS boxes.
+description: Use when changing, evaluating, or deploying ANY of the user's three NixOS hosts - router/edge (~/infra/router, flake .#router), hearth/erfipie Pi (~/infra/hearth, .#erfipie), servarr NAS (~/infra/servarr-nixos, .#servarr). Covers the uniform `make deploy` interface, per-host GitHub deploy keys, eval gates, rollback, the fleet conventions (explicit MTU, clone-force-reset, never-edit-on-host), and the nixos-fleet monorepo consolidation. Fires on 'deploy the router/NAS/Pi', 'nixos-rebuild', 'flake update', 'add a module to <host>', 'NixOS config'. NOT for read-only router ops queries (eaves), the turing-pi RK1 cluster (that is Talos/OpenTofu - see ~/infra/bombe), compose stacks on those hosts (composer/infrastructure-stack), or non-NixOS boxes.
 ---
 
 # NixOS fleet
@@ -16,11 +16,14 @@ own system natively.
 |---|---|---|---|---|---|
 | router (MS-01 edge) | `~/infra/router` | `.#router` | `/etc/nixos` | root | `eaves doctor` (16 checks) |
 | servarr (NAS, X570D4U) | `~/infra/servarr-nixos` | `.#servarr` | `/etc/nixos` | root | `.pi/check-acceptance.sh` |
-| hearth (erfipie, Pi) | `~/infra/hearth` | `.#erfipie` | `~/hearth` | erfi + sudo | none yet |
-| turing-pi (RK1, aarch64) | not yet | - | - | - | - |
+| hearth (erfipie, Pi, aarch64) | `~/infra/hearth` | `.#erfipie` | `~/hearth` | erfi + sudo | none yet |
 
 Addresses: router `10.0.69.1`, servarr `10.0.71.2`, hearth `10.0.69.7`.
-Docs source for the cluster board: `docs_search source=nixos-turing-rk1`.
+
+**The turing-pi RK1 cluster is NOT a fleet host.** `~/infra/bombe/docs/research/talos.md`
+settled on OpenTofu + `siderolabs/talos`, not NixOS. If that is ever revisited
+the upstream flake is `github:GiyoMoon/nixos-turing-rk1` (aarch64-only builds
+today - x86_64 cross-compilation unsupported, needs binfmt).
 
 ## Deploy - always `make`, never hand-rolled ssh
 
@@ -87,21 +90,28 @@ ssh <host> 'cd /etc/nixos && git log --oneline -1'   # clone at the pushed commi
 ssh router 'sudo -n eaves doctor'                    # router only
 ```
 
-## Planned: nixos-fleet monorepo
+## nixos-fleet monorepo (scaffolded, no host migrated yet)
 
-Decision 2026-08-26: consolidate the three repos into one `nixos-fleet`
-monorepo (`profiles/` + `hosts/<name>/`, single `flake.lock`) so fleet-wide
-changes are atomic and hosts cannot drift to different revisions of shared
-modules. Shared profiles to extract: `base` (locale/tz/nix/gc),
-`shell` (zsh+tmux+atuin+direnv+fzf+zoxide + modern CLI set - currently
-duplicated verbatim between router and servarr), `admin` (openssh/tailscale/
-users), `deploy` (deploy-key + git safe.directory convention),
-`observability` (node-exporter/vector).
+Repo `~/infra/nixos-fleet` exists with `flake.nix` (mkHost helper, no hosts
+declared yet), `Makefile` (`check`/`diff`/`deploy`/`gate`/`rollback` with
+`HOST=`), and profiles extracted from real host content: `base` (locale/tz/
+nix/gc), `shell` (the zsh+tmux+atuin+direnv+fzf+zoxide + modern-CLI set that
+was duplicated router<->servarr and **entirely missing on hearth**), `admin`
+(sshd key-only, erfi + root backstop, tailscale), `net` (the explicit-MTU
+doctrine as a `fleet.net.defaultMtu` option). `nix flake check` passes.
 
-Migration order: hearth + servarr + turing first, router LAST - its 940-line
-single-file `configuration.nix` holds nftables/kea/VLANs and must be split
-into modules as part of the move. Until that lands, the per-repo layout above
-is current and correct.
+**Read `~/infra/nixos-fleet/PLAN.md` before migrating anything.** Migration
+order is hearth -> servarr -> nixpkgs-pin unification -> router LAST (its
+940-line `configuration.nix` holds nftables/kea/VLANs and splits into modules
+as part of the move). Until a host's step lands, its ORIGINAL repo is
+authoritative and the monorepo must not declare it in `nixosConfigurations`.
+
+Known blocker: the three repos pin different nixpkgs (router a specific
+commit chosen for a no-op closure diff, the other two `nixos-26.05`). One
+`flake.lock` cannot honour all three, so the router's first monorepo deploy
+is a mass rebuild - schedule it as its own step. Per-host inputs that must
+survive the merge: `eaves` + `nixpkgs-tailscale` (router), `disko` +
+`sops-nix` (servarr).
 
 ## Not this skill
 
