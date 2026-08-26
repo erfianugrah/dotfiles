@@ -1,5 +1,5 @@
 {
-  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open \u2014 no restart needed. Source of truth for llm-compose model list: ~/infra/ai/llm-compose/models/*.toml. NOTES: llama-server = llm-compose proxy on localhost:11434; apiKey ignored by proxy but Pi requires the field. compat block for llama-server: llama.cpp's OpenAI server has no developer role or reasoning_effort, both disabled at provider level. $comment keys inside samplingParams / openRouterRouting are NOT allowed - pi forwards those objects VERBATIM into the request body / provider field, and OpenRouter 400s with 'Unrecognized key' (seen 2026-08-19). Notes live at file root and modelOverride roots only.",
+  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open — no restart needed. Source of truth for llm-compose model list: ~/infra/ai/llm-compose/models/*.toml. NOTES: llama-server = llm-compose proxy on localhost:11434; apiKey ignored by proxy but Pi requires the field. compat block for llama-server: llama.cpp's OpenAI server has no developer role or reasoning_effort, both disabled at provider level. $comment keys inside samplingParams / openRouterRouting are NOT allowed - pi forwards those objects VERBATIM into the request body / provider field, and OpenRouter 400s with 'Unrecognized key' (seen 2026-08-19). Notes live at file root and modelOverride roots only.",
   "providers": {
     "llama-server": {
       "baseUrl": "http://localhost:11434/v1",
@@ -20,7 +20,6 @@
           "input": [
             "text"
           ],
-          "reasoning": true,
           "cost": {
             "input": 0,
             "output": 0,
@@ -30,7 +29,7 @@
         },
         {
           "id": "gemma4",
-          "name": "Gemma 4 31B Dense \u2014 multimodal, vision, thinking",
+          "name": "Gemma 4 31B Dense — multimodal, vision, thinking",
           "contextWindow": 65536,
           "input": [
             "text",
@@ -62,7 +61,7 @@
         },
         {
           "id": "qwen3-coder",
-          "name": "Qwen3 Coder 30B \u2014 coding, fast, direct",
+          "name": "Qwen3 Coder 30B — coding, fast, direct",
           "contextWindow": 131072,
           "input": [
             "text"
@@ -77,7 +76,7 @@
         },
         {
           "id": "qwen3-vl",
-          "name": "Qwen3-VL 2B \u2014 vision, image/video description",
+          "name": "Qwen3-VL 2B — vision, image/video description",
           "contextWindow": 32768,
           "input": [
             "text",
@@ -93,7 +92,7 @@
         },
         {
           "id": "qwen3",
-          "name": "Qwen3 32B Dense \u2014 reasoning, tools, thinking",
+          "name": "Qwen3 32B Dense — reasoning, tools, thinking",
           "contextWindow": 40960,
           "input": [
             "text"
@@ -108,7 +107,7 @@
         },
         {
           "id": "qwen36",
-          "name": "Qwen3.6 27B Dense \u2014 coding, vision, thinking",
+          "name": "Qwen3.6 27B Dense — coding, vision, thinking",
           "contextWindow": 163840,
           "input": [
             "text",
@@ -124,7 +123,7 @@
         },
         {
           "id": "qwen36-moe",
-          "name": "Qwen3.6 35B MoE \u2014 coding, vision, thinking, fast",
+          "name": "Qwen3.6 35B MoE — coding, vision, thinking, fast",
           "contextWindow": 163840,
           "input": [
             "text",
@@ -140,7 +139,7 @@
         },
         {
           "id": "qwen36-moe-uncensored",
-          "name": "Qwen3.6 35B Uncensored \u2014 creative, vision, thinking",
+          "name": "Qwen3.6 35B Uncensored — creative, vision, thinking",
           "contextWindow": 163840,
           "input": [
             "text",
@@ -156,7 +155,7 @@
         },
         {
           "id": "summarizer",
-          "name": "Gemma 4 26B-A4B \u2014 128K context, accurate MoE summarization",
+          "name": "Gemma 4 26B-A4B — 128K context, accurate MoE summarization",
           "contextWindow": 131072,
           "input": [
             "text"
