@@ -1,6 +1,6 @@
 ---
 name: migrating-bulk-data
-description: Use when moving large data sets (100GB+) between machines or disks where the source gets wiped or reused afterward and correctness must be proven first - NAS rebuilds, disk replacements, server consolidation, array-to-ZFS moves, staging through an intermediate drive. Fires on "migrate the array", "copy everything before wiping", "verify the copy is correct", "are we certain it is all there", "stage then wipe", "move X TB to the new box". NOT for same-machine directory/repo moves (relocating-repos) or ongoing backup setup (compose-backups).
+description: Use when moving large data sets (100GB+) between machines or disks where the source gets wiped or reused afterward and correctness must be proven first - NAS rebuilds, disk replacements, server consolidation, array-to-ZFS moves, staging through an intermediate drive. Fires on "migrate the array", "copy everything before wiping", "verify the copy is correct", "are we certain it is all there", "stage then wipe", "move X TB to the new box". Primary tool is migctl (~/infra/migctl); scripts/ are the independent fallback/checker. NOT for same-machine directory/repo moves (relocating-repos) or ongoing backup setup (compose-backups).
 ---
 
 # Migrating Bulk Data with Proof
@@ -82,17 +82,51 @@ state is freshly validated too.
 - **Re-runs are fix-forward and idempotent.** A non-zero transferred count in
   P2 means files were repaired; re-run until clean, then the gate is real.
 
-## Scripts
+## Tooling: migctl (primary) + shell scripts (fallback/checker)
 
-| Script | Purpose |
-|---|---|
-| scripts/stage.sh | Parameterized parallel rsync pull, per-share logs |
-| scripts/verify.sh | Two-pass verify, PASS/FAIL verdict lines, fix-forward |
-| scripts/probe-verifier.sh | Plants truncated/missing/silent-corruption fixtures, asserts which pass catches which |
-| scripts/manifest.sh | sha256 manifests both sides + diff (permanent proof artifact) |
+**migctl** (`~/infra/migctl`, deployed at `/root/migctl` on the dest box) is the
+primary tool. It is this skill's executable form: plan.json declaration +
+append-only events.jsonl state + folded status. Verdicts are parsed from rsync
+`--stats`, never rc.
 
-Run probe-verifier.sh output as the FIRST evidence in every migration's docs.
-A verifier that has never caught anything is an assumption, not a control.
+```
+migctl init/validate/inventory/probe/run/status/coverage/gate/report/note/stop
+```
+
+Key behaviors: `probe` fixture-tests the verifier before any p2 run; `run` audit
+is dry-run proof, `--repair` is a full reconciliation (never `--ignore-existing`);
+`coverage` is the union-of-sources vs dst set diff (missing + extras) that
+answers "is everything there"; `gate` prints CLEAR/BLOCKED and never executes.
+
+### The shell scripts as independent fallback/checker
+
+Keep scripts/ as the *independent* check on migctl, not replaced by it. When a
+migctl verdict is load-bearing (a wipe gate), re-derive it with the raw tool:
+
+- **migctl `probe`** == probe-verifier.sh. If migctl's probe and the script ever
+  disagree, trust neither until reconciled.
+- **migctl `run` verdict** == verify.sh's `Number of regular files transferred`
+  grep. Spot-check a PASS by hand-grepping migctl's own log in
+  state_dir/logs/ for a non-zero transferred count.
+- **migctl `coverage` missing/extra** == a manual `find src -type f -printf '%P\n'
+  | sort` on both sides + `comm`. coverage is metadata-only; bytes are p2's job.
+- **Permanent proof artifact**: scripts/manifest.sh (per-side sha256 + diff).
+  migctl has no manifest command yet - use the script when a durable hash record
+  is required before a wipe.
+
+The scripts never lie about what rsync did; migctl orchestrates and records.
+Cross-check before every irreversible action.
+
+| Script | Purpose | migctl equivalent |
+|---|---|---|
+| scripts/stage.sh | Parameterized parallel rsync pull, per-share logs | (staging is upstream of migctl; `run` is verify+reconcile, not the first copy) |
+| scripts/verify.sh | Two-pass verify, PASS/FAIL verdict lines, fix-forward | `migctl run` (audit) / `run --repair` |
+| scripts/probe-verifier.sh | Plants truncated/missing/silent-corruption fixtures | `migctl probe` |
+| scripts/manifest.sh | sha256 manifests both sides + diff (permanent proof) | none - use the script |
+
+Run the probe output (migctl or script) as the FIRST evidence in every
+migration's docs. A verifier that has never caught anything is an assumption,
+not a control.
 
 ## Common mistakes
 
