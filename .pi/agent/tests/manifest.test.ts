@@ -142,3 +142,67 @@ describe("pi-harness manifest coverage", () => {
 		}
 	});
 });
+
+// ---------------------------------------------------------------------------
+// run.sh coverage - the SECOND harness self-sensor.
+//
+// The unit-suite invocation in run.sh used to be a hand-maintained list of
+// test paths, and it rotted silently TWICE (found 2026-08-27):
+//   - one entry read "/trigger-compact.test.ts" (absolute path, missing the
+//     $HERE prefix). `bun test` IGNORES a nonexistent test path rather than
+//     failing, so those 6 tests silently stopped running.
+//   - three suites (continue-after-error, runaway-turn-guard, skill-first)
+//     were never added at all, so writing a test file did not mean it ran.
+// Net: 51 tests were dark. run.sh now globs, and this test asserts it stays
+// that way - a hand-listed path is exactly the thing that goes stale.
+// ---------------------------------------------------------------------------
+
+describe("run.sh unit-suite coverage", () => {
+	const runSh = readFileSync(join(import.meta.dir, "run.sh"), "utf8");
+
+	test("discovers unit test files by glob, not a hand-maintained list", () => {
+		// A `find`/glob-driven invocation cannot go stale when a file is added.
+		expect(runSh).toMatch(/find "\$HERE".*-name '\*\.test\.ts'/);
+	});
+
+	test("contains no hard-coded *.test.ts paths in the bun invocation", () => {
+		// Any literal "<name>.test.ts" ARGUMENT is the failure mode: it can be
+		// misspelled (or simply omitted) with no error. Comments are exempt -
+		// the docstring names the suites that went dark, on purpose.
+		// manifest.test.ts is allowed: it is a find -! filter and its own
+		// separate invocation, not a hand-listed unit path.
+		const codeLines = runSh
+			.split("\n")
+			.filter((l) => !l.trim().startsWith("#"));
+		const literals = codeLines
+			.flatMap((l) => [...l.matchAll(/"[^"]*\/([\w.-]+\.test\.ts)"/g)])
+			.map((m) => m[1]);
+		const allowed = new Set(["manifest.test.ts"]);
+		expect(literals.filter((f) => !allowed.has(f))).toEqual([]);
+	});
+
+	test("every unit test file would be picked up by the glob", () => {
+		// Mirror run.sh's find: maxdepth 1, *.test.ts, minus manifest.test.ts.
+		const onDisk = readdirSync(import.meta.dir)
+			.filter((f) => f.endsWith(".test.ts") && f !== "manifest.test.ts")
+			.sort();
+		// Sanity: the suites that were dark must be present on disk now.
+		for (const f of [
+			"trigger-compact.test.ts",
+			"continue-after-error.test.ts",
+			"runaway-turn-guard.test.ts",
+			"skill-first.test.ts",
+		]) {
+			expect(onDisk).toContain(f);
+		}
+		expect(onDisk.length).toBeGreaterThan(15);
+	});
+
+	test("integration + manifest suites still run in their own processes", () => {
+		// They must NOT be folded into the preloaded unit glob: integration
+		// self-mocks the SDK (top-level mock.module collides with preload.ts)
+		// and manifest is pure fs/glob.
+		expect(runSh).toContain('bun test "$HERE/integration/"');
+		expect(runSh).toContain('bun test "$HERE/manifest.test.ts"');
+	});
+});
