@@ -13,10 +13,10 @@
       },
       "models": [
         {
-          "id": "loop",
-          "reasoning": true,
-          "name": "Loop Engine - Gemma 4 26B-A4B MoE, agentic coding (local, free)",
-          "contextWindow": 196608,
+          "id": "erfi",
+          "reasoning": false,
+          "name": "erfi-bot - personality clone (Qwen3-4B)",
+          "contextWindow": 8192,
           "input": [
             "text"
           ],
@@ -29,13 +29,58 @@
         },
         {
           "id": "gemma4",
-          "name": "Gemma 4 31B Dense — multimodal, vision, thinking",
+          "reasoning": true,
+          "name": "Gemma 4 31B Dense - multimodal, vision, thinking",
           "contextWindow": 65536,
           "input": [
             "text",
             "image"
           ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        {
+          "id": "gemma4-12b",
+          "reasoning": false,
+          "name": "Gemma 4 12B - small-track quality ceiling (3080 Ti deploy target)",
+          "contextWindow": 32768,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        {
+          "id": "lfm25-8b",
+          "reasoning": false,
+          "name": "LFM2.5 8B-A1B - small-track MoE speed candidate",
+          "contextWindow": 32768,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        {
+          "id": "loop",
           "reasoning": true,
+          "name": "Loop Engine - Qwen3.8 27B Dense, agentic coding",
+          "contextWindow": 262144,
+          "input": [
+            "text"
+          ],
           "cost": {
             "input": 0,
             "output": 0,
@@ -45,44 +90,45 @@
         },
         {
           "id": "qwen38",
-          "name": "Qwen3.8 27B Dense + MTP - interactive coding, vision, thinking (P3 winner 2026-08-17)",
+          "reasoning": true,
+          "name": "Qwen3.8 27B Dense - coding, vision, thinking (daily driver)",
+          "contextWindow": 262144,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        {
+          "id": "qwen38-fixed",
+          "reasoning": true,
+          "name": "Qwen3.8 27B Dense - froggeric fixed template (testing)",
           "contextWindow": 196608,
           "input": [
             "text",
             "image"
           ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        {
+          "id": "qwen38-nospec",
           "reasoning": true,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        },
-        {
-          "id": "qwen3-coder",
-          "name": "Qwen3 Coder 30B — coding, fast, direct",
-          "contextWindow": 131072,
-          "input": [
-            "text"
-          ],
-          "reasoning": false,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        },
-        {
-          "id": "qwen3-vl",
-          "name": "Qwen3-VL 2B — vision, image/video description",
-          "contextWindow": 32768,
+          "name": "Qwen3.8 27B Dense - no speculative decoding (A/B control)",
+          "contextWindow": 196608,
           "input": [
             "text",
             "image"
           ],
-          "reasoning": false,
           "cost": {
             "input": 0,
             "output": 0,
@@ -91,61 +137,14 @@
           }
         },
         {
-          "id": "qwen3",
-          "name": "Qwen3 32B Dense — reasoning, tools, thinking",
-          "contextWindow": 40960,
-          "input": [
-            "text"
-          ],
+          "id": "qwen38-xhigh",
           "reasoning": true,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        },
-        {
-          "id": "qwen36",
-          "name": "Qwen3.6 27B Dense — coding, vision, thinking",
-          "contextWindow": 163840,
+          "name": "Qwen3.8 27B Dense - xhigh effort + MTP (interactive quality ceiling)",
+          "contextWindow": 196608,
           "input": [
             "text",
             "image"
           ],
-          "reasoning": true,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        },
-        {
-          "id": "qwen36-moe",
-          "name": "Qwen3.6 35B MoE — coding, vision, thinking, fast",
-          "contextWindow": 163840,
-          "input": [
-            "text",
-            "image"
-          ],
-          "reasoning": true,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        },
-        {
-          "id": "qwen36-moe-uncensored",
-          "name": "Qwen3.6 35B Uncensored — creative, vision, thinking",
-          "contextWindow": 163840,
-          "input": [
-            "text",
-            "image"
-          ],
-          "reasoning": true,
           "cost": {
             "input": 0,
             "output": 0,
@@ -155,12 +154,13 @@
         },
         {
           "id": "summarizer",
-          "name": "Gemma 4 26B-A4B — 128K context, accurate MoE summarization",
+          "reasoning": false,
+          "name": "Gemma 4 26B-A4B - 128K context, accurate MoE summarization",
           "contextWindow": 131072,
           "input": [
-            "text"
+            "text",
+            "image"
           ],
-          "reasoning": false,
           "cost": {
             "input": 0,
             "output": 0,
