@@ -77,7 +77,7 @@ func TestRun(t *testing.T) {
 		"DRIFT  .drifted  (DRIFT:real-file)",
 		"DRIFT  .wrong-link  (DRIFT:link-points-elsewhere)",
 		"MISS   .missing",
-		"2 linked, 2 drifted, 1 missing",
+		"2 linked, 2 drifted, 0 unlinked, 1 missing",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q\n--- got ---\n%s", want, out)
@@ -107,6 +107,101 @@ func TestRunClean(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "MISS hidden") {
 		t.Errorf("non-verbose run should hide MISS\n%s", buf.String())
+	}
+}
+
+// Regression: the 2026-08-27 ai-tell-guard incident. A repo file inside an
+// auto-loaded tree (.pi/agent/extensions) with no live symlink is committed
+// code that can never run, so it must be LOUD (printed unconditionally) and
+// FATAL (exit 1) - not folded into the hidden, non-fatal MISS bucket.
+func TestUnlinkedInLiveTree(t *testing.T) {
+	dotfiles, home := mkTree(t)
+	extDir := filepath.Join(dotfiles, ".pi", "agent", "extensions")
+	if err := os.MkdirAll(filepath.Join(extDir, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// unlinked top-level extension: fatal
+	if err := os.WriteFile(filepath.Join(extDir, "new-guard.ts"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// unlinked helper under lib/: NOT a live-tree member (loader ignores lib/)
+	if err := os.WriteFile(filepath.Join(extDir, "lib", "helper-core.ts"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	code := run(dotfiles, home, false, &buf)
+	out := buf.String()
+
+	if code != 1 {
+		t.Errorf("exit = %d, want 1 (unlinked file in an auto-loaded tree)\n%s", code, out)
+	}
+	if !strings.Contains(out, "UNLINKED") || !strings.Contains(out, "new-guard.ts") {
+		t.Errorf("want UNLINKED line naming new-guard.ts (non-verbose)\n%s", out)
+	}
+	if !strings.Contains(out, "stow -d") {
+		t.Errorf("UNLINKED line must name the fix command\n%s", out)
+	}
+	if strings.Contains(out, "helper-core.ts") {
+		t.Errorf("lib/ helper must NOT be treated as a live-tree member\n%s", out)
+	}
+}
+
+// Once linked, the same tree is clean - guards against a rule that can never
+// be satisfied.
+func TestLinkedInLiveTreeIsClean(t *testing.T) {
+	dotfiles, home := mkTree(t)
+	// mkTree plants deliberate DRIFT; this test is about the live-tree rule
+	// alone, so repair it first or the exit code proves nothing.
+	for _, r := range []string{".drifted", ".wrong-link"} {
+		os.Remove(filepath.Join(home, r))
+		if err := os.Symlink(filepath.Join(dotfiles, r), filepath.Join(home, r)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rel := filepath.Join(".pi", "agent", "extensions", "new-guard.ts")
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(dotfiles, rel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dotfiles, rel), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(home, rel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dotfiles, rel), filepath.Join(home, rel)); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if code := run(dotfiles, home, false, &buf); code != 0 {
+		t.Errorf("exit = %d, want 0 once linked\n%s", code, buf.String())
+	}
+	if strings.Contains(buf.String(), "UNLINKED") {
+		t.Errorf("linked file must not be reported UNLINKED\n%s", buf.String())
+	}
+}
+
+func TestInLiveTree(t *testing.T) {
+	yes := []string{
+		".pi/agent/extensions/foo.ts",
+		".pi/agent/prompts/tool-routing.md",
+	}
+	no := []string{
+		".pi/agent/extensions/lib/foo-core.ts",
+		".pi/agent/extensions/tests/foo.test.ts",
+		".pi/agent/skills/erfi-voice/SKILL.md",
+		".zshrc",
+		".claude/hooks/ascii-guard.ts",
+	}
+	for _, r := range yes {
+		if !inLiveTree(r) {
+			t.Errorf("inLiveTree(%q) = false, want true", r)
+		}
+	}
+	for _, r := range no {
+		if inLiveTree(r) {
+			t.Errorf("inLiveTree(%q) = true, want false", r)
+		}
 	}
 }
 
@@ -170,7 +265,7 @@ func TestCompareOnly(t *testing.T) {
 		if code := run(dotfiles, home, true, &buf); code != 0 {
 			t.Errorf("exit = %d, want 0\n%s", code, buf.String())
 		}
-		if !strings.Contains(buf.String(), "1 linked, 0 drifted, 0 missing") {
+		if !strings.Contains(buf.String(), "1 linked, 0 drifted, 0 unlinked, 0 missing") {
 			t.Errorf("in-sync exception not counted as linked\n%s", buf.String())
 		}
 	})

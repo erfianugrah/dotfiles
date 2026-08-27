@@ -236,3 +236,20 @@ describe("decideForCommand (orchestrator)", () => {
     expect(warned.has("/home/erfi/repo")).toBe(true);
   });
 });
+
+// Regression: the dotfiles AGENTS.md stow rule must stay inside the injected
+// head. It is the rule that prevents shipping an unlinked (dead) extension,
+// and it was originally at line ~225 - far below the 80-line/4000-char cap -
+// which is why the 2026-08-27 ai-tell-guard incident happened at all. If a
+// future edit pushes it back below the cut, this fails.
+describe("dotfiles AGENTS.md: stow rule survives head truncation", () => {
+  const path = `${process.env.HOME}/dotfiles/AGENTS.md`;
+
+  test("the stow-link + verify rule is in the injected head", () => {
+    const head = readHead(path);
+    if (!head) return; // not on a dotfiles machine; nothing to assert
+    for (const probe of ["stow-linked", "stow-drift", "UNLINKED", "stow -d ~/dotfiles"]) {
+      expect(head).toContain(probe);
+    }
+  });
+});

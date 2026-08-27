@@ -8,6 +8,35 @@ extension's prepend (the old `~/.pi/agent/AGENTS.md` symlink was retired
 2026-08-09 because pi loaded it natively AND the extension prepended it -
 a 17.7KB/turn double injection). The notes here are repo-shape only.
 
+## Read this first: nothing here runs until it is stow-linked
+
+This section is deliberately at the top. `cd-agents-reload` injects only a
+bounded head of this file (80 lines / 4000 chars), so anything below that cut
+is invisible to an agent that arrived here mid-session - which is exactly how
+the 2026-08-27 incident happened: the "Adding a new extension" checklist sits
+at line ~225, the agent never saw it, and shipped an extension that could not
+load.
+
+Editing a file in this repo changes NOTHING about live behaviour on its own.
+Live config is stow symlinks into `$HOME`; a new repo file has no link until
+you make one. After adding ANY new file under `.pi/agent/extensions/`,
+`.pi/agent/prompts/`, or `.claude/hooks/`:
+
+```bash
+cd ~ && stow -d ~/dotfiles -t ~ -n -v .   # dry run: shows links to create
+cd ~ && stow -d ~/dotfiles -t ~ -v .      # apply (idempotent)
+stow-drift                                # MUST exit 0; UNLINKED = dead config
+```
+
+`stow-drift` exits 1 and prints `UNLINKED` for any repo file in an auto-loaded
+tree with no live symlink. Run it before claiming a config change works.
+Extensions load at session start, so also verify out-of-band rather than
+assuming the next restart proves it:
+
+```bash
+pi -p 'Use the write tool to create /tmp/probe.md with <text that should trip the guard>. Report any block verbatim.'
+```
+
 ## What's running here (pi vs opencode disambiguation)
 
 "opencode" is overloaded in this tree. Three different things share the
