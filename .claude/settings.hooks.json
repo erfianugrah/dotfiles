@@ -99,6 +99,15 @@
             "command": "bun \"$HOME/.claude/hooks/ai-tell-guard.ts\""
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$HOME/.claude/hooks/epistemic-guard.ts\""
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -117,15 +126,6 @@
           {
             "type": "command",
             "command": "bun \"$HOME/.claude/hooks/bash-error-hints.ts\""
-          }
-        ]
-      },
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun \"$HOME/.claude/hooks/epistemic-guard.ts\""
           }
         ]
       }

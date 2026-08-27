@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "comment": "Entity registry for epistemic-guard's `entity` claim class. Each entry is a host, service, or infrastructure identifier the agent asserts about. `names` are the strings that mean THAT thing (case-insensitive exact match on the mention). `provides` are the corpus facts that count as verification of an assertion about the entity (hostname match means SOME lookup mentioning the host counts; alias match means the alias string was seen for the entity this session). Refresh: run bin/gen-entities.sh after any infra rename/migration. KILL: PI_EPISTEMIC_GUARD_OFF=1.",
+  "entities": [
+    {
+      "names": ["servarr"],
+      "kind": "host",
+      "provides": ["hostname-match", "skill:arr-stack", "skill:composer", "skill:drawbridge", "skill:jellyfin", "skill:infrastructure-stack"]
+    },
+    {
+      "names": ["router", "ms-01", "edge router"],
+      "kind": "host",
+      "provides": ["hostname-match", "alias-match", "skill:composer", "skill:eaves"]
+    },
+    {
+      "names": ["hearth", "erfipie"],
+      "kind": "host",
+      "provides": ["hostname-match", "alias-match", "skill:nixos"]
+    },
+    {
+      "names": ["erfi1", "dev box"],
+      "kind": "host",
+      "provides": ["hostname-match", "alias-match"]
+    },
+    {
+      "names": ["xikestor", "sks8300", "the switch"],
+      "kind": "device",
+      "provides": ["hostname-match", "alias-match", "skill:xikectl"]
+    },
+    {
+      "names": ["pikvm"],
+      "kind": "device",
+      "provides": ["hostname-match", "alias-match", "skill:tailscale-homelab"]
+    },
+    {
+      "names": ["composer", "composerd"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:composer"]
+    },
+    {
+      "names": ["drawbridge"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:drawbridge", "skill:composer"]
+    },
+    {
+      "names": ["eaves"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:eaves"]
+    },
+    {
+      "names": ["xikectl"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:xikectl"]
+    },
+    {
+      "names": ["knotctl"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:knotctl"]
+    },
+    {
+      "names": ["glory-hole", "gloryhole", "resolver"],
+      "kind": "service",
+      "provides": ["hostname-match", "alias-match", "skill:gloryhole"]
+    },
+    {
+      "names": ["knot", "knot-dns"],
+      "kind": "service",
+      "provides": ["hostname-match", "alias-match", "skill:knot-dns"]
+    },
+    {
+      "names": ["wafctl"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:waf-api"]
+    },
+    {
+      "names": ["souin"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:souin"]
+    },
+    {
+      "names": ["memledger"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:memledger"]
+    },
+    {
+      "names": ["llm-compose", "llmc"],
+      "kind": "stack",
+      "provides": ["hostname-match", "alias-match", "skill:llm-compose"]
+    },
+    {
+      "names": ["jellyfin", "jellyseerr", "navidrome"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:jellyfin"]
+    },
+    {
+      "names": ["sonarr", "radarr", "prowlarr", "bazarr", "sabnzbd", "qbittorrentvpn", "recyclarr", "decluttarr", "tdarr", "tracearr"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:arr-stack"]
+    },
+    {
+      "names": ["immich", "keycloak", "minio", "copyparty", "joplin", "vaultwarden", "atuin"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:composer"]
+    },
+    {
+      "names": ["forgejo"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:composer"]
+    },
+    {
+      "names": ["llama-server"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:llm-compose"]
+    },
+    {
+      "names": ["comfyui"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:comfyui"]
+    },
+    {
+      "names": ["lora-train"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:lora-train"]
+    },
+    {
+      "names": ["whisper-transcribe"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:whisper"]
+    },
+    {
+      "names": ["discord-wipe"],
+      "kind": "service",
+      "provides": ["hostname-match", "skill:discord-wipe"]
+    },
+    {
+      "names": ["unraid"],
+      "kind": "host",
+      "provides": ["hostname-match", "alias-match"]
+    },
+    {
+      "names": ["servarr-nixos"],
+      "kind": "host",
+      "provides": ["hostname-match", "alias-match"]
+    },
+    {
+      "names": ["10.0.69.69", "10.0.70.2", "10.0.69.4", "10.0.71.2", "100.69.69.7", "100.67.90.55"],
+      "kind": "ip",
+      "provides": ["ip-match"]
+    }
+  ]
+}

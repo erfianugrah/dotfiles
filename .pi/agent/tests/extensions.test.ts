@@ -4414,7 +4414,9 @@ describe("epistemic-guard.provenance", () => {
     const c = egNewCorpus();
     egAbsorb(c, "caddy version v2.11.4");
     const claims = extractClaims("we run Caddy 2.11.4 and Knot 3.5.9", "prose");
-    expect(unprovenanced(c, claims, new Set()).map((x) => x.key)).toEqual(["3.5.9"]);
+    // "knot" is a registered entity (see entities.json) and never appears in
+    // the corpus text, so it surfaces alongside the unprovenanced version.
+    expect(unprovenanced(c, claims, new Set()).map((x) => x.key)).toEqual(["3.5.9", "knot"]);
   });
 
   test("paths and URLs match prefix-wise in both directions", () => {
@@ -4428,7 +4430,8 @@ describe("epistemic-guard.provenance", () => {
     const c = egNewCorpus();
     const flagged = new Set<string>();
     const claims = extractClaims("Knot 3.5.9", "prose");
-    expect(unprovenanced(c, claims, flagged)).toHaveLength(1);
+    // "3.5.9" (version) + "knot" (entity) - both unprovenanced, both once-only.
+    expect(unprovenanced(c, claims, flagged)).toHaveLength(2);
     expect(unprovenanced(c, claims, flagged)).toHaveLength(0);
   });
 

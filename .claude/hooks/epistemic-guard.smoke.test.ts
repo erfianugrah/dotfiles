@@ -1,6 +1,6 @@
 /**
- * Smoke test for the epistemic-guard PostToolUse hook. Spawns the hook as a
- * real subprocess, writes a transcript JSONL fixture, and pipes a PostToolUse
+ * Smoke test for the epistemic-guard PreToolUse hook. Spawns the hook as a
+ * real subprocess, writes a transcript JSONL fixture, and pipes a PreToolUse
  * payload to stdin - asserting the annotate/clean contract. No `claude` binary
  * needed.
  *
@@ -61,8 +61,8 @@ function toolResultEntry(text: string): unknown {
   };
 }
 
-describe("epistemic-guard PostToolUse hook", () => {
-  test("annotates a Write emitting an unprovenanced version", async () => {
+describe("epistemic-guard PreToolUse hook", () => {
+  test("denies a Write emitting an unprovenanced version", async () => {
     const transcript = writeTranscript([
       { type: "user", message: { role: "user", content: [{ type: "text", text: "audit the deploy" }] } },
     ]);
@@ -73,10 +73,10 @@ describe("epistemic-guard PostToolUse hook", () => {
     });
     expect(code).toBe(0);
     const out = JSON.parse(stdout);
-    expect(out.hookSpecificOutput.hookEventName).toBe("PostToolUse");
-    expect(out.hookSpecificOutput.additionalContext).toContain("epistemic-guard");
-    expect(out.hookSpecificOutput.additionalContext).toContain("Caddy 2.8.4");
-    expect(out.hookSpecificOutput.additionalContext).toContain("PostToolUse Write");
+    expect(out.hookSpecificOutput.hookEventName).toBe("PreToolUse");
+    expect(out.hookSpecificOutput.permissionDecisionReason).toContain("epistemic-guard");
+    expect(out.hookSpecificOutput.permissionDecisionReason).toContain("Caddy 2.8.4");
+    expect(out.hookSpecificOutput.permissionDecisionReason).toContain("PreToolUse Write");
   });
 
   test("stays silent when the specific has provenance in the transcript", async () => {
@@ -89,7 +89,7 @@ describe("epistemic-guard PostToolUse hook", () => {
       transcript_path: transcript,
     });
     expect(code).toBe(0);
-    expect(stdout.trim()).toBe(""); // literal was seen -> no annotation
+    expect(stdout.trim()).toBe(""); // literal was seen -> no deny
   });
 
   test("assistant text in the transcript is NOT provenance (hallucination cannot self-verify)", async () => {
@@ -102,10 +102,10 @@ describe("epistemic-guard PostToolUse hook", () => {
       transcript_path: transcript,
     });
     // assistant text does not enter the corpus, so the version is still flagged
-    expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toContain("2.8.4");
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecisionReason).toContain("2.8.4");
   });
 
-  test("skip target (scratch / lockfile) is never annotated", async () => {
+  test("skip target (scratch / lockfile) is never denied", async () => {
     const transcript = writeTranscript([]);
     const { stdout } = await runHook({
       tool_name: "Write",
@@ -131,8 +131,8 @@ describe("epistemic-guard PostToolUse hook", () => {
       tool_input: { file_path: "/repo/docs/guide.md", old_string: "x", new_string: "run with --dns-01 mode" },
       transcript_path: transcript,
     });
-    // --dns-01 was never seen -> annotated
-    expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toContain("--dns-01");
+    // --dns-01 was never seen -> denied
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecisionReason).toContain("--dns-01");
   });
 
   test("EPISTEMIC_GUARD_OFF=1 disables the guard", async () => {
@@ -154,6 +154,6 @@ describe("epistemic-guard PostToolUse hook", () => {
       tool_input: { file_path: "/repo/README.md", content: "Postgres 17.2 is out." },
       transcript_path: "/nonexistent/path/to/transcript.jsonl",
     });
-    expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toContain("17.2");
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecisionReason).toContain("17.2");
   });
 });

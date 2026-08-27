@@ -1,35 +1,37 @@
 #!/usr/bin/env bun
 /**
- * epistemic-guard - Claude Code PostToolUse hook. After a Write/Edit/MultiEdit
- * lands, it checks the SPECIFICS the payload emitted (versions, urls, cves, perf
- * numbers, flags, syspaths, dates) against a PROVENANCE CORPUS built from the
- * session transcript. A specific that appears in the write but in NO tool
- * result / bash output / user message is, by construction, recalled from
- * training - unverified - and gets surfaced as an additionalContext annotation
- * so the model self-corrects (verify, label, or drop it).
+ * epistemic-guard - Claude Code PreToolUse hook. Before a Write/Edit/MultiEdit
+ * lands, it checks the SPECIFICS the payload is about to emit (versions, urls,
+ * cves, perf numbers, flags, syspaths, dates, prices, entities) against a
+ * PROVENANCE CORPUS built from the session transcript. A specific that appears
+ * in the payload but in NO tool result / bash output / user message is, by
+ * construction, recalled from training - unverified - and the tool call is
+ * DENIED with the per-class verify hint so the model verifies, labels, or
+ * drops it and retries.
  *
- * Why PostToolUse (annotate) and not PreToolUse (deny):
- *   pi's guard BLOCKS at tool_call time. CC's PreToolUse deny would work too,
- *   but the transcript-provenance model is best-effort here (see below), and a
- *   false deny is far more disruptive than a false annotation. PostToolUse
- *   additionalContext is the safe, verified CC surface: the write already
- *   succeeded, the model reads the note and fixes the specific in a follow-up.
- *   This mirrors the pi guard's INTENT (name the unprovenanced specifics + the
- *   per-class verify hint) without the harder deny/allow contract.
+ * Why PreToolUse (deny) rather than PostToolUse (annotate):
+ *   CC's PreToolUse can hard-block a tool call; PostToolUse can only annotate
+ *   after the fact. The pi guard blocks at tool_call time - this restores
+ *   parity. The once-per-specific dedup lives in the TRANSCRIPT corpus: after
+ *   a deny, the model runs a check (any tool call whose output contains the
+ *   literal), the literal enters the corpus on the next invocation, and the
+ *   retry passes. A stale claim never lands on disk in the first place.
  *
  * Shares .pi/agent/extensions/lib/epistemic-guard-core.ts with the pi adapter
  * (epistemic-guard.ts) - one claim extractor + corpus + gate, two harnesses.
- * The core is zero-dependency (node:path only), so this runs identically from
- * the repo checkout or the stowed ~/.claude/hooks/ symlink.
+ * The core is zero-dependency (node:path + node:fs for the entity registry),
+ * so this runs identically from the repo checkout or the stowed
+ * ~/.claude/hooks/ symlink.
  *
- * Best-effort provenance (marked partial in the port notes): CC exposes the
- * session as a JSONL transcript at `transcript_path`. We absorb the text the
- * agent SAW - user messages, tool_result blocks (bash/read/grep output) - and
- * deliberately EXCLUDE assistant text and tool_use inputs, so a hallucination
- * cannot bootstrap itself into "verified". The JSONL entry shapes are read
- * defensively: unknown shapes contribute nothing rather than throwing.
+ * Provenance model: CC exposes the session as a JSONL transcript at
+ * `transcript_path`. We absorb the text the agent SAW - user messages and
+ * tool_result blocks (bash/read/grep output) - and deliberately EXCLUDE
+ * assistant text and tool_use inputs, so a hallucination cannot bootstrap
+ * itself into "verified". Entry shapes are read defensively: unknown shapes
+ * contribute nothing rather than throwing.
  *
- * Kill switch: EPISTEMIC_GUARD_OFF=1 (parallels pi's PI_EPISTEMIC_GUARD_OFF).
+ * Kill switch: EPISTEMIC_GUARD_OFF=1 (pi's PI_EPISTEMIC_GUARD_OFF also works;
+ * the shared core's block message advertises that name).
  */
 
 import * as fs from "node:fs";
@@ -87,12 +89,7 @@ function provenanceFromEntry(entry: unknown): string {
   if (role === "assistant") return ""; // agent's own words are never provenance
   if (role === "user") return contentToText(e.message?.content);
   // Compaction / branch summaries carry verified facts forward past a
-  // compaction boundary - the core's provenanceText harvests them, so the CC
-  // corpus must too (else a fact verified pre-compaction is falsely flagged as
-  // recalled afterwards). CC's exact summary-entry shape could NOT be confirmed
-  // against a live transcript (no compaction had occurred), so harvest
-  // DEFENSIVELY across plausible shapes. Additive only: never affects the
-  // user/assistant paths above.
+  // compaction boundary - harvest defensively across plausible shapes.
   if (typeof e.summary === "string" && e.summary) return e.summary;
   if (role === "summary" || role === "compactionSummary" || role === "branchSummary") {
     return contentToText(e.summary ?? e.message?.content);
@@ -125,7 +122,7 @@ function corpusFromTranscript(transcriptPath: string | undefined): Corpus {
   return corpus;
 }
 
-// -- the just-written payload -----------------------------------------------
+// -- the about-to-be-written payload ----------------------------------------
 
 /** (target path, added text) for a Write/Edit/MultiEdit tool_input, or null. */
 function payloadFor(
@@ -149,11 +146,13 @@ function payloadFor(
   return null;
 }
 
-function annotate(context: string): never {
+/** Emit a PreToolUse hard-deny: the tool call never runs, the reason feeds back to the model. */
+function deny(reason: string): never {
   const out = {
     hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      additionalContext: context,
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
     },
   };
   process.stdout.write(JSON.stringify(out));
@@ -183,13 +182,13 @@ async function main() {
   if (!p.text.trim()) process.exit(0);
 
   const corpus = corpusFromTranscript(payload.transcript_path);
-  // Fresh flagged-set per invocation: the hook is stateless across calls, so we
-  // report every unprovenanced specific in THIS payload (the corpus dedup is
-  // what stops verified literals from firing).
-  const res = gateWrite(corpus, p.target, p.text, new Set(), `PostToolUse ${payload.tool_name} -> ${p.target}`);
+  // Fresh flagged-set per invocation: the hook is stateless across calls, so
+  // every unprovenanced specific in THIS payload is reported. The corpus
+  // dedup (verified literals never re-fire) is the once-per-session analogue.
+  const res = gateWrite(corpus, p.target, p.text, new Set(), `PreToolUse ${payload.tool_name} -> ${p.target}`);
   if (!res) process.exit(0); // clean: no unprovenanced specifics
 
-  annotate(res.reason);
+  deny(res.reason);
 }
 
 await main();

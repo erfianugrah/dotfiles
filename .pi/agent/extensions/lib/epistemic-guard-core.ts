@@ -32,7 +32,8 @@ export type ClaimClass =
   | "flag"
   | "syspath"
   | "date"
-  | "price";
+  | "price"
+  | "entity";
 
 export interface Claim {
   cls: ClaimClass;
@@ -96,6 +97,7 @@ export interface Corpus {
   syspath: Set<string>;
   date: Set<string>;
   price: Set<string>;
+  entity: Set<string>;
 }
 
 export function newCorpus(): Corpus {
@@ -108,6 +110,7 @@ export function newCorpus(): Corpus {
     syspath: new Set(),
     date: new Set(),
     price: new Set(),
+    entity: new Set(),
   };
 }
 
@@ -121,12 +124,53 @@ export const VERIFY_HINT: Record<ClaimClass, string> = {
   flag: "`<tool> --help` / docs_grep the source - flags are the top hallucination class",
   syspath: "`ls`/`stat` it, or read it - a path you never opened is a guess",
   date:
-    "memledger_search / search_ledger / session_search - a date about the user's own history " +
-    "lives in the session stores, not in your head",
+    "user-history date -> memledger_search / search_ledger / session_search; " +
+    "public/upstream date -> web_research or webfetch the source; either way it must " +
+    "come from something you saw this session, not from training",
   price:
     "fetch the retailer/listing page THIS session (webfetch / research crawler) and cite the URL " +
     "with an as-of date - prices and stock perish weekly, a recalled price fails like a recalled version",
+  entity:
+    "ssh the actual host / read the skill + docs / memledger_search it THIS session - " +
+    "service placement, per-host roles and stack membership move with every migration; " +
+    "'composer runs on X', 'drawbridge fronts Y', 'stack Z is on host W' all perish",
 };
+
+// -- entity registry (loaded lazily; the file ships with the extension) ------
+
+import * as fs from "node:fs";
+
+interface EntitySpec {
+  names: string[];
+  kind: string;
+  provides: string[];
+}
+
+interface EntityRegistry {
+  version: number;
+  entities: EntitySpec[];
+}
+
+let cachedRegistry: EntityRegistry | null = null;
+let triedLoad = false;
+
+/**
+ * Load the entity registry once. Lives next to the extension source (dotfiles
+ * ships it at .pi/agent/entities.json; the stow-symlinked live copy resolves
+ * to the same file). Returns null on any parse/IO error - the guard degrades
+ * to the literal classes rather than failing the harness.
+ */
+export function entityRegistry(): EntityRegistry | null {
+  if (triedLoad) return cachedRegistry;
+  triedLoad = true;
+  try {
+    const p = new URL("../../entities.json", import.meta.url);
+    cachedRegistry = JSON.parse(fs.readFileSync(p, "utf8")) as EntityRegistry;
+  } catch {
+    cachedRegistry = null;
+  }
+  return cachedRegistry;
+}
 
 // -- regex sources (built fresh per use; /g + lastIndex is a footgun) --------
 
@@ -392,6 +436,20 @@ export function absorb(corpus: Corpus, text: string): void {
   for (const c of wordedDateCandidates(t)) add(corpus.date, c.key);
   for (const m of all(t, RE_PRICE_EXPLICIT, "gi")) add(corpus.price, priceKey(m[1]));
   for (const m of all(t, RE_PRICE_BARE)) add(corpus.price, priceKey(m[1]));
+
+  // Entity names: whatever the corpus text mentions counts as evidence for
+  // that entity. Loose like every other class - a mention is provenance even
+  // when the context is broader (e.g. a compose ps naming the stack, a doc
+  // path containing the service, an ssh probe output).
+  const reg = entityRegistry();
+  if (reg) {
+    for (const ent of reg.entities) {
+      for (const name of ent.names) {
+        const re = new RegExp(`\\b${escapeRe(name)}\\b`, "i");
+        if (re.test(t)) add(corpus.entity, name.toLowerCase());
+      }
+    }
+  }
 }
 
 export function corpusSize(c: Corpus): number {
@@ -403,8 +461,13 @@ export function corpusSize(c: Corpus): number {
     c.flag.size +
     c.syspath.size +
     c.date.size +
-    c.price.size
+    c.price.size +
+    c.entity.size
   );
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // -- claim side: STRICT extraction, scoped by payload kind -------------------
@@ -608,6 +671,27 @@ function extractInto(
     const k = trimTrailingPunct(m[1]).replace(/\/+$/, "");
     pushUnique(out, seen, { cls: "syspath", key: k, raw: k }, text, m.index);
   }
+  // entity: prose-only. A mention of a registered host/service/IP is an
+  // assertion about the user's estate - not universally true, but the
+  // corpus-side check is equally cheap, so tighter extraction wins.
+  const reg = entityRegistry();
+  if (reg) {
+    for (const ent of reg.entities) {
+      for (const name of ent.names) {
+        const re = new RegExp(`\\b${escapeRe(name)}\\b`, "gi");
+        for (const m of all(text, re.source, "gi")) {
+          const key = name.toLowerCase();
+          pushUnique(
+            out,
+            seen,
+            { cls: "entity", key, raw: m[0] },
+            text,
+            m.index,
+          );
+        }
+      }
+    }
+  }
 }
 
 /** Prefix-tolerant membership: /etc/knot is covered by /etc/knot/knot.conf. */
@@ -648,6 +732,20 @@ export function hasProvenance(corpus: Corpus, c: Claim): boolean {
     }
     case "price":
       return corpus.price.has(c.key);
+    case "entity": {
+      if (corpus.entity.has(c.key)) return true;
+      // Sibling-name provenance: any name on the SAME registry entry
+      // proves the entity. "the router" in a prior tool result silences a
+      // claim naming "ms-01", because the entry groups aliases deliberately.
+      const reg = entityRegistry();
+      if (!reg) return false;
+      for (const ent of reg.entities) {
+        const lowers = ent.names.map((n) => n.toLowerCase());
+        if (!lowers.includes(c.key)) continue;
+        for (const l of lowers) if (corpus.entity.has(l)) return true;
+      }
+      return false;
+    }
   }
 }
 
