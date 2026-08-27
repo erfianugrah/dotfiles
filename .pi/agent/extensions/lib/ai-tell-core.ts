@@ -73,10 +73,15 @@ export const TELL_RULES: TellRule[] = [
       'the aphorism fill-in-the-blank ("No X, no Y. Just Z.") - a template sentence with the nouns swapped, not a thought. Delete it or state the fact it gestures at.',
   },
   {
+    // KEEP AS-IS. This rule also matches "It's not a bug. It's a feature" -
+    // a human joke that predates LLMs, so it looks like a false positive and
+    // a future reader will be tempted to narrow or drop it. User decision
+    // (2026-08-27): leave it, "that line is overused anyway". Blocking it is
+    // the intended behaviour, not collateral damage. Do not re-litigate.
     id: "negative_parallelism_cross_sentence",
     pattern: /\bIt'?s not\s[^.\n!?]{1,50}\.\s+It'?s\s/gi,
     reason:
-      'cross-sentence negative parallelism ("It\'s not X. It\'s Y."). State Y; drop the "It\'s not X" setup unless the reader demonstrably believes X.',
+      'cross-sentence negative parallelism ("It\'s not X. It\'s Y."). State Y; drop the "It\'s not X" setup unless the reader demonstrably believes X. This deliberately catches the "not a bug, a feature" construction too - it is an overused line, so the block is intended.',
   },
   {
     id: "mystery_tease",

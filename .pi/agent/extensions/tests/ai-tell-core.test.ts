@@ -39,6 +39,16 @@ describe("detection", () => {
     );
   });
 
+  test("the 'not a bug, a feature' joke is caught ON PURPOSE", () => {
+    // Looks like a false positive (the joke predates LLMs) and will tempt a
+    // future reader to narrow the rule. User decision 2026-08-27: keep it,
+    // the line is overused. This test exists to make removing it a visible,
+    // deliberate act rather than a quiet 'precision fix'.
+    expect(ids("It's not a bug. It's a feature of the design.")).toContain(
+      "negative_parallelism_cross_sentence",
+    );
+  });
+
   test("mystery-tease variants", () => {
     expect(ids("The stunt hides a classic movie trick from the silent era.")).toContain("mystery_tease");
     expect(ids("Here is what they don't tell you about logical replication.")).toContain("mystery_tease");
