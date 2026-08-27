@@ -9,22 +9,31 @@
  * stream live, so the screen filled with rows of "!". Provider-side failure;
  * this guard is the client-side containment.
  *
+ * SECOND incident (2026-08-27) - why this now uses findCollapse: kimi-k3
+ * streamed "   <U+FFFD>" + blank line for ~10 MINUTES, twice, and this guard
+ * did NOT fire. findPeriodCollapse bails out on any newline in the tail (a
+ * deliberate choice to protect wide markdown tables), which made it blind to
+ * every newline-separated loop - the user only found out by cancelling a turn
+ * that felt too slow. findCollapse() adds a line-cycle detector for that mode.
+ *
  * Mechanism: message_update carries the token-by-token stream
  * (event.assistantMessageEvent thinking_delta / text_delta). Deltas are
- * accumulated into a small rolling buffer; findPeriodCollapse()
- * (lib/degenerate-core.ts) judges whether the tail is one short unit
- * repeated. On trip: ctx.abort() + a warning notification. No auto-retry -
- * retry loops would burn money against a provider node that may serve the
- * same degenerate stream again.
+ * accumulated into a rolling buffer; findCollapse() (lib/degenerate-core.ts)
+ * judges whether the tail is one short unit repeated - either as chars on one
+ * line, or as a repeating block of lines. On trip: ctx.abort() + a warning
+ * notification. No auto-retry - retry loops would burn money against a
+ * provider node that may serve the same degenerate stream again.
  *
  * Env:
  *   PI_DEGENERATE_GUARD_OFF=1   disable entirely.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { findPeriodCollapse } from "./lib/degenerate-core.ts";
+import { findCollapse } from "./lib/degenerate-core.ts";
 
-const BUF_CAP = 500;
+// Must hold enough LINES for the line-cycle detector (LINE_WINDOW=140 lines,
+// MIN_LINE_REPEATS=30). 500 chars only covered the single-line char detector.
+const BUF_CAP = 8000;
 
 export default function (pi: ExtensionAPI) {
 	if (process.env.PI_DEGENERATE_GUARD_OFF === "1") return;
@@ -45,7 +54,7 @@ export default function (pi: ExtensionAPI) {
 		if (!e || (e.type !== "thinking_delta" && e.type !== "text_delta") || !e.delta) return;
 
 		buf = (buf + e.delta).slice(-BUF_CAP);
-		const hit = findPeriodCollapse(buf);
+		const hit = findCollapse(buf);
 		if (!hit) return;
 
 		tripped = true;

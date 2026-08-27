@@ -4,7 +4,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { findPeriodCollapse, WINDOW } from "../extensions/lib/degenerate-core.ts";
+import {
+	findCollapse,
+	findLineCollapse,
+	findPeriodCollapse,
+	WINDOW,
+} from "../extensions/lib/degenerate-core.ts";
 
 const PROSE =
 	"The quick brown fox jumps over the lazy dog. Repetition collapse is a degenerate sampling mode " +
@@ -49,7 +54,11 @@ describe("findPeriodCollapse", () => {
 		expect(findPeriodCollapse("!".repeat(48))).not.toBeNull();
 	});
 
-	test("newlines reset the check (multi-line content is healthy)", () => {
+	// NOTE: findPeriodCollapse deliberately bails on any newline in the tail
+	// (protects wide markdown tables). That blindness is what let the
+	// 2026-08-27 incident run for ~10 minutes; findLineCollapse covers it, so
+	// this test documents the char-detector's scope, NOT desired end behaviour.
+	test("char detector ignores newline-separated input (by design; see findLineCollapse)", () => {
 		expect(findPeriodCollapse("!\n".repeat(150))).toBeNull();
 		const table = Array.from({ length: 30 }, () => "| --- ".repeat(10)).join("\n");
 		expect(findPeriodCollapse(table)).toBeNull();
@@ -76,5 +85,88 @@ describe("findPeriodCollapse", () => {
 			chars[i] = noise[j++ % noise.length];
 		}
 		expect(findPeriodCollapse(chars.join(""))).toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// findLineCollapse / findCollapse - the 2026-08-27 incident.
+//
+// kimi-k3 streamed "   <U+FFFD>" + a blank line for ~10 minutes, twice, and
+// findPeriodCollapse never fired: its `tail.includes("\n")` bail-out makes it
+// blind to every newline-separated loop. The user only noticed because the
+// turn felt slow and they cancelled it.
+//
+// The false-positive bar is the design constraint here (user: "how do I
+// prevent this also without false positives"), so the rule is deliberately
+// severe: an EXACT byte-identical cycle of a short unit, 30+ consecutive
+// repeats. Legitimate generated output varies line to line well before that.
+// ---------------------------------------------------------------------------
+
+const REPL = String.fromCharCode(0xfffd);
+/** The observed stream: three spaces, replacement char, blank line. */
+const USER_LOOP = ("   " + REPL + "\n\n").repeat(200);
+
+describe("findLineCollapse (2026-08-27 newline-separated collapse)", () => {
+	test("catches the exact incident stream that the char detector missed", () => {
+		expect(findPeriodCollapse(USER_LOOP)).toBeNull(); // the miss, still true
+		const hit = findLineCollapse(USER_LOOP);
+		expect(hit).not.toBeNull();
+		expect(hit!.period).toBe(2); // content line + blank line
+	});
+
+	test("catches an identical-line run", () => {
+		const hit = findLineCollapse("thinking...\n".repeat(40));
+		expect(hit).not.toBeNull();
+		expect(hit!.period).toBe(1);
+	});
+
+	test("catches a multi-line cycle", () => {
+		const hit = findLineCollapse("a\nb\nc\n".repeat(40));
+		expect(hit).not.toBeNull();
+		expect(hit!.period).toBe(3);
+	});
+
+	test("catches endless blank lines", () => {
+		expect(findLineCollapse("\n".repeat(60))).not.toBeNull();
+	});
+
+	test("ignores a run below the 30-repeat floor", () => {
+		expect(findLineCollapse("same\n".repeat(29))).toBeNull();
+	});
+
+	test("ignores a partial trailing line breaking an otherwise exact cycle", () => {
+		// Mid-stream the last line is incomplete; it must not defeat detection.
+		expect(findLineCollapse("dup\n".repeat(40) + "dup-partial")).not.toBeNull();
+	});
+
+	test("no false positive on real multi-line content", () => {
+		const cases: Array<[string, string]> = [
+			["markdown table", Array.from({ length: 30 }, (_, i) => `| row${i} | v${i} |`).join("\n")],
+			["numbered list", Array.from({ length: 40 }, (_, i) => `${i}. item ${i}`).join("\n")],
+			["ls output", Array.from({ length: 40 }, (_, i) => `file-${i}.ts`).join("\n")],
+			["diff hunk", Array.from({ length: 40 }, (_, i) => `+  const x${i} = ${i};`).join("\n")],
+			["yaml list", Array.from({ length: 30 }, (_, i) => `  - name: svc${i}`).join("\n")],
+			["uniform log lines", Array.from({ length: 40 }, (_, i) => `INFO request ${i} ok`).join("\n")],
+			["prose paragraphs", Array.from({ length: 25 }, (_, i) => `Paragraph ${i} says a thing.\n`).join("\n")],
+			// 25 identical closing braces from a code generator: plausible real
+			// output, and under the floor. This is the case that forced the
+			// 12 -> 30 repeat bump.
+			["25 identical braces", Array.from({ length: 25 }, () => "  }").join("\n") + "\nx"],
+		];
+		for (const [name, text] of cases) {
+			expect(findLineCollapse(text), `false positive on ${name}`).toBeNull();
+		}
+	});
+});
+
+describe("findCollapse (both modes)", () => {
+	test("covers the char mode (2026-08-19)", () => {
+		expect(findCollapse("!".repeat(400))).not.toBeNull();
+	});
+	test("covers the line mode (2026-08-27)", () => {
+		expect(findCollapse(USER_LOOP)).not.toBeNull();
+	});
+	test("healthy prose stays healthy in both modes", () => {
+		expect(findCollapse(PROSE.repeat(4))).toBeNull();
 	});
 });
