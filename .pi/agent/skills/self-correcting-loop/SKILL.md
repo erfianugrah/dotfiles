@@ -480,11 +480,14 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
     but is untested in long sessions - cross-tab it before trusting it as a
     judge.
   - **$0 local rung (llama-server provider, llm-compose proxy on the 5090).**
-    `llama-server/loop` (Gemma 4 26B-A4B MoE, agentic-tuned preset) is a real
-    worker rung for judged loops, not just a toy: A/B on the same scoped task
-    (proxy /metrics route, kimi-k3 judge both runs) it passed in 2 iterations
-    / 8 min vs `llama-server/qwen36-moe`'s 3 iterations / 15 min - the MoE
-    generation-speed and instruction-following edge shows up as wall-clock.
+    `llama-server/loop` (Qwen3.8 27B Dense, agentic-tuned preset - migrated
+    from Gemma 4 26B-A4B MoE on 2026-08-27) is a real worker rung for judged
+    loops, not just a toy. Gemma-era A/B on the same scoped task (proxy
+    /metrics route, kimi-k3 judge both runs) passed in 2 iterations / 8 min
+    vs the old `qwen36-moe`'s 3 iterations / 15 min - the MoE generation-speed
+    and instruction-following edge showed as wall-clock; Qwen3.8's medium
+    effort keeps thinking traces leaner than Gemma 4's 10K+ xhigh binges, so
+    the wide-window rules below stay load-bearing.
     Two operational requirements, both observed live on 2026-08-12: **lock the
     preset first** (`llmc lock loop --owner "$PI_SESSION_ID" --wait` -
     `--wait` queues FIFO if another preset is pinned) or any other
@@ -492,13 +495,14 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
     evicts the worker's model mid-iteration; and keep the judge on a hosted
     frontier model - the local rung writes, the frontier judges, so the only
     cost is a per-iteration review call.
-  - **Local-rung ceiling + the working-window rules (all measured 2026-08-12,
-    llm-compose concurrency build).** Gemma 4 26B one-shots scoped tasks
+  - **Local-rung ceiling + the working-window rules (Gemma 4 26B, measured
+    2026-08-12, llm-compose concurrency build - NOT re-validated on the
+    Qwen3.8 loop preset).** Gemma 4 26B one-shots scoped tasks
     (single-file, ~3-hunk semantic changes with a contract probe) but stalls
     on multi-file refactors - pair it with a frontier escalation rung
     (`["llama-server/loop", "openrouter/moonshotai/kimi-k3"]`) for anything
     bigger. To make the local rung reliable at all you must size its working
-    window: (1) the loop preset needs a WIDE context (196608) - at 131072 the
+    window: (1) the loop preset needs a WIDE context (262144) - at 131072 the
     85% auto-compact threshold (~111K tokens) killed every iteration, because
     big file reads plus 10K-token thinking traces eat ~15K/turn; (2) pass
     `PI_COMPACT_FRACTION=0.95` for headroom; (3) bump `agentTimeoutMs` to
@@ -565,7 +569,7 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
   - **Concurrent loops (llm-compose).** The proxy lock is a SHARED lock with
     named owners: each loop `llmc lock loop --owner <session-id>`, unlock
     releases only that owner. Concurrent loops must share ONE preset (the
-    `loop` preset runs `parallel_slots = 2`, 2x98K ctx); loops on DIFFERENT
+    `loop` preset runs `parallel_slots = 1`, 262144 ctx); loops on DIFFERENT
     presets queue instead of fighting - `llmc lock <preset> --wait` joins a
     FIFO and the grant lands when the current owners drain (a contended
     lock without --wait 409s; it NEVER hijacks the running model - the
