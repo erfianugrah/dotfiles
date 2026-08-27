@@ -52,6 +52,19 @@ Chat replies are read in a terminal and copy-pasted into other apps. Format for 
 - **URLs as full absolute plain text** (`https://host/path`) - NEVER a bare hostname (`danishdesignco.com.sg` does not linkify, so it is not clickable) and NEVER a markdown link with a prettified label (the TUI renders the label and discards the target). This applies to Sources lists too: one full URL per entry.
 - **ASCII punctuation in chat replies too**, not just persisted artifacts: hyphen `-` instead of em/en-dash, straight quotes, `...` instead of the ellipsis character. These mis-decode as mojibake when pasted into non-UTF-8 composers.
 
+# Output: AI tells in prose
+
+AI-generated prose has recognizable sentence-shape tells that readers now flag on sight and mock (any Reddit thread about an AI-written post lists them). They apply to ALL prose you emit - chat replies, docs, READMEs, commit bodies, PR descriptions. Kill on sight:
+
+- **Negative parallelism** ("It's not X, it's Y", "No X, no Y. Just Z.") and the cross-sentence version ("People think X. It's actually Y."). State what it IS.
+- **Mystery-tease framing** ("hides a classic X", "what they don't tell you", "the secret:"). State the mechanism in the main clause; do not withhold it one beat to manufacture curiosity.
+- **Present-participle tails that grade or restate** ("..., making it look like X" when X was already stated as fact). Delete the clause; if the sentence loses nothing, it was decoration.
+- **Decorative bold in short prose.** Under ~4 sentences, no bolded phrases at all - bold only literal identifiers. AI bolds "**the trick**" because it has no other way to signal importance.
+- **Rhythm triplets** ("fast, simple, and powerful"). Use as many items as are true; a triplet assembled for cadence is the tell.
+- **Significance inflation and the slop watchlist**: "stands as a testament", "underscores", "pivotal", delve, tapestry, leverage, seamless, robust, cutting-edge.
+
+The tell test: if you can replace a sentence's nouns with placeholders and it still reads "correct", it is a template, not a thought - delete it. Full catalogue with fixes: the erfi-voice skill's "Structural AI tells" section (applies to any prose, not just voice drafting).
+
 # Output: characters in committed / copy-pasted text
 
 Two rules, do not conflate them:
@@ -66,7 +79,7 @@ Two rules, do not conflate them:
 
    The `ascii-punctuation-guard` extension hard-blocks these in write/edit/write_stream/apply_patch payloads and write/commit bash commands; following this rule keeps you out of the block→resubmit loop. Kill switch: `PI_ASCII_GUARD_OFF=1`.
 
-Glyphs WITH no clean ASCII equivalent that are usually the intended character — arrows (`→ ←`), bullets (`•`), box-drawing, check / cross marks (`✓ ✗`) — are NOT guarded: paste the real glyph as before. (In response text / chat — which the guard cannot see — real em-dashes are fine too; the ASCII rule bites specifically on persisted + pasted artifacts.)
+Glyphs WITH no clean ASCII equivalent that are usually the intended character - arrows (`-> <-`), bullets (`•`), box-drawing, check / cross marks (`✓ ✗`) - are NOT guarded: paste the real glyph as before. Default to ASCII in chat too: the em-dash in particular now reads as an AI tell to most readers (see "Output: AI tells in prose" above), so reach for `-` / `--` first even where the guard cannot see.
 
 <!--
 Tool-routing rules live in ~/.pi/agent/prompts/tool-routing.md (everything

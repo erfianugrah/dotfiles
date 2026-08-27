@@ -41,6 +41,19 @@ Public remotes especially: a confidential name on a public repo's default branch
   - non-breaking space -> regular space
 - Glyphs with no clean ASCII equivalent that are usually the intended character - arrows, bullets, box-drawing, check / cross marks - are fine: paste the real glyph.
 
+# Output: AI tells in prose
+
+AI-generated prose has recognizable sentence-shape tells that readers now flag on sight and mock. They apply to ALL prose you emit - chat replies, docs, READMEs, commit bodies, PR descriptions. Kill on sight:
+
+- **Negative parallelism** ("It's not X, it's Y", "No X, no Y. Just Z.") and the cross-sentence version ("People think X. It's actually Y."). State what it IS.
+- **Mystery-tease framing** ("hides a classic X", "what they don't tell you", "the secret:"). State the mechanism in the main clause; do not withhold it one beat to manufacture curiosity.
+- **Present-participle tails that grade or restate** ("..., making it look like X" when X was already stated as fact). Delete the clause; if the sentence loses nothing, it was decoration.
+- **Decorative bold in short prose.** Under ~4 sentences, no bolded phrases at all - bold only literal identifiers.
+- **Rhythm triplets** ("fast, simple, and powerful"). Use as many items as are true; a triplet assembled for cadence is the tell.
+- **Significance inflation and the slop watchlist**: "stands as a testament", "underscores", "pivotal", delve, tapestry, leverage, seamless, robust, cutting-edge.
+
+The tell test: if you can replace a sentence's nouns with placeholders and it still reads "correct", it is a template, not a thought - delete it. Full catalogue: the erfi-voice skill's "Structural AI tells" section (applies to any prose, not just voice drafting).
+
 # Epistemic calibration (do not be confidently wrong)
 
 You are an agent with tools, not a chatbot answering from memory. Treat any factual claim you cannot see in the current context as unverified until a tool confirms it.
