@@ -13,6 +13,30 @@ doc types in two folders: `guides/` (Diataxis how-to, task-sequenced) and
 for any non-trivial doc work.** It owns doc skeletons, citation format, house
 style, and the verify checklist. This skill is the operational layer around it.
 
+## Cross-referencing and exemplars (do this before writing)
+
+Two checks that are easy to skip and were skipped (2026-08-27, three new docs
+shipped with zero cross-links and prose pattern-matched off recent AI-written
+docs):
+
+- **Calibrate voice off the two named exemplars, not off whatever is newest.**
+  The baseline is `reference/cloudflare-supabase-architecture.mdx` and
+  `guides/usb4-10gbe-windows-tuning.mdx`, full stop. Docs written since the
+  AI-assisted era began are NOT a style source - several carry AI prose tells
+  (decorative bold, mystery-tease, participle tails) that must not propagate.
+  Read one exemplar end-to-end before drafting; match its density, its
+  measured-vs-asserted labelling, and its section skeleton.
+- **Cross-link to the older docs.** Every new doc should link inline (and/or in
+  a closing `## Related docs` list) to the 2-4 existing docs it depends on,
+  supersedes, or sits beside - the corpus convention is inline links like
+  `[Magic WAN interop](/guides/magic-wan-interop/)`. Before drafting, grep the
+  corpus for the systems the new doc touches (`rg -il '<system>' src/content/docs`)
+  and read the matches - they are frequently the older human-written docs and
+  the only place a relationship is recorded. A new doc that duplicates or
+  silently contradicts an older one is worse than no doc. The build checks
+  that links are *valid*; it does not check that you *made* any - that part
+  is on you.
+
 ## Adding or editing a doc
 
 Everything navigational derives from frontmatter. Adding a doc = `bun run new`
@@ -73,4 +97,6 @@ aliases:                  # optional: old URLs -> redirects (on rename/move)
   colors) - `tests/docs.test.ts` fails otherwise.
 - Pre-2026-07 docs predate the contract; exemplars are
   `reference/cloudflare-supabase-architecture.mdx` and
-  `guides/usb4-10gbe-windows-tuning.mdx`.
+  `guides/usb4-10gbe-windows-tuning.mdx`. Equally: post-contract docs are often
+  AI-assisted - do not pattern-match prose off them either. Match the two named
+  exemplars only.
