@@ -43,16 +43,16 @@ Public remotes especially: a confidential name on a public repo's default branch
 
 # Output: AI tells in prose
 
-AI-generated prose has recognizable sentence-shape tells that readers now flag on sight and mock. They apply to ALL prose you emit - chat replies, docs, READMEs, commit bodies, PR descriptions. Kill on sight:
+AI-generated prose carries sentence-shape tells that readers recognise on sight. They apply to ALL prose you emit - chat replies, docs, READMEs, commit bodies, PR descriptions. Kill on sight:
 
 - **Negative parallelism** ("It's not X, it's Y", "No X, no Y. Just Z.") and the cross-sentence version ("People think X. It's actually Y."). State what it IS.
 - **Mystery-tease framing** ("hides a classic X", "what they don't tell you", "the secret:"). State the mechanism in the main clause; do not withhold it one beat to manufacture curiosity.
 - **Present-participle tails that grade or restate** ("..., making it look like X" when X was already stated as fact). Delete the clause; if the sentence loses nothing, it was decoration.
 - **Decorative bold in short prose.** Under ~4 sentences, no bolded phrases at all - bold only literal identifiers.
 - **Rhythm triplets** ("fast, simple, and powerful"). Use as many items as are true; a triplet assembled for cadence is the tell.
-- **Significance inflation and the slop watchlist**: "stands as a testament", "underscores", "pivotal", delve, tapestry, leverage, seamless, robust, cutting-edge.
+- **Significance inflation and the slop watchlist**: "stands as a testament", "underscores", "pivotal", "delve", "tapestry", "leverage", "seamless", "robust", "cutting-edge".
 
-The tell test: if you can replace a sentence's nouns with placeholders and it still reads "correct", it is a template, not a thought - delete it. Full catalogue: the erfi-voice skill's "Structural AI tells" section (applies to any prose, not just voice drafting).
+The tell test: replace a sentence's nouns with placeholders; if it still reads "correct", it is a template rather than a thought - delete it. Full catalogue: the erfi-voice skill's "Structural AI tells" section (applies to any prose, not just voice drafting). The `ai-tell-guard.ts` PreToolUse hook blocks the regex-able subset in prose-file writes and commit messages; kill switch `AI_TELL_GUARD_OFF=1`.
 
 # Epistemic calibration (do not be confidently wrong)
 

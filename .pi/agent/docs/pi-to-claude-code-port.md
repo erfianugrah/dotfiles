@@ -297,6 +297,7 @@ already provides it · SKIP = pi TUI/session internals, no CC analogue.
 | bench | DONE (MCP) | bench |
 | pg-analyser.pi | DONE (MCP) | pg_analyser |
 | ascii-punctuation-guard | DONE (HOOK) | PreToolUse, live-verified |
+| ai-tell-guard | DONE (HOOK) | PreToolUse, smoke-tested (6 pass); deny-only - the fix is a rephrase, so there is no auto-rewrite form |
 | memledger | DONE (MCP) | 5 tools (search/ledger/memories/sessions) |
 | docs | DONE (MCP) | docs.erfi.io over SSH; 6 sub-tools |
 | exa | DONE (MCP) | web_search / code_search |

@@ -90,6 +90,15 @@
             "command": "bun \"$HOME/.claude/hooks/secret-output-guard.ts\""
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$HOME/.claude/hooks/ai-tell-guard.ts\""
+          }
+        ]
       }
     ],
     "PostToolUse": [

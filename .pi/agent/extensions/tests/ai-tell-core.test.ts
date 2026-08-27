@@ -49,9 +49,23 @@ describe("detection", () => {
 
   test("slop watchlist", () => {
     expect(ids("Let me delve into the details of the replication slot.")).toContain("slop_watchlist");
-    expect(ids("This migration is a pivotal moment for the platform.")).toContain("slop_watchlist");
-    expect(ids("The rich tapestry of Unix tools.")).toContain("slop_watchlist");
+    expect(ids("The rich tapestry of Unix tools makes this hard.")).toContain("slop_watchlist");
     expect(ids("Our game-changing approach to caching misses constantly.")).toContain("slop_watchlist");
+    expect(ids("This release stands as a testament to the team's work.")).toContain("slop_watchlist");
+  });
+
+  test("watchlist words dropped on review are NOT blocked (guidance, not gate)", () => {
+    // erfi-voice still flags these; a hard block on them false-positives on
+    // quoted upstream docs, so the guard deliberately lets them through.
+    for (const s of [
+      "This migration is a pivotal moment for the platform team.",
+      "The library provides a robust retry mechanism for callers.",
+      "Playback is seamless across the two storage backends here.",
+      "Foster care records are stored in the same table as this.",
+      "Cutting-edge is marketing language, but the API is stable.",
+    ]) {
+      expect(ids(s)).toEqual([]);
+    }
   });
 
   test("the motivating OP sentence hits multiple rules", () => {
@@ -99,9 +113,41 @@ describe("false positives must not fire", () => {
     expect(ids("not just one, but two")).toEqual([]);
   });
 
-  test("testament in technical identifier context still flags (documented trade-off)", () => {
-    // 'testament' as prose word IS the slop tell; as part of code it is masked
-    expect(ids("The config file `testament.yml` is generated.")).toEqual([]);
+  test("code-span content is masked", () => {
+    expect(ids("The generated config file `tapestry.yml` holds the mapping.")).toEqual([]);
+  });
+});
+
+describe("bash surface (regression: quoted-span masking must not blank the payload)", () => {
+  // Found in review 2026-08-27: with file-surface masking, a double-quoted
+  // commit message scanned CLEAN while the single-quoted form was caught -
+  // i.e. the guard was silently dead for the most common commit idiom.
+  const bashIds = (t: string) => scanTells(t, undefined, "bash").map((h) => h.rule.id);
+
+  test("double-quoted commit message is scanned", () => {
+    expect(bashIds('git commit -m "This is not just a cache, but a whole subsystem"')).toContain(
+      "negative_parallelism_not_just",
+    );
+  });
+
+  test("single-quoted commit message is scanned", () => {
+    expect(bashIds("git commit -m 'No CGI, no extra take. Just a desire to make art.'")).toContain(
+      "aphorism_no_x_no_y_just_z",
+    );
+  });
+
+  test("heredoc body is scanned", () => {
+    expect(bashIds("cat >> notes.md <<EOF\nIt is not just a stunt, but a showcase of the era\nEOF")).toContain(
+      "negative_parallelism_not_just",
+    );
+  });
+
+  test("code spans are still masked on the bash surface", () => {
+    expect(bashIds('git commit -m "document the `not just X, but Y` tell"')).toEqual([]);
+  });
+
+  test("file surface keeps quoted-example masking", () => {
+    expect(scanTells('Never write "not just X, but Y" in any doc you publish.', undefined, "file")).toEqual([]);
   });
 });
 
@@ -113,6 +159,16 @@ describe("reason output", () => {
     expect(r).toContain("negative_parallelism_not_just");
     expect(r).toContain("PI_AI_TELL_GUARD_OFF=1");
     expect(r).toContain("README.md");
+  });
+
+  test("file surface advertises the quoting escape; bash surface must NOT", () => {
+    const hits = scanTells("This is not just a cache, but a whole subsystem for reads.");
+    expect(tellReason(hits, "write -> x.md", "file")).toContain("double quotes");
+    // On bash the quoting 'escape' does not exist, and advertising it would be
+    // both false and an invitation to quote-wrap prose to evade the guard.
+    const bash = tellReason(hits, "bash (writes/commits)", "bash");
+    expect(bash).not.toContain("double quotes");
+    expect(bash).toContain("Rewrite the sentence");
   });
 });
 

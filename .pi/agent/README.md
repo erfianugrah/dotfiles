@@ -99,6 +99,7 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 
 | Extension | Purpose |
 |---|---|
+| `ai-tell-guard.ts` | Blocks high-precision AI-prose tells (negative parallelism, "No X, no Y. Just Z.", mystery-tease framing, slop vocabulary) in prose-path write/edit/write_stream/apply_patch payloads + write/commit bash. Fuzzy tells (decorative bold, participle tails, triplets) are deliberately NOT gated - they live in the erfi-voice skill. Max 2 blocks per rule per session. `PI_AI_TELL_GUARD_OFF=1` kill switch. Shares `lib/ai-tell-core.ts` with the CC hook. |
 | `ascii-punctuation-guard.ts` | Blocks mojibake-prone smart punctuation (em/en-dash, smart quotes, ellipsis, NBSP) in write/edit/write_stream/apply_patch payloads + write/commit bash. `PI_ASCII_GUARD_OFF=1` kill switch. |
 | `bash-error-hints.ts` | Decorates bash tool results with a one-line hint when stderr matches a known footgun pattern. |
 | `bookmark.ts` | `/bookmark` + `/unbookmark` for `/tree` navigation in long sessions. |

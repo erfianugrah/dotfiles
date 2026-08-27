@@ -18,12 +18,16 @@
 import { isProsePath, scanTells, tellReason } from "../../.pi/agent/extensions/lib/ai-tell-core.ts";
 import { WRITE_BASH } from "../../.pi/agent/extensions/lib/ascii-core.ts";
 
-function deny(hits: ReturnType<typeof scanTells>, where: string): never {
+function deny(
+  hits: ReturnType<typeof scanTells>,
+  where: string,
+  surface: "file" | "bash" = "file",
+): never {
   const out = {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: tellReason(hits, where),
+      permissionDecisionReason: tellReason(hits, where, surface),
     },
   };
   process.stdout.write(JSON.stringify(out));
@@ -63,8 +67,10 @@ async function main() {
   } else if (tool === "Bash") {
     const cmd = String(input.command ?? "");
     if (WRITE_BASH.test(cmd)) {
-      const found = scanTells(cmd);
-      if (found.length) deny(found, "Bash (writes/commits)");
+      // surface:"bash" - a commit message lives inside the quotes, so the
+      // file-surface quoted-span masking would blank the whole payload.
+      const found = scanTells(cmd, undefined, "bash");
+      if (found.length) deny(found, "Bash (writes/commits)", "bash");
     }
   }
 

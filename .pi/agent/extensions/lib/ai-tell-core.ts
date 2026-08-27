@@ -26,11 +26,18 @@
 
 import * as path from "node:path";
 
-// Mask code spans and double-quoted spans: quoted examples are documentation
-// ABOUT the tell, not instances of it. Single quotes are NOT masked - the
-// apostrophe in "isn't" is a normal prose character and masking spans between
-// apostrophes eats arbitrary text.
+// Mask code spans and double-quoted spans: in a FILE, a quoted example is
+// documentation ABOUT the tell, not an instance of it. Single quotes are NOT
+// masked - the apostrophe in "isn't" is a normal prose character and masking
+// spans between apostrophes eats arbitrary text.
 const MASK_RE = /`[^`\n]*`|"[^"\n]*"/g;
+
+// Bash is the inverse case and must NOT use MASK_RE: a commit message lives
+// INSIDE the quotes (`git commit -m "..."`), so masking quoted spans blanks
+// the entire payload and the rule can never fire. Measured: with MASK_RE,
+// `git commit -m "not just X, but Y"` scanned clean while the single-quoted
+// form was caught - a silent half-dead guard. Only code spans are masked here.
+const MASK_RE_BASH = /`[^`\n]*`/g;
 
 const PROSE_EXT = new Set([".md", ".mdx", ".txt", ".rst", ".adoc", ".org", ".markdown"]);
 export function isProsePath(p: string): boolean {
@@ -79,10 +86,18 @@ export const TELL_RULES: TellRule[] = [
       'mystery-tease framing ("what they don\'t tell you", "hides a classic X") - engagement-bait that withholds the mechanism one beat to manufacture curiosity. State the mechanism in the main clause.',
   },
   {
+    // Deliberately SHORTER than erfi-voice's watchlist. That list is GUIDANCE,
+    // where a human weighs context; this is a hard BLOCK, and prose-lint.ts's
+    // own Class A note is the warning - a word list as a gate "degrades into a
+    // banned-words list with extra steps". So only words with essentially no
+    // honest technical use survive here. Dropped on review: `foster` (foster
+    // care, the surname), `robust`/`seamless` (routine in upstream API docs the
+    // agent quotes), `leverage` (finance//mechanics noun). Those stay in
+    // erfi-voice, which is where judgement belongs.
     id: "slop_watchlist",
-    pattern: /\bdelve\b|\btapestry\b|\btestament\b|\bpivotal\b|\bgame-chang(?:er|ing)\b|\bcutting-edge\b|\bfoster\b/gi,
+    pattern: /\bdelve[sd]?\b|\btapestry\b|\bgame-chang(?:er|ing)\b|\bstands as a testament\b/gi,
     reason:
-      "slop vocabulary that essentially never appears in this user's technical prose (delve, tapestry, testament, pivotal, game-changer, cutting-edge, foster). Replace with the plain word or the number.",
+      "slop vocabulary with no honest use in this user's prose (delve, tapestry, game-changer, 'stands as a testament'). Replace with the plain verb or the number. Softer offenders (pivotal, cutting-edge, robust, seamless) are not blocked - see the erfi-voice watchlist and use judgement.",
   },
 ];
 
@@ -95,9 +110,9 @@ export type TellHit = {
 // Detect tells in prose text. Returns hits (possibly empty). `minWords` (of
 // the whole text) guards against flagging two-word fragments where a "hit"
 // is really the whole content being an example (e.g. a grep result echo).
-export function scanTells(text: string, minWords = 6): TellHit[] {
+export function scanTells(text: string, minWords = 6, surface: "file" | "bash" = "file"): TellHit[] {
   if (!text) return [];
-  const masked = text.replace(MASK_RE, " ");
+  const masked = text.replace(surface === "bash" ? MASK_RE_BASH : MASK_RE, " ");
   if (masked.split(/\s+/).filter(Boolean).length < minWords) return [];
   const out: TellHit[] = [];
   for (const rule of TELL_RULES) {
@@ -113,15 +128,26 @@ export function scanTells(text: string, minWords = 6): TellHit[] {
   return out;
 }
 
-export function tellReason(hits: TellHit[], where: string, extra = ""): string {
+export function tellReason(
+  hits: TellHit[],
+  where: string,
+  surface: "file" | "bash" = "file",
+): string {
   const lines = hits
     .map((h) => `  - [${h.rule.id}] x${h.count} -> ${h.rule.reason}\n    near: ${h.sample}`)
     .join("\n");
+  // Surface-specific note. The file surface genuinely skips quoted spans (a doc
+  // ABOUT a tell must be writable), so say so. On bash it would be a lie AND an
+  // invitation to quote-wrap prose to defeat the guard - the fix there is to
+  // rewrite the sentence.
+  const note =
+    surface === "file"
+      ? "Writing ABOUT a tell is fine - put the example in double quotes or backticks and the guard skips it.\n"
+      : "There is no quoting escape here: on a commit/heredoc the prose IS the payload. Rewrite the sentence.\n";
   return (
-    `ai-tell-guard: blocked - ${where} contains AI-prose tells that readers flag on sight.\n` +
-    `${lines}\n` +
-    "Quoting a tell as an example is fine - wrap it in double quotes or backticks and the guard skips it. " +
-    `${extra}Full catalogue: erfi-voice skill, \"Structural AI tells\".\n` +
+    `ai-tell-guard: blocked - ${where} contains AI-prose tells that readers recognise on sight.\n` +
+    `${lines}\n${note}` +
+    'Full catalogue: erfi-voice skill, "Structural AI tells".\n' +
     "Kill switch: PI_AI_TELL_GUARD_OFF=1"
   );
 }

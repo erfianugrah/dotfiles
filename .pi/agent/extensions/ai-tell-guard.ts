@@ -35,8 +35,12 @@ export default function (pi: ExtensionAPI) {
 
   const blocksPerRule = new Map<string, number>();
 
-  const check = (text: string, where: string): { block: boolean; reason: string } | undefined => {
-    const hits = scanTells(text).filter((h) => {
+  const check = (
+    text: string,
+    where: string,
+    surface: "file" | "bash" = "file",
+  ): { block: boolean; reason: string } | undefined => {
+    const hits = scanTells(text, undefined, surface).filter((h) => {
       const n = blocksPerRule.get(h.rule.id) ?? 0;
       return n < MAX_BLOCKS_PER_RULE;
     });
@@ -44,7 +48,7 @@ export default function (pi: ExtensionAPI) {
     for (const h of hits) {
       blocksPerRule.set(h.rule.id, (blocksPerRule.get(h.rule.id) ?? 0) + 1);
     }
-    return { block: true, reason: tellReason(hits, where) };
+    return { block: true, reason: tellReason(hits, where, surface) };
   };
 
   pi.on("tool_call", async (event) => {
@@ -81,7 +85,9 @@ export default function (pi: ExtensionAPI) {
     if (tool === "bash") {
       const cmd = (event.input as { command?: string }).command;
       if (typeof cmd !== "string" || !WRITE_BASH.test(cmd)) return undefined;
-      return check(cmd, "bash (writes/commits)");
+      // surface:"bash" - the commit message is INSIDE the quotes, so quoted-span
+      // masking would blank the payload (see MASK_RE_BASH in the core).
+      return check(cmd, "bash (writes/commits)", "bash");
     }
 
     return undefined;

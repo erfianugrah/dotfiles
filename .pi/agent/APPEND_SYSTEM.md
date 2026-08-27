@@ -54,16 +54,16 @@ Chat replies are read in a terminal and copy-pasted into other apps. Format for 
 
 # Output: AI tells in prose
 
-AI-generated prose has recognizable sentence-shape tells that readers now flag on sight and mock (any Reddit thread about an AI-written post lists them). They apply to ALL prose you emit - chat replies, docs, READMEs, commit bodies, PR descriptions. Kill on sight:
+AI-generated prose carries sentence-shape tells that readers recognise on sight (any Reddit thread about an AI-written post itemises them). They apply to ALL prose you emit - chat replies, docs, READMEs, commit bodies, PR descriptions. Kill on sight:
 
 - **Negative parallelism** ("It's not X, it's Y", "No X, no Y. Just Z.") and the cross-sentence version ("People think X. It's actually Y."). State what it IS.
 - **Mystery-tease framing** ("hides a classic X", "what they don't tell you", "the secret:"). State the mechanism in the main clause; do not withhold it one beat to manufacture curiosity.
 - **Present-participle tails that grade or restate** ("..., making it look like X" when X was already stated as fact). Delete the clause; if the sentence loses nothing, it was decoration.
-- **Decorative bold in short prose.** Under ~4 sentences, no bolded phrases at all - bold only literal identifiers. AI bolds "**the trick**" because it has no other way to signal importance.
+- **Decorative bold in short prose.** Under ~4 sentences, no bolded phrases at all - bold only literal identifiers (code, a term being defined).
 - **Rhythm triplets** ("fast, simple, and powerful"). Use as many items as are true; a triplet assembled for cadence is the tell.
-- **Significance inflation and the slop watchlist**: "stands as a testament", "underscores", "pivotal", delve, tapestry, leverage, seamless, robust, cutting-edge.
+- **Significance inflation and the slop watchlist**: "stands as a testament", "underscores", "pivotal", "delve", "tapestry", "leverage", "seamless", "robust", "cutting-edge".
 
-The tell test: if you can replace a sentence's nouns with placeholders and it still reads "correct", it is a template, not a thought - delete it. Full catalogue with fixes: the erfi-voice skill's "Structural AI tells" section (applies to any prose, not just voice drafting).
+The tell test: replace a sentence's nouns with placeholders; if it still reads "correct", it is a template rather than a thought - delete it. Full catalogue with fixes: the erfi-voice skill's "Structural AI tells" section (applies to any prose, not just voice drafting). The `ai-tell-guard` extension blocks the regex-able subset in prose-file writes and commit messages; kill switch `PI_AI_TELL_GUARD_OFF=1`.
 
 # Output: characters in committed / copy-pasted text
 
