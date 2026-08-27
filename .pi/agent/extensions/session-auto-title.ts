@@ -29,30 +29,11 @@
  * To disable: rename file to .ts.disabled or comment out the registration.
  */
 
-// Root import, not /compat: the loader aliases root -> compat since 0.80.0,
-// and the explicit /compat subpath fails to resolve in the Homebrew Mac
-// build (crashes pi at launch). Root resolves on both platforms.
-import { getModel } from "@earendil-works/pi-ai";
+// Model discovery goes through ctx.modelRegistry.getAvailable() (see
+// pickTitleCandidates) - NOT pi-ai's getModel() + models.json, which could
+// not see custom providers and produced zero candidates. No pi-ai import and
+// no models.json read is needed here any more.
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
-
-// models.json doesn't change at runtime (the user edits it, then /reload).
-// Cache the parsed candidates list keyed by mtime so we don't re-read +
-// re-parse on every session_start. Negligible on its own, but cheap to do.
-let modelsCache: { mtimeMs: number; data: unknown } | null = null;
-function loadModelsJson(): unknown {
-  const path = join(process.env.HOME ?? "", ".pi", "agent", "models.json");
-  try {
-    const st = statSync(path);
-    if (modelsCache && modelsCache.mtimeMs === st.mtimeMs) return modelsCache.data;
-    const data = JSON.parse(readFileSync(path, "utf8"));
-    modelsCache = { mtimeMs: st.mtimeMs, data };
-    return data;
-  } catch {
-    return null;
-  }
-}
 
 const MARKER_TYPE = "session-auto-title";
 const MAX_INPUT_CHARS = 4000;
@@ -163,14 +144,26 @@ function getMarkerState(ctx: ExtensionContext): TitleState {
 // hardcoded IDs going stale - prior version hard-coded model IDs that the
 // user never had):
 //
-//   1. Read ~/.pi/agent/models.json directly to enumerate all configured
-//      provider/model pairs.
+//   1. Enumerate ctx.modelRegistry.getAvailable() - every model with working
+//      credentials, custom providers included.
 //   2. Score each by 'smallness heuristic' - prefer local llama-server,
 //      then haiku/mini/flash/nano name patterns, then anything else.
-//   3. Authenticate each in priority order, keep the first MAX_CANDIDATES.
-//   4. Append the current session model as last resort (heavyweight, but
-//      always works).
-async function pickTitleCandidates(ctx: ExtensionContext) {
+//   3. Keep the current session model first, then the cheapest fallbacks.
+//
+// 2026-08-26: do NOT go back to enumerating models.json + pi-ai getModel().
+// That combination silently produced ZERO candidates (marker
+// reason:"no-model") for every session whose model was a custom provider:
+//   - getModel("llama-server", "qwen38") returns UNDEFINED - pi-ai's getModel
+//     only knows its BUILT-IN catalogue, not user-defined providers, so all
+//     10 llama-server entries were dropped at the `if (!m) continue` guard.
+//   - providers.openrouter in models.json carries only modelOverrides (0
+//     entries in `models`), so the cloud fallbacks were never enumerated
+//     either - the real openrouter catalogue comes from pi's builtin list.
+// Net effect: 627 untitled sessions in 2026-08 alone. getAvailable() returns
+// resolved model objects for BOTH custom and builtin providers (verified: 572
+// models, including all 10 llama-server ids), so no getModel() lookup is
+// needed - and auth is already proven by getAvailable()'s own filtering.
+export async function pickTitleCandidates(ctx: ExtensionContext) {
   // Pattern -> priority weight (lower = better)
   const PROVIDER_WEIGHTS: Array<[RegExp, number]> = [
     [/llama-server|ollama|lmstudio|vllm/i, 0],   // local & free
@@ -195,8 +188,20 @@ async function pickTitleCandidates(ctx: ExtensionContext) {
     return pw + nw;
   }
 
-  type Model = NonNullable<ReturnType<typeof getModel>>;
-  type Picked = { model: Model; auth: unknown };
+  type AnyModel = { id: string; provider?: string; providerID?: string };
+  type Picked = { model: AnyModel };
+
+  const provOf = (m: AnyModel) => m.provider ?? m.providerID ?? "";
+  const sameModel = (a: AnyModel, b: AnyModel) =>
+    a.id === b.id && provOf(a) === provOf(b);
+
+  // Every model with working credentials - custom providers included.
+  let available: AnyModel[] = [];
+  try {
+    available = (await ctx.modelRegistry.getAvailable()) as AnyModel[];
+  } catch {
+    available = [];
+  }
 
   // Current session model FIRST (user directive 2026-08-25: same session, not
   // the local model - all-local candidate lists tombstoned most of the
@@ -204,37 +209,24 @@ async function pickTitleCandidates(ctx: ExtensionContext) {
   // GPU-mode-swapped). It just served this turn, so it is authenticated,
   // reachable, and not mid-swap.
   const picked: Picked[] = [];
-  const current = (ctx as { model?: { id: string; provider: string } }).model;
-  if (current) {
-    const m = getModel(current.provider, current.id);
-    if (m) {
-      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
-      if (auth?.ok && auth.apiKey) picked.push({ model: m, auth });
-    }
+  const current = (ctx as { model?: AnyModel }).model;
+  if (current?.id) {
+    // Prefer the registry's own object for the current model; fall back to
+    // ctx.model itself (it just served a turn, so it is usable as-is).
+    const m = available.find((a) => sameModel(a, current)) ?? current;
+    picked.push({ model: m });
   }
 
-  // Cheap fallbacks: for heavyweight current models or auth failure.
-  const candidates: Array<{ provider: string; id: string; weight: number }> = [];
-  const data = loadModelsJson() as
-    | { providers?: Record<string, { models?: Array<{ id?: string }> }> }
-    | null;
-  if (data) {
-    for (const [prov, pd] of Object.entries(data.providers ?? {})) {
-      for (const m of pd.models ?? []) {
-        if (!m.id) continue;
-        candidates.push({ provider: prov, id: m.id, weight: weightOf(prov, m.id) });
-      }
-    }
-  }
-  candidates.sort((a, b) => a.weight - b.weight);
+  // Cheap fallbacks: for heavyweight current models or a failing endpoint.
+  const ranked = available
+    .filter((m) => m.id)
+    .map((m) => ({ model: m, weight: weightOf(provOf(m), m.id) }))
+    .sort((a, b) => a.weight - b.weight);
 
-  for (const c of candidates) {
+  for (const c of ranked) {
     if (picked.length >= 1 + MAX_FALLBACKS) break;
-    if (picked.some((p) => p.model.id === c.id && p.model.provider === c.provider)) continue;
-    const m = getModel(c.provider, c.id);
-    if (!m) continue;
-    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
-    if (auth?.ok && auth.apiKey) picked.push({ model: m, auth });
+    if (picked.some((p) => sameModel(p.model, c.model))) continue;
+    picked.push({ model: c.model });
   }
   return picked;
 }
