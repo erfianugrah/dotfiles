@@ -121,8 +121,12 @@ skew becomes the feature - the Pi wanting a CLI tool cannot drag the router
 into a rebuild.
 
 **Adoption status**: hearth DONE (2026-08-26, verified live: 0 failed units,
-HA+ESPHome 200, zsh is the login shell). servarr and router pending, each on
-its own schedule.
+HA+ESPHome 200, zsh is the login shell). router DONE (2026-08-28, `shell`
+profile only - hosts import base/admin/net as subset; router's inline
+fleet-lite `systemPackages` copy removed, router/network/debug + lazydocker
+stay inline). Router-side fleet access uses a THIRD router-side deploy key
+(`/root/.ssh/id_gh_fleet` + `gh-fleet` Host alias), mirroring the eaves
+pattern - the fleet repo stays private. servarr pending, on its own schedule.
 
 Fleet-repo commands: `make check` (eval both arches), **`make cache`**
 (aarch64 substitute check - run this whenever `shell.nix` gains a package),

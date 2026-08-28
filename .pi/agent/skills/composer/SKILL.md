@@ -61,16 +61,19 @@ curl -s $COMPOSER/openapi.yaml | yq '.paths'           # YAML view
 
 ## Multi-host docker daemons (v0.17.0+/v0.18.0+)
 
-One composerd now manages stacks across MULTIPLE docker daemons. Live registry (verified 2026-07-31): ONE remote host, `{"id":1,"name":"servarr","endpoint":"tcp://100.69.69.7:2376","cert_dir":"/certs/servarr"}` - that endpoint is **drawbridge**, the mTLS+allowlist+audit proxy in front of servarr's `/var/run/docker.sock` (see the drawbridge skill). 19 stacks registered: 8 local (forgejo added 2026-08-23) (atuin, docs-ssh, edge-services, httpbin-bun, joplin, knotea, vaultwarden) + 11 pinned to servarr (forgejo moved to the router 2026-08-23) (bonkled, copyparty, discord-wipe, draw, gumshoe, immich, keycloak, minio, research, revista, servarr).
+One composerd now manages stacks across MULTIPLE docker daemons. The servarr remote endpoint is **drawbridge**, the mTLS+allowlist+audit proxy in front of servarr's `/var/run/docker.sock` (see the drawbridge skill). Hosts register under Settings -> Docker Hosts (name + endpoint + optional mTLS certs).
 
 TLS plumbing internals (do not regress):
 - Per-host SDK clients use `TLSConfig{CertDir}` -> `dockerclient.WithTLSClientConfig(ca, cert, key)` with docker-CLI file naming. `FromEnv` BEFORE `WithHost(host)` in `internal/infra/docker/client.go` is load-bearing (the moby SDK does not apply env TLS implicitly; explicit host still wins).
 - `docker compose` CLI children get explicit per-host env via `NewComposeTLS` (`internal/infra/docker/compose.go`): DOCKER_TLS_VERIFY=1 + DOCKER_CERT_PATH=<cert_dir>. Relying on composerd's process env is wrong for non-default hosts.
-- The container MUST mount `/var/lib/composer/certs:/certs:ro` (drawbridge mTLS material) or every remote-host operation hard-fails with `TLS material: stat /certs/servarr/ca.pem`. Both router.nix copies have it (see upgrade policy below).
+- Client certs can be uploaded via UI/API since v0.25.0: they are AES-256-GCM encrypted in `docker_host_certs` (migration 009) and materialized to `<dataDir>/certs/<host_id>/` on demand - DB certs then WIN over the mounted `cert_dir`. The `/certs:ro` mount remains the legacy fallback and is still required (see upgrade policy below).
 
 Key model:
 
 - `GET/POST /api/v1/hosts`, `GET/PUT/DELETE /api/v1/hosts/{id}` - docker hosts registry. Body: `{name, endpoint, cert_dir}`. Endpoint schemes: `tcp://host:2376` (mTLS), `tcp://host:2375` (plain), `unix:///path.sock`. `cert_dir` holds `ca.pem`/`cert.pem`/`key.pem` (docker CLI convention); empty = no TLS.
+- `PUT/GET/DELETE /api/v1/hosts/{id}/certs` (v0.25.0+) - upload/remove mTLS cert material as PEM text `{ca_cert, cert, key}`. Upload validates (PEM parse, cert-key match, chain verify to CA) -> 422 on garbage. GET is metadata-only (`has_certs`, sha256 fingerprint, `not_after`) - key material is never readable. DB certs take precedence over `cert_dir`.
+- `POST /api/v1/hosts/{id}/test` (v0.25.0+) - throwaway client + 3s Ping against the CURRENT material; `{ok, error, latency_ms}`. Use this after any cert/host change before trusting deploys.
+- `Factory` (internal/infra/docker) caches docker clients + compose per host; `HostService.Update`/`Delete` invalidate that host via `SetCacheInvalidator` - host edits take effect without a restart since v0.25.0 (they required one before).
 - The DEFAULT host (composerd's own `COMPOSER_DOCKER_HOST`/socket) is IMPLICIT - no row, API name `"local"`, `stacks.host_id NULL`. `"local"` is a reserved name.
 - API references hosts by NAME; DB stores id. Create-stack payloads accept `host: "<name>"`; unknown name = 422. Stack detail responses carry a `host` field.
 - ~30 resource endpoints (containers, networks, volumes, images, docker prune/events/builder, SSE logs/stats) take a `?host=<name>` query param; absent = default host.
@@ -411,3 +414,17 @@ version.go            const Version — currently 0.20.2; bump first on release
 3. Endpoint reference → `read /home/erfi/infra/composer/docs/api-reference.md`.
 4. Code spelunking → `grep` / `lsp` on `internal/{domain,app,api,infra}/`. Use `lsp` for symbol navigation (Go LSP is accurate).
 5. NEVER bash-run `./composerd`. NEVER `go run ./cmd/composerd/`.
+
+## Request-path invariant (v0.25.0+)
+
+Read endpoints never call a docker daemon synchronously. A background
+`StatusRefresher` (15s tick, `COMPOSER_STATUS_REFRESH_MS`) fans out to all
+hosts concurrently under a 3s per-host timeout and snapshots per-stack
+counts + derived status + per-host reachability in memory; GET
+/api/v1/stacks serves DB + snapshot only. A dead host shows
+`unknown`/stale, it does not stall the response. Regression class to
+avoid: a live `factory.ClientFor` / `docker.ListContainers` call re-added
+to any GET handler's request path - put the data in the refresher
+snapshot instead (v0.25.2 rechecked this exact bug after the handler was
+moved to snapshot; the fan-out had moved one layer down into
+StackService.List and sensors that grep the handler stayed green).
