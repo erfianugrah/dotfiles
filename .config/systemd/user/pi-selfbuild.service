@@ -1,0 +1,7 @@
+[Unit]
+Description=Rebuild pi from earendil-works/pi main when it moves
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/pi-selfbuild.sh
+Nice=10
