@@ -1,0 +1,8 @@
+theme = "tokyo-night"
+provider = "navidrome"
+visualizer = "Wave"
+
+[navidrome]
+url      = "https://navidrome.erfi.io"
+user     = "anugrah"
+password = "${NAVIDROME_PASSWORD}"
