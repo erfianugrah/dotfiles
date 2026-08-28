@@ -428,3 +428,15 @@ to any GET handler's request path - put the data in the refresher
 snapshot instead (v0.25.2 rechecked this exact bug after the handler was
 moved to snapshot; the fan-out had moved one layer down into
 StackService.List and sensors that grep the handler stayed green).
+
+## Encryption key rotation (v0.26.0+)
+
+The at-rest key (env `COMPOSER_ENCRYPTION_KEY` /
+`$COMPOSER_DATA_DIR/encryption.key`) encrypts every stored secret
+(AES-256-GCM, `enc:` prefix). Precedence: key file > env > auto-generated -
+the UI-settable key file wins. Rotate via Settings -> System -> Encryption
+Key Rotation, or `POST /api/v1/system/config/encryption-key/rotate` (admin).
+It re-encrypts every `enc:` value + SSH deploy keys + git token in ONE
+transaction, then swaps the key; the response returns the new key once
+(back it up). NEVER rotate by hand-editing the key file without the
+re-encrypt - that bricks every stored secret.
