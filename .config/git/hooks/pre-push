@@ -92,7 +92,7 @@ while read -r localref localsha remoteref remotesha; do
   [ -n "$commits" ] || continue
 
   # blob = per-commit `git show` (message + patch), capped
-  blob="$(printf '%s\n' "$commits" | xargs -r -n1 git show --no-color 2>/dev/null | head -c "$MAX_BYTES")"
+  blob="$(printf '%s\n' "$commits" | xargs -r -n1 git show --no-color 2>/dev/null | tr -d '\0' | head -c "$MAX_BYTES")"
 
   # 1. confidential-term scan
   if [ "${PI_CONFIDENTIAL_GUARD_OFF:-0}" != "1" ]; then
