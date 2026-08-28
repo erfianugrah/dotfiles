@@ -96,6 +96,7 @@ pgcli
 pgformatter
 pnpm
 poppler
+python-poetry
 prettier
 rclone
 ripgrep
