@@ -91,6 +91,18 @@ export const TELL_RULES: TellRule[] = [
       'mystery-tease framing ("what they don\'t tell you", "hides a classic X") - engagement-bait that withholds the mechanism one beat to manufacture curiosity. State the mechanism in the main clause.',
   },
   {
+    // Importance-announcing in its highest-precision forms only. The
+    // 2026-08-28 lexicanum sweep found the family reappearing in costume
+    // ("worth knowing", "worth recording", "worth a thought"); those live in
+    // the lexicanum LLM_MARKERS gate and erfi-voice, where judgement applies.
+    // Here only the phrasings with no honest use in this user's prose:
+    // "worth noting" / "worth mentioning" / "important to note".
+    id: "importance_announcing",
+    pattern: /\bworth noting\b|\bworth mentioning\b|\bimportant to note\b/gi,
+    reason:
+      'importance-announcing ("worth noting", "important to note") - rating the point instead of stating it. Drop the frame and keep the fact; order content so the item that matters comes first. Catalogue: erfi-voice, "Importance-announcing".',
+  },
+  {
     // Deliberately SHORTER than erfi-voice's watchlist. That list is GUIDANCE,
     // where a human weighs context; this is a hard BLOCK, and prose-lint.ts's
     // own Class A note is the warning - a word list as a gate "degrades into a
@@ -155,4 +167,25 @@ export function tellReason(
     'Full catalogue: erfi-voice skill, "Structural AI tells".\n' +
     "Kill switch: PI_AI_TELL_GUARD_OFF=1"
   );
+}
+
+/**
+ * A read-only search command (rg/grep/ag/...) is not authored prose - its
+ * PATTERN carrying a tell (e.g. `rg 'it is not X, it is Y'`) is a search, not a
+ * write. WRITE_BASH still matches such a command incidentally (a `2>/dev/null`
+ * redirect, a `>>` in a later segment), so the Bash guard skips a command that
+ * invokes a search tool and has no real authored-content sink: no heredoc, no
+ * tee, no git commit/tag/notes message, no in-place edit, and no redirect to a
+ * real file (a `>`/`>>` to something other than /dev/null|stderr|stdout or an
+ * fd dup). A command that both searches AND writes authored content (e.g.
+ * `rg x f && echo "it is not X, it is Y" > note.md`) is NOT skipped.
+ */
+export function isReadOnlySearchBash(cmd: string): boolean {
+  if (!/\b(?:rg|ripgrep|grep|egrep|fgrep|ag)\b/.test(cmd)) return false;
+  if (/<<-?\s*['"]?\w/.test(cmd)) return false; // heredoc
+  if (/\btee\b/.test(cmd)) return false; // tee to file
+  if (/\bgit\s+(?:commit|tag|notes)\b/.test(cmd)) return false; // authored message
+  if (/\b(?:sd|sed\s+-i|perl\s+-i)\b/.test(cmd)) return false; // in-place edits
+  if (/>>?\s*(?!&)(?!\/dev\/(?:null|stderr|stdout)\b)\S/.test(cmd)) return false; // redirect to a real file
+  return true;
 }

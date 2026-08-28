@@ -15,7 +15,7 @@
  * Kill switch: AI_TELL_GUARD_OFF=1 or PI_AI_TELL_GUARD_OFF=1.
  */
 
-import { isProsePath, scanTells, tellReason } from "../../.pi/agent/extensions/lib/ai-tell-core.ts";
+import { isProsePath, isReadOnlySearchBash, scanTells, tellReason } from "../../.pi/agent/extensions/lib/ai-tell-core.ts";
 import { WRITE_BASH } from "../../.pi/agent/extensions/lib/ascii-core.ts";
 
 function deny(
@@ -66,7 +66,7 @@ async function main() {
     if (found.length) deny(found, `MultiEdit -> ${target}`);
   } else if (tool === "Bash") {
     const cmd = String(input.command ?? "");
-    if (WRITE_BASH.test(cmd)) {
+    if (WRITE_BASH.test(cmd) && !isReadOnlySearchBash(cmd)) {
       // surface:"bash" - a commit message lives inside the quotes, so the
       // file-surface quoted-span masking would blank the whole payload.
       const found = scanTells(cmd, undefined, "bash");

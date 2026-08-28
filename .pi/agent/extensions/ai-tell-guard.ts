@@ -23,7 +23,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { scanTells, tellReason, isProsePath, TELL_RULES } from "./lib/ai-tell-core.ts";
+import { scanTells, tellReason, isProsePath, isReadOnlySearchBash, TELL_RULES } from "./lib/ai-tell-core.ts";
 import { WRITE_BASH } from "./lib/ascii-core.ts";
 
 export { scanTells, tellReason, isProsePath, TELL_RULES } from "./lib/ai-tell-core.ts";
@@ -84,7 +84,7 @@ export default function (pi: ExtensionAPI) {
 
     if (tool === "bash") {
       const cmd = (event.input as { command?: string }).command;
-      if (typeof cmd !== "string" || !WRITE_BASH.test(cmd)) return undefined;
+      if (typeof cmd !== "string" || !WRITE_BASH.test(cmd) || isReadOnlySearchBash(cmd)) return undefined;
       // surface:"bash" - the commit message is INSIDE the quotes, so quoted-span
       // masking would blank the payload (see MASK_RE_BASH in the core).
       return check(cmd, "bash (writes/commits)", "bash");

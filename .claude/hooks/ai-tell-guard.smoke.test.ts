@@ -81,6 +81,28 @@ describe("ai-tell-guard PreToolUse hook", () => {
     expect(stdout.trim()).toBe("");
   });
 
+  test("denies importance-announcing, allows plain 'worth reading'", async () => {
+    const bad = await runHook({
+      tool_name: "Write",
+      tool_input: {
+        file_path: "/tmp/notes.md",
+        content: "It is worth noting that the pooler drops idle connections after five minutes of inactivity.",
+      },
+    });
+    expect(JSON.parse(bad.stdout).hookSpecificOutput.permissionDecisionReason).toContain(
+      "importance_announcing",
+    );
+
+    const ok = await runHook({
+      tool_name: "Write",
+      tool_input: {
+        file_path: "/tmp/notes.md",
+        content: "The migration guide is worth reading before the window opens on Thursday.",
+      },
+    });
+    expect(ok.stdout.trim()).toBe("");
+  });
+
   test("denies a git commit carrying the aphorism tell, ignores plain bash", async () => {
     const bad = await runHook({
       tool_name: "Bash",
@@ -94,6 +116,24 @@ describe("ai-tell-guard PreToolUse hook", () => {
     });
     expect(plain.code).toBe(0);
     expect(plain.stdout.trim()).toBe("");
+  });
+
+  test("allows a read-only search whose pattern contains a tell (WRITE_BASH tripped by a redirect)", async () => {
+    // 2>/dev/null trips WRITE_BASH, but the tell lives in the SEARCH PATTERN,
+    // not in authored prose - the command writes nothing.
+    const search = await runHook({
+      tool_name: "Bash",
+      tool_input: { command: "rg -n 'not just a cache, but a whole subsystem for reads' docs/ 2>/dev/null || echo none" },
+    });
+    expect(search.code).toBe(0);
+    expect(search.stdout.trim()).toBe("");
+
+    // a search that ALSO writes authored prose to a real file is still scanned.
+    const alsoWrites = await runHook({
+      tool_name: "Bash",
+      tool_input: { command: "rg foo docs/ && echo 'This is not just a cache, but a whole subsystem for reads.' > note.md" },
+    });
+    expect(JSON.parse(alsoWrites.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
   });
 
   test("kill switch disables the hook", async () => {
