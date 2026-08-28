@@ -99,4 +99,10 @@ aliases:                  # optional: old URLs -> redirects (on rename/move)
   `reference/cloudflare-supabase-architecture.mdx` and
   `guides/usb4-10gbe-windows-tuning.mdx`. Equally: post-contract docs are often
   AI-assisted - do not pattern-match prose off them either. Match the two named
-  exemplars only.
+  exemplars only. A corpus-wide tell sweep (2026-08-28, six parallel reviewers
+  + a judge) removed the known tells from every post-contract doc and
+  normalised their spelling to British -ise; the regex-able subset now gates
+  in `tests/lib/mdx.ts` `LLM_MARKERS` (added: worth-hedges, honest-gap-label,
+  the-fix-colon). `REJECTED_MARKERS` there records why "the key insight" and
+  "deserves special mention" are NOT banned - both appear in the author's own
+  pre-contract writing, which is the voice the corpus calibrates against.
