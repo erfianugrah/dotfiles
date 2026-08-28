@@ -138,6 +138,14 @@
             "command": "bun \"$HOME/.claude/hooks/notify.ts\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$HOME/.claude/hooks/memledger-seed.ts\""
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
