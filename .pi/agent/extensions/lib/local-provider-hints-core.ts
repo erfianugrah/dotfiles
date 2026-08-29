@@ -76,16 +76,57 @@ const STACKS: LocalStack[] = [
 ];
 
 /**
+ * Quick-probe a local provider to see if it's alive now (boot-race detection).
+ *
+ * WSL reboots create a ~30-60s window where Docker Desktop hasn't finished
+ * binding ports yet. pi's retry loop (~14s) gives up before Docker is ready.
+ * A refused connection at request time + a healthy response NOW = boot race.
+ *
+ * Returns the probe result: "alive" (boot race), "dead" (genuinely down),
+ * or null (not a local provider or probe failed).
+ */
+export async function probeLocalProvider(info: ProviderInfo): Promise<"alive" | "dead" | null> {
+  const url = info.baseUrl;
+  if (!url) return null;
+  // Only probe loopback providers - remote providers have different failure modes.
+  if (!LOCAL_HOST_RE.test(url)) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2_000);
+    const resp = await fetch(`${url.replace(/\/$/, "")}/models`, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    clearTimeout(timeout);
+    return resp.ok ? "alive" : "dead";
+  } catch {
+    return "dead";
+  }
+}
+
+/**
  * Build the hint for a failed local-provider request. Returns null when this
  * isn't a local-provider connection failure (the common case - zero cost).
+ *
+ * `probeResult` is the outcome of probeLocalProvider(). When "alive", the
+ * hint says the service is up now (boot race) instead of claiming it's DOWN.
  */
-export function buildHint(errorText: string, info: ProviderInfo): string | null {
+export function buildHint(errorText: string, info: ProviderInfo, probeResult: "alive" | "dead" | null = null): string | null {
   if (!errorText || !isConnectionError(errorText)) return null;
   if (!isLocalProvider(info)) return null;
 
   const stack = STACKS.find((s) => s.match(info));
   const target = info.baseUrl ? ` at ${info.baseUrl}` : "";
   const label = stack ? stack.name : `local provider "${info.provider}"`;
+
+  if (probeResult === "alive") {
+    const lines = [
+      `${HINT_MARKER} ${label} is UP now - the earlier error was a Docker startup race.`,
+      "The proxy was still starting when pi tried to connect. Try your prompt again.",
+    ];
+    return lines.join("\n");
+  }
 
   const lines = [
     `${HINT_MARKER} ${label} did not accept the connection${target}.`,

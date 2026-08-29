@@ -29,10 +29,10 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { buildHint } from "./lib/local-provider-hints-core.ts";
+import { buildHint, probeLocalProvider } from "./lib/local-provider-hints-core.ts";
 
 // Re-export for the unit suite.
-export { buildHint, isConnectionError, isLocalProvider, HINT_MARKER } from "./lib/local-provider-hints-core.ts";
+export { buildHint, isConnectionError, isLocalProvider, probeLocalProvider, HINT_MARKER } from "./lib/local-provider-hints-core.ts";
 
 function errorTextOf(message: unknown): string {
   if (!message || typeof message !== "object") return "";
@@ -70,8 +70,33 @@ export default function (pi: ExtensionAPI) {
     }
     if (!provider) return;
 
-    const hint = buildHint(text, { provider, baseUrl });
+    // Probe to distinguish boot race (alive now) from genuinely dead.
+    const probeResult = await probeLocalProvider({ provider, baseUrl });
+
+    const hint = buildHint(text, { provider, baseUrl }, probeResult);
     if (!hint) return;
+
+    // Boot race: the service refused earlier but is alive now.
+    // Show the hint and auto-retry via a queued follow-up message.
+    // The original user prompt is already in the session, so "continue"
+    // tells the agent to pick up from the failed turn.
+    if (probeResult === "alive") {
+      if (!warned.has(provider)) {
+        warned.add(provider);
+        try {
+          if (ctx.hasUI) {
+            ctx.ui.notify(hint, "info");
+          }
+        } catch {
+          // fall through
+        }
+        console.error(hint);
+        pi.sendUserMessage("continue");
+      }
+      return;
+    }
+
+    // Genuinely dead - same behaviour as before.
     if (warned.has(provider)) return;
     warned.add(provider);
 
