@@ -64,7 +64,7 @@ cannot enter config mode.
 - `display utilization interface` / `display ddm` / `display pmp` HANG
   the SSH session - use `display utilization channel-group`.
 - Syslog entries are web-only (no CLI path; LIVE since 2026-07-31:
-  info-center 10.0.69.1 -> router vector -> minio). Optical DDM absent
+  info-center 10.0.69.1 -> router vector -> Silo). Optical DDM absent
   on this hardware, but basic SFP inventory + process list ARE
   readable via the ASP web backend (show transceiver / show processes).
 - The ASP content pages (/configchn/*.asp) are a second read surface
