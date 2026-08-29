@@ -205,6 +205,7 @@ Sourced from `.env` (not committed). Vaultwarden vault has the canonical copies 
 ## Common pitfalls
 
 - **`ports: "8080:8080"` for backend services**: don't. Caddy host-mode reaches static IPs directly. Publishing ports adds unnecessary attack surface and can collide with host services. Only publish ports for services that need direct external access (rare — Caddy is the front door).
+- **Port-publishing on an `internal: true` network silently does nothing.** Docker creates NO DNAT rule for it - runtime `NetworkSettings.Ports` stays `null` and `docker port` is empty, with no error. If another stack needs to scrape/reach a service on an internal network, declare that network `external: true` in the CONSUMER stack and make the consumer a MEMBER of it (monitoring-compose's prometheus joins `memledger_backend` to scrape `172.19.51.30:9187`), never try to publish a host port. (2026-08-29, memledger-postgres exporter.)
 - **Forgetting to add the Caddyfile entry**: stack runs but `<svc>.<your-zone>` returns 502. Always pair compose-stack changes with Caddyfile entries.
 - **Mismatched IP between compose and Caddyfile**: change one, forget the other. The static IP in `ipv4_address:` MUST equal the IP in `reverse_proxy`. Search both files when changing IPs.
 - **Mixing `network_mode: host` with custom networks**: a service can't have both. Caddy uses host-mode; everything else uses bridge networks with static IPs.

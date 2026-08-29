@@ -165,6 +165,7 @@ alias zjda="zj da"
 alias s=sentry-cli
 alias sb=supabase
 alias pgpasteriser='(set -a; source ~/pastebin/.env; set +a; pgcli "$PASTERISER_DB_URL")'
+alias navidrome="cliamp --provider navidrome"
 
 # ---------------------------------------------------------------------------
 # Environment
