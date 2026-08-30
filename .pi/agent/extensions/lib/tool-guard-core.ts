@@ -158,10 +158,16 @@ export const BASH_RULES: BlockRule[] = [
     segment: true,
   },
   {
+    // Escape hatch (2026-08-30): AGENTS.md already carves out find for the
+    // capabilities ripgrep/glob lack (-newermt, -printf, -mtime, -size), but the
+    // guard blocked them anyway - a rule stricter than the policy it enforces.
     id: "find_name",
     pattern: /^\s*find\b[^&;|]*\s-name\b/,
+    test: (seg: string) =>
+      /^\s*find\b[^&;|]*\s-name\b/.test(seg) &&
+      !/\s-(newer[mac]?t?|printf|mtime|ctime|atime|size|perm|user|group|delete|exec)\b/.test(seg),
     reason:
-      "Prefer the `Glob` tool for filename matching (e.g. `pattern='**/*.ts'`). `find -name` is slower (no gitignore awareness) and harder to read.",
+      "Prefer the `Glob` tool for filename matching (e.g. `pattern='**/*.ts'`). `find -name` is slower (no gitignore awareness) and harder to read. (Exempt: combined with -newermt/-printf/-mtime/-size/-exec etc - those are capabilities glob genuinely lacks.)",
     segment: true,
   },
   {
@@ -171,10 +177,18 @@ export const BASH_RULES: BlockRule[] = [
     segment: true,
   },
   {
+    // Escape hatch (2026-08-30): `glob` caps at 100 mtime-sorted results, so it
+    // CANNOT enumerate a large tree for aggregate work (e.g. counting tool calls
+    // across 1409 session files). Blocking those was a false positive that cost
+    // two retries. Allow when the output is piped/redirected into an aggregation
+    // step - that shape is never "agent wants to eyeball some filenames".
     id: "rg_files",
     pattern: /^\s*rg\s+(-\S*\s+)*--files\b/,
+    test: (seg: string) =>
+      /^\s*rg\s+(-\S*\s+)*--files\b/.test(seg) &&
+      !/[|>]|\$\(|`|\bxargs\b|\bwc\b|\bsort\b|\buniq\b/.test(seg),
     reason:
-      "Prefer the `Glob` tool (wraps `rg --files -g`). It returns mtime-sorted results with a structured truncation footer.",
+      "Prefer the `Glob` tool (wraps `rg --files -g`). It returns mtime-sorted results with a structured truncation footer. (Exempt: piping/redirecting into wc/sort/uniq/xargs or a file - glob caps at 100 results and can't do aggregate enumeration.)",
     segment: true,
   },
   {
@@ -222,10 +236,16 @@ export const BASH_RULES: BlockRule[] = [
     segment: true,
   },
   {
+    // Escape hatch (2026-08-30): the point of this rule is "don't dump a whole
+    // file into context unstructured" - which only applies when the output
+    // REACHES context. `head -100000 f > out` or `| wc -l` never does.
     id: "head_full_file",
     pattern: /^\s*head\s+(-n\s*)?-?\d{4,}\s+\S/,
+    test: (seg: string) =>
+      /^\s*head\s+(-n\s*)?-?\d{4,}\s+\S/.test(seg) &&
+      !/[|>]|\$\(|`/.test(seg),
     reason:
-      "For reading whole files, use the `Read` tool (gives line numbers + length header). `head -n 99999` is just a slower `cat` and dumps unstructured.",
+      "For reading whole files, use the `Read` tool (gives line numbers + length header). `head -n 99999` is just a slower `cat` and dumps unstructured. (Exempt: piped or redirected - that output never reaches context.)",
     segment: true,
   },
   {

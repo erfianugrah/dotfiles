@@ -122,13 +122,27 @@ describe("skill-guard e2e / action (tool_call)", () => {
     expect(await toolCall("bash", { command: "git status" }, ctx)).toBeUndefined();
   });
 
-  test("intent + action share the dedup: intent fly suppresses the flyctl block", async () => {
+  test("intent and action have SEPARATE budgets: an intent note never disarms the action block", async () => {
+    // Revised 2026-08-30. This test previously asserted the opposite - that a
+    // passing mention of fly.io suppressed the block on a real `flyctl deploy`.
+    // That was the rustnzb failure shape encoded as a contract: acknowledge the
+    // skill in prose, then violate it in bash with the guard already spent.
     const ctx = freshCtx();
     const intent = await beforeStart("let's use fly.io for this", ctx);
     expect(intent?.message?.content).toContain("`fly`");
-    // fly already nudged via intent -> the bash action must NOT block again
+    // The intent note is advisory only - the ACTION must still be intercepted.
     const action = await toolCall("bash", { command: "flyctl deploy" }, ctx);
-    expect(action).toBeUndefined();
+    expect(action?.block).toBe(true);
+  });
+
+  test("same command retried passes, but a DIFFERENT command on the same rule re-fires", async () => {
+    const ctx = freshCtx();
+    // First occurrence blocks.
+    expect((await toolCall("bash", { command: "flyctl deploy" }, ctx))?.block).toBe(true);
+    // Exact retry passes, so the agent is never stuck in a loop.
+    expect(await toolCall("bash", { command: "flyctl deploy" }, ctx)).toBeUndefined();
+    // A genuinely different context on the same skill earns its own nudge.
+    expect((await toolCall("bash", { command: "flyctl secrets set FOO=bar" }, ctx))?.block).toBe(true);
   });
 
   test("different session gets a fresh block", async () => {

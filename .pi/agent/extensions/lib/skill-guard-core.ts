@@ -212,7 +212,7 @@ export function actionReason(hint: SkillHint, skillsDir: string = SKILLS_DIR): s
   return (
     `skill-guard[${hint.id}]: this touches the \`${hint.skill}\` skill's domain - ${hint.why}. ` +
     `Read ${skillsDir}/${hint.skill}/SKILL.md (or /skill:${hint.skill}) first, then retry. ` +
-    `This nudge fires once per session.`
+    `Retrying this same command passes; a different command in this skill's domain nudges again.`
   );
 }
 

@@ -66,10 +66,27 @@ export {
 // ---- Extension registration ----------------------------------------------
 
 export default function (pi: ExtensionAPI) {
-  // Fired skills, keyed by session file so /new starts fresh. Skill name is
-  // the dedup unit: once we've nudged for `fly` this session (via intent OR
-  // action OR bash), we don't nudge for it again.
-  const firedBySession = new Map<string, Set<string>>();
+  // Fired nudges, keyed by session file so /new starts fresh.
+  //
+  // Dedup design (revised 2026-08-30). The original keyed on SKILL NAME shared
+  // across all three paths, which had two failure modes:
+  //   1. The non-blocking INTENT note consumed the budget for the blocking
+  //      ACTION guard. A session that merely said "deploy the stack" (intent)
+  //      could then run `ssh servarr 'docker compose up -d'` thirty turns later
+  //      and never be blocked - the rustnzb shape exactly: acknowledge the
+  //      skill in prose, violate it in bash, guard already spent.
+  //   2. One nudge per skill per session is too few: a long session legitimately
+  //      hits the same skill in several DIFFERENT contexts (compose up, then a
+  //      cert rotation, then a pipeline edit) and each deserves its own nudge.
+  //
+  // Now: namespaces are separate (`intent:<skill>` vs `action:<ruleId>`), and
+  // the action path dedups on the EXACT command/path too, so an immediate retry
+  // of the same command passes (preserving the block-once-then-allow contract)
+  // while a genuinely different command matching the same rule re-fires. A
+  // per-rule cap keeps a stubborn loop from becoming a nag.
+  const firedBySession = new Map<string, Map<string, number>>();
+
+  const MAX_FIRES_PER_RULE = Number(process.env.PI_SKILL_GUARD_MAX_FIRES) || 3;
 
   const sessionKey = (ctx: unknown): string => {
     try {
@@ -80,13 +97,24 @@ export default function (pi: ExtensionAPI) {
       return "default";
     }
   };
-  const firedSet = (key: string): Set<string> => {
+  const firedSet = (key: string): Map<string, number> => {
     let s = firedBySession.get(key);
     if (!s) {
-      s = new Set();
+      s = new Map();
       firedBySession.set(key, s);
     }
     return s;
+  };
+
+  /** Count of prior fires for a dedup key. */
+  const fireCount = (fired: Map<string, number>, k: string): number =>
+    fired.get(k) ?? 0;
+
+  /** Record a fire; returns the new count. */
+  const bump = (fired: Map<string, number>, k: string): number => {
+    const n = fireCount(fired, k) + 1;
+    fired.set(k, n);
+    return n;
   };
 
   pi.on("session_shutdown", async (_event, ctx) => {
@@ -100,9 +128,12 @@ export default function (pi: ExtensionAPI) {
     if (hints.length === 0) return undefined;
 
     const fired = firedSet(sessionKey(ctx));
-    const fresh = hints.filter((h) => !fired.has(h.skill));
+    // Namespaced: an intent note must NOT consume the action guard's budget.
+    const fresh = hints.filter(
+      (h) => fireCount(fired, `intent:${h.skill}`) < MAX_FIRES_PER_RULE,
+    );
     if (fresh.length === 0) return undefined;
-    for (const h of fresh) fired.add(h.skill);
+    for (const h of fresh) bump(fired, `intent:${h.skill}`);
 
     return {
       message: {
@@ -141,9 +172,21 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (!hint) return undefined;
-    if (fired.has(hint.skill)) return undefined; // already nudged this session
 
-    fired.add(hint.skill);
+    // Dedup on rule + exact target: an immediate retry of the SAME command
+    // passes (block-once-then-allow, so the agent is never stuck), but a
+    // different command matching the same rule earns its own nudge.
+    const target =
+      e.input.command ?? e.input.path ?? e.input.file_path ?? e.input.patchText ?? "";
+    const exact = `action:${hint.id}:${target.trim().slice(0, 200)}`;
+    if (fireCount(fired, exact) > 0) return undefined; // this exact call already nudged
+
+    // Per-rule cap: a stubborn loop gets 3 nudges, then we stop nagging.
+    const perRule = `action:${hint.id}`;
+    if (fireCount(fired, perRule) >= MAX_FIRES_PER_RULE) return undefined;
+
+    bump(fired, exact);
+    bump(fired, perRule);
     return { block: true, reason: actionReason(hint) };
   });
 }
