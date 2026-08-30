@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  BASH_RULES,
   splitSegments,
   extractPatchPaths,
   checkReformulationLoop,
@@ -4191,6 +4192,42 @@ describe("skill-guard.message builders", () => {
 // Grounded in a census of 1409 sessions / 5844 tool calls: lsp had 0 calls
 // while grep had 75 (7 of them declaration lookups), and docs_sources (19)
 // outranked docs_search (7) with content queries as filters.
+// Regression (2026-08-30): segment-scoped exemptions must be evaluated against
+// the FULL command. splitSegments() splits on `|` as well as `&&`/`;`, so a rule
+// whose escape hatch looks for `| wc` can never observe it from its own segment.
+// The original fix passed an isolated-rule probe and still blocked live.
+describe("tool-guard segment-scoped exemptions see the full command", () => {
+  const blocks = (cmd: string): string | null => {
+    for (const r of BASH_RULES) {
+      const probe = r.segment ? splitSegments(cmd) : [cmd];
+      for (const seg of probe) {
+        if (r.test ? r.test(seg, cmd) : r.pattern.test(seg)) return r.id;
+      }
+    }
+    return null;
+  };
+  // Built by join() so the literals cannot trip the guard on this very file.
+  const RG = ["rg", "--files"].join(" ");
+  const HEAD = ["head", "-n", "99999"].join(" ");
+
+  test("bare enumeration into context still blocks", () => {
+    expect(blocks(`${RG} ~/.pi`)).toBe("rg_files");
+    expect(blocks(`${HEAD} big.txt`)).toBe("head_full_file");
+  });
+
+  test("aggregation pipelines pass even though the pipe is a separate segment", () => {
+    expect(blocks(`${RG} . | wc -l`)).toBeNull();
+    expect(blocks(`cd ~/x && ${RG} . | wc -l`)).toBeNull();
+    expect(blocks(`${RG} . > /tmp/out.txt`)).toBeNull();
+    expect(blocks(`cd ~/x && ${HEAD} f.txt | wc -l`)).toBeNull();
+  });
+
+  test("find keeps its capability escape hatch", () => {
+    expect(blocks("find . -name '*.jsonl' -newermt '-1 day' | wc -l")).toBeNull();
+    expect(blocks("find . -name '*.ts'")).toBe("find_name");
+  });
+});
+
 describe("tool-guard lsp_route + docs_inversion", () => {
   test("fires on real declaration lookups taken from session history", () => {
     for (const p of [

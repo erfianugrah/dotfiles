@@ -51,6 +51,7 @@ import {
 // Re-export the pure helpers the pi test suite imports from this module so
 // ../tests/extensions.test.ts keeps resolving them here.
 export {
+  BASH_RULES,
   splitSegments,
   extractPatchPaths,
   stripAnsiCSpans,
@@ -384,7 +385,7 @@ export default function (pi: ExtensionAPI) {
         if (DISABLED.has(rule.id)) continue;
         const probe = rule.segment ? splitSegments(command) : [command];
         for (const seg of probe) {
-          const matched = rule.test ? rule.test(seg) : rule.pattern.test(seg);
+          const matched = rule.test ? rule.test(seg, command) : rule.pattern.test(seg);
           if (matched) {
             return { block: true, reason: `tool-guard[${rule.id}]: ${rule.reason}` };
           }

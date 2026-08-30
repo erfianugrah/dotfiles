@@ -188,7 +188,14 @@ export type BlockRule = {
   reason: string;
   segment?: boolean; // if true, test against each `&&|;|||` segment, not the whole command
   // Optional predicate that overrides `pattern` for the match decision.
-  test?: (seg: string) => boolean;
+  //
+  // `full` is the ENTIRE original command, which a segment-scoped rule needs for
+  // pipe-aware exemptions: splitSegments() splits on `|` too, so a rule that
+  // wants to allow `rg --files . | wc -l` can never see the `| wc` from its own
+  // segment (it is a different segment). Bug found live 2026-08-30 - the
+  // previous exemption was unreachable through the real code path because it
+  // only inspected `seg`.
+  test?: (seg: string, full: string) => boolean;
 };
 
 // Strip bash ANSI-C quoting spans (`$'...'`) from a command.
@@ -251,9 +258,11 @@ export const BASH_RULES: BlockRule[] = [
     // step - that shape is never "agent wants to eyeball some filenames".
     id: "rg_files",
     pattern: /^\s*rg\s+(-\S*\s+)*--files\b/,
-    test: (seg: string) =>
+    test: (seg: string, full: string) =>
       /^\s*rg\s+(-\S*\s+)*--files\b/.test(seg) &&
-      !/[|>]|\$\(|`|\bxargs\b|\bwc\b|\bsort\b|\buniq\b/.test(seg),
+      // Exemption is evaluated against the FULL command: the pipe target lands
+      // in a separate segment, so `seg` alone can never prove aggregation.
+      !/[|>]|\$\(|`|\bxargs\b|\bwc\b|\bsort\b|\buniq\b/.test(full),
     reason:
       "Prefer the `Glob` tool (wraps `rg --files -g`). It returns mtime-sorted results with a structured truncation footer. (Exempt: piping/redirecting into wc/sort/uniq/xargs or a file - glob caps at 100 results and can't do aggregate enumeration.)",
     segment: true,
@@ -308,9 +317,9 @@ export const BASH_RULES: BlockRule[] = [
     // REACHES context. `head -100000 f > out` or `| wc -l` never does.
     id: "head_full_file",
     pattern: /^\s*head\s+(-n\s*)?-?\d{4,}\s+\S/,
-    test: (seg: string) =>
+    test: (seg: string, full: string) =>
       /^\s*head\s+(-n\s*)?-?\d{4,}\s+\S/.test(seg) &&
-      !/[|>]|\$\(|`/.test(seg),
+      !/[|>]|\$\(|`/.test(full),
     reason:
       "For reading whole files, use the `Read` tool (gives line numbers + length header). `head -n 99999` is just a slower `cat` and dumps unstructured. (Exempt: piped or redirected - that output never reaches context.)",
     segment: true,
