@@ -13,6 +13,8 @@ import {
   collectSensitiveEnv,
   envDumpSegment,
   MIN_VALUE_LEN,
+  PLAINTEXT_PIPELINE_REASON,
+  plaintextPipelineSegment,
   redactSecrets,
 } from "../extensions/lib/secret-output-guard-core.ts";
 
@@ -168,5 +170,67 @@ describe("envDumpSegment", () => {
 
   test("catches the dump segment inside a compound command", () => {
     expect(envDumpSegment(["cd /tmp", "env "])).toBe("env");
+  });
+});
+
+// ── plaintextPipelineSegment ────────────────────────────────────────────────
+// The env-dump patterns above catch `env`/`printenv`. They do NOT catch the
+// three forms that actually leaked credentials in practice: a whole-container
+// env dump over ssh, a sops decrypt piped into a text filter, and a vault read
+// piped into jq. All three put plaintext in a pipeline where one mistyped stage
+// or one traceback prints it. secretctl answers the same questions with a
+// digest, so these are blockable rather than merely discouraged.
+describe("plaintextPipelineSegment", () => {
+  const blocked = [
+    // whole-container env transport (the 2026-08-30 MINIO_ROOT_PASSWORD leak)
+    `docker inspect memledger-backup --format "{{json .Config.Env}}"`,
+    `ssh servarr 'docker inspect caddy --format "{{json .Config.Env}}"'`,
+    `docker inspect c --format '{{ json .Config.Env }}'`,
+    // sops decrypt into a text filter
+    `sops -d .env | grep '^POSTGRES_PASSWORD='`,
+    `sops decrypt .env | cut -d= -f2-`,
+    `sops -d --input-type dotenv .env | awk -F= '{print $2}'`,
+    // vault read into jq
+    `bw get item FOO | jq -r '.notes'`,
+    `curl -s localhost:8087/object/item/x | jq -r '.data.fields[].value'`,
+  ];
+  for (const cmd of blocked) {
+    test(`blocks: ${cmd.slice(0, 44)}`, () => {
+      expect(plaintextPipelineSegment([cmd])).not.toBeNull();
+    });
+  }
+
+  const allowed = [
+    // Field-selected docker inspect: transports ONE value, which is the
+    // documented replacement, so it must not be blocked.
+    `docker inspect c --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^VAR=//p'`,
+    // Non-env docker inspect is unrelated to credentials.
+    `docker inspect c --format '{{json .State}}'`,
+    `docker inspect c --format '{{.NetworkSettings.IPAddress}}'`,
+    // sops NOT piped into a filter - decrypt-in-place is the sops-encrypt skill's path.
+    `sops -d secrets.yaml`,
+    `sops decrypt --input-type dotenv .env > /dev/null`,
+    // sops piped into a masking filter is the approved way to LIST keys.
+    `sops -d .env | sed 's/=.*/=<set>/'`,
+    // secretctl itself, obviously.
+    `secretctl cmp 'sops:.env#KEY' 'docker:servarr/c#VAR'`,
+    `bw get item FOO | secretctl fp -`,
+    // jq on something that is not a vault read.
+    `curl -s localhost:9090/api/v1/query | jq -r '.data'`,
+  ];
+  for (const cmd of allowed) {
+    test(`allows: ${cmd.slice(0, 44)}`, () => {
+      expect(plaintextPipelineSegment([cmd])).toBeNull();
+    });
+  }
+
+  test("names the secretctl replacement in the reason", () => {
+    expect(PLAINTEXT_PIPELINE_REASON).toContain("secretctl");
+  });
+
+  test("scans every segment, not just the first", () => {
+    expect(
+      plaintextPipelineSegment(["cd /tmp", `sops -d .env | grep TOKEN`]),
+    ).not.toBeNull();
   });
 });

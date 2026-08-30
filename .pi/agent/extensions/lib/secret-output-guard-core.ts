@@ -216,6 +216,60 @@ export function envDumpSegment(segments: string[]): string | null {
   return null;
 }
 
+// ── plaintext-in-a-pipeline forms (blockable, with a named replacement) ─────
+
+/** Whole-container env transport. `{{json .Config.Env}}` renders EVERY variable
+ *  in the container as one JSON string, so pulling one credential ships all of
+ *  them - across ssh, into a local interpreter, and through any traceback on
+ *  the way. This is the exact shape of the 2026-08-30 MINIO_ROOT_PASSWORD leak.
+ *  The field-selected form (`{{range .Config.Env}}{{println .}}{{end}}` piped
+ *  to sed) transports one value and is deliberately NOT matched. */
+const DOCKER_ENV_DUMP = /docker\s+inspect\b[^|]*\{\{-?\s*json\s+\.Config\.Env\s*-?\}\}/;
+
+/** sops decrypt piped into a text filter. Two problems, not one: plaintext
+ *  exists in a pipeline where a mistyped stage can print it, and `cut -d= -f2`
+ *  truncates any value containing '=' (base64 padding, connection strings),
+ *  which then reads as drift against a correctly-read copy. A pipe into a
+ *  MASKING filter (sed 's/=.*\/=<set>/') is the approved key-listing path and
+ *  is excluded. */
+const SOPS_TO_FILTER =
+  /\bsops\s+(?:-d\b|decrypt\b)[^|]*\|\s*(?:grep|egrep|rg|cut|awk|head|tail|tr|sed)\b/;
+
+/** A masking filter keeps no value, so it is not a leak. Checked against the
+ *  stage AFTER the pipe: `sed 's/=.*$/=<set>/'` and friends. */
+const MASKING_FILTER = /\|\s*sed\s+(?:-\S+\s+)*['"]?s\/=\.\*/;
+
+/** Vault read piped into a value extractor. `jq -r .notes` / `.value` /
+ *  `.fields[]` on a `bw`/bw-serve response puts the credential on stdout. */
+const VAULT_TO_JQ =
+  /(?:\bbw\s+get\b|127\.0\.0\.1:8087|localhost:8087)[^|]*\|\s*jq\b[^|]*(?:\.notes|\.value|\.password|\.fields)/;
+
+/** Returns the offending segment, or null. Mirrors envDumpSegment's shape so
+ *  the extension can treat both the same way. */
+export function plaintextPipelineSegment(segments: string[]): string | null {
+  for (const seg of segments) {
+    const s = seg.trim();
+    // secretctl is the replacement, so never block a command that uses it.
+    if (/\bsecretctl\b/.test(s)) continue;
+    if (DOCKER_ENV_DUMP.test(s)) return s;
+    if (SOPS_TO_FILTER.test(s) && !MASKING_FILTER.test(s)) return s;
+    if (VAULT_TO_JQ.test(s)) return s;
+  }
+  return null;
+}
+
+export const PLAINTEXT_PIPELINE_REASON =
+  "puts a credential's PLAINTEXT in a shell pipeline, where one mistyped stage, one merged stderr, " +
+  "or one traceback prints it into the session transcript and the synced session store. " +
+  "Use `secretctl` instead - it answers the same question with a keyed digest and never renders the value:\n" +
+  "  compare:      secretctl cmp 'sops:.env#KEY' 'docker:HOST/CONTAINER#VAR'\n" +
+  "  fingerprint:  secretctl fp 'bw:ITEM#FIELD'\n" +
+  "  use it:       secretctl exec 'sops:.env#KEY' --as NAME -- <cmd>\n" +
+  "For a remote container it extracts AND hashes on the far host, so only a digest crosses ssh. " +
+  "If you genuinely need one field's value locally, select the field rather than dumping the env: " +
+  "`docker inspect C --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^VAR=//p'`. " +
+  "See ~/.pi/agent/skills/secret-handling/SKILL.md. Kill switch: PI_SECRET_GUARD_OFF=1.";
+
 export const ENV_DUMP_REASON =
   "wholesale environment dump (`env`/`printenv`/bare `set`/`export -p`) prints EVERY secret in the " +
   "process env (API keys, tokens) into the session transcript, model context, and synced session store. " +

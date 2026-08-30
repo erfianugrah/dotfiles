@@ -37,12 +37,19 @@ import {
   collectSensitiveEnv,
   ENV_DUMP_REASON,
   envDumpSegment,
+  PLAINTEXT_PIPELINE_REASON,
+  plaintextPipelineSegment,
   redactSecrets,
   type EnvSecret,
 } from "./lib/secret-output-guard-core.ts";
 
 // Re-exports for the unit suite.
-export { collectSensitiveEnv, envDumpSegment, redactSecrets };
+export {
+  collectSensitiveEnv,
+  envDumpSegment,
+  plaintextPipelineSegment,
+  redactSecrets,
+};
 
 interface ToolResultContent {
   type: string;
@@ -70,12 +77,27 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName !== "bash") return undefined;
     const command = (event.input as { command?: string }).command;
     if (typeof command !== "string") return undefined;
-    const hit = envDumpSegment(splitSegments(command));
-    if (!hit) return undefined;
-    return {
-      block: true,
-      reason: `tool-guard[secret_env_dump]: blocked \`${hit}\` - ${ENV_DUMP_REASON}`,
-    };
+    const segments = splitSegments(command);
+
+    const dump = envDumpSegment(segments);
+    if (dump) {
+      return {
+        block: true,
+        reason: `tool-guard[secret_env_dump]: blocked \`${dump}\` - ${ENV_DUMP_REASON}`,
+      };
+    }
+
+    // Checked after the env-dump patterns: a bare `env` is the more specific
+    // diagnosis, so it should win the error message when a command trips both.
+    const pipeline = plaintextPipelineSegment(segments);
+    if (pipeline) {
+      return {
+        block: true,
+        reason: `tool-guard[secret_plaintext_pipeline]: blocked \`${pipeline}\` - ${PLAINTEXT_PIPELINE_REASON}`,
+      };
+    }
+
+    return undefined;
   });
 
   pi.on("tool_result", async (event) => {
