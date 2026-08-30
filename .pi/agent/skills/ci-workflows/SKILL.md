@@ -381,6 +381,22 @@ Copy this same file to both `.github/workflows/ci.yml` and `.forgejo/workflows/c
 
 The single biggest LLM failure on CI YAML: pinning to `@v3` or `@v4` from training-data defaults when the current major is several ahead. **ALWAYS check the action's latest release** via `webfetch https://api.github.com/repos/<owner>/<repo>/releases/latest | jq .tag_name` before writing the YAML. Don't trust memory - and don't trust this table either; two of its rows were a major behind within three months.
 
+### gitleaks-action is now license-gated - use the bare binary
+
+gitleaks-action (v2+) requires a `GITLEAKS_LICENSE` secret (free key via the gitleaks.io form; 1 free license covers 1 repo). It validates by querying the **GitHub API** for the repo owner, so on non-GitHub runners (Forgejo) the owner comes back as `unexpected type [undefined]` and the action hard-fails with "missing gitleaks license". The gitleaks **core stays MIT** with binaries on the releases page; the action is the only licensed part. Pattern, verified on a self-hosted Forgejo runner (2026-08-30):
+
+```yaml
+- name: gitleaks
+  run: |
+    set -euo pipefail
+    ver=8.30.1
+    curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz" -o /tmp/gl.tgz
+    tar -xzf /tmp/gl.tgz -C /tmp
+    /tmp/gitleaks git --no-banner
+```
+
+`gitleaks git` scans full history, redacts findings by default, and exits 1 on leaks. Verify the asset name and tarball layout against the release API before pinning - the naming changed to `gitleaks_<ver>_<os>_<arch>.tar.gz` with the binary at the tarball top level. On GitHub the action is a trap too: `@v2` (Node 20) stops working on GitHub-hosted runners after 2026-09-16, and `@v3` needs runner >= 2.327.1.
+
 ### A latest release does NOT imply a floating major tag
 
 Checking `releases/latest` tells you the release, not what you can write in `uses:`. Some orgs publish a moving `v9` alongside `v9.0.0`; astral-sh stopped doing that after v7. Pinning `@v9` from a verified `tag_name: v9.0.0` fails the job before any step runs:
@@ -402,6 +418,18 @@ GitHub deprecated v3 in 2024 and **breaks running workflows** when artifacts are
 ### v6 actions need Node 24
 
 `actions/checkout@v7`, `actions/setup-node@v7`, `docker/*@v4+`, `softprops/action-gh-release@v3` all use the Node 24 actions runtime. Self-hosted runners must be **Actions Runner ≥ 2.327.1**. Older self-hosted runners hang or fail on these. Either upgrade the runner or pin to the previous major (v5/v3/v2.6.2 respectively).
+
+### Forgejo runner: stuck workers, and where run results live
+
+A runner worker can hang after picking up a task: the log shows `task N repo is ...` and then nothing for minutes, no job container in `docker ps`. Fix: kill PID 1 inside the runner container (`docker compose exec -T runner sh -c 'kill 1'`); with `restart: unless-stopped` docker recreates it. Already-assigned orphaned tasks are NOT re-dispatched by Forgejo after the worker dies - retrigger with a fresh push. Job output does NOT appear in the runner's logs (it streams to the UI only). Read results from the Forgejo DB instead:
+
+```bash
+docker exec <forgejo-db> psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "select id, status, updated from action_run order by id desc limit 5"
+# per-job: same query on action_task (has log_filename)
+```
+
+Status codes: **1 = success, 2 = failure** (verify the mapping against a run whose outcome you know before trusting the numbers).
 
 ### Forgejo `concurrency:` doesn't queue
 
