@@ -57,6 +57,40 @@ For decluttarr / recyclarr, `SONARR_API_KEY` / `RADARR_API_KEY` come from the st
 
 8. **Bash quoting trap on Prowlarr/arr API payloads**: indexer JSON contains `(` `)` in helpText. Inline `-d "$PAYLOAD"` triggers "syntax error near unexpected token `('`". Always tempfile + `--data-binary @file`.
 
+## DNS: all containers resolve via knotea, not Tailscale
+
+The fleet-wide tailnet profile (nixos-fleet) sets `accept-dns=false` on every NixOS host and pins `networking.nameservers = [ "10.0.10.5" ]` (knotea on the router). servarr-nixos additionally pins `virtualisation.docker.daemon.settings.dns = [ "10.0.10.5" ]` so Docker's embedded DNS (127.0.0.11) forwards to knotea regardless of when the daemon last restarted.
+
+Two failure modes this prevents (both hit 2026-08-30):
+
+- **Tailscale accept-dns hijack**: `tailscaled` rewrites `/etc/resolv.conf` to 100.100.100.100, bypassing knotea's 44 split-horizon erfi.io overrides. `*.erfi.io` resolves to public Cloudflare IPs instead of 10.0.10.1. Symptoms: arrs connect to the public edge instead of the internal one, hairpinning through the internet.
+- **Docker resolver staleness**: after the host resolv.conf flips, Docker's embedded DNS (127.0.0.11) still forwards to the old resolver until the daemon restarts. Containers SERVFAIL on everything. Fix: restart Docker or pin daemon.settings.dns.
+
+## Remote path mappings: hostname, not IP
+
+The arrs' qBit download-client configs use `host: qbit.erfi.io`. Remote path mappings must use the SAME host string - Sonarr/Radarr match mappings by exact host field. A mapping keyed to `172.19.1.22` never applies when the client connects via `qbit.erfi.io`, and Sonarr reports "directory does not exist inside the container" even though the path exists.
+
+Correct mapping (all three arrs):
+```
+host: qbit.erfi.io
+remotePath: /media/torrents/
+localPath: /data/torrents/
+```
+
+## Prowlarr app sync categories
+
+Prowlarr's Sonarr app must sync with TV categories (5000-series), not movie (2000-series). If syncCategories includes 2000-series, Sonarr's Newznab queries to every indexer include movie cats and return 0 results for TV shows. Correct Sonarr syncCategories: `[5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080]`.
+
+Symptom: interactive release search returns 0 results even though Prowlarr finds them fine when queried directly. Check Sonarr's debug log for the `cat=` parameter in the Newznab URL.
+
+## Rustnzb queue pause
+
+Rustnzb can end up with its queue globally paused (the SAB-compat API returns `"paused": true` in the queue response). Jobs get accepted from arrs but never download. Fix: call `mode=resume` on the rustnzb SAB-compat API (same as SABnzbd's API). The arr shows the item as "paused" in its queue.
+
+## FlareSolverr tag wiring
+
+Prowlarr's FlareSolverr indexer proxy (`indexerproxy` API, id=1) needs `tags: [1]` matching the tag ID on the Cloudflare-protected indexers (1337x, KickAssTorrents). The tag is `flaresolverr` (id=1). Without the tag, the proxy exists but never engages - indexer tests fail with generic connection errors.
+
 ## Sibling skills
 
 - **`jellyfin`** — consumer-side (jellyfin/jellyseerr/navidrome). Jellyseerr requests upstream into Sonarr/Radarr via API integration.

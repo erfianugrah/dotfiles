@@ -109,7 +109,9 @@ Profiles: `base` (tz/locale incl. the en_GB ssh-LANG workaround, nix+gc),
 `shell` (zsh+tmux+atuin+direnv+fzf+zoxide+nvim+delta+modern-CLI - BINARIES
 only; the stow dotfiles and zinit/omz/p10k/TPM do the rest), `admin` (sshd
 key-only, erfi+wheel, opt-in root key backstop, tailscale), `net`
-(`fleet.net.defaultMtu` + explicit-MTU doctrine).
+(`fleet.net.defaultMtu` + explicit-MTU doctrine), `tailnet` (DNS doctrine:
+`accept-dns=false` on tailscale, knotea 10.0.10.5 as fleet resolver,
+/etc/hosts tailnet node map replacing MagicDNS).
 
 **A monorepo was tried and rejected the same day (2026-08-26).** Almost
 nothing in these configs is reusable - hearth's `iot.nix` is 2266 lines of HA
@@ -131,6 +133,27 @@ pattern - the fleet repo stays private. servarr pending, on its own schedule.
 Fleet-repo commands: `make check` (eval both arches), **`make cache`**
 (aarch64 substitute check - run this whenever `shell.nix` gains a package),
 `make attrs`, `make fmt`.
+
+### Tailnet profile (2026-08-30)
+
+The `tailnet` profile is the fleet DNS doctrine: knotea resolves, MagicDNS
+does not. It sets `services.tailscale.extraSetFlags = [ "--accept-dns=false" ]`
+on every host, pins `networking.nameservers = [ "10.0.10.5" ]` (knotea on the
+router), and writes an /etc/hosts entry for every tailnet node (name +
+FQDN) so MagicDNS-only names still resolve without MagicDNS. New tailnet
+devices are a one-line addition to `fleet.tailnet.nodes`.
+
+Why: `tailscaled` with `accept-dns=true` (the default) rewrites
+`/etc/resolv.conf` to 100.100.100.100, bypassing knotea's 44 split-horizon
+erfi.io overrides. On servarr this meant arrs connected to public Cloudflare
+IPs instead of the edge Caddy (10.0.10.1). The profile pairs with knotea
+1.4.9's split-horizon NODATA fix (AAAA queries for local-A-only names
+return NODATA instead of leaking the public CDN AAAA).
+
+Docker on servarr additionally pins `daemon.settings.dns = [ "10.0.10.5" ]`
+(servarr-nixos `modules/docker.nix`) because Docker's embedded DNS
+(127.0.0.11) caches the host resolver at daemon start - a post-boot
+resolv.conf change leaves containers forwarding to the stale resolver.
 
 ### Adoption gotchas (all paid for on hearth)
 

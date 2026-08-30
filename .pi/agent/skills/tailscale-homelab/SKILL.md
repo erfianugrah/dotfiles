@@ -119,7 +119,7 @@ sudo tailscale logout                             # remove node from tailnet
 sudo tailscale up --reset                         # reset unspecified prefs to default
 sudo tailscale up --ssh                           # accept incoming Tailscale SSH
 sudo tailscale up --accept-routes                 # accept advertised subnet routes
-sudo tailscale up --accept-dns=false              # disable MagicDNS (rarely correct)
+sudo tailscale up --accept-dns=false              # disable MagicDNS (fleet-wide on NixOS hosts)
 sudo tailscale up --advertise-routes=10.0.X.0/24  # become a subnet router (subject to admin approval)
 sudo tailscale up --advertise-exit-node           # offer this node as exit (subject to admin approval)
 ```
@@ -151,6 +151,27 @@ The user's tailnet uses **Grants** (newer ACL syntax). The relevant ACL idioms:
 - `via: [...]` restricts which exit nodes / subnet routers a source may use. Without `via:`, an exit-node grant defaults to "any exit node visible to the source".
 - Subnet routes must be **approved in the admin console** after a node advertises them. `tailscale status | grep offers` shows advertised-but-unapproved routes.
 - For SaaS allowlisting where the SaaS wants a specific egress IP: prefer a **subnet router with `--advertise-routes=<saas-ip>/32`** over an exit node. ACLs then control access to that `/32` cleanly; exit-node ACLs are coarse-grained.
+
+## DNS doctrine: knotea resolves, MagicDNS does not (2026-08-30)
+
+Fleet-wide on NixOS hosts (router, servarr, hearth), tailscale runs with
+`--accept-dns=false` via the nixos-fleet `tailnet` profile. Rationale:
+
+- `accept-dns=true` rewrites `/etc/resolv.conf` to 100.100.100.100, bypassing
+  knotea's 44 split-horizon erfi.io overrides. `*.erfi.io` then resolves to
+  public Cloudflare IPs instead of the edge Caddy (10.0.10.1).
+- The profile writes /etc/hosts entries for every tailnet node (name +
+  FQDN), so MagicDNS names keep resolving without MagicDNS.
+- knotea 1.4.9 adds split-horizon NODATA: AAAA queries for local-A-only
+  names return NODATA instead of leaking the public CDN AAAA (glibc sorts
+  AAAA first, so this was the actual user-visible bug).
+
+The dev box (erfi1, WSL) has the same pattern manually: /etc/hosts has the
+tailnet node map, and systemd-resolved points at 10.0.10.5.
+
+Docker on servarr pins `daemon.settings.dns = [ "10.0.10.5" ]` because
+Docker's embedded DNS caches the host resolver at daemon start; a post-boot
+resolv.conf change leaves containers forwarding to the stale resolver.
 
 ## Failure-mode diagnostic order
 

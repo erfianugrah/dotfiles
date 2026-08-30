@@ -254,6 +254,8 @@ E2E via `docker-compose.e2e.yml` — auth disabled, all features on, high ports 
 
 14. **Fly-profile query-log sizing (2026-07-22)** - the "prune cron" is the in-app hourly retention goroutine (`cmd/glory-hole/main.go`, `database.retention_days`, 50K-row batches, 5-min ctx per run); there is no system cron. On the public Fly profile ~100K queries/day (internet scanners + LE validators) make 7-day retention ~500MB SQLite on the 512MB shared-cpu box, and the dashboard's 24h stats aggregations blow the API's 15s deadline -> `/api/stats/*` 500s while DNS stays healthy. Fixed by `retention_days: 2` in the on-volume `/var/lib/glory-hole/config.yml` (Fly profile only; live-edited + machine restart - the retention value is captured at boot, hot-reload does NOT restart the goroutine). Symptom fingerprint: dashboard stats 500s + `Slow batch flush detected` + 100MB+ WAL; diagnose with `sqlite3 ... "select count(*), min(timestamp) from queries"` - if oldest ~ retention window, the goroutine works and it's a sizing problem, not a stuck cron. The .db file does not shrink after deletes (free pages get reused); VACUUM needs exclusive access so skip it unless the volume is actually filling.
 
+15. **Split-horizon NODATA (v1.4.9, 2026-08-30)** - a local-record name with only an A override now answers NODATA (empty NOERROR) for AAAA instead of falling through to public recursion. Prevents the WAN AAAA (CDN proxy) from leaking into the local view for AAAA-preferring clients. Symmetric for AAAA-only names. The LAN has no IPv6, so public AAAA records for internal names are always wrong.
+
 ## Cross-references
 
 - **`knot-dns` skill** — sibling DNS work but opposite role (authoritative vs recursive); shares the Fly anycast UDP-hairpin lessons.
