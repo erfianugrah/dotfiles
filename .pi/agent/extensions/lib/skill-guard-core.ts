@@ -133,6 +133,19 @@ const BASH_RULES: Rule[] = [
     test: /\bsupabase\s+(db|migration|functions|start|link|gen)\b/,
     why: "CLI + migrations, RLS/auth patterns, SSR client wiring, edge functions",
   },
+  {
+    // The 2026-08-30 rustnzb miss: agent said "composerd runs there" and still
+    // ran `ssh servarr 'docker compose ... up -d rustnzb'` against a path that
+    // exists only on the router. docker is trained-default behavior, so it
+    // out-competes the composer skill exactly as this file's header predicts.
+    // Read-only verbs (ps/logs/inspect/stats) are deliberately NOT matched -
+    // those are fine over raw ssh and nudging them would train the model to
+    // ignore the channel.
+    id: "composer_stack_compose",
+    skill: "composer",
+    test: /\bssh\s+\S*(servarr|router)\S*\s+[\s\S]{0,200}?\bdocker\s+compose\s+(?:-[^\s]+\s+\S+\s+)*(up|down|restart|build|pull|rm|stop|start|create)\b/,
+    why: "these stacks are composer-managed: the compose checkout lives on the ROUTER (/var/lib/composer/stacks/<name>, container view /opt/stacks/<name>) even for servarr-host stacks, so raw ssh+compose hits a nonexistent path AND bypasses SOPS decryption + the per-stack lock. Lifecycle goes through POST /stacks/{name}/{up,down,restart}?async=true; ad-hoc commands (force-recreate) through POST /stacks/{name}/exec with {\"command\": \"up -d --force-recreate <svc>\"}",
+  },
 ];
 
 // ---- Pure matchers (exported for unit tests) ------------------------------
