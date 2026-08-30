@@ -71,6 +71,16 @@ Leaf/research subagent prompts must forbid further delegation - end with: "Do NO
 - `session_search` BEFORE rebuilding context from scratch when the user references past work ("how did we do X last time?", "remember when...", "like before"). For anything older than ~30 days or spanning opencode/claude as well as pi, use `memledger_search` instead - local session logs get pruned after 30d and memledger (Postgres, all clients) is the only full copy. Keep FTS queries to 2-3 terms (terms are ANDed per message; the tool auto-excludes the current session's own echo and OR-broadens empty results, but shorter queries are still better).
 - `session_search` BEFORE bash+jq when the user message contains a path under `~/.pi/agent/sessions/`, references "previous session" / "where we left off" / "pick up from", or names a session UUID. The .jsonl is the storage format; the FTS5 index is the access path. Pasted bash transcripts referencing a session file are the canonical trigger — don't match the demonstrated tool register, route to the right tool.
 
+## Pre-flight check before any infrastructure command
+
+Before running `ssh <host>` or any infrastructure-mutating command (docker compose, flyctl, kubectl, nixos-rebuild, systemctl, gh, composer API) against the user's hosts, pause and check three things -- in this order, as ONE step before the command:
+
+1. **Skills**: does the task match a skill description? Read the matching SKILL.md -- it exists precisely so you don't rediscover the user's infrastructure conventions from scratch.
+2. **Memories**: `memory list` (inline, fast) for a pattern matching this operation. The user stores infrastructure conventions as memories.
+3. **Past sessions**: `memledger_search` or `session_search` with 2-3 terms from the task. Someone already handled this exact situation.
+
+The observed failure (2026-08-30, rustnzb force-recreate): agent said "composerd runs there" and then ran `ssh servarr 'docker compose ...'` against a path that doesn't exist on servarr. The composer SKILL.md had the `/exec` endpoint documented the whole time -- it was never read. Check before acting, not after the command fails.
+
 ## Bash discipline
 
 - File finding: `rg --files <root>` (parallel, gitignore-aware), NEVER `find` (hangs on the 18GB home tree).
@@ -129,17 +139,6 @@ When a task will take >30s OR you want pi to keep working in parallel, use the b
 - **"It will work after a restart" is an untested claim, not a caveat.** Deferring verification to a future session is how dead config ships: the 2026-08-27 incident shipped an extension that was written, unit-tested, committed and documented but never stow-linked, so no restart could ever have loaded it - and the deferral hid that for a whole session. Config that loads at process start is testable NOW in a fresh process: `pi -p '<prompt that should trip it>'` for a pi extension, `claude -p '...' --allowedTools Write` for a CC hook, `systemctl show`/`docker inspect` for a unit or container. Install-path changes get the same treatment: verify the file is actually reachable at its LIVE path (`stat -c '%N'` on the symlink, `stow-drift` exits 1 on `UNLINKED`), not merely correct in the repo. If a spawned-process check is genuinely impossible, say "unverified: activates at next start" as a KNOWN GAP - never as if shipping were complete.
 - **Worktree cleanup**: only `git worktree remove` paths under `.worktrees/` or `worktrees/`. `cd` to the main repo root before removing. Verify the path with `git worktree list` first. Never `rm -rf` a worktree directly — it leaves a stale entry in `.git/worktrees/` that confuses git.
 - **Scaffolding new projects**: when the user asks to start / scaffold / build a new project, invoke the `scaffold-new-project` skill rather than running an ad-hoc question loop. That skill orchestrates the relevant concrete-tech skills (`frontend-stack`, `infrastructure-stack`, `software-architecture`, `design-utilitarian`, `ci-workflows`) so user defaults are applied without re-asking.
-
-## Composer-managed stacks (servarr, router) -- docker compose goes through the API, NOT raw SSH
-
-The user's compose stacks on servarr and the router are managed by composer (https://composer.erfi.io, API key in $COMPOSER_API_KEY). The compose-file checkout lives on the ROUTER at /var/lib/composer/stacks/<name>/ (container view /opt/stacks/<name>/) -- even for servarr-host stacks -- so `ssh servarr 'docker compose -f /opt/stacks/<name>/...'` fails with "no such file" every time. And raw `ssh servarr 'docker compose ...'` against the live checkout would bypass SOPS decryption.
-
-ALWAYS use the composer API for docker compose operations on ANY stack listed in `curl -s -H "X-API-Key: $COMPOSER_API_KEY" https://composer.erfi.io/api/v1/stacks | jq -r '.stacks[].name'`:
-- Lifecycle: `POST /stacks/{name}/{up,down,restart}?async=true` via `curl -X POST -H "X-API-Key: $COMPOSER_API_KEY"`
-- Ad-hoc compose commands (force-recreate, logs with flags, exec): `POST /stacks/{name}/exec` with body `{"command": "up -d --force-recreate <svc>"}`
-- Read-only inspection (container list, logs, status) can use `ssh servarr 'docker ps/logs/inspect ...'` directly -- that's fine and faster.
-
-NEVER: `ssh servarr 'docker compose ...'`, `ssh router 'docker compose ...'`, `ssh servarr 'docker rm -f ...'` followed by a raw compose up (composer has a per-stack lock; raw ops race with it).
 
 ## Agent-surface routing (registering skills / MCP servers / rules)
 
