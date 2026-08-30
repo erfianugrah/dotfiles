@@ -5,6 +5,8 @@
  *   - Regex content search
  *   - Optional include pattern for file filter (e.g. "*.ts", "*.{ts,tsx}")
  *   - Returns file paths + line numbers sorted by mtime
+ *   - Searches hidden dirs (--hidden, .git excluded) and follows symlinks (-L)
+ *     by default; both are required to see this user's stow-linked .pi/ tree.
  *   - Use this for "find files containing pattern X", NOT for counting matches
  *     (use bash + rg directly for counting)
  *
@@ -35,11 +37,35 @@ async function rgSearch(
   include: string | undefined,
   ignoreCase: boolean,
   signal?: AbortSignal,
+  followSymlinks = true,
 ): Promise<RgFileMatch[]> {
   return new Promise((resolve, reject) => {
     // ripgrep 15 rejects `--column=false` (the flag is boolean and takes no
             // value). Columns aren't shown by default anyway, so just omit it.
     const args = ["--no-config", "-n", "--no-heading", "-H"];
+
+    // --hidden: ripgrep skips dot-directories by default, which made this tool
+    // STRUCTURALLY BLIND to the trees this user edits most - `.pi/agent/` in
+    // ~/dotfiles (226 TS files), plus `.claude/`, `.config/`, `.github/`. The
+    // failure was silent and therefore worse than an error: the tool returned
+    // "No matches found", which reads as "the thing does not exist" rather than
+    // "this search could not see it". Cost two wrong conclusions on 2026-08-30
+    // (concluded there was no second BASH_RULES call site; concluded a live
+    // guard rule was absent). .gitignore is still honoured, so node_modules and
+    // build output stay excluded - verified 0 node_modules hits after this
+    // change.
+    args.push("--hidden");
+
+    // ...but --hidden alone drags in .git/ internals (packfiles, refs, COMMIT_
+    // EDITMSG), which is noise in every repo. Exclude it explicitly rather than
+    // making callers remember to.
+    args.push("--glob", "!.git/**");
+
+    // -L: the live agent tree is symlinks into ~/dotfiles (stow), so an
+    // unfollowed search of ~/.pi/agent/extensions finds NOTHING. ripgrep
+    // detects and reports symlink loops rather than hanging.
+    if (followSymlinks) args.push("-L");
+
     if (ignoreCase) args.push("-i");
     if (include) args.push("-g", include);
     args.push("--", pattern, ".");
@@ -84,9 +110,10 @@ const grepTool = defineTool({
   promptSnippet: "grep — ripgrep regex search. Returns file:line:text.",
   promptGuidelines: [
     "Use `include` glob (e.g. `*.ts`) to scope. For match counts / pipelines, use bash + rg.",
+    "Searches hidden directories (.pi, .claude, .github) and follows symlinks by default; .git is excluded and .gitignore is still honoured.",
   ],
   description:
-    "Ripgrep content search (Rust regex). Filter files via `include` glob. Returns file:line:text, capped at 100 hits.",
+    "Ripgrep content search (Rust regex). Filter files via `include` glob. Searches hidden dirs and follows symlinks by default (.git excluded, .gitignore honoured). Returns file:line:text, capped at 100 hits.",
 
   parameters: Type.Object({
     pattern: Type.String({
@@ -104,7 +131,13 @@ const grepTool = defineTool({
     ),
     ignoreCase: Type.Optional(
       Type.Boolean({
-        description: "Case-insensitive match (default: false — regex is case-sensitive by default)",
+        description: "Case-insensitive match (default: false - regex is case-sensitive by default)",
+      }),
+    ),
+    followSymlinks: Type.Optional(
+      Type.Boolean({
+        description:
+          "Follow symlinks (default: true - required for stow-linked trees like ~/.pi/agent). Set false if a symlinked tree is producing duplicate hits.",
       }),
     ),
   }),
@@ -134,7 +167,14 @@ const grepTool = defineTool({
 
     let hits: RgFileMatch[];
     try {
-      hits = await rgSearch(search, params.pattern, params.include, params.ignoreCase ?? false, signal);
+      hits = await rgSearch(
+        search,
+        params.pattern,
+        params.include,
+        params.ignoreCase ?? false,
+        signal,
+        params.followSymlinks ?? true,
+      );
     } catch (err) {
       return {
         isError: true,

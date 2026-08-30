@@ -21,3 +21,12 @@ node_modules
 # pick up a pending-approval project server (+ a ${CLAUDE_PROJECT_DIR} warning).
 # The reliable path is the user-scope registration install.sh do_claude() adds.
 .mcp.json
+# .config/cliamp/config.toml: the TRACKED copy uses password =
+# "${NAVIDROME_PASSWORD}", but cliamp does NOT interpolate env vars in every
+# build, so the live file holds the real credential. Deliberately NOT stowed and
+# deliberately NOT in stow-drift's compareOnly (that demands byte-identical,
+# which is exactly wrong here - the two copies MUST differ). Never copy the live
+# file back over the tracked one: the password has never been committed (verified
+# 2026-08-30, 0 hits across all history) and must stay that way. Live settings
+# that are safe to share (theme/provider/visualizer) get hand-synced.
+.config/cliamp/config.toml

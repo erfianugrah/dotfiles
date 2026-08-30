@@ -205,4 +205,23 @@ describe("run.sh unit-suite coverage", () => {
 		expect(runSh).toContain('bun test "$HERE/integration/"');
 		expect(runSh).toContain('bun test "$HERE/manifest.test.ts"');
 	});
+
+	test("run.sh also runs the extensions/tests tree", () => {
+		// Added 2026-08-30. That directory (32 files, ~719 tests - larger than
+		// the unit suite) was never referenced by run.sh, so it never ran under
+		// the wrapper everyone is told to use, and it hid a real failing
+		// assertion. This sensor makes deleting the line fail the suite.
+		expect(runSh).toContain('bun test "$EXT_TESTS/"');
+	});
+
+	test("every extensions/tests file is reachable by the run.sh glob", () => {
+		// Guards the OTHER half: the glob must be a directory pass, never a
+		// hand-maintained list (the failure mode documented twice in run.sh).
+		const extTests = join(EXT_DIR, "tests");
+		if (!existsSync(extTests)) return;
+		const files = readdirSync(extTests).filter((f) => f.endsWith(".test.ts"));
+		expect(files.length).toBeGreaterThan(20);
+		// A directory arg covers all of them; assert we did not regress to a list.
+		expect(runSh).not.toMatch(/EXT_TESTS\/[a-z-]+\.test\.ts/);
+	});
 });

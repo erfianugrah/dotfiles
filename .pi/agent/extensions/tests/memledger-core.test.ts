@@ -290,7 +290,14 @@ describe("selfSession filtering", () => {
       return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
     }) as never;
     const r = await runMemledgerSearch({ q: "knots dns", kind: "sessions", selfSession: SELF });
-    expect(calls).toBe(2);
+    // THREE fetches, not two (corrected 2026-08-30): when every shallow row is
+    // the current session's own echo, the code first re-queries at depth 50
+    // (self-hits dominate the shallow ranking, so a shallow OR retry can miss
+    // non-self answers sitting below the self-block - the 2026-08-25 tailscale
+    // failure), and only then falls back to the OR-broadened query. The old
+    // toBe(2) predated that deep-retry path, so this test failed against
+    // correct behaviour. Asserting the sequence, not just the count.
+    expect(calls).toBe(3);
     expect(r.text).toContain("real");
     expect(r.text).toContain("OR-broadened");
   });

@@ -64,6 +64,21 @@ bun test --preload "$HERE/preload.ts" "${UNIT_FILES[@]}"
 # Integration suite (self-mocked; no preload). Always run in full.
 bun test "$HERE/integration/"
 
+# Extension-local suite: extensions/tests/*.test.ts (32 files, ~719 tests).
+#
+# This directory was NOT referenced here until 2026-08-30, so an entire second
+# test tree - larger than the unit suite - never ran under `run.sh`. It hid a
+# genuine failing assertion (memledger-core.test.ts OR-broadening call count)
+# AND made `run.sh` green while `bun test` was red, which is the worst possible
+# split: the wrapper everyone is told to use disagreed with the raw runner.
+#
+# Same lesson as the two rots documented above, one directory over: glob it,
+# never hand-list it. No preload - these self-mock like the integration suite.
+EXT_TESTS="$HERE/../extensions/tests"
+if [ -d "$EXT_TESTS" ]; then
+  bun test "$EXT_TESTS/"
+fi
+
 # Harness self-sensor: assert the pi-package manifest ships every resource.
 # No preload (pure fs/glob). Runs in full.
 bun test "$HERE/manifest.test.ts"
