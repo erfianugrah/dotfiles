@@ -114,6 +114,73 @@ export function decideDocsFirst(
 }
 
 // ---- Bash anti-pattern rules ----
+// ---- lsp routing: symbol lookup via text search -------------------------
+//
+// Measured 2026-08-30 over 1409 sessions / 5844 tool calls: `lsp` had ZERO
+// calls while `grep` had 75 and bash-grep/rg carried ~60 more declaration
+// lookups. lsp was verified working (document_symbols returns a full outline
+// instantly), so it is invisible, not broken.
+//
+// Precision is the whole design constraint here: only 7 of those 75 grep
+// patterns (9.3%) were declaration-shaped; the other 68 were legitimate text
+// search that must NOT be touched. So this matches a declaration KEYWORD
+// followed by an identifier - not bare identifiers, not comment/string scans.
+// Advisory (never blocks): the right call depends on intent the guard can't
+// see, e.g. "find every place this word appears including docs".
+
+const DECL_KEYWORDS = "function|class|interface|type|struct|impl|def|func|enum|trait";
+
+/** True when a search pattern looks like a symbol DECLARATION lookup. */
+export function looksLikeSymbolSearch(pattern: string): boolean {
+  if (!pattern) return false;
+  // Strip regex word-boundary noise so `\bfunc NewClient` still matches.
+  const p = pattern.replace(/\\b/g, "").replace(/\\/g, "");
+  // Declaration keyword + whitespace + an identifier character.
+  return new RegExp(`\\b(${DECL_KEYWORDS})\\s+[A-Za-z_*(]`).test(p);
+}
+
+export function lspRouteNote(pattern: string): string {
+  return (
+    `tool-guard[lsp_route]: "${pattern.slice(0, 60)}" looks like a symbol declaration lookup. ` +
+    `The \`lsp\` tool answers this precisely - \`definition\` for where it is declared, ` +
+    `\`references\` for every call site, \`document_symbols\` for a file outline, ` +
+    `\`incoming_calls\` for the call graph. Regex matches comments, strings and ` +
+    `unrelated files; LSP uses the same index your editor does. ` +
+    `(Advisory - if you genuinely want every textual occurrence, text search is correct. Measured: lsp 0 calls vs grep 75 across 1409 sessions.)`
+  );
+}
+
+// ---- docs pipeline inversion --------------------------------------------
+//
+// Measured 2026-08-30: docs_sources 19 > docs_search 7 > docs_summary 2 - the
+// fallback outranks the entry point 3:1. Observed docs_sources filters were
+// content queries ("singapore", "psychology", "furniture", "tea"), i.e. topic
+// searches aimed at a tool that only lists source names. tool-routing.md is
+// explicit: "do NOT call docs_sources (that lists sources, it is not a search
+// fallback)".
+//
+// A 1-token filter is the DOCUMENTED use (verify a source exists), so only
+// nudge on multi-word / long filters that betray search intent. Advisory.
+
+/** True when a docs_sources filter looks like a content query, not a source-name check. */
+export function docsSourcesMisuse(filter: string | undefined): boolean {
+  if (!filter) return false;               // bare listing: documented use
+  const f = filter.trim();
+  if (f.length === 0) return false;
+  return /\s/.test(f) || f.length > 20;    // multi-word or long = search intent
+}
+
+export function docsSourcesNote(filter: string): string {
+  return (
+    `tool-guard[docs_inversion]: docs_sources only LISTS source names - it is not a search. ` +
+    `"${filter.slice(0, 40)}" looks like a content query. Use \`docs_search\` (searches the ` +
+    `title+summary index, ~15x smaller than raw docs) with 1-2 keyword tokens, then ` +
+    `\`docs_summary\` on files >300 lines, then \`docs_read\` with offset/lines. ` +
+    `For a known phrase inside a known source, \`docs_grep path=/docs/<source>/\` beats both. ` +
+    `(Advisory. Measured: docs_sources 19 > docs_search 7 - the fallback outranking the entry point.)`
+  );
+}
+
 // Hard-block rules: regex on bash command, plus a redirect message.
 export type BlockRule = {
   id: string;

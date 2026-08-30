@@ -25,6 +25,10 @@ import {
   decideResearchRouteSoft,
   queryTokens,
   tokenContainment,
+  looksLikeSymbolSearch,
+  lspRouteNote,
+  docsSourcesMisuse,
+  docsSourcesNote,
 } from "../extensions/tool-guard.ts";
 import {
   matchIntent,
@@ -4173,11 +4177,71 @@ describe("skill-guard.message builders", () => {
     expect(msg).toContain("/skill:fly");
     expect(msg).toContain("SKILL.md");
   });
-  test("actionReason carries the rule id + fires-once note", () => {
+  test("actionReason carries the rule id + per-context retry note", () => {
     const r = actionReason({ id: "compose_infra", skill: "infrastructure-stack", why: "conventions" });
     expect(r).toContain("skill-guard[compose_infra]");
     expect(r).toContain("infrastructure-stack");
-    expect(r).toContain("once per session");
+    // Revised 2026-08-30: dedup is per-context, not once-per-session - retrying
+    // the same command passes, a different command in the domain re-fires.
+    expect(r).toContain("Retrying this same command passes");
+  });
+});
+
+// ---- lsp_route + docs_inversion (added 2026-08-30) ------------------------
+// Grounded in a census of 1409 sessions / 5844 tool calls: lsp had 0 calls
+// while grep had 75 (7 of them declaration lookups), and docs_sources (19)
+// outranked docs_search (7) with content queries as filters.
+describe("tool-guard lsp_route + docs_inversion", () => {
+  test("fires on real declaration lookups taken from session history", () => {
+    for (const p of [
+      "def skip_unless_package",
+      "type Client struct",
+      "func \\(h \\*SystemHandler\\)",
+      "func TestNewClient|func NewClient",
+      "type Job interface|type JobManager",
+      "interface SkillHint",
+    ]) {
+      expect(looksLikeSymbolSearch(p)).toBe(true);
+    }
+  });
+
+  test("does NOT fire on legitimate text search (68/75 of the real corpus)", () => {
+    for (const p of [
+      "(?i)\\bmcp\\b", "mcp", "TODO|FIXME", "ERROR|FATAL",
+      "AuthSubnetWhitelist", "rx_fcs_error", "share the dedup",
+      // bare keywords with no identifier following
+      "type", "function", "const",
+      // keyword appearing as a substring of an ordinary word
+      "typescript", "functional programming", "classes are cool",
+    ]) {
+      expect(looksLikeSymbolSearch(p)).toBe(false);
+    }
+  });
+
+  test("lspRouteNote names the tool and stays advisory", () => {
+    const n = lspRouteNote("func NewClient");
+    expect(n).toContain("tool-guard[lsp_route]");
+    expect(n).toContain("lsp");
+    expect(n).toContain("Advisory");
+  });
+
+  test("docs_inversion fires on content queries, not on 1-token source checks", () => {
+    // Multi-word / long filters betray search intent.
+    expect(docsSourcesMisuse("singapore travel")).toBe(true);
+    expect(docsSourcesMisuse("how to configure tailwind dark mode")).toBe(true);
+    // The DOCUMENTED use: verify a source exists. Must stay silent.
+    expect(docsSourcesMisuse(undefined)).toBe(false);
+    expect(docsSourcesMisuse("")).toBe(false);
+    for (const f of ["supabase", "docker", "keycloak", "cloudflare", "tea"]) {
+      expect(docsSourcesMisuse(f)).toBe(false);
+    }
+  });
+
+  test("docsSourcesNote redirects to the documented pipeline", () => {
+    const n = docsSourcesNote("singapore travel");
+    expect(n).toContain("tool-guard[docs_inversion]");
+    expect(n).toContain("docs_search");
+    expect(n).toContain("Advisory");
   });
 });
 

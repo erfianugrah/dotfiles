@@ -133,12 +133,13 @@ describe("skill-guard-core.message builders", () => {
     expect(msg).toContain("~/.claude/skills/scaffold-new-project/SKILL.md");
   });
 
-  test("actionReason names the rule id + skill and says once per session", () => {
+  test("actionReason names the rule id + skill and states the per-context retry rule", () => {
     const hint = matchPath("infra/compose.yml")!;
     const r = actionReason(hint);
     expect(r).toContain("skill-guard[compose_infra]");
     expect(r).toContain("infrastructure-stack");
-    expect(r).toContain("once per session");
+    // Revised 2026-08-30: nudges are per-context, not once-per-session.
+    expect(r).toContain("Retrying this same command passes");
   });
 
   test("actionReason honors a custom skills dir", () => {

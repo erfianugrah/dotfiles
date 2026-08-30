@@ -31,8 +31,12 @@ import {
   decideResearchRoute,
   decideResearchRouteSoft,
   detectResearchIntent,
+  docsSourcesMisuse,
+  docsSourcesNote,
   extractPatchPaths,
   extractTopics,
+  looksLikeSymbolSearch,
+  lspRouteNote,
   matchDocsTopic,
   splitSegments,
   stripAnsiCSpans,
@@ -58,6 +62,10 @@ export {
   decideResearchRouteSoft,
   queryTokens,
   tokenContainment,
+  looksLikeSymbolSearch,
+  lspRouteNote,
+  docsSourcesMisuse,
+  docsSourcesNote,
 } from "./lib/tool-guard-core.ts";
 
 // Set to e.g. ["docs_path", "find_name"] to suppress specific rules.
@@ -93,6 +101,17 @@ const DOCS_FIRST_TOOLS = new Set([
   "docs_sources", "docs_search", "docs_grep", "docs_find", "docs_read", "docs_summary",
 ]);
 const docsFirstSessions = new Set<string>();
+
+// lsp_route: advisory fire counter per session (capped so it never nags).
+const LSP_ROUTE_MAX = Number(process.env.PI_LSP_ROUTE_MAX) || 3;
+const lspRouteFired = new Map<string, number>();
+const lspRouteCount = (k: string): number => lspRouteFired.get(k) ?? 0;
+const bumpLspRoute = (k: string): void => {
+  lspRouteFired.set(k, lspRouteCount(k) + 1);
+};
+
+// docs_inversion: one advisory per session.
+const docsInversionFired = new Set<string>();
 
 const DOCS_SSH_HOST = "docs@docs.erfi.io";
 const DOCS_SSH_PORT = "2222";
@@ -240,6 +259,8 @@ export default function (pi: ExtensionAPI) {
       const key = ctx.sessionManager.getSessionFile?.() ?? "default";
       loopStates.delete(key);
       docsFirstSessions.delete(key);
+      lspRouteFired.delete(key);
+      docsInversionFired.delete(key);
       researchRouteStates.delete(key);
       researchSoftFired.delete(key);
       pendingAdvisories.delete(key);
@@ -324,6 +345,35 @@ export default function (pi: ExtensionAPI) {
     ) {
       researchSoftFired.add(sessionKey);
       addAdvisory(sessionKey, event.toolCallId, RESEARCH_ROUTE_SOFT_NOTE);
+    }
+
+    // lsp routing: symbol-declaration lookups sent through text search.
+    // Advisory, capped per session - the correct choice depends on intent the
+    // guard cannot see ("every textual occurrence" is a legitimate goal).
+    if (!DISABLED.has("lsp_route") && lspRouteCount(sessionKey) < LSP_ROUTE_MAX) {
+      const pat = (event.input as { pattern?: string }).pattern;
+      const isSearchTool = event.toolName === "grep";
+      const bashCmd =
+        event.toolName === "bash" ? (event.input as { command?: string }).command : undefined;
+      // For bash, only consider the quoted pattern of an rg/grep invocation.
+      const bashPat =
+        bashCmd && /^\s*(rg|grep)\b/.test(bashCmd)
+          ? (bashCmd.match(/['"]([^'"]{3,80})['"]/)?.[1] ?? undefined)
+          : undefined;
+      const candidate = isSearchTool ? pat : bashPat;
+      if (candidate && looksLikeSymbolSearch(candidate)) {
+        bumpLspRoute(sessionKey);
+        addAdvisory(sessionKey, event.toolCallId, lspRouteNote(candidate));
+      }
+    }
+
+    // docs pipeline inversion: docs_sources used as a content search.
+    if (!DISABLED.has("docs_inversion") && event.toolName === "docs_sources") {
+      const filter = (event.input as { filter?: string }).filter;
+      if (docsSourcesMisuse(filter) && !docsInversionFired.has(sessionKey)) {
+        docsInversionFired.add(sessionKey);
+        addAdvisory(sessionKey, event.toolCallId, docsSourcesNote(filter as string));
+      }
     }
 
     // bash anti-patterns
