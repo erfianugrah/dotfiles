@@ -159,6 +159,7 @@ describe("envDumpSegment", () => {
     "printenv HOME",
     "declare -p FOO", // single var stays allowed
     "printenv COMPOSER_API_KEY", // single-var read; redaction layer masks the value
+    "[ -n \"${NAME+x}\" ] && echo set || echo unset", // the documented set-check escape: no env command, no value
     "grep KEY .env", // file read; redaction layer, not the dump block
   ];
 

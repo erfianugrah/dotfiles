@@ -91,8 +91,9 @@ Source: /docs/sops/usage/advanced/index.md (`exec-env` / `exec-file`).
 ## Never
 
 - **`env`, `printenv`, bare `set`, `export -p`** - dumps every credential in the
-  process. `tool-guard` hard-blocks these. To check one variable:
-  `env | grep ^NAME | sed 's/=.*/=<set>/'`.
+  process. `tool-guard` hard-blocks these. To check one variable WITHOUT its
+  value: `[ -n "${NAME+x}" ] && echo set || echo unset` (a bare `env | grep`
+  is blocked by the guard itself - the chain starts with the dump form).
 - **`docker inspect --format '{{json .Config.Env}}'`** - transports the whole
   container environment. Use a field selector, remote-side:
   `--format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^VAR=//p'`.

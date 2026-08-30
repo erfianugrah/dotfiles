@@ -325,7 +325,9 @@ export const PLAINTEXT_PIPELINE_REASON =
 export const ENV_DUMP_REASON =
   "wholesale environment dump (`env`/`printenv`/bare `set`/`export -p`) prints EVERY secret in the " +
   "process env (API keys, tokens) into the session transcript, model context, and synced session store. " +
-  "There is no legitimate agent use for a full env dump. To check one variable: " +
-  "`env | grep ^NAME | sed 's/=.*/=<set>/'`. The tool_result redactor masks known secret values, " +
-  "but it only knows secrets in ITS env - don't rely on it for values from files. " +
+  "There is no legitimate agent use for a full env dump. To check one variable WITHOUT printing its value: " +
+  "`[ -n \"${NAME+x}\" ] && echo set || echo unset`. To read a single value: `printenv NAME` " +
+  "(the tool_result redactor masks known secret values, but it only knows secrets in ITS env - " +
+  "don't rely on it for values from files). Note `env | grep ^NAME` is itself blocked by this guard - " +
+  "it starts with the dump form. " +
   "Kill switch: PI_SECRET_GUARD_OFF=1.";
