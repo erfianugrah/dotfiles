@@ -4226,6 +4226,17 @@ describe("tool-guard segment-scoped exemptions see the full command", () => {
     expect(blocks("find . -name '*.jsonl' -newermt '-1 day' | wc -l")).toBeNull();
     expect(blocks("find . -name '*.ts'")).toBe("find_name");
   });
+
+  test("servarr docker logs: documented raw-stderr exception is expressible", () => {
+    // The rule's reason text always said raw ssh is fine when you need raw
+    // stderr, but it was a hard block with no way to say so - and it fired
+    // while the composer logs endpoint was returning 500, leaving no route.
+    expect(blocks("ssh servarr 'docker logs foo --tail 8'")).toBe("docker_logs_servarr");
+    expect(blocks("ssh servarr 'docker logs foo --tail 8' # raw-stderr")).toBeNull();
+    // Read-only inspection and local docker were never in scope.
+    expect(blocks("ssh servarr 'docker ps'")).toBeNull();
+    expect(blocks("docker logs local-container")).toBeNull();
+  });
 });
 
 describe("tool-guard lsp_route + docs_inversion", () => {
