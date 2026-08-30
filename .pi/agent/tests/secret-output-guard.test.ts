@@ -9,6 +9,7 @@
 
 import { describe, expect, test } from "bun:test";
 
+import { splitSegments } from "../extensions/lib/tool-guard-core.ts";
 import {
   collectSensitiveEnv,
   envDumpSegment,
@@ -196,7 +197,7 @@ describe("plaintextPipelineSegment", () => {
   ];
   for (const cmd of blocked) {
     test(`blocks: ${cmd.slice(0, 44)}`, () => {
-      expect(plaintextPipelineSegment([cmd])).not.toBeNull();
+      expect(plaintextPipelineSegment(splitSegments(cmd))).not.toBeNull();
     });
   }
 
@@ -220,7 +221,7 @@ describe("plaintextPipelineSegment", () => {
   ];
   for (const cmd of allowed) {
     test(`allows: ${cmd.slice(0, 44)}`, () => {
-      expect(plaintextPipelineSegment([cmd])).toBeNull();
+      expect(plaintextPipelineSegment(splitSegments(cmd))).toBeNull();
     });
   }
 
@@ -230,7 +231,24 @@ describe("plaintextPipelineSegment", () => {
 
   test("scans every segment, not just the first", () => {
     expect(
-      plaintextPipelineSegment(["cd /tmp", `sops -d .env | grep TOKEN`]),
+      plaintextPipelineSegment(splitSegments(`cd /tmp && sops -d .env | grep TOKEN`)),
     ).not.toBeNull();
+  });
+
+  // REGRESSION (found live 2026-08-30): these patterns match ACROSS a pipe,
+  // but the extension passes splitSegments(command), which splits on '|'. The
+  // original tests called the core with [cmd] unsplit, so they asserted a
+  // calling convention production never uses and every piped form silently
+  // sailed through. Any pipeline-spanning rule must be exercised through
+  // splitSegments, and the joined view is what it has to inspect.
+  test("fires on piped forms when driven through splitSegments", () => {
+    for (const cmd of [
+      `sops -d .env | grep TOKEN`,
+      `sops decrypt .env | cut -d= -f2-`,
+      `bw get item FOO | jq -r '.notes'`,
+    ]) {
+      expect(splitSegments(cmd).length).toBeGreaterThan(1); // proves the split happens
+      expect(plaintextPipelineSegment(splitSegments(cmd))).not.toBeNull();
+    }
   });
 });

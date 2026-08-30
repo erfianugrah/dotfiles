@@ -244,17 +244,29 @@ const MASKING_FILTER = /\|\s*sed\s+(?:-\S+\s+)*['"]?s\/=\.\*/;
 const VAULT_TO_JQ =
   /(?:\bbw\s+get\b|127\.0\.0\.1:8087|localhost:8087)[^|]*\|\s*jq\b[^|]*(?:\.notes|\.value|\.password|\.fields)/;
 
-/** Returns the offending segment, or null. Mirrors envDumpSegment's shape so
- *  the extension can treat both the same way. */
+/** Returns the offending command, or null.
+ *
+ *  IMPORTANT - unlike envDumpSegment, this inspects the segments REJOINED.
+ *  Every rule here describes a value crossing a PIPE (`sops -d | grep`,
+ *  `bw get | jq`), and the caller passes splitSegments(command), which splits
+ *  on `|` among other operators. Testing each segment in isolation therefore
+ *  matches nothing: `sops -d .env` and `grep TOKEN` are individually harmless.
+ *
+ *  That was a live bug (2026-08-30): the unit tests called this with [cmd]
+ *  unsplit - a calling convention the extension never uses - so every piped
+ *  form passed the suite and sailed through in production. Only the docker
+ *  rule fired, because it happens to contain no pipe.
+ *
+ *  Rejoining with " | " is deliberate: the operator that was there is
+ *  irrelevant to these rules (`;` or `&&` between the same two stages is the
+ *  same leak), and a single separator keeps the regexes simple. */
 export function plaintextPipelineSegment(segments: string[]): string | null {
-  for (const seg of segments) {
-    const s = seg.trim();
-    // secretctl is the replacement, so never block a command that uses it.
-    if (/\bsecretctl\b/.test(s)) continue;
-    if (DOCKER_ENV_DUMP.test(s)) return s;
-    if (SOPS_TO_FILTER.test(s) && !MASKING_FILTER.test(s)) return s;
-    if (VAULT_TO_JQ.test(s)) return s;
-  }
+  const joined = segments.map((s) => s.trim()).join(" | ");
+  // secretctl is the replacement, so never block a command that uses it.
+  if (/\bsecretctl\b/.test(joined)) return null;
+  if (DOCKER_ENV_DUMP.test(joined)) return joined;
+  if (SOPS_TO_FILTER.test(joined) && !MASKING_FILTER.test(joined)) return joined;
+  if (VAULT_TO_JQ.test(joined)) return joined;
   return null;
 }
 
