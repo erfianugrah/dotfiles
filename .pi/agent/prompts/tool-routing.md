@@ -130,6 +130,17 @@ When a task will take >30s OR you want pi to keep working in parallel, use the b
 - **Worktree cleanup**: only `git worktree remove` paths under `.worktrees/` or `worktrees/`. `cd` to the main repo root before removing. Verify the path with `git worktree list` first. Never `rm -rf` a worktree directly — it leaves a stale entry in `.git/worktrees/` that confuses git.
 - **Scaffolding new projects**: when the user asks to start / scaffold / build a new project, invoke the `scaffold-new-project` skill rather than running an ad-hoc question loop. That skill orchestrates the relevant concrete-tech skills (`frontend-stack`, `infrastructure-stack`, `software-architecture`, `design-utilitarian`, `ci-workflows`) so user defaults are applied without re-asking.
 
+## Composer-managed stacks (servarr, router) -- docker compose goes through the API, NOT raw SSH
+
+The user's compose stacks on servarr and the router are managed by composer (https://composer.erfi.io, API key in $COMPOSER_API_KEY). The compose-file checkout lives on the ROUTER at /var/lib/composer/stacks/<name>/ (container view /opt/stacks/<name>/) -- even for servarr-host stacks -- so `ssh servarr 'docker compose -f /opt/stacks/<name>/...'` fails with "no such file" every time. And raw `ssh servarr 'docker compose ...'` against the live checkout would bypass SOPS decryption.
+
+ALWAYS use the composer API for docker compose operations on ANY stack listed in `curl -s -H "X-API-Key: $COMPOSER_API_KEY" https://composer.erfi.io/api/v1/stacks | jq -r '.stacks[].name'`:
+- Lifecycle: `POST /stacks/{name}/{up,down,restart}?async=true` via `curl -X POST -H "X-API-Key: $COMPOSER_API_KEY"`
+- Ad-hoc compose commands (force-recreate, logs with flags, exec): `POST /stacks/{name}/exec` with body `{"command": "up -d --force-recreate <svc>"}`
+- Read-only inspection (container list, logs, status) can use `ssh servarr 'docker ps/logs/inspect ...'` directly -- that's fine and faster.
+
+NEVER: `ssh servarr 'docker compose ...'`, `ssh router 'docker compose ...'`, `ssh servarr 'docker rm -f ...'` followed by a raw compose up (composer has a per-stack lock; raw ops race with it).
+
 ## Agent-surface routing (registering skills / MCP servers / rules)
 
 - **pi.dev is the primary harness. Claude Code is the user's WORK harness.** (opencode was retired 2026-08-15; its config tree is deleted - git history is the archive. The `opencode` PROVIDER in pi's auth is opencode-zen, the self-hosted gateway - that stays.)

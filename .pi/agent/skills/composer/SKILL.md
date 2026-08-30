@@ -15,7 +15,9 @@ Composer (on the **MS-01 NixOS router**, ssh alias `router`, public URL `https:/
 - Anything reached via plain `docker ...` on the dev machine.
 - drawbridge itself - deliberately NOT composer-managed (composer reaches servarr's docker THROUGH drawbridge; composer managing it would be a self-dependency loop). See the drawbridge skill.
 
-For local stacks, use `docker compose -f <path> {logs,ps,restart}` directly. Don't reach for the composer API just because the word "compose" appears — verify the target host first (`docker context show`, or check whether the container name appears in `curl $COMPOSER/api/v1/services | jq -r '.[].name'`).
+For local stacks, use `docker compose -f <path> {logs,ps,restart}` directly. Don't reach for the composer API just because the word "compose" appears -- verify the target host first (`docker context show`, or check whether the container name appears in `curl $COMPOSER/api/v1/services | jq -r '.[].name'`).
+
+**Conversely, when a stack IS composer-managed (servarr, router-local): NEVER `ssh servarr 'docker compose ...'` or `ssh router 'docker compose ...'`. Use the composer API.** The compose file checkout lives on the ROUTER, not on the target host -- `ssh servarr 'docker compose -f /opt/stacks/...'` fails with "no such file" even though the stack deploys fine through the API. For lifecycle ops (up/down/restart) use the dedicated endpoints (`POST /stacks/{name}/{up,down,restart}?async=true`). For ad-hoc compose commands (force-recreate, exec, logs with custom flags) use `POST /stacks/{name}/exec` with body `{"command": "up -d --force-recreate <svc>"}`. The API routes compose operations to the correct docker daemon (router-local or servarr via drawbridge) and handles SOPS decryption -- raw SSH bypasses both.
 
 ## Hard safety rules
 
@@ -113,6 +115,87 @@ ssh router "curl -s -X POST -H \"X-API-Key: $COMPOSER_API_KEY\" 'localhost:8080/
 ```
 
 If the key 401s, it was rotated - ASK the user for the current key; do NOT improvise manual git surgery as a first resort. Known-good manual fallback when no key is available (used for the v1.1.5/v1.1.6 edge deploys before the key was at hand): generate a throwaway ed25519 keypair inside the stack checkout, `gh repo deploy-key add` it read-only, `git -c core.sshCommand="ssh -i <key> -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" pull --ff-only`, `docker compose up -d --build` from the checkout, then delete the GH deploy key + `shred -u` the keypair. Why this is needed at all: composerd's startup hook **AES-encrypts every key under its ssh dir at rest** (`/var/lib/composer/ssh/id_github*`), so interactive git/ssh with those keys fails with "invalid format" - only composerd can decrypt and use them. The API is the intended path.
+
+## SOPS decryption and secret rotation
+
+Composer decrypts SOPS-encrypted `.env` files before every `up` or `sync`
+operation and re-encrypts them after. The cycle is:
+
+```
+decryptSopsSecrets → docker compose up → reEncryptSopsSecrets
+```
+
+This means `.env` MUST be plaintext during the `docker compose up` call.
+Docker compose reads `${POSTGRES_PASSWORD}` and similar directly from the
+file -- ciphertext passed as an env-var value is a literal string
+(`POSTGRES_DB=ENC[AES256_GCM,data:GBxlkrs=...]`), not a decrypted secret.
+
+### Age key resolution order
+
+`LoadGlobalAgeKey` in `internal/infra/sops/agekey.go` resolves the age
+private key from (highest priority first):
+
+1. `/opt/composer/age.key` (UI-saved key, non-empty wins over all env vars)
+2. `COMPOSER_SOPS_AGE_KEY` env var
+3. `SOPS_AGE_KEY` env var
+4. `SOPS_AGE_KEYS` env var (multi-line, unescapes `\n`)
+5. `COMPOSER_SOPS_AGE_KEY_FILE` env var
+6. `SOPS_AGE_KEY_FILE` env var
+7. `~/.config/sops/age/keys.txt` (standard SOPS location)
+
+On the router, the composer container has both the `age.key` file AND
+`COMPOSER_SOPS_AGE_KEY` set -- the file wins. Both hold the same key
+(public key `age132gmayefg7mq9t7fdfh9ppczn009uqyql49yje89fcjcp74v84aq36gu87`).
+`$HOME` inside the container is `/root`, so `~/.config/sops/age/keys.txt`
+resolves to `/root/.config/sops/age/keys.txt`, **not**
+`/home/composer/.config/sops/age/keys.txt`.
+
+### Secret rotation (e.g. POSTGRES_PASSWORD)
+
+The correct rotation flow is:
+
+```bash
+ssh router 'set -e
+cd /var/lib/composer/stacks/<name>
+AGE_KEY=$(docker exec composer sh -c "echo \$COMPOSER_SOPS_AGE_KEY")
+export SOPS_AGE_KEY="$AGE_KEY"
+NEW_PW=$(openssl rand -base64 24 | tr -d "+/=" | head -c 32)
+
+# 1. Decrypt
+sops -d .env > .env.plain
+
+# 2. Update the secret
+sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$NEW_PW/" .env.plain
+
+# 3. ALTER ROLE on the database FIRST (so the running container still works)
+docker exec postgres_forgejo psql -U gitea -d gitea -c "ALTER USER gitea WITH PASSWORD '$NEW_PW';"
+
+# 4. Copy plaintext over .env (leave it decrypted for compose)
+cp .env.plain .env
+rm -f .env.plain
+
+# 5. Recreate containers with new password
+#    .env is plaintext here -- compose reads ${POSTGRES_PASSWORD} from it
+docker compose -f docker-compose.router.yml up -d --force-recreate <service> <db>
+
+# 6. Re-encrypt AFTER containers are up and healthy
+sops -e --in-place .env
+'
+```
+
+**CRITICAL: do NOT encrypt `.env` before `docker compose up`.** If `.env`
+is ciphertext at `up` time, docker compose passes raw SOPS ciphertext as
+env-var values. Postgres sees `POSTGRES_DB=ENC[AES256_GCM,...]` and fails
+healthcheck with `pg_isready: error: invalid connection option`. Forgejo
+fails connecting to the database. This was hit live 2026-08-29 during a
+password rotation.
+
+**Why composer's own decrypt→up→re-encrypt cycle works:** composerd calls
+`sops.DecryptEnvFile` which writes plaintext to `.env`, saves the original
+as `.env.sops`, runs compose, then `ReEncryptEnvFile` restores from
+the backup. The `.sops` backup is the safety net -- on failure, the
+defer chain always re-encrypts. Manual rotations don't have the defer
+chain, so the agent must replicate the same order.
 
 ## Auth quick-start (agent driving the API)
 
