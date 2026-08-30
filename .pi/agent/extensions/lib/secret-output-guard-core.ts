@@ -201,6 +201,7 @@ const ENV_DUMP_PATTERNS: RegExp[] = [
   /^set\s*(\||>|$)/, // bare `set` dumps vars + functions
   /^(?:builtin\s+)?export(?:\s+-p)?\s*(\||>|$)/, // export / export -p
   /^declare\s+-[a-zA-Z]*x[a-zA-Z]*\s*(\||>|$)/, // declare -x
+  /^declare\s+-[a-zA-Z]*p[a-zA-Z]*\s*(\||>|$)/, // declare -p / -pa / -pA (print variables/arrays)
   /^typeset\s+-x\s*(\||>|$)/, // typeset -x (ksh/zsh)
 ];
 
@@ -239,6 +240,37 @@ const SOPS_TO_FILTER =
  *  stage AFTER the pipe: `sed 's/=.*$/=<set>/'` and friends. */
 const MASKING_FILTER = /\|\s*sed\s+(?:-\S+\s+)*['"]?s\/=\.\*/;
 
+/** `docker inspect` with the PLAIN (non-`json`) form of `.Config.Env` - the
+ *  Go slice prints every variable too. The `json` form is caught by
+ *  DOCKER_ENV_DUMP first; this exists so `{{.Config.Env}}` is not an escape. */
+const DOCKER_ENV_PLAIN = /docker\s+inspect\s+\S+[^|]*\{\{-?\s*\.Config\.Env\b(?!.*json)/;
+
+/** Whole-container env through `exec` instead of `inspect`:
+ *  `docker exec c env`, `docker exec c env | grep X`, `printenv` likewise.
+ *  A trailing name (`printenv TSIG_KEY`) is a targeted single-value read and
+ *  stays allowed, matching the field-selected docker policy. `env FOO=1 cmd`
+ *  prints only cmd's output and stays allowed. */
+const DOCKER_EXEC_ENV =
+  /\bdocker\s+exec\b[^|]*?\b(env|printenv)\b['"]?\s*(?:\||$)/;
+
+/** Remote whole-env dump: `ssh host env`, `ssh host 'printenv'`. The
+ *  env-dump patterns above only match a segment that STARTS with `env` -
+ *  a quoted remote command never does. This is the tool's own threat model:
+ *  the credentials in this fleet live on router/servarr, not on this box. */
+const SSH_ENV_DUMP = /\bssh\s+\S+[^|]*\b(env|printenv)\b['"]?\s*(?:\||$)/;
+
+/** Whole-vault read with no field: `bw get item X`, `bw get notes X`.
+ *  Piped forms are handled by VAULT_TO_JQ; a bare read prints the entire
+ *  object, which is the leak. */
+const BW_WHOLE = /^\s*bw\s+get\s+(item|notes|fields)\s+\S+\s*$/;
+
+/** Bare decrypt of a dotenv-named file: `sops -d .env` with no pipe and no
+ *  redirect puts the whole decrypted file in the transcript. Piped forms go
+ *  through SOPS_TO_FILTER; a redirect target the agent does not read
+ *  (`> /dev/null`) is not a transcript leak. The filename heuristic is
+ *  deliberate - the guard cannot know which files hold secrets. */
+const SOPS_BARE_DOTENV = /\bsops\s+(?:-d\b|--decrypt\b|decrypt\b)\s+\S*\.env\S*\s*$/;
+
 /** Vault read piped into a value extractor. `jq -r .notes` / `.value` /
  *  `.fields[]` on a `bw`/bw-serve response puts the credential on stdout. */
 const VAULT_TO_JQ =
@@ -265,8 +297,16 @@ export function plaintextPipelineSegment(segments: string[]): string | null {
   // secretctl is the replacement, so never block a command that uses it.
   if (/\bsecretctl\b/.test(joined)) return null;
   if (DOCKER_ENV_DUMP.test(joined)) return joined;
+  if (DOCKER_ENV_PLAIN.test(joined)) return joined;
   if (SOPS_TO_FILTER.test(joined) && !MASKING_FILTER.test(joined)) return joined;
   if (VAULT_TO_JQ.test(joined)) return joined;
+  if (DOCKER_EXEC_ENV.test(joined)) return joined;
+  if (SSH_ENV_DUMP.test(joined)) return joined;
+  if (BW_WHOLE.test(joined)) return joined;
+  // Bare-decrypt: only meaningful when nothing downstream consumes the output.
+  if (!joined.includes("|") && !joined.includes(">") && SOPS_BARE_DOTENV.test(joined)) {
+    return joined;
+  }
   return null;
 }
 

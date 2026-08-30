@@ -144,6 +144,9 @@ describe("envDumpSegment", () => {
     "export -p | grep SECRET",
     "declare -x",
     "declare -x | head",
+    "declare -p",
+    "declare -p | head",
+    "declare -pa",
     "typeset -x",
   ];
   const ALLOWED = [
@@ -154,6 +157,7 @@ describe("envDumpSegment", () => {
     "export PATH=$PATH:/x",
     "set -euo pipefail",
     "printenv HOME",
+    "declare -p FOO", // single var stays allowed
     "printenv COMPOSER_API_KEY", // single-var read; redaction layer masks the value
     "grep KEY .env", // file read; redaction layer, not the dump block
   ];
@@ -194,6 +198,18 @@ describe("plaintextPipelineSegment", () => {
     // vault read into jq
     `bw get item FOO | jq -r '.notes'`,
     `curl -s localhost:8087/object/item/x | jq -r '.data.fields[].value'`,
+    // whole-environment forms the first pass missed (2026-08-30 audit)
+    `docker inspect c --format '{{.Config.Env}}'`,  // no "json" - Go slice, same leak
+    `docker exec caddy env`,
+    `docker exec caddy env | grep TSIG`,
+    `docker exec caddy printenv`,
+    `ssh router env`,
+    `ssh router 'printenv'`,
+    `ssh router env | grep KEY`,
+    `bw get item FOO`,            // whole item, no field
+    `bw get notes FOO`,           // whole notes
+    `sops -d .env`,               // bare decrypt of a dotenv-named file -> transcript
+    `sops --decrypt .env`,
   ];
   for (const cmd of blocked) {
     test(`blocks: ${cmd.slice(0, 44)}`, () => {
@@ -218,6 +234,15 @@ describe("plaintextPipelineSegment", () => {
     `bw get item FOO | secretctl fp -`,
     // jq on something that is not a vault read.
     `curl -s localhost:9090/api/v1/query | jq -r '.data'`,
+    // targeted single-value reads stay allowed - same policy as field-selected docker
+    `docker exec caddy printenv TSIG_KEY`,
+    `docker exec caddy env FOO=1 somecmd`,   // override form prints only cmd's output
+    `ssh router 'docker ps'`,
+    `ssh router 'printenv TSIG_KEY'`,
+    `declare -p FOO`,
+    `bw get item FOO password`,
+    `sops -d config.yaml`,                  // non-dotenv file: no heuristic
+    `sops -d .env > /dev/null`,             // redirected, never reaches context
   ];
   for (const cmd of allowed) {
     test(`allows: ${cmd.slice(0, 44)}`, () => {

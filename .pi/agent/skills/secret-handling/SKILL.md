@@ -143,6 +143,23 @@ rather than "could not read", which points at rotating a working secret.
 *Distinguish MISMATCH (1) from UNRESOLVED (2). An empty resolve is UNRESOLVED -
 two empty values digest identically, the most dangerous false MATCH there is.*
 
+**Encrypted framing read as drift.** The router's composer checkout of a
+stack's `.env` holds SOPS-ENCRYPTED values (`ENC[AES256_GCM,...]`, ~171B)
+while the container runs the decrypted one (48B). Digesting the blob against
+plaintext reported MISMATCH on identical credentials. A length delta of
+*hundreds* of bytes is framing, not a rotation - check the file's format
+before acting. `secretctl`'s `sshenv:` now fails closed on `ENC[` values
+with the cause named; the supported path is ciphertext-vs-ciphertext
+(`dotenv:` vs `sshenv:`) or fetch-and-`sops:` locally.
+
+**A boolean probe that prints the line.** `sed -n 's/^KEY=[^E]*/plain/p'`
+was meant to classify a line without reading it, but `s///` replaces only
+the matched prefix and keeps the rest of the line - the full value went
+into the transcript. It was ciphertext (the age key is the boundary, and it
+never appeared), but the shape was wrong. *Classify with `grep -q`, `case`,
+or a pattern that consumes the whole line (`s/...$/tag/p`), never one that
+preserves the tail.*
+
 ## Interpreting a comparison
 
 - **MATCH, same lengths** - the same credential.
