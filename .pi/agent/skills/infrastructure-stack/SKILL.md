@@ -213,6 +213,14 @@ Sourced from `.env` (not committed). Vaultwarden vault has the canonical copies 
 - **Not pinning image tags**: `:latest` upgrades silently and breaks things. Always pin (`postgres:18.1-alpine`, `lscr.io/linuxserver/radarr:6.1.1`). Use `oci_tags <image>` to find current versions when bumping.
 - **Skipping health checks**: Compose can't sequence `depends_on: condition: service_healthy` without them. Always declare a healthcheck.
 - **PUID/PGID mismatch**: file permissions on bind-mounts inherit container UID. Mismatch with host owner = permission denied. Default everywhere: PUID=1000, PGID=100, UMASK=0002.
+- **Docker root-creates a missing bind-mount host source.** When a bind-mount's host path doesn't exist, `docker compose up` auto-creates it as `root:root`. A container that then drops to PUID (1000) can't write it -> crashloop or "directory not writeable" (slskd 2026-06-04, nzbget 2026-08-31). Fix compose-natively with a `pre_start` lifecycle hook (NOT a manual `chown`, NOT a NixOS tmpfiles rule, NOT an LSIO `custom-cont-init.d` script - `pre_start` is image-agnostic and lives in the compose file):
+  ```yaml
+  pre_start:
+    - image: busybox
+      user: root
+      command: sh -c 'mkdir -p /data/incomplete && chown 1000:100 /data/incomplete && chmod 0775 /data/incomplete'
+  ```
+  The ephemeral container runs as root sharing the service's mounts, fixes ownership, exits; the service then starts with a writable dir. Non-recursive chown (the running service owns its own files); add the service's own subdirs explicitly if the app writes into a nested path. Verify `pre_start` support with `docker compose version` (needs a recent v2).
 - **Putting the DB on the same network as the public-facing service**: makes the DB reachable from any container that knows the IP. Use a second `internal: true` network for backend dependencies, even when convenience tempts otherwise.
 
 ## When to graduate from compose
