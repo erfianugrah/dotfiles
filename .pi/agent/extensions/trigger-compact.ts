@@ -123,6 +123,19 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
+    // Mark right before triggering so resume-after-compact can tell this
+    // automatic compaction apart from a user /compact - ctx.compact() hardcodes
+    // reason "manual" on the session_compact event, which would otherwise
+    // make the auto-resume skip every auto-compaction (incident 2026-08-31).
+    // The marker is a session entry, not shared module state: pi's loader
+    // gives every extension its own copy of lib/ modules, so a singleton
+    // would never be seen by the other extension (probed 2026-08-31).
+    // Custom entries do not participate in LLM context.
+    try {
+      pi.appendEntry("trigger-compact:auto", { at: Date.now(), tokens: current, threshold });
+    } catch {
+      // appendEntry must never block the compaction itself
+    }
     trigger(ctx);
   });
 
