@@ -46,3 +46,6 @@ bin/memledger
 
 # Local hardware tooling (GPU fan curve), machine-specific
 bin/vfcurve
+
+# Agent worktrees (git-worktrees skill recipe)
+.worktrees/
