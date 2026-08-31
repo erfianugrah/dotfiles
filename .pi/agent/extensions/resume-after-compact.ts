@@ -1,32 +1,40 @@
 /**
- * resume-after-compact - resume a turn that auto-compaction killed.
+ * resume-after-compact - resume interrupted or clean turns that auto-compaction stopped.
  *
- * Background (2026-08-22 incident, pi issue #8409): ESC during tool
- * execution leaves pi's abort signal tripped, so the NEXT model request
- * dies instantly at lazyStream setup and is recorded as stopReason "error"
- * ("The operation was aborted.") instead of "aborted". _checkCompaction
- * only skips clean-aborted turns, so when context sits near the threshold
- * pi runs threshold auto-compaction on the bogus error turn - and threshold
- * compaction NEVER resumes the interrupted turn (agent.continue() no-ops on
- * a trailing assistant message; overflow recovery only re-runs for explicit
- * overflow). Net effect: the session compacted, then dead-stopped with zero
- * visible error. The user found it stalled and had to "continue" by hand.
+ * Two distinct scenarios:
+ *
+ * 1. ERROR INTERRUPTION (pi issue #8409): ESC during tool execution leaves
+ *    pi's abort signal tripped, so the NEXT model request dies instantly at
+ *    lazyStream setup and is recorded as stopReason "error" ("The operation
+ *    was aborted.") instead of "aborted". _checkCompaction only skips
+ *    clean-aborted turns, so when context sits near the threshold pi runs
+ *    threshold auto-compaction on the bogus error turn - and threshold
+ *    compaction NEVER resumes the interrupted turn. Net effect: the session
+ *    compacted, then dead-stopped with zero visible error.
+ *
+ * 2. CLEAN-TURN COMPACTION (no bug, a design gap): A clean turn completes
+ *    (stopReason "stop"), threshold compaction fires with willRetry=false
+ *    (nothing to retry -- the turn finished), session compacts correctly
+ *    but pi idles instead of continuing. In the TUI the user can type
+ *    /continue; in headless pi -p mode there is nobody to do that.
+ *    The extension now handles this path.
  *
  * This extension restores the missing resume:
  *
  *  1. agent_end records whether the run's last assistant message ended
- *     unfinished (stopReason "error", or "aborted"). Clean turns ("stop")
- *     and fresh user input clear the record.
+ *     unfinished (stopReason "error" or "aborted"). Clean turns ("stop")
+ *     arm cleanCompactArmed instead.
  *
- *  2. session_compact with willRetry=false (pi will NOT resume on its own)
- *     and a recorded interruption arms a one-shot resume. willRetry=true
- *     (overflow recovery) and reason="manual" (/compact) are left alone -
- *     pi handles the first, the user asked for the second.
+ *  2. session_compact with willRetry=false (pi will NOT resume on its own):
+ *     - Error turn + recorded interruption -> arms one-shot error resume.
+ *     - Clean turn + cleanCompactArmed -> headless: arms resume; TUI: notify only.
+ *     willRetry=true (overflow recovery) and reason="manual" (/compact) are
+ *     left alone -- pi handles the first, the user asked for the second.
  *
- *  3. agent_settled fires the resume: a synthetic user message telling the
- *     agent to pick up where the interrupted turn stopped. One attempt per
- *     interruption (circuit breaker); re-armed only by a clean turn or a
- *     real user message.
+ *  3. agent_settled fires the resume: a synthetic user message. Error case
+ *     tells the agent to pick up where it stopped; clean case just says
+ *     "continue working." One attempt per event (circuit breaker); re-armed
+ *     only by a clean turn or real user message.
  *
  * Deliberate limits:
  *  - stopReason "aborted" (a REAL user Escape, not the #8409 misrecord)
@@ -35,8 +43,8 @@
  *  - Auth/quota/rate-limit errors (401/402/403/429, billing, quota) are
  *    notify-only: compaction changes nothing about them and an instant
  *    re-hit is futile. continue-after-error owns that recovery flow.
- *
- * Works headless (pi -p loops): UI calls are gated on ctx.hasUI.
+ *  - Clean-turn resume fires only in headless mode (ctx.hasUI === false);
+ *    in the TUI the user sees a notification and continues manually.
  *
  * Disable via `PI_NO_RESUME_AFTER_COMPACT=1`.
  */

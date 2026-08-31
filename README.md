@@ -943,6 +943,7 @@ DB access, session lifecycle hooks).
 | `tool-output-prune.ts` | opencode-style surgical pruning of oversized tool outputs to preserve context |
 | `compaction-model.ts` | Runs pi's compaction summarizer on a cheaper / faster model |
 | `continue-after-error.ts` | Recovery affordance for provider 401 / 402 / 429 - resume instead of ending the run |
+| `resume-after-compact.ts` | Auto-resume after threshold compaction: error-interrupted turns (#8409 workaround) and clean-turn compaction in headless mode |
 | `clipboard-image-shrink.ts` | Auto-downscales pasted clipboard images before they reach the model |
 | `bookmark.ts`, `migrate-sessions.ts`, `notify.ts`, `question.ts`, `session-name.ts`, `session-undo.ts`, `trigger-compact.ts`, `inline-bash.ts` | Smaller utilities (`/undo`, bookmarks, desktop notify, prompts, session naming, threshold compaction, `!{cmd}` inline bash) |
 
