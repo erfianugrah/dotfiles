@@ -199,11 +199,11 @@ chain, so the agent must replicate the same order.
 
 ## Auth quick-start (agent driving the API)
 
-The production instance is `https://composer.erfi.io` (on the router). **`COMPOSER_API_KEY` is normally already exported in the user's shell** (sourced from Vaultwarden by the user's zsh init). Check `env | grep COMPOSER` first — only fall back to `bw get` if the env is empty.
+The production instance is `https://composer.erfi.io` (on the router). **`COMPOSER_API_KEY` is normally already exported in the user's shell** (sourced from Vaultwarden by the user's zsh init). Check `[ -n "${COMPOSER_API_KEY+x}" ] && echo set` first - only fall back to `bw get` if the env is empty.
 
 ```bash
 # 1. is the key already in pi's inherited env?
-env | grep -i ^COMPOSER_API_KEY | sed 's/=.*/=<set>/'
+[ -n "${COMPOSER_API_KEY+x}" ] && echo set || echo unset
 
 # 2. only if missing: pull from Vaultwarden (vault.erfi.io)
 bw status | jq -r .status        # 'unlocked' | 'locked' | 'unauthenticated'
@@ -227,7 +227,7 @@ curl -sf -X POST -H "X-API-Key: $COMPOSER_API_KEY" \
 
 ### Env propagation gotcha
 
-Pi's `bash` tool spawns a fresh subshell from pi's parent process — it does NOT see env vars exported in the user's tmux/terminal AFTER pi started. If the user runs `bw unlock` interactively post-pi-launch, pi never sees the resulting `BW_SESSION`. Two workarounds: (a) the user pastes the `export ...` line into pi as a bash command, (b) the user restarts pi after unlocking. Memory-of-fact: **`COMPOSER_API_KEY` is exported by the user's shell init**, so it normally IS in pi's env from launch — verify with `env | grep ^COMPOSER` before assuming it isn't.
+Pi's `bash` tool spawns a fresh subshell from pi's parent process — it does NOT see env vars exported in the user's tmux/terminal AFTER pi started. If the user runs `bw unlock` interactively post-pi-launch, pi never sees the resulting `BW_SESSION`. Two workarounds: (a) the user pastes the `export ...` line into pi as a bash command, (b) the user restarts pi after unlocking. Memory-of-fact: **`COMPOSER_API_KEY` is exported by the user's shell init**, so it normally IS in pi's env from launch - verify with `[ -n "${COMPOSER_API_KEY+x}" ] && echo set` before assuming it isn't.
 
 ### Failure modes
 
