@@ -24,6 +24,7 @@ mistake this skill exists to prevent.
 hand-rolled version of this kept being wrong in ways that were worse than
 verbose - see the failure catalogue below.
 
+<!-- good -->
 ```bash
 secretctl cmp 'sops:.env#POSTGRES_PASSWORD' 'docker:servarr/memledger-backup#PGPASSWORD'
 # exit 0 = match, 1 = mismatch, 2 = a source could not be read
@@ -53,6 +54,7 @@ correlation handle. It prints length alongside every digest for free.
 
 ## Rotation: the loop that proves it landed
 
+<!-- good -->
 ```bash
 secretctl fp --salt-file ~/.secretctl-salt 'docker:router/caddy#TOKEN' > before.txt
 # ... rotate + deploy ...
@@ -70,6 +72,7 @@ file and any recorded digests as sensitive metadata.
 
 ## When a program needs the real value
 
+<!-- good -->
 ```bash
 secretctl exec 'sops:.env#POSTGRES_PASSWORD' --as PGPASSWORD -- psql -h db -U postgres
 sops exec-env secrets.enc.env 'psql'      # equivalent for a whole file, FIFO-backed
@@ -89,6 +92,30 @@ alternatives all leave a copy somewhere durable:
 Source: /docs/sops/usage/advanced/index.md (`exec-env` / `exec-file`).
 
 ## Never
+
+<!-- good -->
+```bash
+[ -n "${NAME+x}" ] && echo set || echo unset
+printenv NAME
+docker inspect C --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^VAR=//p'
+```
+
+The guard's contract, pinned by `skill-guard-coupling.test.ts` (dotfiles): every
+fenced block in this file is annotated `<!-- good -->` or `<!-- bad -->` and fed
+through the guard's rules, so the documented escape hatches cannot drift from
+what the guard actually enforces (that drift bit live 2026-08-30 - the old
+`env | grep ^NAME` escape was blocked by the guard itself).
+
+<!-- bad -->
+```bash
+env | grep ^NAME
+docker inspect --format '{{json .Config.Env}}' c
+sops -d secrets.enc.env | grep KEY | cut -d= -f2
+bw get item MyItem
+ssh router 'printenv'
+docker exec caddy env
+sops -d .env
+```
 
 - **`env`, `printenv`, bare `set`, `export -p`** - dumps every credential in the
   process. `tool-guard` hard-blocks these. To check one variable WITHOUT its
