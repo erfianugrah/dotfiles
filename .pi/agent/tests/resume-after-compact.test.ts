@@ -213,6 +213,46 @@ describe("resume-after-compact", () => {
     expect(sent.length).toBe(0);
   });
 
+  test("busy compaction followed by turn_start disarms (pi 0.84.4 continues the run itself, #6879)", async () => {
+    const h = makeHarness({ idle: false });
+    resumeAfterCompact(h.pi as never);
+
+    await h.fire("agent_end", cleanTurn);
+    await h.fire("session_compact", { reason: "threshold", willRetry: false });
+    expect(h.sent.length).toBe(0); // armed, not fired
+
+    // 0.84.4+: the same run continues with the next assistant response.
+    await h.fire("turn_start");
+    h.setIdleOverride(undefined);
+    await h.fire("agent_settled");
+    expect(h.sent.length).toBe(0); // no spurious resume
+  });
+
+  test("busy compaction after an errored turn disarms when pi auto-retries (turn_start)", async () => {
+    const h = makeHarness({ idle: false });
+    resumeAfterCompact(h.pi as never);
+
+    await h.fire("agent_end", errorTurn);
+    await h.fire("session_compact", { reason: "threshold", willRetry: false });
+    await h.fire("turn_start"); // pi retried the errored turn itself
+    h.setIdleOverride(undefined);
+    await h.fire("agent_settled");
+    expect(h.sent.length).toBe(0);
+  });
+
+  test("busy compaction with NO following turn dead-stops; agent_settled resumes", async () => {
+    const h = makeHarness({ idle: false });
+    resumeAfterCompact(h.pi as never);
+
+    await h.fire("agent_end", errorTurn);
+    await h.fire("session_compact", { reason: "threshold", willRetry: false });
+    expect(h.sent.length).toBe(0);
+
+    h.setIdleOverride(undefined);
+    await h.fire("agent_settled"); // run unwound with no new turn -> dead-stop
+    expect(h.sent.length).toBe(1);
+  });
+
   test("threshold reason (pi core path) with idle agent fires without a marker", async () => {
     const { pi, fire, sent } = makeHarness();
     resumeAfterCompact(pi as never);

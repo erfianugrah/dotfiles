@@ -41,10 +41,15 @@
  * contextWindow on turn_end. The marker path is therefore the ONLY path
  * by which auto-resume can fire at all (incident 2026-08-31).
  *
- *  3. agent_settled fires the resume: a synthetic user message. Error case
- *     tells the agent to pick up where it stopped; clean case just says
- *     "continue working." One attempt per event (circuit breaker); re-armed
- *     only by a clean turn or real user message.
+ *  3. Busy-armed resumes wait for a verdict before firing: a turn_start
+ *     AFTER the compaction means pi continued the run itself (0.84.4+ #6879
+ *     compacts between tool execution and the next assistant response IN the
+ *     same run, and pi also auto-retries errored turns) - disarm. An
+ *     agent_settled with no intervening turn_start means pi dead-stopped -
+ *     fire the resume: a synthetic user message. Error case tells the agent
+ *     to pick up where it stopped; clean case just says "continue working."
+ *     One attempt per event (circuit breaker); re-armed only by a clean turn
+ *     or real user message.
  *
  * Deliberate limits:
  *  - stopReason "aborted" (a REAL user Escape, not the #8409 misrecord)
@@ -87,7 +92,14 @@ type Interruption = {
 
 type SessionState = {
   interrupted: Interruption | null;
-  resumeArmed: boolean;
+  /**
+   * Armed when a compaction fired while the agent was busy. Resolved one of
+   * two ways, exactly once: turn_start after the compaction (pi continued
+   * the run itself - 0.84.4+ #6879 mid-run compaction, or an auto-retry of
+   * an errored turn - disarm, no resume) or agent_settled with no
+   * intervening turn_start (pi dead-stopped - fire the resume).
+   */
+  pendingMidRun: boolean;
   /** one auto-resume per interruption; reset by a clean turn or real user input */
   resumeAttempted: boolean;
   /** suppress our own synthetic user message from the input handler */
@@ -105,7 +117,7 @@ const sessions = new Map<string, SessionState>();
 function stateFor(key: string): SessionState {
   let s = sessions.get(key);
   if (!s) {
-    s = { interrupted: null, resumeArmed: false, resumeAttempted: false, sendingResume: false, cleanCompactArmed: false, resuming: false, lastConsumedMarkerId: null };
+    s = { interrupted: null, pendingMidRun: false, resumeAttempted: false, sendingResume: false, cleanCompactArmed: false, resuming: false, lastConsumedMarkerId: null };
     sessions.set(key, s);
   }
   return s;
@@ -248,13 +260,23 @@ export default function (pi: ExtensionAPI) {
     } else {
       // Clean turn (stop/toolUse completed): interruption is over, re-arm breaker.
       s.interrupted = null;
-      s.resumeArmed = false;
+      s.pendingMidRun = false;
       s.resumeAttempted = false;
       // Arm clean-turn compaction resume for headless mode.
       // In the TUI the user sees the compaction notification and can continue;
       // in headless pi -p mode there is no user to hit /continue.
       s.cleanCompactArmed = true;
     }
+  });
+
+  pi.on("turn_start", (_event, ctx) => {
+    const s = stateFor(sessionKey(ctx));
+    if (!s.pendingMidRun) return;
+    // A turn starting after a busy compaction means pi continued the run on
+    // its own: 0.84.4+ compacts between tool execution and the next
+    // assistant response inside the same run (#6879), and errored turns can
+    // auto-retry. Pi owns the continuation - disarm, no resume.
+    s.pendingMidRun = false;
   });
 
   pi.on("message_start", (event, ctx) => {
@@ -264,7 +286,7 @@ export default function (pi: ExtensionAPI) {
     if (m?.role !== "user") return;
     // Real user input supersedes any pending interruption/resume.
     s.interrupted = null;
-    s.resumeArmed = false;
+    s.pendingMidRun = false;
     s.resumeAttempted = false;
     s.cleanCompactArmed = false;
   });
@@ -276,7 +298,7 @@ export default function (pi: ExtensionAPI) {
     if (e.willRetry) {
       // Overflow recovery: pi re-runs the turn itself.
       s.interrupted = null;
-      s.resumeArmed = false;
+      s.pendingMidRun = false;
       return;
     }
     if (e.reason === "manual") {
@@ -303,9 +325,10 @@ export default function (pi: ExtensionAPI) {
         // fired, so no agent_settled is coming - fire the resume now.
         await sendResume(ctx, s);
       } else {
-        // Pi-core mid-run compaction: agent_settled arrives after the run
-        // unwinds; arm for it.
-        s.resumeArmed = true;
+        // Busy: could be a mid-run compaction pi continues itself (0.84.4+
+        // #6879), or a dead-stop compaction at run end. Arm and let
+        // turn_start (disarm) or agent_settled (resume) decide.
+        s.pendingMidRun = true;
       }
       return;
     }
@@ -332,17 +355,19 @@ export default function (pi: ExtensionAPI) {
       // Same ordering: extension-triggered, agent already settled - fire now.
       await sendResume(ctx, s);
     } else {
-      s.resumeArmed = true;
+      // Busy: arm; turn_start disarms if pi continues/retries the run.
+      s.pendingMidRun = true;
     }
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
     const s = stateFor(sessionKey(ctx));
-    if (!s.resumeArmed) return;
+    if (!s.pendingMidRun) return;
     // The resumed turn settles with its own agent_settled while the original
     // handler is still awaiting waitForIdle - do not re-enter.
     if (s.resuming) return;
-    s.resumeArmed = false;
+    // One-shot: no turn started after the compaction, so pi dead-stopped.
+    s.pendingMidRun = false;
 
     const idle = (await ctx.isIdle?.()) ?? true;
     if (!idle) return; // another extension started work; don't pile on
