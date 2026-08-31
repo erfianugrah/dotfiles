@@ -64,6 +64,8 @@ type SessionState = {
   resumeAttempted: boolean;
   /** suppress our own synthetic user message from the input handler */
   sendingResume: boolean;
+  /** clean-turn compaction: last turn completed, compaction fired, no resume mechanism in pi core */
+  cleanCompactArmed: boolean;
 };
 
 const sessions = new Map<string, SessionState>();
@@ -71,7 +73,7 @@ const sessions = new Map<string, SessionState>();
 function stateFor(key: string): SessionState {
   let s = sessions.get(key);
   if (!s) {
-    s = { interrupted: null, resumeArmed: false, resumeAttempted: false, sendingResume: false };
+    s = { interrupted: null, resumeArmed: false, resumeAttempted: false, sendingResume: false, cleanCompactArmed: false };
     sessions.set(key, s);
   }
   return s;
@@ -118,6 +120,10 @@ export default function (pi: ExtensionAPI) {
       s.interrupted = null;
       s.resumeArmed = false;
       s.resumeAttempted = false;
+      // Arm clean-turn compaction resume for headless mode.
+      // In the TUI the user sees the compaction notification and can continue;
+      // in headless pi -p mode there is no user to hit /continue.
+      s.cleanCompactArmed = true;
     }
   });
 
@@ -130,6 +136,7 @@ export default function (pi: ExtensionAPI) {
     s.interrupted = null;
     s.resumeArmed = false;
     s.resumeAttempted = false;
+    s.cleanCompactArmed = false;
   });
 
   pi.on("session_compact", (event, ctx) => {
@@ -143,6 +150,20 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     if (e.reason === "manual") return;
+
+    // Clean-turn compaction: arm resume for headless mode only.
+    // TUI mode shows a notification; the user can continue manually.
+    if (!s.interrupted && s.cleanCompactArmed) {
+      s.cleanCompactArmed = false;
+      if (ctx.hasUI) {
+        notify(ctx, "Session compacted. Continue to pick up the task.", "info");
+        return;
+      }
+      s.resumeAttempted = false; // re-arm for this path
+      s.resumeArmed = true;
+      return;
+    }
+
     if (!s.interrupted) return;
 
     if (!s.interrupted.resumable) {
@@ -166,11 +187,33 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_settled", async (_event, ctx) => {
     const s = stateFor(sessionKey(ctx));
-    if (!s.resumeArmed || !s.interrupted) return;
+    if (!s.resumeArmed) return;
     s.resumeArmed = false;
 
     const idle = (await ctx.isIdle?.()) ?? true;
     if (!idle) return; // another extension started work; don't pile on
+
+    // Clean-turn compaction (no interruption): task completed, just continue.
+    if (!s.interrupted) {
+      s.resumeAttempted = true;
+      notify(ctx, "Auto-resuming after compaction", "info");
+      const text =
+        "The session was compacted to stay within the context window. " +
+        "The previous turn completed successfully. Continue working on the task;";
+      s.sendingResume = true;
+      try {
+        await pi.sendUserMessage(text);
+      } catch (err) {
+        notify(
+          ctx,
+          `Auto-resume failed to send: ${err instanceof Error ? err.message : String(err)}. /continue by hand.`,
+          "error",
+        );
+      } finally {
+        s.sendingResume = false;
+      }
+      return;
+    }
 
     s.resumeAttempted = true;
     const cause = s.interrupted.errorMessage
