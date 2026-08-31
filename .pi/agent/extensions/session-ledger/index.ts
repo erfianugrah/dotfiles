@@ -56,6 +56,14 @@ import { mkdirSync } from "node:fs";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { searchLedger, toOrQuery } from "../lib/memledger-core.ts";
+import {
+	buildSemanticBlock,
+	decideInject,
+	fetchSemanticHits,
+	freshSemanticState,
+	SEMANTIC_INJECT_HEADER,
+	type SemanticInjectState,
+} from "../lib/semantic-inject-core.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Constants
@@ -400,6 +408,30 @@ async function fetchMemledgerBrief(project: string): Promise<string> {
 }
 let injectionEnabled = process.env.LEDGER_OFF !== "1";
 
+// Semantic task-relevant injection (gap 1 of the 2026-08-31 ruflo eval):
+// one-shot, fires on the first substantive user message, pushes semantically
+// similar past-session snippets into the system prompt. Kill switches:
+// PI_SEMANTIC_INJECT_OFF=1, and LEDGER_OFF=1 as the master switch (the
+// semantic block IS retrieval injection - `/ledger off` must silence all of
+// it, not just the project brief). State lives per session file.
+const semanticEnabled = process.env.PI_SEMANTIC_INJECT_OFF !== "1";
+const semanticStates = new Map<string, SemanticInjectState>();
+
+function semanticStateFor(ctx: ExtensionContext): SemanticInjectState {
+	let key = "default";
+	try {
+		key = ctx.sessionManager.getSessionFile?.() ?? "default";
+	} catch {
+		/* stale ctx */
+	}
+	let s = semanticStates.get(key);
+	if (!s) {
+		s = freshSemanticState();
+		semanticStates.set(key, s);
+	}
+	return s;
+}
+
 function gitBranch(cwd: string): string | null {
 	try {
 		const b = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
@@ -569,14 +601,51 @@ export default function (pi: ExtensionAPI) {
 	// via systemPrompt prepend did. Consequence: per-project session
 	// summaries reached the model in NO session, so fresh sessions
 	// rediscovered known context by trial and error.
-	pi.on("before_agent_start", async (event: { systemPrompt: string }) => {
-		if (!injectionEnabled || (injectRows.length === 0 && !memledgerBlock)) return undefined;
+	pi.on("before_agent_start", async (event: { systemPrompt: string }, ctx: ExtensionContext) => {
+		// ── Semantic one-shot (task-relevant push) ──────────────────────
+		// Runs even when ledger injection is off: the anchors differ (this
+		// one keys on the task, not the project). Degrades silently.
+		let semanticBlock = "";
+		if (semanticEnabled && injectionEnabled) {
+			try {
+				const state = semanticStateFor(ctx);
+				const entries = (ctx.sessionManager.getEntries?.() ?? []) as AnyEntry[];
+				const userTexts = entries
+					.filter((e) => entryRole(e) === "user")
+					.map((e) => extractText(entryContent(e)))
+					.filter((t) => t.trim().length > 0);
+				// Self-exclusion: this session's own file is the closest
+				// semantic match to its own prompt.
+				let selfKey: string | undefined;
+				try {
+					selfKey = ctx.sessionManager.getSessionFile?.() ?? undefined;
+				} catch {
+					/* stale ctx */
+				}
+				const hit = await decideInject(state, userTexts, {
+					timeoutMs: 2500,
+					selfSession: selfKey,
+				});
+				if (hit) semanticBlock = hit;
+			} catch {
+				/* stale ctx / no entries - skip */
+			}
+		}
+
+		if (!injectionEnabled || (injectRows.length === 0 && !memledgerBlock)) {
+			if (!semanticBlock) return undefined;
+			if (event.systemPrompt.includes(SEMANTIC_INJECT_HEADER)) return undefined;
+			return { systemPrompt: `${semanticBlock}\n\n${event.systemPrompt}` };
+		}
 		// Idempotency - earlier handlers chain the system prompt.
 		if (event.systemPrompt.includes(INJECT_HEADER)) return undefined;
 		let block = buildInjectionBlock(injectRows);
 		if (memledgerBlock) {
 			const brief = await Promise.race([memledgerBlock, new Promise<string>((r) => setTimeout(() => r(""), 600))]);
 			if (brief) block = block ? `${block}\n${brief}` : `${INJECT_HEADER}\n${brief}`;
+		}
+		if (semanticBlock && !block.includes(SEMANTIC_INJECT_HEADER)) {
+			block = block ? `${semanticBlock}\n${block}` : semanticBlock;
 		}
 		if (!block) return undefined;
 		return { systemPrompt: `${block}\n\n${event.systemPrompt}` };

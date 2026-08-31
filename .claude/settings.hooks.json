@@ -156,6 +156,14 @@
             "command": "bun \"$HOME/.claude/hooks/history-first.ts\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$HOME/.claude/hooks/semantic-inject.ts\""
+          }
+        ]
       }
     ]
   }

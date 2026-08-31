@@ -40,6 +40,14 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
 	getAgentDir: () => AGENT_DIR,
 }));
 
+// The semantic-inject path (2026-08-31) does a real fetch to memledger's
+// pgvector endpoint when substantive user entries exist. Tests must never
+// hit the network - stub fetch to fail fast, which the extension treats as
+// silent degradation (no semantic block).
+(globalThis as { fetch?: unknown }).fetch = async () => {
+	throw new Error("e2e: network disabled");
+};
+
 // Fake pi runtime
 const hooks: Record<string, Array<(e: unknown, c: unknown) => Promise<unknown> | unknown>> = {};
 const tools: Record<string, { execute: (id: string, p: unknown) => Promise<{ content: Array<{ text: string }> }> }> = {};
@@ -182,5 +190,45 @@ describe("session-ledger e2e", () => {
 		await commands.ledger.handler("off", ctx);
 		const res = await emit("before_agent_start", { systemPrompt: "BASE_PROMPT" }, ctx);
 		expect(res).toBeUndefined();
+	});
+
+	test("semantic one-shot: fires once on substantive entries, prepends block, then done", async () => {
+		// fresh session state: new session file so semanticStates is cold
+		const ctx2 = {
+			...ctx,
+			sessionManager: {
+				getSessionFile: () => "/tmp/sess-e2e-semantic.jsonl",
+				getEntries: () => entries,
+			},
+		};
+		await commands.ledger.handler("on", ctx2);
+		await emit("session_start", { reason: "new" }, ctx2);
+		const realFetch = globalThis.fetch;
+		let calls = 0;
+		(globalThis as { fetch?: unknown }).fetch = async () => {
+			calls++;
+			return new Response(
+				JSON.stringify({
+					results: [
+						{ session_key: "pi:HOST:other", ordinal: 7, text: "decided the backup sidecar design", similarity: 0.88 },
+						{ session_key: "/tmp/sess-e2e-semantic.jsonl", ordinal: 1, text: "self must be excluded", similarity: 0.99 },
+					],
+				}),
+				{ status: 200 },
+			);
+		};
+		try {
+			const res = (await emit("before_agent_start", { systemPrompt: "BASE_PROMPT" }, ctx2)) as { systemPrompt: string };
+			expect(res.systemPrompt).toContain("[semantic-inject]");
+			expect(res.systemPrompt).toContain("decided the backup sidecar design");
+			expect(res.systemPrompt).not.toContain("self must be excluded");
+			// second turn: done - no more fetches
+			await emit("before_agent_start", { systemPrompt: "BASE_PROMPT" }, ctx2);
+			expect(calls).toBe(1);
+		} finally {
+			(globalThis as { fetch?: unknown }).fetch = realFetch ?? (async () => {
+				throw new Error("e2e: network disabled");
+			});
+		}
 	});
 });
