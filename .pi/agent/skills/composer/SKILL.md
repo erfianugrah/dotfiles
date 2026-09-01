@@ -85,7 +85,7 @@ Key model:
 
 ### Deploying to a remote-host stack (verified 2026-07-31 on gumshoe + research)
 
-- **Push to `main` auto-deploys.** Both servarr-host app stacks have GitHub webhooks with `auto_redeploy=true` (check `GET /api/v1/webhooks`); composer runs sync+up within ~1 min of a push. Manual `POST /api/v1/stacks/<name>/sync|up?async=true` with `X-API-Key: $COMPOSER_API_KEY` against `https://composer.erfi.io` passes the edge WAF (empty-body POSTs don't trip the credential rule) and is only needed to recreate containers for reasons git can't see - a new `:latest` image ID, or a manual container kill.
+- **Push to `main` auto-deploys.** Both servarr-host app stacks have GitHub webhooks with `auto_redeploy=true` (check `GET /api/v1/webhooks`); composer runs sync+up within ~1 min of a push. Manual `POST /api/v1/stacks/<name>/deploy?async=true` (full GitOps pipeline: git pull -> decrypt -> compose pull -> compose up -d -> re-encrypt). Use `up` only to recreate containers for reasons git can't see -- a new `:latest` image ID, or a manual container kill.
 - **`up` does NOT build.** A stack service with a `build:` context (e.g. memledger's `ui`) fails `up` with `No such image: <name>:latest` until `POST /api/v1/stacks/<name>/build` has run. Deploy order for such a stack is sync -> build -> up. The webhook sync+up path has the same gap - a git-backed stack with an in-repo `build:` needs the build triggered too (hit live 2026-08-29 on memledger).
 - **Force-pushes are handled as of v0.26.5.** Composer's git sync uses fetch+hard-reset to origin/branch, so amended/force-pushed commits are pulled correctly. The old limitation (2026-08-29) required a manual `docker exec ... git reset --hard origin/main`; that is no longer needed.
 - **The git checkout lives on the ROUTER** (`/var/lib/composer/stacks/<name>`, container view `/opt/stacks/<name>`), even for servarr-host stacks. There is NO checkout on servarr; compose ops run against servarr's daemon through drawbridge. Bind-mount sources resolve ON THE DAEMON HOST - any host path in a servarr-host stack's compose/.env must be a servarr path (e.g. research's `SEARXNG_CONFIG_DIR=/mnt/user/appdata/research/searxng`).
@@ -274,7 +274,7 @@ GETs work fine through the public WAF. Only PUT/POST/DELETE with credential-like
 
 CRUD: `GET/POST /stacks`, `POST /stacks/git` (clone repo), `POST /stacks/import` (Dockge dir), `GET/PUT/DELETE /stacks/{name}`, `PUT /stacks/{name}/env`.
 
-Lifecycle: `POST /stacks/{name}/{up|build|down|restart|pull}` — all support `?async=true` returning `{job_id}`. Sync mode blocks until done (subject to 1 MB resp cap on logs).
+Lifecycle: `POST /stacks/{name}/{up|build|down|restart|pull|deploy}` -- all support `?async=true` returning `{job_id}`. Sync mode blocks until done (subject to 1 MB resp cap on logs). `up` = `compose up -d` only. `deploy` = full GitOps pipeline (git pull -> decrypt -> `compose pull` -> `compose up -d` -> re-encrypt).
 
 Other: `POST /validate`, `POST /exec` (run `docker compose <cmd>`), `POST /convert/{git,local}` (toggle git-backed ↔ local), `GET /diff` (disk vs running config), `GET/PUT /credentials` (per-stack registry).
 
@@ -302,7 +302,7 @@ Live run output: SSE at `GET /sse/pipelines/{id}/runs/{runId}`.
 
 ## GitOps
 
-Stack-side endpoints: `POST /stacks/{name}/sync` (pull + clear dirty flag), `GET /stacks/{name}/git/{log,status,diff}`, `POST /stacks/{name}/rollback` (checkout SHA).
+Stack-side endpoints: `POST /stacks/{name}/sync` (pull + clear dirty flag), `POST /stacks/{name}/deploy` (full pipeline: sync + decrypt + pull + up + re-encrypt), `GET /stacks/{name}/git/{log,status,diff}`, `POST /stacks/{name}/rollback` (checkout SHA).
 
 ### Repointing a stack to a DIFFERENT repo URL: convert does NOT clone
 
