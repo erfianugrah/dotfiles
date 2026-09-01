@@ -22,7 +22,7 @@ migration state).
 | `xikectl/` | Operator CLI for the XikeStor SKS8300 switch |
 | `vyos/` | VyOS router config - SG site (erfiyos, incl. Magic WAN) |
 | `vyos-nl/` | VyOS router config - NL site |
-| `openwrt/` | Clone of upstream `openwrt/openwrt` (origin upstream, `fork` remote at erfianugrah/openwrt) |
+| `openwrt/` | Clone of upstream `openwrt/openwrt` (origin upstream, `fork` remote at erfianugrah/openwrt, `ecsv` remote at ecsv/openwrt) |
 | `wifi7-ap/` | Spec + bring-up plan for a DIY Wi-Fi 7 (802.11be) access point |
 | `pylon/` | Self-hosted tunnel platform - single Go binary (server, client, CLI) |
 | `gps-clock/` | GPS-disciplined master clock for the bench |

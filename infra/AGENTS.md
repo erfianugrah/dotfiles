@@ -10,7 +10,8 @@ check first).
 - One repo per domain; each maps to a private GitHub repo under `erfianugrah/`.
   Exceptions: `ai/llm-compose` is PUBLIC; `bombe/`, `lockstep/`, `mnemosyne/`
   are local-only (no remote yet); `openwrt/` tracks upstream
-  `openwrt/openwrt` as origin (erfianugrah fork as `fork` remote).
+  `openwrt/openwrt` as origin (erfianugrah fork as `fork` remote,
+  plus `ecsv` remote at ecsv/openwrt).
   Not repos at all: `docs/`, `knotea-build/`,
   `storage-migration-tracker.md`.
 - `ai/` and `ergo/` are the only sub-groupings. `ergo/` has its own workspace

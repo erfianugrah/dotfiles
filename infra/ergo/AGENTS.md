@@ -1,4 +1,4 @@
-# AGENTS.md — ergo workspace
+# AGENTS.md - ergo workspace
 
 Seven independent Go projects (the proxy/edge services workspace), each with
 its own git repo and `go.mod`:
@@ -39,7 +39,7 @@ go vet ./... && go mod tidy                            # Always run before commi
 Always use `-race -count=1`. `-count=1` disables test caching; `-race` catches
 data races in concurrency tests that exist in all plugins.
 
-### caddy-compose — wafctl (Go backend, ~632 tests)
+### caddy-compose - wafctl (Go backend, ~632 tests)
 
 ```bash
 cd caddy-compose && make test                          # All tests (Go + frontend)
@@ -47,7 +47,7 @@ cd caddy-compose/wafctl && go test -count=1 -timeout 60s ./...          # Go onl
 cd caddy-compose/wafctl && go test -run TestFunctionName -count=1 -timeout 60s ./... # Single
 ```
 
-### caddy-compose — waf-dashboard (Astro/React frontend, ~338 tests)
+### caddy-compose - waf-dashboard (Astro/React frontend, ~338 tests)
 
 ```bash
 cd caddy-compose/waf-dashboard && npx vitest run       # All frontend tests
@@ -55,7 +55,7 @@ cd caddy-compose/waf-dashboard && npx vitest run -t "description substring" # Si
 cd caddy-compose/waf-dashboard && npx tsc --noEmit     # Type check
 ```
 
-### caddy-compose — E2E & Docker
+### caddy-compose - E2E & Docker
 
 ```bash
 cd caddy-compose/test/e2e && go test -v -count=1 -timeout 600s ./...    # E2E (needs Docker)
@@ -78,7 +78,7 @@ No dedicated linter config. Use:
 `.env` in caddy-compose is SOPS-encrypted (age). A pre-commit hook blocks
 unencrypted `.env`, `.tfvars`, `.tfstate` files. Never commit plaintext secrets.
 
-## Code Style — Go (all projects)
+## Code Style - Go (all projects)
 
 ### Imports
 
@@ -91,19 +91,19 @@ Named imports only when necessary (e.g. `libinjection "github.com/corazawaf/libi
 
 ### Naming Conventions
 
-- **Exported types**: PascalCase — `PolicyEngine`, `MatchBody`, `DDOSMitigator`
-- **Unexported types**: camelCase — `compiledRule`, `compiledCondition`
-- **Constants**: camelCase — `defaultMaxSize`, `numShards`
-- **Variables**: Short contextual names — `pe`, `cr`, `cc`, `rls`
-- **JSON struct tags**: `snake_case,omitempty` — `json:"max_size,omitempty"`
-- **Files**: lowercase, underscores — `ratelimit.go`, `rl_analytics.go`
-- **Test functions**: `Test<Subject>_<Scenario>` — `TestCondition_Eq_Match`
+- **Exported types**: PascalCase - `PolicyEngine`, `MatchBody`, `DDOSMitigator`
+- **Unexported types**: camelCase - `compiledRule`, `compiledCondition`
+- **Constants**: camelCase - `defaultMaxSize`, `numShards`
+- **Variables**: Short contextual names - `pe`, `cr`, `cc`, `rls`
+- **JSON struct tags**: `snake_case,omitempty` - `json:"max_size,omitempty"`
+- **Files**: lowercase, underscores - `ratelimit.go`, `rl_analytics.go`
+- **Test functions**: `Test<Subject>_<Scenario>` - `TestCondition_Eq_Match`
 
 ### Error Handling
 
-- Wrap with `fmt.Errorf("context: %w", err)` — always `%w`.
+- Wrap with `fmt.Errorf("context: %w", err)` - always `%w`.
 - Return errors as last value. Check immediately; never defer error checks.
-- No sentinel error variables — errors are constructed inline.
+- No sentinel error variables - errors are constructed inline.
 - Early returns for guard clauses.
 - In `Match()`/`ServeHTTP()`: log I/O errors at Debug level, never propagate up.
 - In tests: `t.Fatal(err)` or `t.Fatalf(...)` for immediate failure.
@@ -129,27 +129,27 @@ Named imports only when necessary (e.g. `libinjection "github.com/corazawaf/libi
 
 ### wafctl-specific patterns
 
-- **Zero external deps** — stdlib only.
+- **Zero external deps** - stdlib only.
 - Go 1.22+ route patterns: `mux.HandleFunc("GET /api/health", handler)`
 - Closure-based DI: `handleSummary(store, als) http.HandlerFunc`
 - JSON helpers: `writeJSON()`, `decodeJSON()` (5 MB limit).
 - Atomic file writes via `atomicWriteFile()` (write temp, fsync, rename).
 - Config from env: `envOr("KEY", "default")`.
 
-## Code Style — TypeScript/React (waf-dashboard)
+## Code Style - TypeScript/React (waf-dashboard)
 
 - **Path alias**: `@/` maps to `./src/`
 - **API layer**: domain modules in `src/lib/api/` with barrel export via `index.ts`
 - Go returns `snake_case` JSON; API modules map to `camelCase` TypeScript interfaces.
 - shadcn/ui in `src/components/ui/`; `cn()` for className merging.
-- Astro static MPA — file-based routing, pre-rendered HTML.
+- Astro static MPA - file-based routing, pre-rendered HTML.
 - Read URL params in `useEffect` (client-only), never in `useState` initializer.
 - Cross-page links: native `<a href>`, not SPA navigation.
 - Components over ~500 lines split into feature subdirs (`policy/`, `ratelimits/`).
 
 ## Testing Conventions
 
-- All Go tests are **white-box** (same package), standard `testing` only — no testify/gomock.
+- All Go tests are **white-box** (same package), standard `testing` only - no testify/gomock.
 - Table-driven tests with `t.Run()` subtests.
 - Test helpers at top of test files: `testContext()`, `mustProvision()`, `makeRequest()`, etc.
 - wafctl handlers: `httptest.NewRequest` + `httptest.NewRecorder`; `httptest.NewServer` for Caddy admin API mocks.
