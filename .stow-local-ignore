@@ -1,6 +1,12 @@
 .git
-README.md
-AGENTS.md
+# Anchored to the repo root only (unanchored basenames would also ignore
+# infra/README.md, infra/AGENTS.md, infra/ergo/AGENTS.md - added 2026-09-01,
+# those MUST stow-link into ~/infra). The optional leading slash covers both
+# matchers: GNU stow matches slash-containing patterns against "/<rel>",
+# stow-drift matches plain "<rel>". Side effect of anchoring: .pi/agent/README.md
+# now links too (harmless doc; the other .pi READMEs sit under folded dir links).
+^/?README\.md$
+^/?AGENTS\.md$
 brew_packages_list.txt
 pacman_list.txt
 yay_list.txt
