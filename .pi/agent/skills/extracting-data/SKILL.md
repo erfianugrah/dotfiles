@@ -210,9 +210,36 @@ UTF-8 transcoding of every file. Use it only for lookaround/backreferences.
 `-U/--multiline` requires the whole file in memory, so avoid it on large
 trees. `--sort path` disables all parallelism.
 
-`--json` emits one event per line with `.type` in `begin match end summary`
-(verified) - use it when parsing rg output programmatically instead of
-regexing the human format. `--stats` appends counts and timing.
+### The `--json` event stream
+
+Parse this instead of regexing the human format. One JSON object per line;
+verified against rg 15.2.0 searching a two-line file:
+
+| `.type` | `.data` keys |
+|---|---|
+| `begin` | `path` |
+| `match` | `path`, `lines`, `line_number`, `absolute_offset`, `submatches` |
+| `context` | same as `match` |
+| `end` | `path`, `binary_offset`, `stats` |
+| `summary` | `elapsed_total`, `stats` |
+
+The printer crate's own documentation lists only four types and no
+`summary` - the binary emits one anyway, at the end of the whole run
+(`stats` keys: `bytes_printed bytes_searched elapsed matched_lines matches
+searches searches_with_match`). Trust the binary.
+
+**Every path and text field is a two-shape object**, not a string: `{"text":
+"..."}` when the bytes are valid UTF-8, `{"bytes": "<base64>"}` when they are
+not. A consumer that reads `.data.path.text` unconditionally silently drops
+every non-UTF-8 path. Use `.data.path.text // (.data.path.bytes|@base64d)`.
+
+**Two different offset origins in the same message.** `absolute_offset` is a
+byte offset into the FILE; `submatches[].start/end` are byte offsets into
+`lines` (half-open, and into the decoded bytes if `lines` came back base64).
+Verified: line 1 of `hay needle hay` gives `absolute_offset 0` with submatch
+`4..10`; line 2 gives `absolute_offset 15` with submatch `0..6`.
+
+`--stats` appends the same counters in human form.
 
 `--pre CMD` runs a preprocessor per file (PDFs, binaries); always pair it
 with `--pre-glob` or it runs on every file - the GUIDE measures a 17x
@@ -291,6 +318,107 @@ $ printf 'src/main.go\nsrc/util_test.go\ndocs/readme.md\n' | fzf -f 'srcgo'
 src/main.go
 src/util_test.go
 ```
+
+## awk (gawk 5.4.1 here)
+
+Reach for awk when the job is field arithmetic, grouping, or a conditional
+across columns - it beats `cut` (which cannot collapse repeated delimiters)
+and beats a Python script for anything a line at a time.
+
+```bash
+awk '{s+=$3} END{print s}'                    # sum a column
+awk -F, '$3 > 100 {print $1}'                 # filter on a field
+awk '{c[$1]++} END{for (k in c) print c[k], k}' | sort -rn   # group-by count
+awk 'NR==FNR{seen[$1]; next} $1 in seen' a b  # join/semi-join two files
+awk 'NF' file                                 # drop blank lines
+awk '{print $NF}'                             # last field
+```
+
+**`FS=" "` is a special value, not "a space".** It means "runs of whitespace,
+with leading and trailing trimmed". Any other single character delimits
+literally, so consecutive delimiters create empty fields:
+
+```
+printf '   a   b  \n' | awk '{print NF"|"$1"|"$2}'   -> 2|a|b
+printf 'a\t\tb\n'     | awk -F'\t' '{print NF}'       -> 3
+```
+
+**OFS is only applied when `$0` is rebuilt.** This is the single most common
+awk surprise:
+
+```
+printf 'a b c\n' | awk 'BEGIN{OFS=","}{print $1,$2}'    -> a,b     # comma list uses OFS
+printf 'a b c\n' | awk 'BEGIN{OFS=","}{print}'          -> a b c   # $0 untouched
+printf 'a b c\n' | awk 'BEGIN{OFS=","}{$1=$1; print}'   -> a,b,c   # $1=$1 forces rebuild
+```
+
+**Comparison flips between numeric and string depending on the other side.**
+A field that looks like a number is a "strnum": numeric against a number,
+string against a string literal.
+
+```
+$1 > 9      on "10" -> true      # numeric
+$1 > "9"    on "10" -> false     # string: "1" < "9"
+$1 == 7     on "  007  " -> true   # numeric
+$1 == "7"   on "  007  " -> false  # string
+```
+
+And verified against gawk 5.4.1, contradicting a claim you will see repeated:
+an **empty field does not equal 0**. `$2 == 0` is false for both an empty
+field and a nonexistent one; only `$2 == ""` is true for either. Test the
+emptiness you actually mean.
+
+Other load-bearing bits: `NR` is the global record number, `FNR` restarts per
+file (the `NR==FNR` idiom above depends on it); assigning past `NF` extends
+the record and rebuilds `$0`; `for (k in a)` has **no defined order** (pipe to
+`sort`); `exit N` sets the status and still runs `END`. `gensub`, `RS` as a
+regex, and `delete array` (whole array) are gawk extensions - avoid them in
+anything that might run under busybox or mawk.
+
+## sed (GNU sed 4.10 here)
+
+House rule first: **do not use sed to edit source code** - `sd` for plain
+text, `ast-grep --rewrite` for structure, the `edit` tool for one-off
+surgical changes. sed earns its place for line-addressed work on streams and
+large files.
+
+```bash
+sed -n '100,200p' big.log        # print a line range (cheaper than read)
+sed -i '99a\new line here' f     # insert after line 99
+sed -i '100,200d' f              # delete a range
+sed -i '/^DEBUG/d' f             # delete matching lines
+sed -n 's/^ver=//p' f            # extract + print only what matched
+sed '10q' big.log                # stop after 10 lines - early exit on huge files
+```
+
+**`0,/re/` is not `1,/re/`.** The GNU-only zero form lets the END address
+match the very first line, which is what you want for "replace the first
+occurrence anywhere in the file":
+
+```
+seq 10 | sed -n '1,/[0-9]/p'   -> 1 2     # range starts at line 1, ends at the NEXT match
+seq 10 | sed -n '0,/[0-9]/p'   -> 1       # range can end on line 1 itself
+```
+
+**`q` and `Q` carry an exit code**: `seq 5 | sed '2q5'` exits **5**. Useful
+as a cheap test-and-report inside a pipeline (`Q` quits without printing).
+
+**`N` on the last line behaves differently under POSIX.** GNU prints the
+pattern space; POSIX mode discards it, silently losing the final line:
+
+```
+seq 3 | sed N            -> 1 2 3
+seq 3 | sed --posix N    -> 1 2     # line 3 vanished
+```
+
+Any script relying on `N` should guard with `$!N` or accept GNU-only.
+
+Also: `-i` takes an OPTIONAL suffix, so `sed -iE` means "backup suffix E",
+not `-i -E` (BSD/macOS instead REQUIRES an argument, hence the `sed -i ''`
+you see in cross-platform scripts). `-E` for extended regex, `-z` for
+NUL-separated records, `-s` to treat multiple files separately, `--debug` to
+see the program and per-cycle pattern space. Any character can be the `s`
+delimiter - `s#one/two#three/four#` avoids backslash soup.
 
 ## Shell traps that produce wrong extractions
 
