@@ -128,6 +128,7 @@ Full usage examples + canonical invocations in [`TOOLKIT.md`](./TOOLKIT.md).
 | `tool-output-prune.ts` | opencode-style surgical tool-output pruning to reclaim context from large tool results. |
 | `tool-routing.ts` | Prepend AGENTS.md tool-routing rules to the system prompt with hard "CRITICAL MANDATORY" framing. |
 | `trigger-compact.ts` | Auto-compact when context crosses 100k tokens + `/trigger-compact`. |
+| `vim-editor.ts` | Modal (vim-style) editing for the input box via `setEditorComponent`. Starts in INSERT; Escape → NORMAL; vim motions (`hjkl`, `w`/`b`, `0`/`$`, `x`/`X`, `D`/`C`, `dd`/`cc`, `p`, `u`, `i`/`a`/`A`/`I`, `o`/`O`). Thin motion layer: translates to the base editor's own escape sequences (arrows, ctrl+a/e/k/u/y, meta-b/f), so it shares the buffer/kill-ring/undo and tracks `keybindings.json`. No counts, registers, visual mode, or ex-commands. Escape in NORMAL mode still aborts the agent. |
 
 ## Prompt templates (slash commands)
 
