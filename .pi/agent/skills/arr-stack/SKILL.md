@@ -91,9 +91,38 @@ Rustnzb can end up with its queue globally paused (the SAB-compat API returns `"
 
 Prowlarr's FlareSolverr indexer proxy (`indexerproxy` API, id=1) needs `tags: [1]` matching the tag ID on the Cloudflare-protected indexers (1337x, KickAssTorrents). The tag is `flaresolverr` (id=1). Without the tag, the proxy exists but never engages - indexer tests fail with generic connection errors.
 
+## arrctl - the executable form of these mechanics
+
+`~/infra/arrctl` (Go, stdlib-only, static binary) encodes the arr operations
+this skill describes as tested, named commands, so a nuke+rebuild or a manual
+import is a scripted sequence, not hand-rolled curl. Reach for it instead of
+`-d "$PAYLOAD"` (which also trips the rule-8 quoting trap). It has its own
+README/AGENTS (auto-load when cwd is inside the repo); the load-bearing facts:
+
+- **import-existing** (`arrctl import -app X -id N`): the verified
+  `GET /manualimport -> POST ManualImport -> Rename*` flow. seriesId+episodeIds
+  (Sonarr) or movieId (Radarr) at the TOP level; the pushed command's outcome
+  is CHECKED, so a "completed, imported 0" run is a non-zero exit, not a
+  silent success.
+- **TRaSH naming** (`naming set -app X`): applies the profile for the running
+  major version via apply-and-verify (PUT candidate, read the server render,
+  reject on residual `{`/`}`, restore if dirty). Handles the Sonarr 4.0.19
+  nested-audiocodec render bug.
+- **export/restore** (M1/M3 nuke safety net): `export` writes config 0600;
+  `restore` recreates into a fresh instance (strips ids, POSTs) and exits
+  non-zero on any failure.
+- **restructure** (M2, DESTRUCTIVE): canonical folder renames + `[imdb]`-tree
+  deletes; **dry-run by default**, `-execute` required, inode-aware guards,
+  `-opslog` audit. Backstop is the `tank/media@pre-merge-20260901` snapshot.
+- **clients pause/resume**: SAB (parses the status body, redacts the apikey)
+  + nzbget queue control before a restructure.
+
+No deployed binary path yet - it is scp'd to `servarr:/tmp/arrctl` and run
+inside the app netns (see its AGENTS.md).
+
 ## Sibling skills
 
-- **`jellyfin`** — consumer-side (jellyfin/jellyseerr/navidrome). Jellyseerr requests upstream into Sonarr/Radarr via API integration.
+- **`jellyfin`** — consumer-side (jellyfin/seerr/navidrome). Seerr requests upstream into Sonarr/Radarr via API integration.
 - **`composer`** — GitOps deploy mechanism. `sync` ≠ `up` ≠ `restart`. WAF on composer.servarr.erfi.io blocks bare-curl mutations — internal-network workaround documented.
 - **`caddy`** — `*.erfi.io` reverse proxy + TSIG ACME path against Knot.
 - **`tailscale-homelab`** — `ssh servarr` access; the `docker exec / docker logs / docker restart` triple that runs everything else.

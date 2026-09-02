@@ -854,7 +854,7 @@ requirement IDs that flow into plan tasks and loop sensors.
 | Skill | Purpose |
 |---|---|
 | `arr-stack` | The *arr pipeline on servarr (radarr / sonarr / prowlarr / bazarr + sabnzbd / qbittorrent / flaresolverr), TRaSH guides, quality profiles |
-| `jellyfin` | Media-consumer stack on servarr - Jellyfin + Jellyseerr + Navidrome, NVENC transcoding on the GTX 1070 |
+| `jellyfin` | Media-consumer stack on servarr - Jellyfin + Seerr + Navidrome, NVENC transcoding on the GTX 1070 |
 | `discord-wipe` | Delete the user's own Discord messages (guild/DM purge, rolling retention) via the discord-wipe-go daemon on servarr |
 
 **Diagnostics**:

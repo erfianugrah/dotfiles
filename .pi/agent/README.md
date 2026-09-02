@@ -199,7 +199,7 @@ Three layers, by how they fire:
 | `gloryhole` | Self-built DNS server `glory-hole` — Go binary + embedded Unbound + Astro/React dashboard. Pi-hole-style filtering, expr policy engine, sharded LRU cache, REST/WS API, DoT/DoH. Home + Fly deploy profiles. |
 | `gocurl` | Drive the `gocurl` CLI - HTTP latency measurement (DNS/TCP/TLS/server/transfer phase breakdown), load testing (p95/p99, RPS), streaming/SSE validation, Prometheus/JSON/CSV output. |
 | `infrastructure-stack` | Docker Compose with bridge-network + static-IP + host-mode-Caddy reverse-proxy conventions; per-stack AGENTS.md, subnet allocation, secrets, backups, when-to-graduate-to-k3s. |
-| `jellyfin` | Media-consumer stack on `servarr` - Jellyfin (NVENC transcoding), Jellyseerr (request routing into the arrs), Navidrome. Cross-stack `media` network. |
+| `jellyfin` | Media-consumer stack on `servarr` - Jellyfin (NVENC transcoding), Seerr (request routing into the arrs), Navidrome. Cross-stack `media` network. |
 | `knot-dns` | Self-hosted authoritative DNS — Knot DNS on Fly anycast, TSIG/rfc2136 to Caddy, CF→Knot migration. Sibling to `fly`, `cloudflare`, `caddy`. |
 | `knotctl` | Drive the `knotctl` CLI for live TSIG/RFC2136 DNS edits against the knotea authority (add/rm/set/ls/export/apply, declarative YAML reconcile). Sibling to knot-dns. |
 | `lexicanum` | Authoring/restructuring docs on the lexicanum site (~/lexicanum, erfi.dev) - taxonomy frontmatter, guide vs reference, IEEE-footnote citations, build/test debugging. |
