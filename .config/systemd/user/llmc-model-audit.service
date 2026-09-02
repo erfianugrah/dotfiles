@@ -1,0 +1,17 @@
+[Unit]
+Description=llmc model audit - detect upstream GGUF drift, back up orphans to tank
+Documentation=file:%h/infra/ai/llm-compose/docs/reference/model-audit.md
+
+[Service]
+Type=oneshot
+# --deep is deliberately off: it sha256s ~90 GiB of GGUF. Size mismatch
+# already catches every re-upload seen so far, and the weekly job should not
+# thrash the page cache the LLM depends on. Run --deep by hand when a
+# specific file is in question.
+ExecStart=%h/infra/ai/llm-compose/bin/llmc audit --backup
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=2h
+
+[Install]
+WantedBy=default.target

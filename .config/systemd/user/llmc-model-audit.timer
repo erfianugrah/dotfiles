@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly llmc model audit (upstream drift + orphan backup)
+
+[Timer]
+OnCalendar=Sun *-*-* 05:00:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

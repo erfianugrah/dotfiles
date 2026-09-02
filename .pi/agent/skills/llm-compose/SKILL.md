@@ -40,6 +40,55 @@ loop-task suite (fixtures+manifests+canary solutions in bench/, every probe
 needs a canary + `llmc bench tasks --verify-only` before scoring models).
 `bench watch` = staleness report after pin bumps/preset edits.
 
+**Reading bench output (each lesson cost a wrong conclusion, 2026-09-02):**
+- **Read medians, not totals/means.** A single task run hit 1165s inside ONE
+  iteration; it moved the arm's total by 3x and meant nothing about the arm.
+- **2 runs is not a sample.** A 2-run pass had the UD quant looking 63%
+  slower; at 3 runs it was FASTER. The first pass ran on a GGUF downloaded
+  minutes earlier - cold page cache.
+- **The `tasks` micro-suite (t1-t6) cannot measure long-horizon behaviour.**
+  Max single generation across the 4 fast tasks is 412 tokens (1134 at
+  xhigh). A real greenfield build generated 9564. Anything about thinking
+  length, context growth or compaction measured on t1-t6 is a false
+  negative. Use a real scoped task in a git worktree instead (pylon Phase 0
+  was the instrument: 202 requests, 490k tokens, prompts to 36k).
+- `perf`'s `pp` column was meaningless before 2026-09-02 (read off a
+  ~30-token prompt = overhead, not prefill; it reported 27 tok/s against a
+  real 2452). Now measured on a ~17k uncached prompt and printed with
+  `prompt_n` - anything quoting old pp numbers is quoting noise.
+- Measured reference (qwen38 on UD-Q4_K_M, 262144 ctx): gen 75.6 tok/s,
+  prefill 3675.5 tok/s at prompt_n 17221, TTFT p50 167.7ms, VRAM peak
+  29217 MiB.
+
+## Upstream GGUF drift - `make audit` (2026-09-02)
+
+A preset's `[model] repo`+`file` is the entrypoint's download fallback, and
+upstream DELETES files: unsloth wiped every plain K-quant of Qwen3.8-27B on
+2026-08-19 (UD-only + imatrix re-upload), ggml-org did the same to both
+gemma-4 repos. Four local GGUFs were orphaned - unrecoverable if the volume
+had been lost - and nothing noticed for two weeks.
+
+`make audit` / `llmc audit [--deep] [--backup] [--unreferenced]` classifies
+every preset file ok/renamed/diff/gone/missing/local-only; `--backup` rsyncs
+orphans to `servarr:/tank/backups/llm-models/orphaned` with far-end sha256
+verify; weekly `llmc-model-audit.timer` (units in `deploy/`, `make
+install-timer`). Read-only mode checks the backup dest, so a safe orphan
+exits 0. Full doc: `docs/reference/model-audit.md`.
+
+- **HF's LFS `oid` IS the file's sha256** (verified against gemma-4-12b) -
+  upstream identity is checkable without downloading anything.
+- A failed HF lookup is `unknown`, NEVER `gone` - a rate limit read as a
+  deletion triggers pointless multi-GiB copies.
+- `--unreferenced` is the mirror question (which files does no preset name):
+  found 146G of dead GGUFs on a 91%-full disk.
+- Archive dormant GGUFs to tank, do NOT network-mount them. Measured
+  2026-09-02: 3 GB read over ssh took 28.233s (106.3 MB/s), identical over
+  tailnet and direct LAN, and servarr's only live NIC reports
+  `Speed: 1000Mb/s` - that is wire speed, so no protocol swap beats it. A
+  16.5 GB model therefore loads in ~155 s vs 5-10s warm locally. With full
+  offload the file is untouched after load, so the cost is load-time only:
+  fine for an archive, wrong for the daily driver.
+
 ## proxy-go (Go rewrite, AUTHORITATIVE since 2026-08-19)
 
 `proxy-go/` = the v2 proxy in Go (spec `docs/specs/2026-08-19-model-proxy-v2.md`).
@@ -62,6 +111,19 @@ Commands: `make build-proxy-go` / `make test-proxy-go` / `make smoke-proxy-go`.
   404 on switch until `docker restart model_proxy_go`.
 - **Preset schema changes need `make build-proxy`** - the running proxy
   validates TOMLs from baked code and crash-loops on unknown keys.
+- **A new runtime key must land in BOTH schemas** - `llmc/presets.py` AND
+  `proxy-go/internal/proxy/presets.go` (struct field + `runtimeKeys` +
+  validation + env emission). proxy-go fails the WHOLE preset reload on one
+  unknown key, so adding it python-side only silently freezes `/v1/models`
+  at its last good state (hit 2026-09-02 adding `reasoning_budget`).
+- **A/B preset arms need distinct GGUF filenames** (presets dedup by
+  model_id = the file stem); hardlink the same blob, it costs zero disk.
+- `reasoning_budget` (llama.cpp `--reasoning-budget`) exists but NO preset
+  sets it, deliberately: budget exhaustion injects the end-of-thinking tag
+  and forces an answer from a chain cut mid-sentence. Measured p99 is 9201
+  tokens and nothing has exceeded 9564, so any cap low enough to bite would
+  cut converging work. `docs/reference/reasoning-budget.md` has the
+  distributions; revisit only with evidence of a true runaway.
 - whisper GPU services hold ~5.6GB - `llmc bench perf` stops+restarts them.
 - Locks are restart-safe (persisted to state volume). A client POSTing a
   different model gets 503 "model lock active" while locked.
@@ -114,12 +176,24 @@ Adopted:
   interactive). llama.cpp pin b10472 fixed the abandoned-stream
   slot-parking bug. Details: docs/plans/2026-08-19-qwen38-p5-effort-spec.md
   + docs/reference/speculative-decoding.md.
-- **Chat template** (2026-08-23): qwen38 presets use
-  froggeric/Qwen-Fixed-Chat-Templates v22.3, saved as
-  `templates/qwen38-fixed.jinja` + `[template] file =` in each TOML.
+- **Chat template**: qwen38 presets use froggeric/Qwen-Fixed-Chat-Templates,
+  saved as `templates/qwen38-fixed.jinja` + `[template] file =` in each TOML.
   Fixes empty-think poisoning, tool-call crash on JSON-string args,
   mid-dialogue system-message drops, and hallucinated user instructions
-  during thinking. Same template on all three qwen38 presets.
+  during thinking. **v22.4 since 2026-09-02** (was v22.3): adds multi-tool
+  token alignment (drops a stray newline before `<tool_call>`) and assistant
+  `message.reasoning` handling. Measured on the 4 fast tasks x2, same GGUF,
+  container respawned: 8/8 PASS both arms, but iterations 12 -> 8 and total
+  wall 543.4s -> 452.0s. Check the repo for newer versions - the upstream
+  archives every release, and a template bug reads as a model failure.
+- **Quant** (2026-09-02): qwen38 / qwen38-xhigh / loop all run unsloth
+  `UD-Q4_K_M`, promoted from the plain `Q4_K_M` that upstream deleted.
+  Same-invocation A/B, perf re-measured warm: median 44.8s vs 52.9s, max
+  124.8s vs 1165.4s, gen 75.6 vs 73.5 tok/s, 29217 vs 29897 MiB, full
+  262144 ctx held. The retired blob stays on disk + tank as a rollback
+  artifact, referenced by no preset. `qwen38-fixed` / `qwen38-nospec` were
+  deleted the same day - both had become no-ops once their findings were
+  folded into qwen38.
 - small track: gemma4-12b ties qwen35-9b incumbent (0.944 hit) with fewer
   steps (1.67 vs 2.30); swap gated on 3080 Ti deploy-fit. g15-chain is 0/3
   for everything - the discriminator case.

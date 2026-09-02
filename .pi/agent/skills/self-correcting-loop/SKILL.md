@@ -804,6 +804,25 @@ What this does NOT cover: whether the goal was right. If "unify the primitives"
 had been a bad design rather than a false premise, every sensor here would be
 green and the output still wrong. That part stays human.
 
+### Greenfield: the empty repo IS the canary
+
+`verify-sensors` reports "unverified, no canary declared" on a manifest for
+work that does not exist yet, and that is fine - when every sensor is red at
+baseline and the spec's "Done When" list is what turned them green, the run
+itself is the discrimination proof. Confirm the baseline is red by hand
+(`for s in ...; do eval "$s" && echo GREEN-BAD || echo red; done`) and go.
+Declare canaries for anything you keep re-running.
+
+A fully-specified, unimplemented project is also the best *measuring*
+instrument you have. Micro-fixture tasks are too small to exercise thinking
+length, context growth or compaction: on a 4-task fixture suite the largest
+single generation was 412 tokens, where one real greenfield bootstrap
+(pylon Phase 0, 2026-09-02) ran 202 requests, 490k generated tokens and
+prompts to 36k. A knob measured on the small suite measures as "no effect"
+whether or not it has one. Run it in a git worktree (`git worktree add
+.worktrees/<slice> -b <slice>-loop`) so a bad run cannot touch the main
+checkout, and so the branch survives when you remove the tree.
+
 ### `loop verify-sensors`: prove each sensor can flip, before trusting any of it
 
 **Run this on every new manifest, before the first `loop run`.** It is the
