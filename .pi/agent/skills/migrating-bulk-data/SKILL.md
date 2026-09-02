@@ -84,7 +84,8 @@ state is freshly validated too.
 
 ## Tooling: migctl (primary) + shell scripts (fallback/checker)
 
-**migctl** (`~/infra/migctl`, deployed at `/root/migctl` on the dest box) is the
+**migctl** (`~/infra/migctl`, `make deploy` -> `/home/erfi/bin/migctl`, run as
+`sudo migctl`) is the
 primary tool. It is this skill's executable form: plan.json declaration +
 append-only events.jsonl state + folded status. Verdicts are parsed from rsync
 `--stats`, never rc.
@@ -94,9 +95,11 @@ migctl init/validate/inventory/probe/run/status/coverage/gate/report/note/stop
 ```
 
 Key behaviors: `probe` fixture-tests the verifier before any p2 run; `run` audit
-is dry-run proof, `--repair` is a full reconciliation (never `--ignore-existing`);
-`coverage` is the union-of-sources vs dst set diff (missing + extras) that
-answers "is everything there"; `gate` prints CLEAR/BLOCKED and never executes.
+is dry-run proof, `--repair` is a full reconciliation (never `--ignore-existing`)
+that also creates each dst dir mirroring the SOURCE ownership/mode (no manual
+`mkdir`; a Postgres data dir lands 700/pg-uid, not root-owned); `coverage` is the
+union-of-sources vs dst set diff (missing + extras) that answers "is everything
+there"; `gate` prints CLEAR/BLOCKED and never executes.
 
 ### The shell scripts as independent fallback/checker
 
