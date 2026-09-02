@@ -180,6 +180,15 @@ before acting. `secretctl`'s `sshenv:` now fails closed on `ENC[` values
 with the cause named; the supported path is ciphertext-vs-ciphertext
 (`dotenv:` vs `sshenv:`) or fetch-and-`sops:` locally.
 
+**Quote/CRLF framing (fixed 2026-09-02).** `sshenv:` now applies the same
+dotenv codec as `dotenv:`/`sops:` on the far side: it trims surrounding
+whitespace (a trailing CR from a CRLF file) and strips ONE matched pair of
+surrounding quotes. Before this, `KEY="abc"` or a CRLF-edited file reported a
+false MISMATCH against an identical plaintext source and cost a needless
+rotation. Residual: a double-quoted value with backslash escapes is not
+unescaped remotely (rare; `secretctl set` writes single-quoted, which is
+exact).
+
 **A boolean probe that prints the line.** `sed -n 's/^KEY=[^E]*/plain/p'`
 was meant to classify a line without reading it, but `s///` replaces only
 the matched prefix and keeps the rest of the line - the full value went

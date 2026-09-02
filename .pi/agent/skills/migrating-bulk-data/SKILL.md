@@ -136,7 +136,15 @@ not a control.
 - Verifying while the source is still being written to.
 - Parallel rsync of many shares against a single failing disk: watch iostat;
   degraded arrays amplify seek thrash.
-- Declaring done from exit codes instead of per-share verdict lines.
+- Declaring a share DONE from a command's exit code instead of its recorded
+  PASS/FAIL verdict line. (Distinct from the WAITER commands: `migctl
+  scrub-wait`/`expand-wait`/`scrub-status`/`expand-status` deliberately exit
+  non-zero WHILE running so `expand-wait && expand <next-disk>` chains off the
+  signal - that is a control signal, not a completion verdict.)
+- Attaching the next expansion disk before the reflow finishes, or recording a
+  scrub/expansion that never ran: `migctl scrub-record`/`expand-record` PASS
+  only on positive evidence (a matched completed line, 0 errors) - `scan: none
+  requested` or a canceled scrub is refused, never a silent PASS.
 
 ## Done criteria (all required)
 
