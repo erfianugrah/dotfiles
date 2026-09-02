@@ -211,6 +211,11 @@ describe("plaintextPipelineSegment", () => {
     `bw get notes FOO`,           // whole notes
     `sops -d .env`,               // bare decrypt of a dotenv-named file -> transcript
     `sops --decrypt .env`,
+    // value-extracting grep for a secret-shaped field in a stray file, piped
+    // onward (2026-09-02: slipped past every source-oriented rule above)
+    `grep -ohE '"password":"[^"]+"' /tmp/q.json | sed -E 's/:.*/:REDACTED/'`,
+    `grep -o 'apiKey=[^ ]*' dump.txt | head -2`,
+    `rg -o 'token": "[^"]+' state.json | tail -1`,
   ];
   for (const cmd of blocked) {
     test(`blocks: ${cmd.slice(0, 44)}`, () => {
@@ -233,6 +238,12 @@ describe("plaintextPipelineSegment", () => {
     // secretctl itself, obviously.
     `secretctl cmp 'sops:.env#KEY' 'docker:servarr/c#VAR'`,
     `bw get item FOO | secretctl fp -`,
+    // counting answers "is a real value present" without rendering one
+    `grep -c '"password":"[^"]*"' /tmp/q.json`,
+    `grep -ocE '"(apiKey|password)":"[^"*][^"]{7,}"' dump.json | tr -d ' '`,
+    // searching for the WORD in source is not value extraction
+    `rg -n password internal/ | head -20`,
+    `rg -l apiKey --include '*.go' | wc -l`,
     // jq on something that is not a vault read.
     `curl -s localhost:9090/api/v1/query | jq -r '.data'`,
     // targeted single-value reads stay allowed - same policy as field-selected docker

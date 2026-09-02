@@ -115,6 +115,7 @@ bw get item MyItem
 ssh router 'printenv'
 docker exec caddy env
 sops -d .env
+grep -ohE '"password":"[^"]+"' /tmp/dump.json | sed -E 's/:.*/:REDACTED/'
 ```
 
 - **`env`, `printenv`, bare `set`, `export -p`** - dumps every credential in the
@@ -132,8 +133,27 @@ sops -d .env
   sails straight past `MINIO_ROOT_PASSWORD`.
 - **Printing a value to "check" a credential.** Test it by USING it:
   `aws s3 ls` with the vars inline, `psql -c 'select 1'` via `exec`.
+- **Extracting a value in order to redact it for display.** If the question is
+  "does this file hold a live secret" - deciding whether to delete a stray
+  dump, say - a COUNT answers it: `grep -c '"password":"[^"]*"' f`. Reaching
+  for `grep -o` and masking the result with `sed` buys no extra information
+  and puts the plaintext one regex miss from the transcript: different
+  whitespace, a nested object or an escaped quote and the mask silently fails
+  open. To characterise a whole file without rendering it, fingerprint it:
+  `secretctl fp 'keyfile:PATH'` or `secretctl fp 'dotenv:PATH#KEY'`.
 
 ## Failure catalogue (each one happened)
+
+**Redact-on-display instead of count.** A stray 681KB json dump on a shared
+host's /tmp held real `"password"` values. Deciding whether to delete it needed
+only "is a secret-shaped field populated" - and a `grep -c` had already
+answered yes. A second command ran `grep -o` for the field and masked the
+result with `sed`, which worked, but carried the plaintext through a pipeline
+where one non-matching quote style would have printed it. It also fired no
+guard rule: every rule was source-oriented (sops / docker / vault / ssh) and
+none knew about grepping an arbitrary file. *Stop at the count; fingerprint the
+file with `secretctl fp 'keyfile:PATH'` if you need more. The
+SECRET_FIELD_EXTRACT rule now blocks the `-o`-plus-pipe shape.*
 
 **Whole-env transport.** `docker inspect --format '{{json .Config.Env}}'` piped
 into a local interpreter to pull one variable. A redaction filter keyed on the

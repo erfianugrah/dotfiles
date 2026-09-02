@@ -264,6 +264,25 @@ const SSH_ENV_DUMP = /\bssh\s+\S+[^|]*\b(env|printenv)\b['"]?\s*(?:\||$)/;
  *  object, which is the leak. */
 const BW_WHOLE = /^\s*bw\s+get\s+(item|notes|fields)\s+\S+\s*$/;
 
+/** Value-extracting search for a secret-shaped FIELD in an arbitrary file,
+ *  piped onward. The other rules here are source-oriented (sops, docker,
+ *  vault, ssh); none of them knows about grepping a stray config/json dump,
+ *  which is how a real pipeline slipped through on 2026-09-02:
+ *
+ *    grep -ohE '"password":"[^"]+"' /tmp/q.json | sed -E 's/.../REDACTED/'
+ *
+ *  Nothing leaked - the sed matched - but the plaintext sat one regex miss
+ *  from the transcript, and the redaction bought no information the earlier
+ *  `grep -c` had not already given.
+ *
+ *  Deliberately narrow: only `-o`-style extraction (which prints the matched
+ *  VALUE) counts, and a `-c` anywhere in the flag cluster exempts it because
+ *  counting answers "is a real value present" without rendering one. Plain
+ *  `rg -n password *.go | head` (searching for the WORD in source) is not
+ *  matched. */
+const SECRET_FIELD_EXTRACT =
+  /\b(?:grep|egrep|rg)\b[^|]*\s-(?!\S*c)\S*o\S*\s[^|]*\b(?:api[_-]?key|password|passwd|rpcpass|token|secret)\b[^|]*\|/i;
+
 /** Bare decrypt of a dotenv-named file: `sops -d .env` with no pipe and no
  *  redirect puts the whole decrypted file in the transcript. Piped forms go
  *  through SOPS_TO_FILTER; a redirect target the agent does not read
@@ -303,6 +322,7 @@ export function plaintextPipelineSegment(segments: string[]): string | null {
   if (DOCKER_EXEC_ENV.test(joined)) return joined;
   if (SSH_ENV_DUMP.test(joined)) return joined;
   if (BW_WHOLE.test(joined)) return joined;
+  if (SECRET_FIELD_EXTRACT.test(joined)) return joined;
   // Bare-decrypt: only meaningful when nothing downstream consumes the output.
   if (!joined.includes("|") && !joined.includes(">") && SOPS_BARE_DOTENV.test(joined)) {
     return joined;
