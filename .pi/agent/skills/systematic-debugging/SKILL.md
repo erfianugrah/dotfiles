@@ -68,6 +68,18 @@ You MUST complete each phase before proceeding to the next.
    - Git diff, recent commits
    - New dependencies, config changes
    - Environmental differences
+   - **Mutable state before the code that explains it.** `ls -la` / `stat` /
+     `docker ps` / a directory listing answers "is the thing still there,
+     and when did it change" in one call. Reading source to explain why a
+     record might be missing is the expensive branch, and it is worthless if
+     the record was simply deleted five minutes ago. Observed 2026-09-02: a
+     session spent five calls diffing `List` vs `GetByName` WHERE clauses to
+     explain an absent stack; `ls` on the stacks directory showed it had been
+     removed out-of-band minutes earlier.
+   - Rank candidate probes by cost-to-run divided by how much they'd narrow
+     the space, and run the cheapest discriminator first. A hypothesis you
+     can test in one command outranks one that needs three file reads, even
+     when the expensive one feels more likely.
 
 4. **Gather Evidence in Multi-Component Systems**
 

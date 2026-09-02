@@ -17,6 +17,13 @@ Composer (on the **MS-01 NixOS router**, ssh alias `router`, public URL `https:/
 
 For local stacks, use `docker compose -f <path> {logs,ps,restart}` directly. Don't reach for the composer API just because the word "compose" appears -- verify the target host first (`docker context show`, or check whether the container name appears in `curl $COMPOSER/api/v1/services | jq -r '.[].name'`).
 
+**Response shapes differ per endpoint**: `/stacks` returns an OBJECT wrapping
+`.stacks[]`, while `/services` returns a bare ARRAY (`.[]`). Copying one
+endpoint's filter to the other yields an empty result that reads like "the
+thing isn't there" - a 2026-09-02 session burned six calls on exactly that,
+concluding a stack was missing from the API when its filter was simply wrong.
+When unsure: `curl ... | jq 'type, keys'` first, one call.
+
 **Conversely, when a stack IS composer-managed (servarr, router-local): NEVER `ssh servarr 'docker compose ...'` or `ssh router 'docker compose ...'`. Use the composer API.** The compose file checkout lives on the ROUTER, not on the target host -- `ssh servarr 'docker compose -f /opt/stacks/...'` fails with "no such file" even though the stack deploys fine through the API. For lifecycle ops (up/down/restart) use the dedicated endpoints (`POST /stacks/{name}/{up,down,restart}?async=true`). For ad-hoc compose commands (force-recreate, exec, logs with custom flags) use `POST /stacks/{name}/exec` with body `{"command": "up -d --force-recreate <svc>"}`. The API routes compose operations to the correct docker daemon (router-local or servarr via drawbridge) and handles SOPS decryption -- raw SSH bypasses both.
 
 ## Hard safety rules
