@@ -643,12 +643,18 @@ export function decideResearchRoute(
 
 export function decideResearchRouteSoft(
   toolName: string,
-  input: { query?: string },
+  input: { query?: string; mode?: string },
 ): boolean {
-  return (
-    toolName === "websearch" &&
-    NON_TECHNICAL_QUERY.test((input.query ?? "").trim())
-  );
+  // websearch (always bare) or web_research in default mode (NOT local/fresh/crosscheck).
+  if (toolName === "websearch") {
+    return NON_TECHNICAL_QUERY.test((input.query ?? "").trim());
+  }
+  if (toolName === "web_research") {
+    const mode = (input.mode ?? "").trim();
+    if (mode && mode !== "default") return false; // local/fresh/crosscheck already routes through research stack
+    return NON_TECHNICAL_QUERY.test((input.query ?? "").trim());
+  }
+  return false;
 }
 
 // Extract every target path from an apply_patch envelope (pi-only surface).

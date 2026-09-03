@@ -189,15 +189,17 @@ function docsFirstAdvisoryNote(matchedTopic: string | null): string {
     `If the query is non-technical (shopping, local business, news, weather), ignore this - ` +
     `prefer \`web_research\` with mode:"local"/"fresh" or the research stack's SearXNG (:8888) for those; ` +
     `docs.erfi.io only holds technical documentation.`;
+  const escalateNote =
+    ` If docs don't answer your specific question after one search+read, use \`web_research\`.`;
   if (matchedTopic) {
     return (
       `tool-guard[docs_first]: this looks technical and docs.erfi.io has a "${matchedTopic}" source that may cover it. ` +
-      `Consider \`docs_search query=\"<keywords>\" source=\"${matchedTopic}\"\`, then docs_read / docs_grep the hits. ${nonTechNote}`
+      `Consider \`docs_search query=\"<keywords>\" source=\"${matchedTopic}\"\`, then docs_read / docs_grep the hits.${escalateNote} ${nonTechNote}`
     );
   }
   return (
     `tool-guard[docs_first]: docs.erfi.io has ~158 indexed technical sources; coverage for this query is unknown ` +
-    `(topic cache not warmed yet). Consider \`docs_sources <filter>\` to check coverage. ${nonTechNote}`
+    `(topic cache not warmed yet). Consider \`docs_sources <filter>\` to check coverage.${escalateNote} ${nonTechNote}`
   );
 }
 
@@ -342,7 +344,7 @@ export default function (pi: ExtensionAPI) {
     if (
       !DISABLED.has("research_route_soft") &&
       !researchSoftFired.has(sessionKey) &&
-      decideResearchRouteSoft(event.toolName, event.input as { query?: string })
+      decideResearchRouteSoft(event.toolName, event.input as { query?: string; mode?: string })
     ) {
       researchSoftFired.add(sessionKey);
       addAdvisory(sessionKey, event.toolCallId, RESEARCH_ROUTE_SOFT_NOTE);

@@ -222,10 +222,14 @@ describe("research-route logic", () => {
   test("decideResearchRoute lifts after max blocks", () => {
     expect(decideResearchRoute("websearch", { query: "x" }, 2).action).toBe("allow");
   });
-  test("decideResearchRouteSoft only for a non-technical bare websearch", () => {
+  test("decideResearchRouteSoft: websearch + web_research default mode", () => {
     expect(decideResearchRouteSoft("websearch", { query: "best hotels near me" })).toBe(true);
     expect(decideResearchRouteSoft("websearch", { query: "postgres internals" })).toBe(false);
-    expect(decideResearchRouteSoft("web_research", { query: "best hotels near me" })).toBe(false);
+    expect(decideResearchRouteSoft("web_research", { query: "best hotels near me" })).toBe(true);
+    expect(decideResearchRouteSoft("web_research", { query: "best hotels near me", mode: "local" })).toBe(false);
+    expect(decideResearchRouteSoft("web_research", { query: "best hotels near me", mode: "fresh" })).toBe(false);
+    expect(decideResearchRouteSoft("web_research", { query: "postgres internals" })).toBe(false);
+    expect(decideResearchRouteSoft("web_research", { query: "postgres internals", mode: "local" })).toBe(false);
   });
 });
 

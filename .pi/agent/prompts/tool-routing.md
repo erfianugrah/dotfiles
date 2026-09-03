@@ -20,7 +20,8 @@ Applies to every search tool: `websearch`, `docs_search`, `codesearch`, `context
 
 ## Web research
 
-- BEFORE reaching for `websearch` / `webfetch` / `web_research` on any technical topic, do a one-shot `docs_sources <topic>` check (or `docs_sources` with a 1-token filter like 'keycloak', 'cloudflare', 'tailwind'). If the source exists on docs.erfi.io (≥1 file), prefer `docs_*` first. Escalate to web tools when docs returns nothing useful, the topic is current-events / latest-versions / external state (npm registry, GitHub API), or after one drill-in proves docs lack the specific detail.
+- For technical topics where docs.erfi.io HAS a source: check docs first, capped at ONE drill-in (docs_search -> docs_read/docs_grep). **The docs check is a gate, not a destination.** When docs don't answer the specific question after that one drill-in, escalate immediately to `web_research` -- do not re-search docs hoping for a better hit.
+- Skip the docs check entirely for: current-events / latest-versions / external state (npm registry, GitHub API), or topics where docs.erfi.io has no relevant source.
 - Making a recommendation / asserting a fact / answering a disputed question → `web_research` (auto search + fetch top results).
 - Quick discovery only, no claims yet → `websearch`.
 - Known URL → `webfetch`. If it returns empty/SPA-shell content, escalate to research crawler `:8889/extract` with `force_js:true`.

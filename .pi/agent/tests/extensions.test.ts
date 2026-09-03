@@ -570,8 +570,17 @@ describe("tool-guard.decideResearchRouteSoft", () => {
   test("technical websearch does not nudge", () => {
     expect(decideResearchRouteSoft("websearch", { query: "postgres vacuum tuning" })).toBe(false);
   });
-  test("web_research never nudges (already fetches via the crawler)", () => {
-    expect(decideResearchRouteSoft("web_research", { query: "buy a sofa bed" })).toBe(false);
+  test("web_research in default mode nudges (Exa-only path, no crawler)", () => {
+    expect(decideResearchRouteSoft("web_research", { query: "buy a sofa bed" })).toBe(true);
+    expect(decideResearchRouteSoft("web_research", { query: "buy a sofa bed", mode: "default" })).toBe(true);
+  });
+  test("web_research in local/fresh/crosscheck mode does not nudge (already uses research stack)", () => {
+    expect(decideResearchRouteSoft("web_research", { query: "buy a sofa bed", mode: "local" })).toBe(false);
+    expect(decideResearchRouteSoft("web_research", { query: "buy a sofa bed", mode: "fresh" })).toBe(false);
+    expect(decideResearchRouteSoft("web_research", { query: "buy a sofa bed", mode: "crosscheck" })).toBe(false);
+  });
+  test("web_research technical query does not nudge", () => {
+    expect(decideResearchRouteSoft("web_research", { query: "postgres vacuum tuning" })).toBe(false);
   });
   test("empty query does not nudge", () => {
     expect(decideResearchRouteSoft("websearch", {})).toBe(false);
