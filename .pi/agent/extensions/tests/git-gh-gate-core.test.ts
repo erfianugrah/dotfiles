@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import {
   classifyBashCommand,
   classifyWritePath,
+  isReadOnlyGhApi,
   matchesBashGate,
   matchesGitInternal,
   splitCommandSegments,
@@ -81,12 +82,29 @@ describe("matchesBashGate - mutating gh commands are gated", () => {
     "gh release create v1.0",
     "gh repo delete owner/x",
     "gh gist create f.txt",
-    "gh api /user",
+    "gh api -X POST repos/o/r/issues -f title=x",
+    "gh api repos/o/r/issues -f title=x", // no -X + field => gh sends POST
+    "gh api -X DELETE repos/o/r",
+    "gh api --method PATCH repos/o/r -f name=y",
+    "gh api --method=PUT repos/o/r/topics --input topics.json",
+    "gh api -XDELETE repos/o/r",
+    "gh api graphql -f query='mutation { x }'",
+    "gh api repos/o/r --input body.json",
+    "gh api -X GET -X POST repos/o/r", // mixed methods: last wins in gh, gate it
+    "gh api -X", // dangling flag: ambiguous
     "gh auth login",
+    "gh auth logout",
+    "gh auth refresh -s repo",
+    "gh auth setup-git",
+    "gh auth token", // prints a credential; not a mutation but stays gated
     "gh secret set X",
+    "gh secret delete X",
     "gh variable set X",
+    "gh variable delete X",
     "gh ssh-key add key",
+    "gh ssh-key delete 1",
     "gh gpg-key add key",
+    "gh gpg-key delete 1",
     "gh workflow run ci.yml",
     "gh run cancel 99",
     "gh run rerun 99",
@@ -115,6 +133,21 @@ describe("matchesBashGate - read-only / benign commands are NOT gated", () => {
     "gh repo view owner/x",
     "gh run view 99",
     "gh workflow list",
+    "gh api -X GET search/code -f q=needle",
+    "gh api --method GET repos/o/r",
+    "gh api --method=GET repos/o/r/pulls",
+    "gh api -XGET rate_limit",
+    'gh api -X "GET" repos/o/r',
+    "gh api -X get repos/o/r", // method is case-insensitive in gh
+    "gh api repos/o/r", // no method, no body => GET
+    "gh api repos/o/r/pulls --paginate --jq '.[].number'",
+    "gh api -H 'Accept: application/vnd.github+json' repos/o/r",
+    "gh auth status",
+    "gh secret list",
+    "gh variable list",
+    "gh variable get FOO",
+    "gh ssh-key list",
+    "gh gpg-key list",
     "ls -la",
     "echo hello",
     "cat file.txt",
@@ -149,6 +182,27 @@ describe("matchesBashGate - compound / subshell forms", () => {
   });
   test("multi-line fully read-only chain stays ungated", () => {
     expect(matchesBashGate("ls -la\ngit status\npwd")).toBeUndefined();
+  });
+});
+
+describe("isReadOnlyGhApi - gh api method resolution", () => {
+  test("non-gh-api segments are never read-only gh api", () => {
+    expect(isReadOnlyGhApi("git status")).toBe(false);
+    expect(isReadOnlyGhApi("gh pr list")).toBe(false);
+    expect(isReadOnlyGhApi("gh")).toBe(false);
+  });
+  test("explicit GET wins even with fields (they become query params)", () => {
+    expect(isReadOnlyGhApi("gh api -X GET search/code -f q=x -f per_page=5")).toBe(true);
+  });
+  test("fields without an explicit method mean POST", () => {
+    expect(isReadOnlyGhApi("gh api repos/o/r/issues -f title=x")).toBe(false);
+    expect(isReadOnlyGhApi("gh api repos/o/r/issues --raw-field body=x")).toBe(false);
+    expect(isReadOnlyGhApi("gh api repos/o/r/issues --field=title=x")).toBe(false);
+  });
+  test("compound segments are handled by the gate", () => {
+    expect(matchesBashGate("cd /r && gh api -X GET repos/o/r")).toBeUndefined();
+    expect(matchesBashGate("gh api -X GET repos/o/r; gh api -X DELETE repos/o/r")).toBeDefined();
+    expect(matchesBashGate("echo $(gh api -X GET rate_limit --jq .rate.remaining)")).toBeUndefined();
   });
 });
 

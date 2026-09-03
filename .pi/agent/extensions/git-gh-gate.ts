@@ -33,6 +33,7 @@ import { matchesBashGate, matchesGitInternal } from "./lib/git-gh-gate-core.ts";
 
 // Re-export the pure helpers so any importer resolves them here.
 export {
+  isReadOnlyGhApi,
   matchesBashGate,
   matchesGitInternal,
   splitCommandSegments,

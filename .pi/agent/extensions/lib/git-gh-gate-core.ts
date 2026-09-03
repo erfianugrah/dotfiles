@@ -64,8 +64,13 @@ export const GIT_GH_PATTERNS: RegExp[] = [
   /^\s*gh\s+repo\s+(create|edit|delete|rename|archive|fork|clone)\b/i,
   // gh mutations - Gist
   /^\s*gh\s+gist\s+(create|edit|delete)\b/i,
-  // gh - auth / api / secrets / variables / keys
-  /^\s*gh\s+(api|auth|secret|variable|ssh-key|gpg-key)\b/i,
+  // gh - auth / api / secrets / variables / keys. Read-only shapes are carved
+  // out: `gh auth status`, and `list` / `get` on the four credential-ish
+  // subcommands. `gh api` stays in the table; its read-only forms are decided
+  // by isReadOnlyGhApi() (a regex cannot see that `-f` flips GET to POST).
+  /^\s*gh\s+api\b/i,
+  /^\s*gh\s+auth\s+(?!status\b)/i,
+  /^\s*gh\s+(secret|variable|ssh-key|gpg-key)\s+(?!(list|get)\b)/i,
   // gh - workflow / run mutations
   /^\s*gh\s+workflow\s+(run|enable|disable)\b/i,
   /^\s*gh\s+run\s+(cancel|rerun|delete)\b/i,
@@ -107,6 +112,59 @@ export function splitCommandSegments(command: string): string[] {
   return segments;
 }
 
+// -- gh api: read-only carve-out ---------------------------------------------
+//
+// `gh api` is the raw REST escape hatch, so the pattern table gates it as a
+// whole. But it is also the only way to reach several read-only endpoints
+// (code search, rate limit, arbitrary GETs), and gating every one of those
+// made the gate fire on searches. The HTTP method decides mutation, and gh's
+// rules are: explicit `-X`/`--method` wins; otherwise the method is GET unless a
+// body-producing flag (`-f`/`-F`/`--field`/`--raw-field`/`--input`) is present,
+// in which case it is POST. So a segment is read-only iff every method flag is
+// GET, or there is no method flag and no body flag. Anything ambiguous (a `-X`
+// with no value, an unknown method) is treated as mutating.
+//
+// Best-effort tokenisation on whitespace. Quotes around a method value are
+// stripped; a method value split from its flag by a quoted space is not a
+// shape gh accepts, so it is not handled.
+const GH_API_BODY_FLAGS = new Set(["-f", "-F", "--field", "--raw-field", "--input"]);
+
+export function isReadOnlyGhApi(segment: string): boolean {
+  const tokens = segment.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return false;
+  if (tokens[0].toLowerCase() !== "gh" || tokens[1].toLowerCase() !== "api") return false;
+
+  const methods: string[] = [];
+  let hasBody = false;
+  const clean = (v: string) => v.replace(/^["']|["']$/g, "").toUpperCase();
+
+  for (let i = 2; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok === "-X" || tok === "--method") {
+      const val = tokens[i + 1];
+      if (val === undefined) return false; // dangling flag: ambiguous, gate it
+      methods.push(clean(val));
+      i++;
+      continue;
+    }
+    if (tok.startsWith("--method=")) {
+      methods.push(clean(tok.slice("--method=".length)));
+      continue;
+    }
+    if (/^-X.+/.test(tok)) {
+      methods.push(clean(tok.slice(2)));
+      continue;
+    }
+    if (GH_API_BODY_FLAGS.has(tok) || /^--(field|raw-field|input)=/.test(tok)) {
+      hasBody = true;
+      continue;
+    }
+  }
+
+  if (methods.length > 0) return methods.every((m) => m === "GET");
+  return !hasBody;
+}
+
 // -- .git internal paths that should never be written/edited directly --------
 export const GIT_INTERNAL_PATTERNS: RegExp[] = [/(^|\/)\.git(\/|$)/];
 
@@ -117,6 +175,7 @@ export const GIT_INTERNAL_PATTERNS: RegExp[] = [/(^|\/)\.git(\/|$)/];
 export function matchesBashGate(command: string): RegExp | undefined {
   const segments = splitCommandSegments(command);
   for (const seg of segments) {
+    if (isReadOnlyGhApi(seg)) continue;
     const hit = GIT_GH_PATTERNS.find((p) => p.test(seg));
     if (hit) return hit;
   }
