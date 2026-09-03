@@ -66,6 +66,11 @@ diff before.txt after.txt
 value of the loop: "I deployed it" is a claim, a changed digest is evidence.
 `secretctl set` prints before/after automatically and says so when they match.
 
+`set` destinations: `dotenv:`, `keyfile:`, `sops:` (re-encrypts to the file's
+OWN age recipients, never a .sops.yaml rule), and `bw:` (updates the custom
+field when one exists, else upserts a notes `FIELD=value` line; syncs the
+daemon's read cache after the PUT so the verify step sees the write).
+
 `--salt-file` is required here and only here - comparing across time needs a
 stable key. The cost is that those digests become linkable, so treat the salt
 file and any recorded digests as sensitive metadata.
