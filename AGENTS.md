@@ -182,6 +182,13 @@ installed Cloudflare skill set a whole-dir link would clobber):
 - `.claude/hooks/*.ts` + `.claude/mcp/toolkit.ts` - the CC guard hooks and
   the 22-tool MCP server over the shared `.pi/agent/extensions/lib/` cores.
   See `.pi/agent/docs/pi-to-claude-code-port.md`.
+- `.claude/skills/lsp-servers/` - a real directory, not a skill symlink: a
+  skills-directory plugin whose `.lsp.json` gives Claude Code's `LSP` tool
+  servers for shell, YAML, JSON, CSS, HTML, TOML, Terraform, Astro, Markdown,
+  Dockerfile, SQL and GraphQL. TypeScript, Go, Python, Rust, Lua and C/C++ come
+  from the official `*-lsp@claude-plugins-official` plugins (enabled in the
+  live settings.json); a second plugin on the same extension would conflict.
+  Same binaries as pi's `extensions/lsp/` and nvim's Mason set, via PATH.
 
 ## Agent-surface routing (pi primary / Claude Code work)
 

@@ -63,7 +63,7 @@ the loader without deleting it.
 | `exa.ts` | `websearch` + `codesearch` via mcp.exa.ai (SSE-MCP). Auto-falls back to SearXNG (`SEARXNG_URL`) on empty / error. |
 | `glob.ts` | File-pattern lookup wrapping `rg --files -g`. mtime-sorted, capped at 100. |
 | `grep.ts` | Content search via `rg` (compatible with rg 15 — no more `--column=false` foot-gun). |
-| `lsp/` | Language Server Protocol — 8 operations (hover/definition/references/implementation/document\_symbols/workspace\_symbol/incoming\_calls/outgoing\_calls) + auto-install for 14 languages via bun/go/cargo/rustup. |
+| `lsp/` | Language Server Protocol — 8 operations (hover/definition/references/implementation/document\_symbols/workspace\_symbol/incoming\_calls/outgoing\_calls) + auto-install for 19 languages via bun/go/cargo/rustup. Binaries resolve from PATH, which `.zshrc` extends with nvim's Mason bin dir, so nvim, pi and Claude Code (`.claude/skills/lsp-servers` + the official `*-lsp` plugins) run the same servers. Servers are unref'd after spawn so `pi -p` exits once the turn ends. |
 | `memory.ts` | Persistent cross-session memory + per-LLM-call inject. mtime cache (no per-call disk read), `MEMORY_INJECT_MAX_BYTES` cap, `MEMORY_OFF=1` kill switch. |
 | `oci-tags.ts` | Query OCI registries (Docker Hub, ghcr, quay) for image tags. |
 | `opendata.ts` | `dataset_search` / `dataset_fetch` - official open-data portals (data.gov.sg default) via the crawler service's `/dataset/*` endpoints. Rows never enter context: fetch writes a local FILE, returns path + schema + preview; query with duckdb/mlr. |

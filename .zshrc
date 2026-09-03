@@ -9,6 +9,11 @@ fi
 typeset -ga _missing_tools=()
 
 export PATH=$HOME/.npm-global/bin:$HOME/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:$HOME/.local/bin:$HOME/.bun/bin:/usr/local/go/bin:$PATH
+# Language servers Mason installs for nvim (terraform-ls, astro-ls, lua-language-server,
+# markdown-oxide, docker-langserver, sql-language-server, ...). Appended, not prepended:
+# bun/cargo/go copies of the same servers keep winning, Mason only fills the gaps. Both
+# pi (extensions/lsp) and Claude Code (LSP plugins) resolve servers from PATH.
+export PATH=$PATH:$HOME/.local/share/nvim/mason/bin
 
 # WSL-specific paths
 if [[ -d /mnt/c ]]; then

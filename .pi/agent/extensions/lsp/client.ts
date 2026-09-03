@@ -56,6 +56,19 @@ export class LspClient {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
+    // A live child with piped stdio holds the event loop open, so a
+    // non-interactive run (`pi -p`) that touched the lsp tool never exited:
+    // measured 90 s to the caller's timeout against 7 s for a run without it.
+    // Unref the process handle and the three pipes so they stop counting as
+    // pending work; the pipes still deliver data while the loop is otherwise
+    // alive, and the exit handler registered in index.ts still shuts the
+    // servers down.
+    this.proc.unref();
+    for (const stream of [this.proc.stdin, this.proc.stdout, this.proc.stderr]) {
+      const s = stream as unknown as { unref?: () => void };
+      if (typeof s.unref === "function") s.unref();
+    }
+
     this.proc.stdout.on("data", (chunk: Buffer) => this.onStdout(chunk));
     this.proc.stderr.on("data", (chunk: Buffer) => {
       // Silently buffer stderr; expose via getStderr() for diagnostics.

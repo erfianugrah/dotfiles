@@ -1,0 +1,6 @@
+{
+  "name": "lsp-servers",
+  "version": "1.0.0",
+  "description": "Language servers for the file types the official *-lsp plugins do not cover: shell, YAML, JSON, CSS, HTML, TOML, Terraform/OpenTofu, Astro, Markdown, Dockerfile, SQL, GraphQL. Binaries come from bun -g, cargo, or nvim's Mason install (~/.local/share/nvim/mason/bin is on PATH).",
+  "author": { "name": "Erfi Anugrah" }
+}

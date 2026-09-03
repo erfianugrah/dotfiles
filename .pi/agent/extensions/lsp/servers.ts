@@ -120,7 +120,7 @@ export const SERVERS: ServerConfig[] = [
     which: "lua-language-server",
     command: "lua-language-server",
     args: [],
-    install: { type: "manual", hint: "sudo pacman -S lua-language-server (or your distro equivalent)" },
+    install: { type: "manual", hint: "In nvim: :MasonInstall lua-language-server (Mason bin dir is on PATH), or your distro package" },
     indexWaitMs: 1000,
   },
 
@@ -196,7 +196,77 @@ export const SERVERS: ServerConfig[] = [
     which: "terraform-ls",
     command: "terraform-ls",
     args: ["serve"],
-    install: { type: "manual", hint: "Download from https://github.com/hashicorp/terraform-ls/releases" },
+    install: { type: "manual", hint: "In nvim: :MasonInstall terraform-ls (Mason bin dir is on PATH), or https://github.com/hashicorp/terraform-ls/releases" },
+    indexWaitMs: 1000,
+  },
+
+  // ── Astro ──────────────────────────────────────────────────────────────
+  // astro-ls needs a TypeScript SDK path; the project's own node_modules is
+  // preferred by editors, but the table is static, so point at the bun-global
+  // typescript that typescript-language-server already depends on.
+  {
+    id: "astro",
+    languageIds: ["astro"],
+    rootMarkers: ["astro.config.mjs", "astro.config.ts", "astro.config.js", "package.json", ".git"],
+    which: "astro-ls",
+    command: "astro-ls",
+    args: ["--stdio"],
+    install: { type: "bun-global", pkg: "@astrojs/language-server" },
+    indexWaitMs: 2000,
+    initializationOptions: {
+      typescript: { tsdk: `${process.env.HOME ?? ""}/.bun/install/global/node_modules/typescript/lib` },
+    },
+  },
+
+  // ── Markdown ───────────────────────────────────────────────────────────
+  // Same server nvim runs (markdown_oxide). Mason installs it; the Mason bin
+  // dir is on PATH via .zshrc.
+  {
+    id: "markdown-oxide",
+    languageIds: ["markdown"],
+    rootMarkers: [".git"],
+    which: "markdown-oxide",
+    command: "markdown-oxide",
+    args: [],
+    install: { type: "manual", hint: "In nvim: :MasonInstall markdown-oxide (Mason bin dir is on PATH)" },
+    indexWaitMs: 1000,
+  },
+
+  // ── Dockerfile ─────────────────────────────────────────────────────────
+  {
+    id: "dockerfile-language-server",
+    languageIds: ["dockerfile"],
+    rootMarkers: [".git"],
+    which: "docker-langserver",
+    command: "docker-langserver",
+    args: ["--stdio"],
+    install: { type: "bun-global", pkg: "dockerfile-language-server-nodejs" },
+    indexWaitMs: 500,
+  },
+
+  // ── SQL ────────────────────────────────────────────────────────────────
+  // sqlls, as in nvim. Its parser chokes on Postgres-specific syntax and
+  // reports diagnostics we ignore anyway; symbols and references still work.
+  {
+    id: "sql-language-server",
+    languageIds: ["sql"],
+    rootMarkers: [".sqllsrc.json", ".git"],
+    which: "sql-language-server",
+    command: "sql-language-server",
+    args: ["up", "--method", "stdio"],
+    install: { type: "bun-global", pkg: "sql-language-server" },
+    indexWaitMs: 500,
+  },
+
+  // ── GraphQL ────────────────────────────────────────────────────────────
+  {
+    id: "graphql",
+    languageIds: ["graphql"],
+    rootMarkers: [".graphqlrc", ".graphqlrc.yml", ".graphqlrc.yaml", ".graphqlrc.json", ".graphqlrc.ts", "graphql.config.ts", "package.json", ".git"],
+    which: "graphql-lsp",
+    command: "graphql-lsp",
+    args: ["server", "-m", "stream"],
+    install: { type: "bun-global", pkg: "graphql-language-service-cli" },
     indexWaitMs: 1000,
   },
 

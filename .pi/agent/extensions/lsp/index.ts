@@ -171,12 +171,35 @@ const SYMBOL_KIND: Record<number, string> = {
   26: "TypeParameter",
 };
 
-function formatDocumentSymbols(symbols: DocumentSymbol[] | null | undefined): string {
+// textDocument/documentSymbol may answer with either shape, per the spec:
+// DocumentSymbol[] (hierarchical: range + selectionRange + children) when the
+// client advertises hierarchicalDocumentSymbolSupport and the server honours
+// it, or the flat SymbolInformation[] (location.range + containerName) from
+// servers that never implemented the hierarchical form. bash-language-server
+// sends the flat one and the hierarchical-only reader threw on it.
+interface SymbolInformation {
+  name: string;
+  kind: number;
+  location: Location;
+  containerName?: string;
+}
+
+function isSymbolInformation(s: DocumentSymbol | SymbolInformation): s is SymbolInformation {
+  return "location" in s && !("range" in s);
+}
+
+function formatDocumentSymbols(
+  symbols: Array<DocumentSymbol | SymbolInformation> | null | undefined,
+): string {
   if (!symbols || symbols.length === 0) return "(no symbols)";
 
-  function walk(s: DocumentSymbol, depth: number): string[] {
+  function walk(s: DocumentSymbol | SymbolInformation, depth: number): string[] {
     const indent = "  ".repeat(depth);
     const kind = SYMBOL_KIND[s.kind] ?? `Kind${s.kind}`;
+    if (isSymbolInformation(s)) {
+      const container = s.containerName ? ` in ${s.containerName}` : "";
+      return [`${indent}${kind} ${s.name}${container} (L${s.location.range.start.line + 1})`];
+    }
     const detail = s.detail ? ` ${s.detail}` : "";
     const line = (s.selectionRange ?? s.range).start.line + 1;
     const out = [`${indent}${kind} ${s.name}${detail} (L${line})`];
@@ -411,7 +434,7 @@ const lspTool = defineTool({
         }
         case "document_symbols": {
           raw = await client.documentSymbol(filePath);
-          text = formatDocumentSymbols(raw as DocumentSymbol[] | null);
+          text = formatDocumentSymbols(raw as Array<DocumentSymbol | SymbolInformation> | null);
           break;
         }
         case "workspace_symbol": {

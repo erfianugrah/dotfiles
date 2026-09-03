@@ -1,0 +1,67 @@
+{
+  "bash": {
+    "command": "bash-language-server",
+    "args": ["start"],
+    "extensionToLanguage": { ".sh": "shellscript", ".bash": "shellscript", ".zsh": "shellscript" }
+  },
+  "yaml": {
+    "command": "yaml-language-server",
+    "args": ["--stdio"],
+    "extensionToLanguage": { ".yaml": "yaml", ".yml": "yaml" }
+  },
+  "json": {
+    "command": "vscode-json-language-server",
+    "args": ["--stdio"],
+    "extensionToLanguage": { ".json": "json", ".jsonc": "jsonc" }
+  },
+  "css": {
+    "command": "vscode-css-language-server",
+    "args": ["--stdio"],
+    "extensionToLanguage": { ".css": "css", ".scss": "scss", ".less": "less" }
+  },
+  "html": {
+    "command": "vscode-html-language-server",
+    "args": ["--stdio"],
+    "extensionToLanguage": { ".html": "html", ".htm": "html" }
+  },
+  "toml": {
+    "command": "taplo",
+    "args": ["lsp", "stdio"],
+    "extensionToLanguage": { ".toml": "toml" }
+  },
+  "terraform": {
+    "command": "terraform-ls",
+    "args": ["serve"],
+    "extensionToLanguage": { ".tf": "terraform", ".tfvars": "terraform-vars", ".hcl": "hcl" },
+    "startupTimeout": 30000
+  },
+  "astro": {
+    "command": "astro-ls",
+    "args": ["--stdio"],
+    "extensionToLanguage": { ".astro": "astro" },
+    "initializationOptions": {
+      "typescript": { "tsdk": "/home/erfi/.bun/install/global/node_modules/typescript/lib" }
+    }
+  },
+  "markdown": {
+    "command": "markdown-oxide",
+    "extensionToLanguage": { ".md": "markdown", ".markdown": "markdown" },
+    "diagnostics": false
+  },
+  "dockerfile": {
+    "command": "docker-langserver",
+    "args": ["--stdio"],
+    "extensionToLanguage": { ".dockerfile": "dockerfile" }
+  },
+  "sql": {
+    "command": "sql-language-server",
+    "args": ["up", "--method", "stdio"],
+    "extensionToLanguage": { ".sql": "sql" },
+    "diagnostics": false
+  },
+  "graphql": {
+    "command": "graphql-lsp",
+    "args": ["server", "-m", "stream"],
+    "extensionToLanguage": { ".graphql": "graphql", ".gql": "graphql" }
+  }
+}
