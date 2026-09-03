@@ -84,6 +84,78 @@ Read every measured sentence against these. Each one cost a review round.
   docs; a single-request run does not test a shared warm worker. Say what the
   run's shape covers and what it does not.
 
+## The attribution classes (the 2026-09-03 review round)
+
+The practices pass over 34 pages drew 75 findings on about 1,500 added
+lines, one per 20 lines. Few were the ambiguity classes above; most were a
+"Rests on" cell pointing at evidence that does not say what the row says.
+
+- **The module did not measure the claim.** About 30 of the 75. Check the
+  module's own header and closeout, and the probe source under `lib/` for
+  what it actually hit: the RUNLOG prose said "Auth", `setup.ts` said
+  `GET /auth/v1/health` with an anon key, and three pages had built an
+  "authenticated Auth path" on it.
+- **The figure lives only in a page.** A "5 of 5 fresh projects" row was
+  cited by seven pages as a lab run; no RUNLOG or artifact holds it. Say
+  "this corpus's row, no lab record" in the cell.
+- **Two runs in one sentence.** "Healthy in 154 s and the first admin write
+  failed" fused W21 (2026-08-17) with the provisioning note (2026-08-03).
+- **Event order from the artifact.** The summary read "201 then 422"; the
+  artifact had the 422 first, because a standby key already existed.
+- **Precision the artifact does not hold.** 154.924 ms against a recorded
+  155-159 ms is a number nobody measured.
+- **Public docs move.** A practice resting on an August 401 for `sb_secret_`
+  keys met a September docs page that documents them; date the negative and
+  the re-check.
+- **A contradiction handed to a writer needs the evidence-side value**, or
+  the writer picks one: told "1 minute vs 60 s disagree", one wrote 30 s.
+- **Fix the source of a paste.** New text copied an older gotcha's inverted
+  polarity (`slot_name = none` leaves the publisher slot either way).
+
+Fixers reply one line per finding, "applied / adapted (how) / left (why)";
+"left" must quote the evidence line. The edit tool's provenance guard
+blocked literals two writers had just read in a file; the answer is to
+re-read the line and retry, not to route around it with a script.
+
+## Every lab-backed page ends in practices
+
+A measurement without a practice leaves the reader to derive the fix. Each
+reference or guide backed by the lab carries a section named "What to do about
+it" (or "What to do about each ceiling" when the page is organised by ceiling):
+imperative rows, each with the lever the reader holds (a config, a query, a
+deploy path, a client version, an architecture choice) and a "Rests on" column
+naming the module id or RUNLOG line. A row that is a design choice rather than
+a result says so. "Be careful with X" is not a practice.
+
+## Auditing older pages for practices (the subagent workflow)
+
+Used on 2026-09-02 across the 36 Supabase pages after the two new references
+got their practices sections.
+
+1. **Map.** For every doc in scope, list the experiments and module ids it
+   cites (`rg -o "experiments/[a-z0-9-]+"` and the module-id regex) so each
+   auditor knows which RUNLOGs to read.
+2. **Audit in parallel, read-only.** Five to seven docs per subagent. Each
+   answers, per doc: (A) does an actionable section exist - yes, partial, no;
+   (B) gaps, each as one imperative sentence with the module id it rests on and
+   where it goes; (C) what a practice would need that is not measured; (D) leaks
+   and house-style slips seen in passing. One markdown file per doc in a
+   scratch directory. Docs audited today are excluded.
+3. **Write in parallel, one subagent per flagged doc.** Each adds the section
+   from the audit file and the RUNLOG, cites module ids, follows the house
+   rules (ASCII, British -ise, no watchlist words, no leaks), and does NOT run
+   the build or commit - concurrent builds in one checkout collide on `dist/`.
+4. **Build once, then review.** `bun run build` on the batch; fix what fails.
+   Then the reviewer brief (above) on the diff as a fresh subagent; apply.
+5. **Review, then fix, as separate agents.** One reviewer per writer batch
+   with the brief below, cross-checking against the RUNLOGs and probe source;
+   then one fixer per report, applying the rewrites verbatim. The 2026-09-03
+   run: 5 auditors, 5 writers, 5 reviewers, 5 fixers, about four million
+   tokens, 75 findings, all applied before one build.
+6. **Pins, commit, deploy, live check.** Add each new section as a required
+   section in `tests/pins.test.ts`; after deploy, check every changed page for
+   status, references, no stray math, and the leak sweep on the live HTML.
+
 ## Sweeps before commit
 
 Run all of these; keep the pattern list in a file so the shell guards do not
@@ -103,6 +175,16 @@ scan it.
   (Supabase's "organization"), and one spelling per doc.
 - **Contrast cadence**: "X, not Y" once is a distinction; several in a page is
   rhythm. Keep the ones that carry a real difference (throttle vs quota).
+- **MDX reads `<` as JSX**: `Micro <-> Small`, `<ref>` or `<slug>` in prose
+  (outside a code span or fence) fails the build with "Unexpected character".
+  Write "Micro to Small and back" or put the placeholder in backticks.
+  `rg -n '<[a-z-]|<->' <files>` on the prose lines catches it before `bun run
+  build` does; it cost one build on 2026-09-03.
+- **Dropped figures**: lexicanum's rule is that every figure, backticked
+  identifier and URL at HEAD survives an edit unless dropped on purpose. Diff
+  the token sets per file (backticks, URLs, numbers with units) between `git
+  show HEAD:<file>` and the working copy; name each deliberate drop in the
+  commit message.
 
 ## The reviewer brief
 
