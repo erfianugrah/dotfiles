@@ -137,6 +137,23 @@ Docker compose reads `${POSTGRES_PASSWORD}` and similar directly from the
 file -- ciphertext passed as an env-var value is a literal string
 (`POSTGRES_DB=ENC[AES256_GCM,data:GBxlkrs=...]`), not a decrypted secret.
 
+### Self-healing (since v0.26.10 / v0.26.11)
+
+Two failure modes from the 2026-09-04 incident are closed in composerd:
+
+- Re-encrypt no longer runs under the request context. A cancelled/aborted
+  WS action (or a stop/restart/pull cleanup) used to skip
+  `reEncryptSopsSecrets` and leave `.env` plaintext on disk forever. The
+  deferred cleanup now resolves the env file with `context.Background()`.
+- A `.env` ALREADY plaintext is re-encrypted in place during the decrypt
+  phase (best-effort, only when an age key is available). One
+  `up`/`sync`/`restart` therefore repairs files left bare by older versions.
+
+Verify ciphertext with `grep -q sops_version <checkout>/.env` (marker only
+present in the encrypted form). Do NOT use `head -c 3 | grep 'ENC\|sops'`:
+an encrypted dotenv's first line is the first key name, so that check gives
+false "plaintext" positives on every properly encrypted stack.
+
 ### Age key resolution order
 
 `LoadGlobalAgeKey` in `internal/infra/sops/agekey.go` resolves the age
