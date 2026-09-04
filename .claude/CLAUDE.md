@@ -19,6 +19,10 @@ Commits and pull requests must read as if written by the human author. The user 
 
 NEVER run compiled binaries, servers, or daemons directly on the dev machine unless you fully understand their startup hooks and side effects. Use tests, Docker, or dry-run flags instead. If unsure what a binary does at startup, read the main() function first.
 
+# Secrets: use, never print
+
+Run commands WITH credentials by var reference (`curl -H "X-API-Key: $KEY" ...`); the var name in a command is harmless. NEVER print a resolved value: no `env`/`printenv`/bare `set`/`export -p`, no `echo $KEY`, no `cat .env` to "check auth". To check a var is set: `[ -n "${NAME+x}" ] && echo set || echo unset`; to list a store's keys: `cut -d= -f1 FILE`. The `secret-output-guard` hook enforces this from a registry of stores (`~/.config/secretctl/sources`, via `secretctl digests`): it denies a Read/Grep/Bash of a registered store or of a file holding a registered value, denies a registered value (or pieces or a base64 form of one) typed into any tool argument, and alarms when one reaches a tool result (Claude Code hooks cannot redact output, so an alarm means "rotate"). A store nobody registered is NOT covered: when you create a secrets file, register it; `secretctl coverage` lists what is missing. If the guard blocks a configuration value (a timezone, a hostname, a label), add that key to the registry's `exclude` line rather than working around the guard. Compare, rotate and hand values to programs with `secretctl fp|cmp|set|exec` (the `secret-handling` skill).
+
 # Confidential identifiers in tracked files
 
 Before persisting prose to a tracked file in a git repo that has a remote - plan docs, READMEs, design notes, commit messages, PR/issue bodies - you are the classifier for confidential third-party identifiers: customer / partner / client names, internal program or deal codenames, named individuals, and unreleased roadmap.

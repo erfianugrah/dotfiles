@@ -320,7 +320,7 @@ already provides it · SKIP = pi TUI/session internals, no CC analogue.
 | epistemic-guard | DONE (HOOK) | PostToolUse (Write|Edit|MultiEdit) transcript-provenance |
 | notify | DONE (HOOK) | Stop |
 | cd-agents-reload | DONE (HOOK) | PreToolUse Bash additionalContext (live-verified) |
-| secret-output-guard | DONE (HOOK) | PreToolUse Bash deny (env dumps) + PostToolUse (Bash\|Read\|Grep\|WebFetch) leak alarm - CC cannot mutate tool_response, so pi's redaction layer ports as detection-only additionalContext |
+| secret-output-guard | DONE (HOOK) | PreToolUse (Bash\|Read\|Grep\|Write\|Edit\|MultiEdit) deny: env dumps, registered-store and copy reads, registered values (or pieces / base64 forms) typed into arguments - all from `secretctl digests --json`, cached 0600 under $XDG_RUNTIME_DIR; PostToolUse (Bash\|Read\|Grep\|WebFetch) leak alarm naming env/format/registry labels - CC cannot mutate tool_response, so pi's output and message masks have no CC equivalent (2026-09-04) |
 | methodology skills | DONE (CMD) | 7 skills symlinked into .claude/skills |
 | prompt templates | DONE (CMD) | commit/pr/test/rollback -> .claude/commands |
 | grep | NATIVE | CC Grep |

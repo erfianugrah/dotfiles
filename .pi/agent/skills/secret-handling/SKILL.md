@@ -162,6 +162,7 @@ glob written with both schemes puts each file in exactly one resolver):
 secretctl sources                          # what the registry expands to (labels only)
 secretctl digests                          # keyed digest per registered value
 secretctl classify ~/infra/x/compose.yaml  # 0 = holds registered material, 1 = clean, 2 = unresolved
+secretctl coverage                         # secret-looking files the registry does NOT cover (nightly timer too)
 ```
 
 The pi guard consumes `secretctl digests --json` (full-width HMACs + the

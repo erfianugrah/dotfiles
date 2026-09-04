@@ -981,3 +981,16 @@ WezTerm shell integration (sourced by `.zshrc`). Sets up:
 - OSC 7: report current working directory to terminal
 - OSC 133: semantic prompt zones (command input vs output)
 - User vars for WezTerm's Lua API
+
+## Secret handling
+
+`secretctl` (`~/infra/secretctl`) compares, moves and uses credentials without
+printing them, and keeps the registry of where they live
+(`.config/secretctl/sources`, stowed to `~/.config/secretctl/`). The pi
+extension and the Claude Code hook `secret-output-guard` consume
+`secretctl digests --json` to block reads of registered stores, refuse
+registered values typed into tool arguments, and (pi only) mask them in tool
+output and in the model's own messages. `secretctl coverage` runs nightly
+(`secret-coverage.timer`) and lists secret-looking files the registry does not
+cover. Operating discipline: the `secret-handling` skill; design write-up:
+`reference/agent-secret-guard` on erfi.dev.
