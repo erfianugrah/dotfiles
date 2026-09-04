@@ -8,12 +8,20 @@
 # (container envs especially). Excluding them only reduces masking: a digest
 # of a timezone or a locale would make the guard mask ordinary output.
 exclude TZ LANG LANGUAGE LC_* EMAIL PUID PGID UMASK
+exclude POSTGRES_DB PGDATABASE DB_NAME *_DB_NAME DATABASE_NAME
 
 dotenv:~/.config/*/env
 dotenv:~/infra/**/.env
 sops:~/infra/**/.env
 sops:~/infra/**/*.enc.*
 keyfile:~/.config/knotctl/keys/*.key
+
+# Found by secret-coverage 2026-09-04: real stores that were unregistered.
+dotenv:~/.aws/credentials
+dotenv:~/.config/cliamp/config.toml
+keyfile:~/.config/sops/age/*.txt
+keyfile:~/.config/stripe-test-key
+keyfile:~/infra/drawbridge/certs/*-key.pem
 
 # Remote stores: hashed on the far host, digests only (vault.RemoteAll).
 # HOST/* = every running container on that host in one ssh round trip.
