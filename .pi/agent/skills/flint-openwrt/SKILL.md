@@ -23,6 +23,7 @@ exists in `config/router/` for a future move; untested on hardware.
 | Fresh box / bricked | GL u-boot recovery, `docs/flash-runbook.md` Recovery section |
 | Which VLAN / subnet / switch port | `docs/network-model.md` - the one table (router `vlans` attrset and any switch config must match it) |
 | What happened last time | `docs/cutover-2026-09-04.md` |
+| "Can we optimise / boost signal?" | `docs/tuning-review-2026-09-04.md` first. Already at the SG regulatory cap (23/30 dBm); WED off on purpose; never override the country code |
 
 ## Rules that bite
 
