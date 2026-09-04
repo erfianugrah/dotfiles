@@ -7,7 +7,7 @@ description: Use when operating the user's Flint 2 (GL-MT6000) access point on m
 
 Repo: `~/infra/flint-openwrt` (read its AGENTS.md). The Flint is a bridged
 WAP under the MS-01 router: mgmt **10.0.72.2**, key-only ssh
-(`-i ~/.ssh/id_flint_erlis`), stock OpenWrt 24.10.8, SSIDs FLINT_2 (2.4G),
+(`-i ~/.ssh/id_flint_erlis`; OpenSSH on :22, dropbear rescue on :2222), stock OpenWrt 24.10.8, SSIDs FLINT_2 (2.4G),
 FLINT_2_5G (5G), FLINT_IOT (2.4G, isolated, VLAN 400). Router mode config
 exists in `config/router/` for a future move; untested on hardware.
 
@@ -21,6 +21,7 @@ exists in `config/router/` for a future move; untested on hardware.
 | Verify | `ssh -i ~/.ssh/id_flint_erlis root@10.0.72.2 'iwinfo; logread \| grep -i "errors found"'` - 3 SSIDs, real Tx-Power, zero errors; then a real client on FLINT_2_5G gets a 10.0.72.x lease |
 | Box on a subnet this machine cannot route to | `DEPLOY_SSH_OPTS="-J root@10.0.72.1 -i ~/.ssh/id_flint_erlis" ./deploy.sh root@<ip> ap`; add a temporary alias on the router VLAN interface if needed |
 | Fresh box / bricked | GL u-boot recovery, `docs/flash-runbook.md` Recovery section |
+| LAN/VLAN mistake locked you out | OTG path above, or dropbear on :2222 if only sshd broke |
 | Which VLAN / subnet / switch port | `docs/network-model.md` - the one table (router `vlans` attrset and any switch config must match it) |
 | What happened last time | `docs/cutover-2026-09-04.md` |
 | "Can we optimise / boost signal?" | `docs/tuning-review-2026-09-04.md` first. Already at the SG regulatory cap (23/30 dBm); WED off on purpose; never override the country code |
@@ -42,8 +43,10 @@ exists in `config/router/` for a future move; untested on hardware.
   recovery (no DHCP server there); stock OpenWrt does serve DHCP.
 - **Do not press reset on a running box you cannot see.** >5 s = factory
   reset + reboot on mainline; held through power-on = u-boot recovery.
-- **PiKVM OTG safety net is unproven** (`docs/otg-safety-net.md`). Do not
-  plan a flash around it.
+- **PiKVM OTG safety net** (`docs/otg-safety-net.md`): proven on the running
+  box. Lease: `ssh root@10.0.69.6 'cat /run/kvmd/dnsmasq.lease'`, then
+  `ssh -J root@10.0.69.6 root@<lease>`. A fresh stock flash has no cdc-ether
+  until deploy.sh runs once, so it does not cover the first boot.
 - **deploy.sh order matters:** it pushes `authorized_keys` before the
   dropbear config that disables password auth. Losing the key = u-boot
   recovery. Do not "simplify" that order.
