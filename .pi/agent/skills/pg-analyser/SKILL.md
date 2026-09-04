@@ -343,6 +343,52 @@ with some Supabase extras - it makes the project's internal Grafana unnecessary.
 - **Never run the compiled binary blindly** to "test" - prefer `bun test` /
   targeted `bun run src/index.ts`. Live runs hit real projects (read-only, but
   still real API calls); use a real `--ref` from `supabase projects list`.
+- **The installed binary lags the tree.** `~/.local/bin/pg-analyser` is whatever
+  was last built; a report's footer and `meta.sbperfVersion` name the version
+  that produced it. On 2026-09-03 a report was four releases behind the repo (0.10.1 vs
+  0.12.0) and half its suspect findings were already fixed on main. Rebuild
+  (`bun run build`) before re-running or attributing a finding to a live rule.
+- **`bun run check:pgversions` warns; `PG_ANALYSER_PGVER_UPDATE=1` only PRINTS
+  the refreshed table.** Apply it to `src/pgversions.ts` by hand and bump
+  `PG_VERSIONS_AS_OF`. Postgres ships minors at least every three months
+  (versioning policy); the table lagged 17.11 for over three weeks.
+
+## Reviewing a report for overreach
+
+Findings are deterministic, so a report never invents data - a bad finding is a
+rule turning an ambiguous signal into a causal claim. Review in this order:
+
+1. **Version first.** `meta.sbperfVersion` in `analysis.json` vs `package.json`,
+   then `git log v<that>..HEAD`. Attribute stale-binary issues separately.
+2. **Trace every disputed number.** Each title's numbers come from a row in
+   `analysis.json` (`sql.*`) or a series in `trends[]` (Prometheus means over
+   the window). A python one-liner over the JSON beats reading the HTML.
+3. **Read the rule.** The inference lives in `src/findings.ts`; the prose in
+   `src/heuristics.ts`. Ask: what other state produces this same signal?
+   Known past overreaches: "counters were reset" from 0 live rows alone (an
+   emptied queue table looks the same), "infinite recursion" from any
+   self-referencing policy (only SELECT/ALL shapes, or write-only with a
+   subquery-bearing SELECT policy, recurse), "footprint can't be explained"
+   from total bytes (TOAST + ANN index explained it), "never vacuumed" inside a
+   10-day stats window.
+4. **Settle Postgres semantics empirically, in-session.** `docker run -d
+   postgres:17-alpine` and reproduce the exact shape; check the docs page for
+   the claim you are about to encode. Three confident answers were wrong on
+   2026-09-03 (RLS recursion shapes; reltuples vs vacuum timestamps as the
+   reset discriminator; pg_relation_size vs pg_table_size for TOASTed tables).
+   Tear the container down afterwards.
+5. **Date the stats window.** pg_stat_statements age, checkpointer
+   `stats_reset` and a null pg_stat_database reset marker agreeing = an unclean
+   restart wiped everything then. Every counter-derived finding is "since
+   then"; `statsWindowDays()` in findings.ts is the helper.
+6. **Fix the rule, not the report.** Add the discriminating column to the SQL
+   (biggestTables gained `dead_rows`/`est_rows`/`maintained`), gate on it, add
+   a regression test with the real shape (anonymise customer object names), and
+   record the measured fact in AGENTS.md "Verified upstream facts".
+
+Customer identifiers (project refs, table and policy names, bucket names, node
+addresses) live in `reports/` (gitignored) and must not travel into tests,
+docs or commit messages - the repo remote is public.
 
 ## See also
 
