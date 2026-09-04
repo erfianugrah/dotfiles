@@ -14,10 +14,12 @@
 import { describe, expect, test } from "bun:test";
 import { splitSegments } from "../lib/tool-guard-core.ts";
 import {
+  ASSEMBLED_MIN_WINDOWS,
   bashReadTargets,
   candidates,
   canonical,
   digestOf,
+  findAssembled,
   findKnown,
   holdsKnown,
   inputHoldsKnown,
@@ -37,8 +39,17 @@ const HEX48 = "4a620d0f3abb0e0cd6bd6cc07cb5700007" + "6f03c6648cbe15"; // 48 hex
 const B64 = "Qm9uamF5b3Vyc2VjcmV0dmFsdWU9PQ=="; // has = padding
 const PASS = "corr3ct-horse"; // 13 chars, above the floor
 
-function payload(values: { label: string; value: string }[], files: string[] = []) {
+function windows(value: string, w = 8): string[] {
+  const out: string[] = [];
+  for (let i = 0; i + w <= value.length; i++) out.push(digestOf(value.slice(i, i + w), SALT));
+  return out;
+}
+
+function payload(values: { label: string; value: string }[], files: string[] = [], fragments = true) {
   return JSON.stringify({
+    ...(fragments
+      ? { fragments: { window: 8, entries: values.filter((v) => v.value.length > 8).map((v) => ({ label: v.label, hex: windows(v.value) })) } }
+      : {}),
     canonical: "strip at most one trailing \\n",
     algorithm: "hmac-sha256 keyed on the salt's hex string",
     salt_hex: SALT,
@@ -242,5 +253,61 @@ describe("tool arguments (tool_call block)", () => {
   test("var references and secretctl forms are not hits", () => {
     expect(inputHoldsKnown({ command: 'curl -H "Authorization: Bearer $MEMLEDGER_TOKEN" x' }, D)).toEqual([]);
     expect(inputHoldsKnown({ command: "secretctl exec 'dotenv:~/.config/memledger/env#MEMLEDGER_TOKEN' --as T -- curl x" }, D)).toEqual([]);
+  });
+});
+
+describe("assembled pieces (fragment digests)", () => {
+  const chunks = HEX48.match(/.{8}/g)!; // six 8-char pieces
+  test("the printf-of-chunks workaround is caught in a tool argument", () => {
+    const cmd = `X=$(printf '%s' ${chunks.join(" ")}) && echo "$X" > /dev/null`;
+    const hits = inputHoldsKnown({ command: cmd }, D);
+    expect(hits.map((h) => h.label)).toEqual(["dotenv:~/.config/memledger/env#MEMLEDGER_TOKEN"]);
+    expect(hits[0].assembled).toBe(true);
+  });
+  test("two pieces anywhere in a text are enough; one alone is not", () => {
+    expect(findAssembled(`first ${chunks[0]} then later ${chunks[3]}`, D).length).toBeGreaterThan(0);
+    expect(findAssembled(`just one piece ${chunks[2]} here`, D)).toEqual([]);
+    expect(ASSEMBLED_MIN_WINDOWS).toBe(2);
+  });
+  test("a single longer piece (several windows) trips it on its own", () => {
+    const piece = HEX48.slice(10, 26); // 16 chars = 9 windows
+    const r = redactKnown(`the middle is ${piece}.`, D);
+    expect(r.redactions).toBe(1);
+    expect(r.text).toContain("[redacted:registry-piece");
+    expect(r.text).not.toContain(piece);
+  });
+  test("pieces are masked in prose and in persisted tool-call arguments", () => {
+    const r = redactContent(
+      [{ type: "toolCall", id: "1", name: "bash", arguments: { command: `printf '%s' ${chunks.slice(0, 3).join(" ")}` } }],
+      D,
+    );
+    const args = (r.content[0] as { arguments: { command: string } }).arguments;
+    for (const c of chunks.slice(0, 3)) expect(args.command).not.toContain(c);
+    expect(r.redactions).toBe(3);
+  });
+  test("ordinary words that happen to be windows of a list-shaped value are not pieces", () => {
+    // If fragments ever exist for a list-like value, its windows are words.
+    // The matcher must reject word-shaped pieces regardless of what was
+    // emitted - the 2026-09-04 false positive, second half.
+    const list = "owner/alpha-tool,owner/beta-conf";
+    const withList = parseDigests(payload([{ label: "sops:~/x/.env#REPOS", value: list }]));
+    expect(withList.fragByHex.size).toBeGreaterThan(0); // the test payload emits them anyway
+    expect(findAssembled("cd ~/beta-conf && make alpha-tool lint", withList)).toEqual([]);
+    expect(inputHoldsKnown({ command: "cd ~/beta-conf && make alpha-tool lint" }, withList)).toEqual([]);
+  });
+  test("a chunk sharing only SOME windows with a value is not a piece", () => {
+    const partial = HEX48.slice(0, 8) + "zz" + HEX48.slice(10, 18); // mixed coverage
+    expect(findAssembled(`x ${partial} y ${HEX48.slice(20, 28)}`, D)).toEqual([]);
+  });
+  test("unrelated hex and a payload without fragments are inert", () => {
+    expect(findAssembled("3f2a9c1e 7b4d8a6f 5e0c2b1d 9a8e7f6c", D)).toEqual([]);
+    const noFrag = parseDigests(payload([{ label: "l", value: HEX48 }], [], false));
+    expect(noFrag.fragWindow).toBe(0);
+    expect(findAssembled(chunks.join(" "), noFrag)).toEqual([]);
+  });
+  test("the whole value is still reported as a whole value, not as pieces", () => {
+    const hits = inputHoldsKnown({ command: `echo ${HEX48}` }, D);
+    expect(hits.length).toBe(1);
+    expect(hits[0].assembled).toBeFalsy();
   });
 });

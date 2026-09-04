@@ -165,7 +165,9 @@ describe.skipIf(!haveSecretctl)("secret-output-guard known-value layer", () => {
   const registry = path.join(root, "sources");
   const cache = path.join(root, "cache");
   // synthetic: 48 hex chars built from a repeat, never a real token
-  const VALUE = "9c3e1f7a".repeat(6);
+  // synthetic 48-hex value from six DISTINCT blocks (a repeated block would
+  // make every "piece" the same window and never reach the assembly threshold)
+  const VALUE = ["9c3e1f7a", "0b2d4e6f", "81a3c5e7", "f9d1b3a5", "26c8e0a2", "74b6d8f0"].join("");
   const env = { SECRETCTL_SOURCES: registry, SECRET_GUARD_CACHE_DIR: cache };
 
   beforeAll(() => {
@@ -226,6 +228,28 @@ describe.skipIf(!haveSecretctl)("secret-output-guard known-value layer", () => {
       expect(out.permissionDecisionReason).toContain("secret_in_args");
       expect(out.permissionDecisionReason).not.toContain(VALUE);
     }
+  });
+
+  test("denies a value ASSEMBLED from 8-char pieces (printf-of-chunks workaround)", async () => {
+    const chunks = VALUE.match(/.{8}/g)!;
+    const { stdout } = await runHook(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command: `X=$(printf '%s' ${chunks.join(" ")}) && echo "$X" > /dev/null && echo done` },
+      },
+      env,
+    );
+    const out = JSON.parse(stdout).hookSpecificOutput;
+    expect(out.permissionDecision).toBe("deny");
+    expect(out.permissionDecisionReason).toContain("PIECES that assemble");
+    expect(out.permissionDecisionReason).not.toContain(VALUE);
+    // a single piece on its own is not a hit
+    const single = await runHook(
+      { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: `echo ${chunks[0]}` } },
+      env,
+    );
+    expect(single.stdout).toBe("");
   });
 
   test("allows a clean read and a var-reference command", async () => {

@@ -3,6 +3,11 @@
 # means every key in the store. dotenv:/sops: globs are content-sniffed, so the
 # same pattern with both schemes puts each file in exactly one resolver.
 # Read by: secretctl sources | digests | classify, and the pi secret-output-guard.
+#
+# Keys whose values are configuration, not credentials, wherever they appear
+# (container envs especially). Excluding them only reduces masking: a digest
+# of a timezone or a locale would make the guard mask ordinary output.
+exclude TZ LANG LANGUAGE LC_* EMAIL PUID PGID UMASK
 
 dotenv:~/.config/*/env
 dotenv:~/infra/**/.env

@@ -249,7 +249,7 @@ async function main() {
     if (!d) process.exit(0);
 
     const typed = inputHoldsKnown(input, d);
-    if (typed.length > 0) deny(inputHoldsKnownReason(tool, typed));
+    if (typed.length > 0) deny(inputHoldsKnownReason(tool, typed, typed.every((h) => h.assembled)));
 
     for (const t of ccReadTargets(tool, input)) {
       const f = regularFile(t, cwd);

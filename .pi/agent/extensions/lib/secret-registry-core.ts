@@ -52,6 +52,11 @@ export interface RegistryDigests {
   files: Set<string>;
   unresolved: string[];
   loadedAt: number;
+  /** Sliding-window fragment digests of LOCAL values (see findAssembled).
+   *  fragWindow = 0 when secretctl emitted none. */
+  fragWindow: number;
+  /** fragment hex -> label of the value it came from */
+  fragByHex: Map<string, string>;
 }
 
 /** Parse `secretctl digests --json`. Throws on a shape that cannot be a
@@ -64,6 +69,7 @@ export function parseDigests(json: string, now = Date.now()): RegistryDigests {
     files?: string[];
     entries?: DigestEntry[];
     unresolved?: { label: string; error: string }[];
+    fragments?: { window?: number; entries?: { label: string; hex: string[] }[] };
   };
   if (typeof raw.salt_hex !== "string" || raw.salt_hex.length < 32 || !Array.isArray(raw.entries)) {
     throw new Error("not a secretctl digests payload (missing salt_hex / entries)");
@@ -75,6 +81,11 @@ export function parseDigests(json: string, now = Date.now()): RegistryDigests {
   for (const e of raw.entries) {
     if (typeof e.hex === "string" && e.hex.length === 64) byHex.set(e.hex, e);
   }
+  const fragByHex = new Map<string, string>();
+  const fragWindow = typeof raw.fragments?.window === "number" ? raw.fragments.window : 0;
+  for (const f of raw.fragments?.entries ?? []) {
+    for (const h of f.hex ?? []) if (typeof h === "string" && h.length === 64) fragByHex.set(h, f.label);
+  }
   return {
     saltHex: raw.salt_hex,
     minLen: typeof raw.min_len === "number" ? raw.min_len : 8,
@@ -82,6 +93,8 @@ export function parseDigests(json: string, now = Date.now()): RegistryDigests {
     files: new Set(raw.files ?? []),
     unresolved: (raw.unresolved ?? []).map((u) => u.label),
     loadedAt: now,
+    fragWindow,
+    fragByHex,
   };
 }
 
@@ -139,9 +152,91 @@ export function candidates(text: string, minLen: number): Set<string> {
   return out;
 }
 
-export type KnownHit = { value: string; entry: DigestEntry };
+export type KnownHit = { value: string; entry: DigestEntry; assembled?: boolean };
 
-/** Every candidate in `text` whose digest is registered. */
+/** Minimum distinct fragment windows of one value that must appear before a
+ *  set of pieces counts as "the value, assembled". One 8-char window of a
+ *  hex token could coincide with an unrelated hash; two of the same value
+ *  in one text is not coincidence. A single piece longer than the window
+ *  contributes several windows by itself, so a 9+ char chunk trips this on
+ *  its own. */
+export const ASSEMBLED_MIN_WINDOWS = 2;
+
+/**
+ * Pieces of a registered value scattered through `text`. The 2026-09-04
+ * workaround the model reached for after a block was
+ * `X=$(printf '%s' 6353f098 86386287 ...)`: eight-character chunks, no one
+ * of which is the value. Each candidate token at least `fragWindow` long is
+ * cut into every window of that size and each window's digest is looked up;
+ * the candidates whose windows belong to one value are returned once that
+ * value has ASSEMBLED_MIN_WINDOWS distinct windows present. Exact hits are
+ * excluded here (findKnown reports those).
+ */
+/** A chunk of an opaque token has letters AND digits and nothing but token
+ *  characters. Ordinary words never qualify - the second half of the fix for
+ *  a live 2026-09-04 false positive where a registered value was a list of
+ *  repo names and two of them appeared in an ordinary command. (The first
+ *  half: secretctl emits fragments for opaque tokens only.) */
+export function pieceShaped(c: string): boolean {
+  return /^[A-Za-z0-9+/=_.-]+$/.test(c) && /[0-9]/.test(c) && /[A-Za-z]/.test(c);
+}
+
+export function findAssembled(text: string, d: RegistryDigests): KnownHit[] {
+  if (d.fragWindow <= 0 || d.fragByHex.size === 0) return [];
+  const w = d.fragWindow;
+  // Whole values present in the text are findKnown's job; a candidate that
+  // CONTAINS one (`KEY=<value>`, `./env:2:KEY=<value>`) is that value with
+  // decoration, not an assembly, so it and its label are left alone here.
+  const all = candidates(text, Math.min(w, d.minLen));
+  const exactValues: string[] = [];
+  const exactLabels = new Set<string>();
+  for (const c of all) {
+    const e = d.byHex.get(digestOf(c, d.saltHex));
+    if (e) {
+      exactValues.push(c);
+      exactLabels.add(e.label);
+    }
+  }
+  // label -> { windows seen, pieces they came from }
+  const perLabel = new Map<string, { hexes: Set<string>; pieces: Set<string> }>();
+  for (const c of all) {
+    if (c.length < w || c.length > 512) continue; // too short to hold a window / a blob
+    if (exactValues.some((v) => c.includes(v))) continue;
+    if (!pieceShaped(c)) continue;
+    // A piece counts only when EVERY window of it belongs to ONE value. A word
+    // that shares a window with some longer value is a word, not a chunk;
+    // partial coverage is discarded.
+    let label: string | undefined;
+    const hexes: string[] = [];
+    let covered = true;
+    for (let i = 0; i + w <= c.length; i++) {
+      const win = c.slice(i, i + w);
+      const l = d.fragByHex.get(digestOf(win, d.saltHex));
+      if (!l || (label && l !== label)) {
+        covered = false;
+        break;
+      }
+      label = l;
+      hexes.push(win);
+    }
+    if (!covered || !label) continue;
+    let rec = perLabel.get(label);
+    if (!rec) perLabel.set(label, (rec = { hexes: new Set(), pieces: new Set() }));
+    for (const h of hexes) rec.hexes.add(h);
+    rec.pieces.add(c);
+  }
+  const hits: KnownHit[] = [];
+  for (const [label, rec] of perLabel) {
+    if (exactLabels.has(label) || rec.hexes.size < ASSEMBLED_MIN_WINDOWS) continue;
+    const entry = [...d.byHex.values()].find((e) => e.label === label) ?? { label, hex: "", len: 0 };
+    for (const piece of rec.pieces) hits.push({ value: piece, entry, assembled: true });
+  }
+  hits.sort((a, b) => b.value.length - a.value.length);
+  return hits;
+}
+
+/** Every candidate in `text` whose digest is registered, plus pieces that
+ *  together assemble a registered value. */
 export function findKnown(text: string, d: RegistryDigests): KnownHit[] {
   if (d.byHex.size === 0) return [];
   const hits: KnownHit[] = [];
@@ -149,6 +244,7 @@ export function findKnown(text: string, d: RegistryDigests): KnownHit[] {
     const entry = d.byHex.get(digestOf(c, d.saltHex));
     if (entry) hits.push({ value: c, entry });
   }
+  hits.push(...findAssembled(text, d));
   // Longest first so a value that is a prefix of another is masked whole.
   hits.sort((a, b) => b.value.length - a.value.length);
   return hits;
@@ -170,11 +266,11 @@ export function redactKnown(text: string, d: RegistryDigests): RedactKnownResult
   let out = text;
   let redactions = 0;
   const labels: string[] = [];
-  for (const { value, entry } of findKnown(text, d)) {
+  for (const { value, entry, assembled } of findKnown(text, d)) {
     if (!out.includes(value)) continue; // already masked as part of a longer hit
     const parts = out.split(value);
     redactions += parts.length - 1;
-    out = parts.join(knownMask(value, entry.label));
+    out = parts.join(assembled ? `...[redacted:registry-piece ${entry.label}]` : knownMask(value, entry.label));
     labels.push(entry.label);
   }
   return { text: out, redactions, labels };
@@ -189,7 +285,9 @@ export function isRegisteredFile(path: string, d: RegistryDigests): boolean {
 /** Does file `content` hold any registered value? Same tokenised-HMAC test
  *  as output redaction, so the two layers cannot disagree. */
 export function holdsKnown(content: string, d: RegistryDigests): DigestEntry[] {
-  return findKnown(content, d).map((h) => h.entry);
+  const byLabel = new Map<string, DigestEntry>();
+  for (const h of findKnown(content, d)) if (!byLabel.has(h.entry.label)) byLabel.set(h.entry.label, h.entry);
+  return [...byLabel.values()];
 }
 
 // ── the model's own output, and the arguments it passes to tools ─────────────
@@ -275,11 +373,17 @@ export function redactStrings(value: unknown, d: RegistryDigests): { value: unkn
  *  credential into a command line, a file body, or a URL. Blocked rather than
  *  masked: a masked command would run wrong, and the right form is `$VAR` or
  *  `secretctl exec`. */
-export function inputHoldsKnown(input: unknown, d: RegistryDigests): DigestEntry[] {
-  const seen = new Map<string, DigestEntry>();
+export type InputHit = DigestEntry & { assembled?: boolean };
+
+export function inputHoldsKnown(input: unknown, d: RegistryDigests): InputHit[] {
+  const seen = new Map<string, InputHit>();
   const walk = (v: unknown): void => {
     if (typeof v === "string") {
-      for (const h of findKnown(v, d)) seen.set(h.entry.label, h.entry);
+      for (const h of findKnown(v, d)) {
+        const prev = seen.get(h.entry.label);
+        // A whole-value hit outranks an assembled one for the same label.
+        if (!prev || (prev.assembled && !h.assembled)) seen.set(h.entry.label, { ...h.entry, assembled: h.assembled });
+      }
     } else if (Array.isArray(v)) v.forEach(walk);
     else if (v && typeof v === "object") Object.values(v as Record<string, unknown>).forEach(walk);
   };
@@ -287,10 +391,11 @@ export function inputHoldsKnown(input: unknown, d: RegistryDigests): DigestEntry
   return [...seen.values()];
 }
 
-export function inputHoldsKnownReason(toolName: string, entries: DigestEntry[]): string {
+export function inputHoldsKnownReason(toolName: string, entries: DigestEntry[], assembled = false): string {
   const labels = entries.slice(0, 5).map((e) => e.label).join(", ") + (entries.length > 5 ? ", ..." : "");
+  const what = assembled ? "PIECES that assemble into the value" : "the plaintext value";
   return (
-    `tool-guard[secret_in_args]: blocked - the ${toolName} call's arguments contain the plaintext value of ${labels}. ` +
+    `tool-guard[secret_in_args]: blocked - the ${toolName} call's arguments contain ${what} of ${labels}. ` +
     "A credential in a tool argument lands in the transcript, the synced session store and (for bash) the process " +
     "table. Never type the value: reference it as $NAME, run the command under `secretctl exec 'SRC' --as NAME -- <cmd>`, " +
     "or write it with `secretctl set 'DST' --from 'SRC'`. Do NOT work around this by assembling the value at runtime " +
@@ -385,7 +490,7 @@ export function registeredFileReason(path: string, label: string): string {
     `tool-guard[secret_store_read]: blocked - \`${path}\` is a registered credential store (${label}). ` +
     "Reading it puts every value in it into the transcript, the model context and the synced session store. " +
     "Answer the question without the values:\n" +
-    `  which keys are set:   sed -E 's/^([[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_.-]*[[:space:]]*=).*/\\1<set>/' '${path}'\n` +
+    `  which keys are set:   cut -d= -f1 '${path}'   (names only; not an edit-shaped command)\n` +
     "  compare/fingerprint:  secretctl fp 'dotenv:PATH#KEY'   (sops:/keyfile: as fits)\n" +
     "  use it in a command:  secretctl exec 'dotenv:PATH#KEY' --as NAME -- <cmd>\n" +
     "  change a value:       secretctl set 'dotenv:PATH#KEY' --from <src>\n" +

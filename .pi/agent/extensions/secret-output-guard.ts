@@ -257,7 +257,9 @@ export default function (pi: ExtensionAPI) {
       const d = digests();
       if (d) {
         const hits = inputHoldsKnown(input, d);
-        if (hits.length > 0) return { block: true, reason: inputHoldsKnownReason(event.toolName, hits) };
+        if (hits.length > 0) {
+          return { block: true, reason: inputHoldsKnownReason(event.toolName, hits, hits.every((h) => h.assembled)) };
+        }
       }
     }
 

@@ -187,11 +187,16 @@ retyped a credential it had seen into its own message, twice in one day):
   `secret_in_args`, and the persisted call is masked. The fix is `$VAR`,
   `secretctl exec`, or `secretctl set` - never a rewrite.
 
-Residual, by design: a value assembled at runtime from pieces (`printf` of
-chunks, base64, shell variables) is invisible to any known-value matcher. The
-block reason says so explicitly; doing it anyway is a policy violation.
-Values read from a remote box over ssh are not registrable and are not covered
-either - see the secretctl TODO for remote digests.
+Pieces are caught too: `secretctl digests` emits digests of every 8-byte
+window of each local opaque-token value, and two or more chunk-shaped pieces of
+one value in a command or message (or a single piece of 9+ characters) are
+refused as an assembly. Residual, by design: pieces shorter than 8 characters,
+base64 or other encodings of a value, and values that only exist after a shell
+runs. The block reason names all of that as a policy violation; doing it anyway
+is one. Remote stores are registrable as `docker:HOST/*#*`, `sshenv:HOST/path#*`
+and `uci:HOST/config#*` (hashed on the far host, digests only, no fragments).
+Registry `exclude` lines keep configuration keys (TZ, LANG, EMAIL...) out of
+the digest set so ordinary output is not masked.
 
 ## Failure catalogue (each one happened)
 
