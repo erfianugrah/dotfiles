@@ -45,8 +45,16 @@ function windows(value: string, w = 8): string[] {
   return out;
 }
 
+function encodings(value: string): string[] {
+  const b = Buffer.from(value, "utf8");
+  return [...new Set([b.toString("base64"), b.toString("base64").replace(/=+$/, ""), b.toString("base64url"), encodeURIComponent(value)])]
+    .filter((f) => f !== value)
+    .map((f) => digestOf(f, SALT));
+}
+
 function payload(values: { label: string; value: string }[], files: string[] = [], fragments = true) {
   return JSON.stringify({
+    variants: { encodings: ["base64", "base64-nopad", "base64url", "percent"], entries: values.map((v) => ({ label: v.label, hex: encodings(v.value) })) },
     ...(fragments
       ? { fragments: { window: 8, entries: values.filter((v) => v.value.length > 8).map((v) => ({ label: v.label, hex: windows(v.value) })) } }
       : {}),
@@ -78,7 +86,8 @@ const D: RegistryDigests = parseDigests(
 describe("parseDigests", () => {
   test("accepts the secretctl shape and indexes by full-width hex", () => {
     expect(D.saltHex).toBe(SALT);
-    expect(D.byHex.size).toBe(3);
+    expect([...D.byHex.values()].filter((e) => !e.encoded).length).toBe(3);
+    expect([...D.byHex.values()].some((e) => e.encoded)).toBe(true); // encoded spellings join the set
     expect(D.minLen).toBe(8);
     expect(D.files.has("/home/u/.config/memledger/env")).toBe(true);
   });
@@ -309,5 +318,31 @@ describe("assembled pieces (fragment digests)", () => {
     const hits = inputHoldsKnown({ command: `echo ${HEX48}` }, D);
     expect(hits.length).toBe(1);
     expect(hits[0].assembled).toBeFalsy();
+  });
+});
+
+describe("encoded variants", () => {
+  test("a base64-encoded value in output is masked with the same label", () => {
+    const b64 = Buffer.from(HEX48, "utf8").toString("base64");
+    const r = redactKnown(`Authorization: Basic ${b64}\nnext line`, D);
+    expect(r.redactions).toBe(1);
+    expect(r.text).not.toContain(b64);
+    expect(r.text).toContain("[redacted:registry-encoded dotenv:~/.config/memledger/env#MEMLEDGER_TOKEN");
+  });
+  test("a value typed base64-encoded into a command is refused", () => {
+    const b64 = Buffer.from(PASS, "utf8").toString("base64");
+    const hits = inputHoldsKnown({ command: `echo ${b64} | base64 -d | psql` }, D);
+    expect(hits.map((h) => h.label)).toEqual(["dotenv:~/infra/y/.env#DB_PASSWORD"]);
+  });
+  test("a percent-encoded value is caught too", () => {
+    // B64 contains '+' and '=' so its percent-encoding differs from itself
+    const pct = encodeURIComponent(B64);
+    expect(pct).not.toBe(B64);
+    expect(findKnown(`GET /cb?token=${pct}`, D).map((h) => h.entry.label)).toEqual(["sops:~/infra/x/.env#S3_SECRET"]);
+  });
+  test("a payload without variants still works", () => {
+    const d = parseDigests(JSON.stringify({ salt_hex: SALT, width: 64, entries: [{ label: "l", hex: digestOf(HEX48, SALT), len: 48 }] }));
+    expect(findKnown(HEX48, d).length).toBe(1);
+    expect(findKnown(Buffer.from(HEX48).toString("base64"), d)).toEqual([]);
   });
 });

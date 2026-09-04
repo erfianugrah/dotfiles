@@ -41,6 +41,9 @@ export interface DigestEntry {
   label: string;
   hex: string;
   len: number;
+  /** set when this digest is of an ENCODED spelling (base64 / percent) of the
+   *  labelled value rather than the value itself */
+  encoded?: boolean;
 }
 
 export interface RegistryDigests {
@@ -70,6 +73,7 @@ export function parseDigests(json: string, now = Date.now()): RegistryDigests {
     entries?: DigestEntry[];
     unresolved?: { label: string; error: string }[];
     fragments?: { window?: number; entries?: { label: string; hex: string[] }[] };
+    variants?: { encodings?: string[]; entries?: { label: string; hex: string[] }[] };
   };
   if (typeof raw.salt_hex !== "string" || raw.salt_hex.length < 32 || !Array.isArray(raw.entries)) {
     throw new Error("not a secretctl digests payload (missing salt_hex / entries)");
@@ -80,6 +84,14 @@ export function parseDigests(json: string, now = Date.now()): RegistryDigests {
   const byHex = new Map<string, DigestEntry>();
   for (const e of raw.entries) {
     if (typeof e.hex === "string" && e.hex.length === 64) byHex.set(e.hex, e);
+  }
+  // Encoded spellings (base64, percent) of a value are the same secret; their
+  // digests join the exact-match set so a base64'd header or an escaped DSN
+  // in output is masked like the raw value. Same label, flagged encoded.
+  for (const v of raw.variants?.entries ?? []) {
+    for (const h of v.hex ?? []) {
+      if (typeof h === "string" && h.length === 64 && !byHex.has(h)) byHex.set(h, { label: v.label, hex: h, len: 0, encoded: true });
+    }
   }
   const fragByHex = new Map<string, string>();
   const fragWindow = typeof raw.fragments?.window === "number" ? raw.fragments.window : 0;
@@ -270,7 +282,13 @@ export function redactKnown(text: string, d: RegistryDigests): RedactKnownResult
     if (!out.includes(value)) continue; // already masked as part of a longer hit
     const parts = out.split(value);
     redactions += parts.length - 1;
-    out = parts.join(assembled ? `...[redacted:registry-piece ${entry.label}]` : knownMask(value, entry.label));
+    out = parts.join(
+      assembled
+        ? `...[redacted:registry-piece ${entry.label}]`
+        : entry.encoded
+          ? `...[redacted:registry-encoded ${entry.label} ${value.length} chars]`
+          : knownMask(value, entry.label),
+    );
     labels.push(entry.label);
   }
   return { text: out, redactions, labels };

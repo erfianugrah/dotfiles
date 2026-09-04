@@ -190,9 +190,11 @@ retyped a credential it had seen into its own message, twice in one day):
 Pieces are caught too: `secretctl digests` emits digests of every 8-byte
 window of each local opaque-token value, and two or more chunk-shaped pieces of
 one value in a command or message (or a single piece of 9+ characters) are
-refused as an assembly. Residual, by design: pieces shorter than 8 characters,
-base64 or other encodings of a value, and values that only exist after a shell
-runs. The block reason names all of that as a policy violation; doing it anyway
+refused as an assembly. Encoded spellings are covered too: the base64 and
+percent-encoded forms of each local value carry digests, so a base64'd header or
+an escaped DSN is masked like the raw value. Residual, by design: pieces shorter
+than 8 characters, a value embedded mid-way inside a larger base64 blob, and
+values that only exist after a shell runs. The block reason names all of that as a policy violation; doing it anyway
 is one. Remote stores are registrable as `docker:HOST/*#*`, `sshenv:HOST/path#*`
 and `uci:HOST/config#*` (hashed on the far host, digests only, no fragments).
 Registry `exclude` lines keep configuration keys (TZ, LANG, EMAIL...) out of
