@@ -10,6 +10,8 @@
 exclude TZ LANG LANGUAGE LC_* EMAIL PUID PGID UMASK
 exclude POSTGRES_DB PGDATABASE DB_NAME *_DB_NAME DATABASE_NAME
 exclude *_HOST *_HOSTNAME HOSTNAME *_PORT *_USER *_USERNAME PGUSER PGHOST PGPORT
+# an access key ID is an identifier; the paired SECRET_ACCESS_KEY is the credential
+exclude *_ACCESS_KEY_ID
 
 dotenv:~/.config/*/env
 dotenv:~/infra/**/.env
