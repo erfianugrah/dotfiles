@@ -119,7 +119,7 @@ do_stow() {
 do_local_bin() {
   echo ">> linking PATH tools into ~/.local/bin"
   run mkdir -p "$HOME/.local/bin"
-  local tools=(mdclip secret-coverage)
+  local tools=(mdclip)
   if [ ! -x "$DOTFILES/bin/stow-drift" ]; then
     if command -v go >/dev/null 2>&1; then
       echo ">> building stow-drift (go found, binary missing)"
