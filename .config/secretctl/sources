@@ -1,0 +1,11 @@
+# secretctl registry - the STORES credentials live in on this box.
+# One source URI per line. Globs and ** apply to file paths; no #field (or #*)
+# means every key in the store. dotenv:/sops: globs are content-sniffed, so the
+# same pattern with both schemes puts each file in exactly one resolver.
+# Read by: secretctl sources | digests | classify, and the pi secret-output-guard.
+
+dotenv:~/.config/*/env
+dotenv:~/infra/**/.env
+sops:~/infra/**/.env
+sops:~/infra/**/*.enc.*
+keyfile:~/.config/knotctl/keys/*.key

@@ -6,6 +6,7 @@
 !.config/cliamp
 !.config/git
 !.config/opencode
+!.config/secretctl
 !.config/systemd
 .config/systemd/user/*.wants
 .ssh/id*

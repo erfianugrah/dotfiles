@@ -147,6 +147,33 @@ grep -ohE '"password":"[^"]+"' /tmp/dump.json | sed -E 's/:.*/:REDACTED/'
   open. To characterise a whole file without rendering it, fingerprint it:
   `secretctl fp 'keyfile:PATH'` or `secretctl fp 'dotenv:PATH#KEY'`.
 
+## The registry: known values, not patterns
+
+Pattern rules cannot tell a token from a commit hash. The 2026-09-04 leak was a
+bare 48-hex token in `~/.config/memledger/env`, printed by the pi `grep` tool
+in the same turn the user had said "don't print it"; no format rule, no env
+value and none of gitleaks / trufflehog / noseyparker matched that line. What
+IS knowable is where the stores are. `~/.config/secretctl/sources` lists them
+(globs and `**` allowed; `dotenv:`/`sops:` patterns are content-sniffed so one
+glob written with both schemes puts each file in exactly one resolver):
+
+<!-- good -->
+```bash
+secretctl sources                          # what the registry expands to (labels only)
+secretctl digests                          # keyed digest per registered value
+secretctl classify ~/infra/x/compose.yaml  # 0 = holds registered material, 1 = clean, 2 = unresolved
+```
+
+The pi guard consumes `secretctl digests --json` (full-width HMACs + the
+session salt, held in memory, never printed) and then: a `read`/`grep`/`cat`
+aimed at a registered store is blocked; a file whose content holds a registered
+value - a compose file with a pasted secret, a dump - is blocked as a COPY; any
+registered value that still reaches a tool result is masked, whatever file or
+command it came from. A new store is covered the moment it is registered; an
+unregistered store is not covered at all, so when you create one, add it.
+
+The registry file is stowed from `dotfiles/.config/secretctl/sources`.
+
 ## Failure catalogue (each one happened)
 
 **Redact-on-display instead of count.** A stray 681KB json dump on a shared
