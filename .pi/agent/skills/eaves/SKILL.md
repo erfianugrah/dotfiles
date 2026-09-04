@@ -19,8 +19,9 @@ old configuration.nix/router.nix manual-mirror workflow is dead).
 on the router. All changes: edit in `~/infra/router`, commit, `make deploy`
 (push -> router fast-forwards -> `nixos-rebuild switch --flake
 .#router` -> `eaves doctor` gate). `make diff` = dry-build. nixpkgs
-and eaves are rev-pinned in flake.nix; bump deliberately. The router
-authenticates with read-only deploy keys (see ~/infra/router/README.md).
+and eaves are pinned in flake.lock; bump deliberately (eaves: the
+lock is regenerated router-side - see Binary availability below).
+The router authenticates with read-only deploy keys (see ~/infra/router/README.md).
 
 Full command reference + doctor check table: `~/infra/eaves/README.md`.
 Implementation plan + fixture contract: `~/infra/eaves/docs/plans/2026-07-24-eaves-cli.md`.
@@ -31,7 +32,7 @@ Implementation plan + fixture contract: `~/infra/eaves/docs/plans/2026-07-24-eav
 |---|---|
 | Answer a router question WITHOUT touching the router | `cd ~/infra/eaves && EAVES_FIXTURE_DIR=testdata/fixtures go run . <cmd>` (fixtures are a sanitized snapshot) |
 | Live answer (leases, conntrack, NAT, ruleset) | `ssh router 'sudo -n eaves <cmd>'` (eaves is on PATH) |
-| Post-rebuild regression gate ("did I break the router?") | `eaves doctor` - full suite: kea/nft/NAT/conntrack + nixos-checkout drift + trunk NIC health (trunk-errors WARNs on nonzero counters - a static value after a tcpdump session is the i40e promisc-toggle artifact, not hardware) |
+| Post-rebuild regression gate ("did I break the router?") | `eaves doctor` - full suite: kea/nft/NAT/conntrack + nixos-checkout drift + trunk NIC health (trunk-link: speed/carrier; trunk-errors: counters - a static value after a tcpdump session is the i40e promisc-toggle artifact, not hardware; trunk-rings: applied RX/TX depth must be 4096 - FAILs the gate on a rings regression) |
 | Verify the flake / test a change end-to-end | `go test ./...` + `bash scripts/smoke-fixtures.sh` (offline) |
 | Change firewall/DHCP/VLAN config | `~/infra/router` + `make deploy` - NEVER eaves (it can't), NEVER edit /etc/nixos on the router |
 | Raw packet forensics eaves doesn't cover | `ssh router` + tcpdump/conntrack by hand (`tailscale-homelab` skill) |
