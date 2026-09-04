@@ -56,7 +56,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, resolve as pathResolve } from "node:path";
@@ -135,48 +135,83 @@ let registry: RegistryDigests | null = null;
 let registryDisabled = false;
 let registryNotice: string | null = null;
 
-/** Load (or reload) the digest set from secretctl. Errors disable the layer
- *  for the session with a one-line notice; exit 2 (some store unresolved) is
- *  partial coverage and is kept. */
-function loadRegistry(): RegistryDigests | null {
+/** With remote stores registered a full `digests` pass takes several seconds
+ *  (two ssh round trips on this box), so it must not run synchronously inside
+ *  a tool call every TTL. The first load is kicked off at session_start and
+ *  refreshes run in the background; only a tool call that arrives before the
+ *  very first load has finished pays for a synchronous one. */
+const DIGESTS_TIMEOUT_MS = 90_000;
+const DIGESTS_ARGS = ["digests", "--json"];
+const DIGESTS_OPTS = { encoding: "utf8" as const, maxBuffer: 16 * 1024 * 1024, timeout: DIGESTS_TIMEOUT_MS };
+let refreshing = false;
+
+/** Exit 2 means some store was unresolved; the JSON is still valid and is
+ *  partial coverage, which beats none. */
+function acceptPartial(err: { status?: number; code?: number | string; stdout?: string } | null, stdout: string): string {
+  if (!err) return stdout;
+  const status = typeof err.code === "number" ? err.code : err.status;
+  if (status === 2 && stdout.trim().startsWith("{")) return stdout;
+  throw err;
+}
+
+function disable(err: unknown): null {
+  registryDisabled = true;
+  registry = null;
+  const e = err as { code?: string; stderr?: string; message?: string };
+  const why = e.code === "ENOENT"
+    ? "secretctl not on PATH"
+    : (e.stderr?.toString().trim().split("\n").pop() || e.message || String(err));
+  registryNotice = `secret-output-guard: known-value layer OFF (${why}). ` +
+    "Env-value + token-format layers still active. Fix: ~/infra/secretctl `make install`, " +
+    "registry at ~/.config/secretctl/sources; kill switch PI_SECRET_GUARD_OFF=1.";
+  return null;
+}
+
+/** Synchronous load: only for a tool call that arrives before the first
+ *  background load completed. */
+function loadRegistrySync(): RegistryDigests | null {
   try {
     let stdout: string;
     try {
-      stdout = execFileSync("secretctl", ["digests", "--json"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 30_000,
-        maxBuffer: 16 * 1024 * 1024,
-      });
+      stdout = execFileSync("secretctl", DIGESTS_ARGS, { ...DIGESTS_OPTS, stdio: ["ignore", "pipe", "pipe"] });
     } catch (err) {
-      const e = err as { status?: number; stdout?: string; stderr?: string; code?: string };
-      if (e.status === 2 && typeof e.stdout === "string" && e.stdout.trim().startsWith("{")) {
-        stdout = e.stdout; // partial: some stores unresolved, the rest is valid
-      } else {
-        throw err;
-      }
+      const e = err as { status?: number; stdout?: string };
+      stdout = acceptPartial(e, e.stdout ?? "");
     }
     registry = parseDigests(stdout);
     registryDisabled = false;
     return registry;
   } catch (err) {
-    registryDisabled = true;
-    registry = null;
-    const e = err as { code?: string; stderr?: string; message?: string };
-    const why = e.code === "ENOENT"
-      ? "secretctl not on PATH"
-      : (e.stderr?.toString().trim().split("\n").pop() || e.message || String(err));
-    registryNotice = `secret-output-guard: known-value layer OFF (${why}). ` +
-      "Env-value + token-format layers still active. Fix: ~/infra/secretctl `make install`, " +
-      "registry at ~/.config/secretctl/sources; kill switch PI_SECRET_GUARD_OFF=1.";
-    return null;
+    return disable(err);
   }
+}
+
+/** Background load / refresh. The current digest set stays in use until the
+ *  new one has parsed, so a slow ssh never leaves the guard empty-handed. */
+function refreshRegistryAsync(): void {
+  if (refreshing || registryDisabled) return;
+  refreshing = true;
+  execFile("secretctl", DIGESTS_ARGS, DIGESTS_OPTS, (err, stdout) => {
+    refreshing = false;
+    try {
+      const json = acceptPartial(err as { code?: number | string; status?: number } | null, String(stdout ?? ""));
+      registry = parseDigests(json);
+      registryDisabled = false;
+    } catch (e) {
+      // A failed REFRESH keeps the previous set; only a failed FIRST load
+      // disables the layer (there is nothing older to fall back to).
+      if (!registry) disable(e);
+    }
+  });
 }
 
 function digests(): RegistryDigests | null {
   if (registryDisabled) return null;
-  if (registry && Date.now() - registry.loadedAt < REGISTRY_TTL_MS) return registry;
-  return loadRegistry();
+  if (registry) {
+    if (Date.now() - registry.loadedAt >= REGISTRY_TTL_MS) refreshRegistryAsync();
+    return registry;
+  }
+  return loadRegistrySync();
 }
 
 function expandHome(p: string): string {
@@ -197,6 +232,11 @@ function regularFile(p: string, cwd: string): { path: string; size: number } | n
 
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_SECRET_GUARD_OFF === "1") return;
+
+  // Preload so the first tool call does not pay for the ssh round trips.
+  pi.on("session_start", async () => {
+    refreshRegistryAsync();
+  });
 
   pi.on("tool_call", async (event, ctx) => {
     const input = (event.input ?? {}) as Record<string, unknown>;
@@ -258,8 +298,9 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName !== "bash") return undefined;
     const command = (event.input as { command?: string }).command;
     if (typeof command !== "string") return undefined;
-    // A rotation changes the values the registry layer knows about.
-    if (/\bsecretctl\s+set\b/.test(command)) registry = null;
+    // A rotation changes the values the registry layer knows about: refresh in
+    // the background, keeping the current set until the new one is parsed.
+    if (/\bsecretctl\s+set\b/.test(command)) refreshRegistryAsync();
     const segments = splitSegments(command);
 
     const dump = envDumpSegment(segments);

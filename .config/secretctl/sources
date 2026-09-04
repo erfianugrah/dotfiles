@@ -9,3 +9,8 @@ dotenv:~/infra/**/.env
 sops:~/infra/**/.env
 sops:~/infra/**/*.enc.*
 keyfile:~/.config/knotctl/keys/*.key
+
+# Remote stores: hashed on the far host, digests only (vault.RemoteAll).
+# HOST/* = every running container on that host in one ssh round trip.
+docker:router/*#*
+docker:servarr/*#*
