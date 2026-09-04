@@ -18,7 +18,7 @@ exists in `config/router/` for a future move; untested on hardware.
 | Change wireless/system config | edit `config/*` (keys stay placeholders), then `./deploy.sh root@10.0.72.2 ap` (reboots the box) |
 | Rotate WPA keys | edit `flint-secrets.env` (gitignored), redeploy. IoT key: `make rotate-wifi` in ~/infra/hearth does all four stores |
 | Un-reflashed IoT devices cannot join | set `LEGACY_IOT_KEY` in `flint-secrets.env`, redeploy: a temporary `erfi-iot` VAP appears; remove the var after the OTA sweep (hearth `docs/plans/2026-09-04-iot-readoption.md`) |
-| Verify | `ssh -i ~/.ssh/id_flint_erlis root@10.0.72.2 'iwinfo; logread \| grep -i "errors found"'` - 3 SSIDs, real Tx-Power, zero errors; then a real client on FLINT_2_5G gets a 10.0.72.x lease |
+| Verify | `owrtctl status flint && owrtctl diff flint` (~/infra/owrtctl; diff exits 1 on live-vs-repo drift). Manual: `iwinfo; logread \| grep -i "errors found"` - 3 SSIDs, real Tx-Power, zero errors; then a real client on FLINT_2_5G gets a 10.0.72.x lease |
 | Box on a subnet this machine cannot route to | `DEPLOY_SSH_OPTS="-J root@10.0.72.1 -i ~/.ssh/id_flint_erlis" ./deploy.sh root@<ip> ap`; add a temporary alias on the router VLAN interface if needed |
 | Fresh box / bricked | GL u-boot recovery, `docs/flash-runbook.md` Recovery section |
 | LAN/VLAN mistake locked you out | OTG path above, or dropbear on :2222 if only sshd broke |
