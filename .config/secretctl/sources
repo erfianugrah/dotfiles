@@ -10,10 +10,14 @@
 exclude TZ LANG LANGUAGE LC_* EMAIL PUID PGID UMASK
 exclude POSTGRES_DB PGDATABASE DB_NAME *_DB_NAME DATABASE_NAME
 exclude *_HOST *_HOSTNAME HOSTNAME *_PORT *_USER *_USERNAME PGUSER PGHOST PGPORT
+# runtime mode flags and public key material are not credentials
+exclude NODE_ENV BONKLED_ENV *_PUBLIC_KEYS *_PUBKEY SOPS_AGE_PUBLICKEY
 # an access key ID is an identifier; the paired SECRET_ACCESS_KEY is the credential
 exclude *_ACCESS_KEY_ID
 # labels, names, tags, versions and image refs are identifiers
 exclude EXEC_LABEL *_LABEL *_NAME *_TAG *_VERSION *_MODEL *_IMAGE
+# 2026-09-04: guard false positives seen in session output - db engine names, from-addresses, domains, fan-out lists are configuration
+exclude *_DB_TYPE GITEA__database__DB_TYPE SMTP_FROM *_FROM GITEA_DOMAIN *_DOMAIN BONKLED_FANOUT *_FANOUT
 
 dotenv:~/.config/*/env
 dotenv:~/infra/**/.env
@@ -35,3 +39,4 @@ keyfile:~/infra/hearth/backup/pios-2026-08-09/home-erfi/docker-volumes/vaultward
 # HOST/* = every running container on that host in one ssh round trip.
 docker:router/*#*
 docker:servarr/*#*
+dotenv:~/infra/flint-openwrt/flint-secrets.env
