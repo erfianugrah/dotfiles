@@ -1,0 +1,6 @@
+# Host-specific additions to `secretctl coverage` built-in ignores (gitignore
+# syntax, any depth). Third-party source checkouts and vendored plugins kept
+# under ~/infra for reference: their fixtures and docs are not our secrets.
+radarr-src/
+openwrt/
+souin/plugins/
