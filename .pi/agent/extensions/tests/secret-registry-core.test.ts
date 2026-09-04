@@ -20,10 +20,13 @@ import {
   digestOf,
   findKnown,
   holdsKnown,
+  inputHoldsKnown,
   isRegisteredFile,
   knownMask,
   parseDigests,
+  redactContent,
   redactKnown,
+  redactStrings,
   toolReadTargets,
   type RegistryDigests,
 } from "../lib/secret-registry-core.ts";
@@ -179,5 +182,65 @@ describe("read targets", () => {
     expect(bashReadTargets(split("sed 's/=.*$/=<set>/' .env"))).toEqual([]);
     expect(bashReadTargets(split("secretctl fp dotenv:.env#K"))).toEqual([]);
     expect(bashReadTargets(split("ls -la ~/.config/memledger"))).toEqual([]);
+  });
+});
+
+describe("assistant / user message content (message_end)", () => {
+  test("masks the model retyping a value in its own prose - the 2026-09-04 shape", () => {
+    const r = redactContent(
+      [{ type: "text", text: `Which key do the plugs hold - ${PASS}? The GL one is ${HEX48}.` }],
+      D,
+    );
+    expect(r.redactions).toBe(2);
+    const text = (r.content[0] as { text: string }).text;
+    expect(text).not.toContain(PASS);
+    expect(text).not.toContain(HEX48);
+    expect(text).toContain("[redacted:registry");
+    expect(r.labels.sort()).toEqual([
+      "dotenv:~/.config/memledger/env#MEMLEDGER_TOKEN",
+      "dotenv:~/infra/y/.env#DB_PASSWORD",
+    ]);
+  });
+  test("masks thinking text and drops the now-invalid signature", () => {
+    const r = redactContent([{ type: "thinking", thinking: `token is ${HEX48}`, thinkingSignature: "sig" }], D);
+    const b = r.content[0] as { thinking: string; thinkingSignature?: string };
+    expect(b.thinking).not.toContain(HEX48);
+    expect(b.thinkingSignature).toBeUndefined();
+  });
+  test("leaves untouched blocks byte-identical (signatures preserved)", () => {
+    const block = { type: "thinking", thinking: "nothing secret here", thinkingSignature: "sig" };
+    const r = redactContent([block, { type: "text", text: "plain" }], D);
+    expect(r.redactions).toBe(0);
+    expect(r.content[0]).toBe(block);
+  });
+  test("masks values inside persisted toolCall arguments", () => {
+    const r = redactContent(
+      [{ type: "toolCall", id: "1", name: "bash", arguments: { command: `curl -H "Authorization: Bearer ${HEX48}" x` } }],
+      D,
+    );
+    const args = (r.content[0] as { arguments: { command: string } }).arguments;
+    expect(args.command).not.toContain(HEX48);
+    expect(r.redactions).toBe(1);
+  });
+  test("redactStrings walks nested JSON", () => {
+    const r = redactStrings({ a: [PASS, { b: `x=${B64}` }], n: 1 }, D);
+    expect(JSON.stringify(r.value)).not.toContain(PASS);
+    expect(JSON.stringify(r.value)).not.toContain(B64);
+    expect(r.redactions).toBe(2);
+  });
+});
+
+describe("tool arguments (tool_call block)", () => {
+  test("a registered value typed into a command is detected", () => {
+    const hits = inputHoldsKnown({ command: `echo ${HEX48} > /tmp/x` }, D);
+    expect(hits.map((h) => h.label)).toEqual(["dotenv:~/.config/memledger/env#MEMLEDGER_TOKEN"]);
+  });
+  test("a value written into a file body is detected (write tool)", () => {
+    const hits = inputHoldsKnown({ path: "/x/.env", content: `S3_SECRET=${B64}\n` }, D);
+    expect(hits.length).toBe(1);
+  });
+  test("var references and secretctl forms are not hits", () => {
+    expect(inputHoldsKnown({ command: 'curl -H "Authorization: Bearer $MEMLEDGER_TOKEN" x' }, D)).toEqual([]);
+    expect(inputHoldsKnown({ command: "secretctl exec 'dotenv:~/.config/memledger/env#MEMLEDGER_TOKEN' --as T -- curl x" }, D)).toEqual([]);
   });
 });

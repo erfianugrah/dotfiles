@@ -174,6 +174,25 @@ unregistered store is not covered at all, so when you create one, add it.
 
 The registry file is stowed from `dotfiles/.config/secretctl/sources`.
 
+Two more layers ride on the same digest set (added 2026-09-04 after the model
+retyped a credential it had seen into its own message, twice in one day):
+
+- **Your own text is masked before it is saved.** `message_end` runs the same
+  tokenise-and-HMAC pass over the finalized assistant (and user) message, so a
+  registered value you retype never reaches the session file, memledger, or
+  the next turn's context. The streamed text was already on screen - a pi
+  notice says so; treat a shared terminal as exposed.
+- **A registered value inside a tool argument is refused.** A command line,
+  file body or URL carrying a plaintext registered value is blocked with
+  `secret_in_args`, and the persisted call is masked. The fix is `$VAR`,
+  `secretctl exec`, or `secretctl set` - never a rewrite.
+
+Residual, by design: a value assembled at runtime from pieces (`printf` of
+chunks, base64, shell variables) is invisible to any known-value matcher. The
+block reason says so explicitly; doing it anyway is a policy violation.
+Values read from a remote box over ssh are not registrable and are not covered
+either - see the secretctl TODO for remote digests.
+
 ## Failure catalogue (each one happened)
 
 **Redact-on-display instead of count.** A stray 681KB json dump on a shared

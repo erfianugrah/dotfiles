@@ -109,7 +109,7 @@ const BROAD_DELIMS = /[\s"'`,;<>(){}\[\]|]+/;
 /** Trailing sentence/list punctuation. `=` is deliberately NOT here: it is
  *  base64 padding as often as it is an assignment operator, and stripping it
  *  would turn a registered `...PQ==` into an unregistered `...PQ`. */
-const TRAIL_PUNCT = /[.,;:]+$/;
+const TRAIL_PUNCT = /[.,;:?!]+$/;
 const LEAD_PUNCT = /^[.:=]+/;
 
 /** Candidate substrings of `text` that could be a whole credential value.
@@ -190,6 +190,114 @@ export function isRegisteredFile(path: string, d: RegistryDigests): boolean {
  *  as output redaction, so the two layers cannot disagree. */
 export function holdsKnown(content: string, d: RegistryDigests): DigestEntry[] {
   return findKnown(content, d).map((h) => h.entry);
+}
+
+// ── the model's own output, and the arguments it passes to tools ─────────────
+
+/**
+ * Both 2026-09-04 leaks ended the same way: the model RETYPED a value it had
+ * seen into its own message ("which key do the plugs hold - <value>?"). The
+ * tool_result layer never sees assistant text, so a value that reached the
+ * model once could be re-emitted freely. pi's `message_end` event lets a
+ * handler replace the finalized message, so the same tokenise-and-HMAC pass
+ * runs over the model's text before it is persisted to the session file,
+ * synced to memledger, or fed back as context. (The streamed text has already
+ * been displayed by then; the durable copies are what this cleans.)
+ *
+ * Thinking blocks carry a provider signature that covers their text; masking
+ * the text would invalidate it, so a masked thinking block also drops its
+ * signature. That loses multi-turn continuity for that one block, which is
+ * the right trade for a credential.
+ */
+
+export interface TextBlock { type: "text"; text: string; textSignature?: string }
+export interface ThinkingBlock { type: "thinking"; thinking: string; thinkingSignature?: string; redacted?: boolean }
+export interface ToolCallBlock { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown>; thoughtSignature?: string }
+export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | { type: string; [k: string]: unknown };
+
+export type RedactContentResult = { content: ContentBlock[]; redactions: number; labels: string[] };
+
+/** Mask registered values in every text / thinking / toolCall-argument block. */
+export function redactContent(content: ContentBlock[], d: RegistryDigests): RedactContentResult {
+  let redactions = 0;
+  const labels: string[] = [];
+  const out = content.map((block) => {
+    if (block.type === "text" && typeof (block as TextBlock).text === "string") {
+      const r = redactKnown((block as TextBlock).text, d);
+      if (r.redactions === 0) return block;
+      redactions += r.redactions;
+      labels.push(...r.labels);
+      return { ...block, text: r.text };
+    }
+    if (block.type === "thinking" && typeof (block as ThinkingBlock).thinking === "string") {
+      const r = redactKnown((block as ThinkingBlock).thinking, d);
+      if (r.redactions === 0) return block;
+      redactions += r.redactions;
+      labels.push(...r.labels);
+      const { thinkingSignature: _sig, ...rest } = block as ThinkingBlock;
+      return { ...rest, thinking: r.text };
+    }
+    if (block.type === "toolCall" && (block as ToolCallBlock).arguments) {
+      const r = redactStrings((block as ToolCallBlock).arguments, d);
+      if (r.redactions === 0) return block;
+      redactions += r.redactions;
+      labels.push(...r.labels);
+      return { ...block, arguments: r.value as Record<string, unknown> };
+    }
+    return block;
+  });
+  return { content: out, redactions, labels };
+}
+
+/** Mask registered values inside every string of an arbitrary JSON-ish value. */
+export function redactStrings(value: unknown, d: RegistryDigests): { value: unknown; redactions: number; labels: string[] } {
+  let redactions = 0;
+  const labels: string[] = [];
+  const walk = (v: unknown): unknown => {
+    if (typeof v === "string") {
+      const r = redactKnown(v, d);
+      redactions += r.redactions;
+      labels.push(...r.labels);
+      return r.text;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") {
+      const o: Record<string, unknown> = {};
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) o[k] = walk(x);
+      return o;
+    }
+    return v;
+  };
+  return { value: walk(value), redactions, labels };
+}
+
+/** Registered values present in a tool call's arguments - the model pasting a
+ *  credential into a command line, a file body, or a URL. Blocked rather than
+ *  masked: a masked command would run wrong, and the right form is `$VAR` or
+ *  `secretctl exec`. */
+export function inputHoldsKnown(input: unknown, d: RegistryDigests): DigestEntry[] {
+  const seen = new Map<string, DigestEntry>();
+  const walk = (v: unknown): void => {
+    if (typeof v === "string") {
+      for (const h of findKnown(v, d)) seen.set(h.entry.label, h.entry);
+    } else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") Object.values(v as Record<string, unknown>).forEach(walk);
+  };
+  walk(input);
+  return [...seen.values()];
+}
+
+export function inputHoldsKnownReason(toolName: string, entries: DigestEntry[]): string {
+  const labels = entries.slice(0, 5).map((e) => e.label).join(", ") + (entries.length > 5 ? ", ..." : "");
+  return (
+    `tool-guard[secret_in_args]: blocked - the ${toolName} call's arguments contain the plaintext value of ${labels}. ` +
+    "A credential in a tool argument lands in the transcript, the synced session store and (for bash) the process " +
+    "table. Never type the value: reference it as $NAME, run the command under `secretctl exec 'SRC' --as NAME -- <cmd>`, " +
+    "or write it with `secretctl set 'DST' --from 'SRC'`. Do NOT work around this by assembling the value at runtime " +
+    "from pieces (printf/echo of chunks, base64, variables built in the shell) - that defeats the guard on purpose and " +
+    "is a policy violation, not a clever fix. If you saw this value in earlier output, that output should have been " +
+    "masked - say so. Kill switch: PI_SECRET_GUARD_OFF=1."
+  );
 }
 
 // ── which files would a tool call print? ────────────────────────────────────

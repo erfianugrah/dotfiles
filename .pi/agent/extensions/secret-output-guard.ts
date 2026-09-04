@@ -43,6 +43,9 @@
  *   tool_result (ALL tools): tokenise, HMAC, mask any registered value that
  *              still made it into output (a grep over a directory, curl -v,
  *              docker inspect). Logic: ./lib/secret-registry-core.ts.
+ *   tool_call  (ANY tool): a registered value typed INTO an argument -> block.
+ *   message_end (assistant + user): mask registered values in the finalized
+ *              message before it is persisted / synced / replayed as context.
  *
  * The digest set is loaded lazily on first use, refreshed every
  * REGISTRY_TTL_MS and after any bash command mentioning `secretctl set` (a
@@ -70,11 +73,15 @@ import {
 import {
   holdsKnown,
   holdsKnownReason,
+  inputHoldsKnown,
+  inputHoldsKnownReason,
   isRegisteredFile,
   parseDigests,
+  redactContent,
   redactKnown,
   registeredFileReason,
   toolReadTargets,
+  type ContentBlock,
   type RegistryDigests,
 } from "./lib/secret-registry-core.ts";
 
@@ -111,6 +118,18 @@ const REGISTRY_TTL_MS = 10 * 60 * 1000;
 /** Files above this are not content-checked (the read tool would truncate
  *  them anyway); registered-path blocking still applies. */
 const MAX_PEEK_BYTES = 16 * 1024 * 1024;
+
+/** Message roles whose finalized content is masked in message_end. User
+ *  messages are included so a value pasted into a prompt does not land in the
+ *  session file or the synced store either; the model then sees the masked
+ *  form, which is the intended pressure toward `secretctl set --from prompt:`. */
+const MASKED_ROLES = new Set<string>(["assistant", "user"]);
+
+/** Tool calls whose arguments message_end had to mask. message_end runs
+ *  BEFORE the tool executes and pi mutates the in-memory message, so a masked
+ *  argument would otherwise be what actually runs - a silently different
+ *  command. Remembering the id lets tool_call refuse it with the real reason. */
+const taintedCalls = new Map<string, string[]>();
 
 let registry: RegistryDigests | null = null;
 let registryDisabled = false;
@@ -180,9 +199,30 @@ export default function (pi: ExtensionAPI) {
   if (process.env.PI_SECRET_GUARD_OFF === "1") return;
 
   pi.on("tool_call", async (event, ctx) => {
-    // Layer 3: a printing tool aimed at a registered store, or at a file that
-    // holds a registered value. Checked for read / grep / bash alike.
     const input = (event.input ?? {}) as Record<string, unknown>;
+
+    // Layer 3a: the model typed a registered value INTO a tool argument (a
+    // command line, a file body, a URL). Any tool. Blocked, not masked - the
+    // masked command would run wrong, and the correct form is $VAR / secretctl.
+    {
+      const id = (event as { toolCallId?: string }).toolCallId;
+      const tainted = id ? taintedCalls.get(id) : undefined;
+      if (tainted) {
+        taintedCalls.delete(id!);
+        return {
+          block: true,
+          reason: inputHoldsKnownReason(event.toolName, tainted.map((label) => ({ label, hex: "", len: 0 }))),
+        };
+      }
+      const d = digests();
+      if (d) {
+        const hits = inputHoldsKnown(input, d);
+        if (hits.length > 0) return { block: true, reason: inputHoldsKnownReason(event.toolName, hits) };
+      }
+    }
+
+    // Layer 3b: a printing tool aimed at a registered store, or at a file that
+    // holds a registered value. Checked for read / grep / bash alike.
     const targets = toolReadTargets(event.toolName, input, splitSegments);
     if (targets.length > 0) {
       const d = digests();
@@ -241,6 +281,42 @@ export default function (pi: ExtensionAPI) {
     }
 
     return undefined;
+  });
+
+  // Layer 3c: the model's OWN text (and the user's). Both 2026-09-04 leaks
+  // ended with the model retyping a value into its message; tool_result never
+  // sees that. message_end lets us replace the finalized message before it is
+  // persisted / synced / replayed as context. The streamed text was already
+  // displayed - this cleans the durable copies.
+  pi.on("message_end", async (event, ctx) => {
+    const msg = (event as { message?: { role?: string; content?: unknown } }).message;
+    if (!msg || !MASKED_ROLES.has(msg.role ?? "")) return undefined;
+    const d = digests();
+    if (!d) return undefined;
+    let content: ContentBlock[];
+    if (typeof msg.content === "string") content = [{ type: "text", text: msg.content }];
+    else if (Array.isArray(msg.content)) content = msg.content as ContentBlock[];
+    else return undefined;
+    const r = redactContent(content, d);
+    if (r.redactions === 0) return undefined;
+    // Any toolCall whose arguments changed must not execute as masked text.
+    content.forEach((orig, i) => {
+      const masked = r.content[i] as { type?: string; id?: string; arguments?: unknown };
+      if (orig.type === "toolCall" && masked !== orig && typeof masked.id === "string") {
+        taintedCalls.set(masked.id, [...new Set(r.labels)]);
+      }
+    });
+    if (ctx.hasUI) {
+      ctx.ui.notify(
+        `secret-output-guard: masked ${r.redactions} registered value(s) in a ${msg.role} message before it was saved ` +
+          `(${[...new Set(r.labels)].join(", ")}). It was already shown on screen - treat it as exposed if this terminal is shared.`,
+        "warning",
+      );
+    }
+    const replacement = typeof msg.content === "string"
+      ? { ...msg, content: (r.content[0] as { text: string }).text }
+      : { ...msg, content: r.content };
+    return { message: replacement };
   });
 
   pi.on("tool_result", async (event) => {
