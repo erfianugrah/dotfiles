@@ -22,6 +22,9 @@ dotenv:~/.config/cliamp/config.toml
 keyfile:~/.config/sops/age/*.txt
 keyfile:~/.config/stripe-test-key
 keyfile:~/infra/drawbridge/certs/*-key.pem
+keyfile:~/infra/vyos-nl/config/erfi/atlas-probe/etc/probe_key
+keyfile:~/infra/vyos-nl/config/erfi/pihole/etc-pihole/tls.pem
+keyfile:~/infra/hearth/backup/pios-2026-08-09/home-erfi/docker-volumes/vaultwarden/vw-data/rsa_key.pem
 
 # Remote stores: hashed on the far host, digests only (vault.RemoteAll).
 # HOST/* = every running container on that host in one ssh round trip.
