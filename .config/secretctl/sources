@@ -54,5 +54,5 @@ exclude *_FILE
 exclude VPN_CLIENT *_CLIENT_TYPE VPN_TYPE
 exclude *_LISTEN *_HEALTH_LISTEN
 exclude theme THEME *_THEME
-exclude *_EMAIL
+exclude *_EMAIL GMAIL
 sops:~/discord-wipe-go/.env
