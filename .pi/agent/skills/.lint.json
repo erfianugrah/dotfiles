@@ -1,0 +1,33 @@
+{
+  "retired": {
+    "Unraid": "servarr is NixOS + ZFS since 2026-08-26 (say 'servarr NAS'; Unraid only as dated history)",
+    "/mnt/user": "Unraid share layout; live tiers are /appdata (hot) and /tank/appdata, /tank/media (bulk)",
+    "/mnt/cache": "Unraid cache pool; retired with the 2026-08-26 cutover",
+    "shfs": "Unraid FUSE layer; gone on ZFS",
+    "Vaultwarden": "no longer the canonical secret store; SOPS-encrypted .env in git is (2026-09-04)",
+    "Bitwarden": "not the canonical secret store; SOPS-encrypted .env in git is",
+    "opencode": "harness retired 2026-08-15; say pi / Claude Code",
+    "superpowers": "skill set removed 2026-08-16",
+    "act_runner": "Gitea runner; the forge runs Forgejo Runner v13",
+    "GITEA_TOKEN": "Forgejo exposes FORGEJO_TOKEN (alias GITHUB_TOKEN)",
+    "Gitea": "forge moved to Forgejo 16.x at git.erfi.io on 2026-08-23",
+    "your human partner": "superpowers voice; say 'the user'",
+    "TodoWrite": "Claude Code-only tool name; say 'a checklist'",
+    "Task tool (general-purpose)": "Claude Code-only name; say 'dispatch a subagent'",
+    "~/servarr-compose": "stacks live under ~/infra/",
+    "docs.erfi.io yet": "the forgejo docs topic exists now"
+  },
+  "allow": {
+    "memledger": [
+      "opencode"
+    ],
+    "writing-skills": [
+      "superpowers"
+    ],
+    "infrastructure-stack": [
+      "/mnt/user"
+    ]
+  },
+  "max_dates": 8,
+  "verified_max_days": 90
+}

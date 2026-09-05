@@ -45,6 +45,19 @@ if [ "${PI_CONFIDENTIAL_GUARD_OFF:-0}" != "1" ] && git remote 2>/dev/null | grep
   fi
 fi
 
+# skills-lint: when SKILL.md trees are staged in a repo that ships the linter,
+# fail the commit on lint ERRORs (stale retired terms, broken frontmatter, smart
+# punctuation, dead paths). Warnings print but do not block.
+top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "$top" ] && [ -f "$top/scripts/skills-lint.py" ] \
+   && git diff --cached --name-only | grep -q '^\.pi/agent/skills/'; then
+  if ! python3 "$top/scripts/skills-lint.py" >/tmp/skills-lint.$$ 2>&1; then
+    { echo "pre-commit[skills-lint]: ERRORS in .pi/agent/skills (see below). Fix or bypass with --no-verify."; grep -E 'ERROR|^[a-z0-9()-]+:$|skills,' /tmp/skills-lint.$$; } >&2
+    rm -f /tmp/skills-lint.$$; exit 1
+  fi
+  rm -f /tmp/skills-lint.$$
+fi
+
 # chain to a repo-local pre-commit hook (preserved under a global hooksPath).
 # NB: under core.hooksPath, `git rev-parse --git-path hooks/X` points back at
 # THIS dir, so resolve the repo-local hook via the git-dir explicitly.

@@ -76,10 +76,14 @@ The operational test for a SPECIFIC (version, CLI flag, config key, system path,
 
 Before starting any non-trivial task (fix, debug, research, build), query prior-session history with 2-3 terms from the task (component name, error text, the task's own words): `memledger_search` / `search_messages` / `search_ledger` (via the erfi-toolkit MCP). This is a process step, not a fallback for when you get stuck: the observed failure (2026-08-25) is sessions burning tokens researching to a dead end and only THEN finding memledger held the answer - the same problem re-solved in 2-4 sessions each. If the lookup comes back genuinely empty, say so and proceed.
 
+# Testing discipline
+
+- **TDD where useful**: write tests before non-trivial business logic, complex algorithms, anything with multiple branches, or bug fixes (red test reproduces the bug, green test fixes it). Skip TDD for scaffolding, glue code, CLI plumbing, infra config, one-off scripts, prototypes you will throw away. "No exceptions" TDD mandates fight pragmatism - the goal is correct code with appropriate test coverage, not ritual. (Same wording as `.pi/agent/prompts/tool-routing.md`; the methodology skills defer to this line.)
+
 # Agent-surface routing (which harness gets what)
 
 pi.dev is the primary harness; Claude Code is the WORK harness. When adding resources on this machine:
 
-- **Skills**: canonical home is `~/dotfiles/.pi/agent/skills/<name>/`. A skill only reaches Claude Code via an explicit per-skill symlink in `~/dotfiles/.claude/skills/` - the work harness is opt-in. NEVER promote private-corpus (mnemo, personal session data), media/GPU, local-hardware, or purely-personal skills here. The directory contents are the allowlist.
+- **Skills**: canonical home is `~/dotfiles/.pi/agent/skills/<name>/`. A skill only reaches Claude Code via an explicit per-skill symlink in `~/dotfiles/.claude/skills/` - the work harness is opt-in. NEVER promote private-corpus (mnemo, personal session data), media/GPU, local-hardware, or purely-personal skills here. The directory contents are the allowlist. Lint the corpus with `python3 ~/dotfiles/scripts/skills-lint.py` (the global pre-commit runs it when skill files are staged; retired-term list in `.pi/agent/skills/.lint.json`).
 - **MCP servers**: pi's shared no-secrets registry is `~/.pi/agent/mcp-servers.json` (tracked in dotfiles, read via pi-mcp-bridge); Claude Code does NOT read it. Register via `claude mcp add` or the erfi-toolkit in `~/.claude/mcp/toolkit.ts`, and only for work-relevant servers. Private-corpus servers (mnemo) never go to the work harness.
 - **Config/rules**: universal rule changes go in BOTH this file and `~/dotfiles/.pi/agent/prompts/tool-routing.md` (pi's prepend). Full policy: `~/dotfiles/AGENTS.md` section "Agent-surface routing".

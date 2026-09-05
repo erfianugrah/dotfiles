@@ -205,7 +205,7 @@ work harness** - propagation there is opt-in and curated, never automatic.
   (mechanism in "Claude Code wiring" above). Promote methodology and
   work-adjacent infra skills. NEVER promote: private-corpus tools
   (anything touching mnemo or personal session data), the media/GPU stack
-  (comfyui, lora-train, whisper, arr-stack, jellyfin), local hardware
+  (comfyui, lora-train, whisper, arr-stack), local hardware
   (xikectl, eaves, gloryhole), purely personal ops (discord-wipe). When
   in doubt: don't, or ask.
 
@@ -336,6 +336,22 @@ tests in /tmp/ that drive the real `execute()` via the SDK preload mock.
   the already-symlinked directory).
 - **Edit a skill:** edit the source file in `~/dotfiles/.pi/agent/skills/<name>/`,
   never the live `~/.pi/agent/skills/<name>/` symlink target.
+- **Lint:** `python3 scripts/skills-lint.py` (optionally `--only <skill>`).
+  Checks frontmatter, description shape and length (<= 500 chars is the
+  per-turn cost; > 1024 pi refuses to load), body <= 500 lines, ASCII
+  punctuation, @-links, unlinked supporting files, dead ~/paths, retired
+  terms, docs-source names, sibling-skill references, `metadata.verified`
+  age, and Claude Code symlink health. The global pre-commit hook runs it
+  when skill files are staged and blocks on ERRORs.
+- **Retiring a system:** add the term to `.pi/agent/skills/.lint.json`
+  `retired` (with the replacement hint) in the same commit that retires
+  it; the lint then finds every skill still describing it as current.
+  Per-skill historical mentions go in `allow`.
+- **Freshness:** a skill may carry `metadata: {verified: YYYY-MM-DD}` in
+  its frontmatter; the lint warns when that is older than 90 days.
+  Skills track the system: update the skill in the same commit as the
+  system change, and fold dated lessons into plain rules once they are
+  the default behaviour.
 
 ## Prompts (system-prompt fragments)
 
