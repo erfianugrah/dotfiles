@@ -196,5 +196,5 @@ the host. Two traps:
 
 Read-only router ops queries (DHCP leases, NAT, conntrack) -> `eaves`.
 Compose stacks running ON these hosts -> `composer` /
-`infrastructure-stack`. Switch/VLAN config -> `xikectl`. ZFS/NAS storage
+`infrastructure-stack`. Switch/VLAN config -> `xikectl` (stock OS; `owrtctl` + the OpenWrt fork after the cutover). ZFS/NAS storage
 policy -> `zfs-storage`. SSH transport/tailnet -> `tailscale-homelab`.

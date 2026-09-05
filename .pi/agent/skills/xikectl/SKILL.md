@@ -5,7 +5,7 @@ description: Use when reading switch state (VLANs, interfaces, MAC table, MTU/ju
 
 # xikectl - operator CLI for the XikeStor switch
 
-**Status: in service, replacement pending.** This switch is being migrated to OpenWrt (fork `github.com/erfianugrah/openwrt`, branch `sks8300-edge`; plan `~/infra/xikectl/docs/plans/2026-08-09-openwrt-replacement.md`). xikectl retires after cutover - fix what the cutover needs, do not grow the tool.
+**Status: in service, replacement prepped 2026-09-05, cutover pending.** This switch is being migrated to OpenWrt (fork `github.com/erfianugrah/openwrt`, branch `sks8300-edge`; plan, pre-window checklist and day-of runbook in `~/infra/xikectl/docs/plans/2026-08-09-openwrt-replacement.md`). xikectl retires after cutover - fix what the cutover needs, do not grow the tool. Its successor is `~/infra/owrtctl` (host `sks8300`) plus the fork's `deploy-sks8300.sh`. Before the cutover xikectl still has two jobs: `backup --running` + `show config --saved` into `~/infra/xikectl/backups/` (gitignored), and `verify`. Export `XIKE_USER=admin XIKE_PASS=admin` first: an unexported env logs in with empty credentials and arms the failMax lockout (it did on 2026-09-05). Never retry a failed login in a loop.
 
 Switch: SKS8300-12E2T2X at `10.0.69.4`, firmware V1.04.B09, PRODUCTION
 (carries the servarr trunk). Tool repo: `~/infra/xikectl`
