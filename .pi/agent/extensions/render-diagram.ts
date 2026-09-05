@@ -57,7 +57,7 @@ const renderDiagramTool = defineTool({
     theme: Type.Optional(
       Type.String({
         description:
-          "Theme name. mermaid: 'default'|'dark'|'forest'|'neutral'. d2: theme id (e.g. '0' default, '100' dark, '300' terminal). Omit for default.",
+          "Theme name. mermaid: 'default'|'dark'|'forest'|'neutral'. d2: theme id from `d2 themes` (e.g. '0' neutral default, '3' flagship, '200' dark mauve, '201' dark flagship, '300' terminal, '302' origami). Omit for default.",
       }),
     ),
   }),

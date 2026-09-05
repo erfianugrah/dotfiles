@@ -1,5 +1,5 @@
 {
-  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open — no restart needed. Source of truth for llm-compose model list: ~/infra/ai/llm-compose/models/*.toml. NOTES: llama-server = llm-compose proxy on localhost:11434; apiKey ignored by proxy but Pi requires the field. compat block for llama-server: llama.cpp's OpenAI server has no developer role or reasoning_effort, both disabled at provider level. $comment keys inside samplingParams / openRouterRouting are NOT allowed - pi forwards those objects VERBATIM into the request body / provider field, and OpenRouter 400s with 'Unrecognized key' (seen 2026-08-19). Notes live at file root and modelOverride roots only.",
+  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open \u2014 no restart needed. Source of truth for llm-compose model list: ~/infra/ai/llm-compose/models/*.toml. NOTES: llama-server = llm-compose proxy on localhost:11434; apiKey ignored by proxy but Pi requires the field. compat block for llama-server: llama.cpp's OpenAI server has no developer role or reasoning_effort, both disabled at provider level. $comment keys inside samplingParams / openRouterRouting are NOT allowed - pi forwards those objects VERBATIM into the request body / provider field, and OpenRouter 400s with 'Unrecognized key' (seen 2026-08-19). Notes live at file root and modelOverride roots only.",
   "providers": {
     "llama-server": {
       "baseUrl": "http://localhost:11434/v1",
@@ -93,38 +93,6 @@
           "reasoning": true,
           "name": "Qwen3.8 27B Dense - coding, vision, thinking (daily driver)",
           "contextWindow": 262144,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        },
-        {
-          "id": "qwen38-fixed",
-          "reasoning": true,
-          "name": "Qwen3.8 27B Dense - froggeric fixed template (testing)",
-          "contextWindow": 196608,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        },
-        {
-          "id": "qwen38-nospec",
-          "reasoning": true,
-          "name": "Qwen3.8 27B Dense - no speculative decoding (A/B control)",
-          "contextWindow": 196608,
           "input": [
             "text",
             "image"

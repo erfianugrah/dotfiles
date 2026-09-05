@@ -38,10 +38,13 @@ import * as fs from "node:fs";
 import {
   type Corpus,
   absorb,
+  corpusSize,
   gateWrite,
   newCorpus,
   payloadMode,
 } from "../../.pi/agent/extensions/lib/epistemic-guard-core.ts";
+
+import { appendFileSync } from "node:fs";
 
 const KILL_SWITCH = "EPISTEMIC_GUARD_OFF";
 
@@ -186,6 +189,35 @@ async function main() {
   // every unprovenanced specific in THIS payload is reported. The corpus
   // dedup (verified literals never re-fire) is the once-per-session analogue.
   const res = gateWrite(corpus, p.target, p.text, new Set(), `PreToolUse ${payload.tool_name} -> ${p.target}`);
+
+  // EPISTEMIC_GUARD_DEBUG=1: append one JSON line per invocation so a session
+  // can show WHICH transcript the corpus came from and how big it was. Added
+  // 2026-09-05 after eight subagents reported that literals they had just
+  // verified with tools were still denied: the hypothesis is that CC hands a
+  // subagent hook the PARENT transcript_path (or a not-yet-flushed file), so
+  // the subagent's own tool results never enter the corpus. This log is how
+  // to confirm or refute that without guessing.
+  if (process.env.EPISTEMIC_GUARD_DEBUG === "1") {
+    let size = -1;
+    try {
+      const st = payload.transcript_path ? Bun.file(payload.transcript_path) : undefined;
+      size = st ? st.size : -1;
+    } catch {}
+    const line = JSON.stringify({
+      ts: new Date().toISOString(),
+      tool: payload.tool_name,
+      target: p.target,
+      transcript_path: payload.transcript_path,
+      transcript_bytes: size,
+      corpus_size: corpusSize(corpus),
+      denied: Boolean(res),
+      pid: process.pid,
+    });
+    try {
+      appendFileSync("/tmp/epistemic-guard.debug.jsonl", line + "\n");
+    } catch {}
+  }
+
   if (!res) process.exit(0); // clean: no unprovenanced specifics
 
   deny(res.reason);
