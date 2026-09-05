@@ -40,3 +40,19 @@ keyfile:~/infra/hearth/backup/pios-2026-08-09/home-erfi/docker-volumes/vaultward
 docker:router/*#*
 docker:servarr/*#*
 dotenv:~/infra/flint-openwrt/flint-secrets.env
+# 2026-09-05: provider selectors (which LLM backend a service talks to) are configuration, not credentials
+exclude AI_PROVIDER *_PROVIDER
+exclude provider PROVIDER
+exclude *_IP *_IPV4 *_IPV6 *_CIDR
+# 2026-09-05: object-store endpoints and backup filter regexps are configuration (seen in compose-backups skill)
+exclude *_ENDPOINT *_SERVER_URL *_EXCLUDE_REGEXP
+exclude JELLYFIN_PublishedServerUrl *PublishedServerUrl
+exclude WAF_CADDY_ADMIN_URL *_ADMIN_URL
+exclude DEFAULT_MODELS *_MODELS PGRST_OPENAPI_SERVER_PROXY_URI *_PROXY_URI GUMSHOE_URL
+exclude MEMLEDGER_URL *_BASE_URL
+exclude *_FILE
+exclude VPN_CLIENT *_CLIENT_TYPE VPN_TYPE
+exclude *_LISTEN *_HEALTH_LISTEN
+exclude theme THEME *_THEME
+exclude *_EMAIL
+sops:~/discord-wipe-go/.env
