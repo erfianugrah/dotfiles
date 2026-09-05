@@ -1,9 +1,0 @@
-[Unit]
-Description=Daily pi self-build check
-
-[Timer]
-OnCalendar=*-*-* 06:30:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
