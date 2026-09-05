@@ -12,9 +12,11 @@ ANSI-stripped output. The script travels to pwsh **on stdin** (`-Command -`),
 so there is never a quoting layer to fight - paste the script as-is.
 
 Local pwsh: 7.6.4 at `~/.local/bin/pwsh` (tarball install in
-`~/.local/share/pwsh`, no sudo; re-run the tarball steps to upgrade).
-Full docs source: `/docs/powershell/` (1110 files) - route syntax/cmdlet
-questions there with `docs_search`/`docs_grep`, source `powershell`.
+`~/.local/share/pwsh`, no sudo; re-run the tarball steps to upgrade;
+`pwsh --version` to confirm). Syntax/cmdlet questions route to the docs
+mirror topic `powershell` (pi: `docs_search` / `docs_grep` with
+`source="powershell"`; Claude Code: the erfi-toolkit `docs` tool,
+`action=search|read`, `source=powershell`).
 
 ## The tool
 
@@ -37,9 +39,11 @@ powershell({ script: "...", timeoutSec: 300 })        # default 120, max 600
 ## The Windows host: ERFI1 (this WSL2 instance lives on it)
 
 pi runs in WSL2 (`*-microsoft-standard-WSL2` kernel) on the user's 5090 dev
-desktop - hostname **ERFI1**, Windows 10 Pro (build 19045), AMD Ryzen 7
-7800X3D, 64 GB RAM, RTX 5090, ASUS custom build (this is the llm-compose
-box). **You are already ON it** - no SSH, no remoting:
+desktop - hostname **ERFI1** (this is the llm-compose box). Last recorded
+inventory, unverified since: Windows 10 Pro build 19045, AMD Ryzen 7 7800X3D,
+64 GB RAM, RTX 5090, ASUS custom build - re-read it with `Get-CimInstance
+Win32_OperatingSystem` / `Win32_Processor` / `Win32_VideoController` before
+relying on a specific. **You are already ON it** - no SSH, no remoting:
 
 - Windows filesystem: `/mnt/c/Users/Erfi Anugrah/...` (Downloads, Desktop,
   etc. are directly readable/writable with normal bash tools).

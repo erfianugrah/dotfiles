@@ -1,31 +1,34 @@
 ---
 name: research
-description: "Use when a task needs multi-engine web search, clean content extraction from JS-heavy pages, OSINT lookups (domain DNS/subdomains, IP geo/ports, email platform registrations, username scans, phone metadata, URL scan history, VirusTotal reputation, CVE details), or location scouting via street-level imagery (area-wide POI enumeration, pano sweeps, CLIP facade classification). Fires on 'research X', 'whois/subdomains for', 'what runs on this IP', 'where is this email/username registered', 'CVE-...', 'street view of', 'pano sweep', 'scout locations'. Backs onto four local services: SearXNG :8888, crawler :8889, OSINT :8890, CLIP sidecar (internal)."
+description: "Use when a task needs multi-engine web search, clean extraction from JS-heavy pages, OSINT lookups (domain/subdomains, IP geo/ports, email or username registrations, phone metadata, URL scans, VirusTotal, CVEs), street-level location scouting (POI enumeration, pano sweeps, CLIP classification), or the SG rental suite. Fires on 'research X', 'subdomains for', 'what runs on this IP', 'CVE-...', 'pano sweep', 'rent comps'. NOT for the survey METHOD (open-ended-research) or transcription (whisper)."
 ---
 
 # Research & OSINT
 
-Local search + scraping + OSINT stack. Three services behind a unified set of
-HTTP endpoints. The MCP wrapper at `~/infra/research/mcp/research-server.py` is the
-canonical Python client; this skill documents the underlying HTTP API.
+Local search + scraping + OSINT stack in `~/infra/research`, running on
+`servarr`. Three HTTP services plus a CLIP sidecar. The MCP wrapper at
+`~/infra/research/mcp/research-server.py` is the canonical Python client
+(registered as `research` in `~/.pi/agent/mcp-servers.json`, bridged by
+pi-mcp-bridge); this skill documents the underlying HTTP API. The Singapore
+rental suite (comps, sun, nuisance, listings, dossier, flight noise, map UI)
+is in `sg-rental.md` - read it when the task is SG housing.
 
 ## Services
 
 | Service | Port | Provides |
 |---|---|---|
 | SearXNG | `:8888` | Aggregator across 7+ search engines |
-| Crawler | `:8889` | Trafilatura + Playwright clean-content extraction |
-| OSINT   | `:8890` | Subfinder, Holehe, Sherlock, Maigret, urlscan, libphonenumber, VirusTotal, NVD |
+| Crawler | `:8889` | Trafilatura + Playwright clean-content extraction; SG rental endpoints |
+| OSINT   | `:8890` | Subfinder, Holehe, Sherlock, Maigret, urlscan, libphonenumber, VirusTotal, NVD, geo panos |
 
 URLs configurable: `SEARXNG_URL`, `CRAWLER_URL`, `OSINT_URL`.
 
 ### Public endpoints (default for off-box callers)
 
-Production stack runs on `servarr` and is fronted by the edge Caddy
-(MS-01) at three subdomains, gated by the `(research_auth)` snippet:
-LAN + tailnet clients pass open, WAN clients need
-`Authorization: Bearer $RESEARCH_TOKEN` (re-added 2026-08-01 after a
-no-auth interval; llama.erfi.io is gated the same way):
+The stack is fronted by the edge Caddy (MS-01) at three subdomains, gated by
+the `(research_auth)` snippet: LAN + tailnet clients pass open, WAN clients
+need `Authorization: Bearer $RESEARCH_TOKEN` (llama.erfi.io is gated the
+same way):
 
 | Service | Public URL                |
 |---------|---------------------------|
@@ -33,16 +36,16 @@ no-auth interval; llama.erfi.io is gated the same way):
 | Crawler | `https://crawler.erfi.io` |
 | OSINT   | `https://osint.erfi.io`   |
 
-From any dev box (incl. WSL) prefer the public URLs over
-`ssh servarr 'curl localhost:888x ...'` - the stack does NOT run on the
-dev box, so `localhost:888x` from WSL always fails. The pi
-`web_research` / `webfetch` / `osint_*` extensions and the opencode
-`research` MCP server already default to the public URLs; they still
-attach `Authorization: Bearer $RESEARCH_TOKEN` when that env var is set -
-required from off-LAN, harmless on-LAN. Keep `RESEARCH_TOKEN` exported.
-Do NOT override `*_URL` to
-`http://localhost:888x` unless you are actually running the dockerised
-stack locally.
+From any dev box (incl. WSL) use the public URLs - the stack does NOT run on
+the dev box, so `localhost:888x` from WSL always fails, and `ssh servarr
+'curl localhost:888x ...'` is the slow way round. The pi `web_research` /
+`webfetch` / `osint_*` extensions and the `research` MCP server default to
+the public URLs and attach `Authorization: Bearer $RESEARCH_TOKEN` when that
+env var is set - required from off-LAN, harmless on-LAN. Keep
+`RESEARCH_TOKEN` exported. Do NOT override `*_URL` to `http://localhost:888x`
+unless you are actually running the dockerised stack locally. The curl
+examples below use the container ports for brevity; substitute the public
+URL.
 
 ## Search (SearXNG)
 
@@ -53,34 +56,34 @@ curl -s "http://localhost:8888/search?q=postgres+row+security&format=json&safese
 # News (time-limited)
 curl -s "http://localhost:8888/search?q=cve+vulnerability&format=json&categories=news&time_range=week" | jq
 
-# Image / video / academic — categories: general,images,videos,news,science,it
+# Image / video / academic - categories: general,images,videos,news,science,it
 ```
 
 SearXNG result shape: `{ results: [ {title, url, content, engine}, ... ] }`.
 
-### Engine pool state (as of 2026-08-17)
+### Engine pool state (changes over time; last reviewed 2026-08-17)
 
-The pool CHANGES over time - upstream engines rate-limit / CAPTCHA /
-poison server-side, and SearXNG's reliability tracker self-suspends
-failing engines. Check before trusting a result set:
+Upstream engines rate-limit / CAPTCHA / poison server-side, and SearXNG's
+reliability tracker self-suspends failing engines. Check before trusting a
+result set:
 `curl -s "https://searxng.erfi.io/config" | jq -r '.engines[] | select(.enabled) | .name'`
 and look at `unresponsive_engines` in any `/search?format=json` response.
 
-- **bing family DISABLED** (2026-08-17): Bing serves degraded SERPs to
-  SearXNG clients (first-token-only matching, CN/JP spam, NSFW junk -
-  upstream searxng/searxng#4964). Do not re-enable without running the
-  re-test protocol in `~/infra/research/docs/plans/2026-08-17-searxng-engine-resilience.md`.
+- **bing family DISABLED**: Bing serves degraded SERPs to SearXNG clients
+  (first-token-only matching, CN/JP spam, NSFW junk - upstream
+  searxng/searxng#4964). Do not re-enable without running the re-test
+  protocol in `~/infra/research/docs/plans/2026-08-17-searxng-engine-resilience.md`.
   Tell-tale junk signature: top titles share no token with the query.
-- **startpage via `startpage anubis`** (custom offline engine in the
-  repo): stock startpage is Anubis-PoW-walled; the custom engine solves
-  it in-process. Bang `!spa`.
+- **startpage via `startpage anubis`** (custom offline engine in the repo):
+  stock startpage is Anubis-PoW-walled; the custom engine solves it
+  in-process. Bang `!spa`.
 - **mwmbl, wiby, marginalia**: indie crawls, low volume but on-topic.
 - **duckduckgo + google cse**: the two main carriers.
-- **brave / qwant / mojeek**: intermittently IP-blocked (429/CAPTCHA/
-  403); the circuit breaker parks them automatically. qwant is a dead
-  end (DataDome). A `braveapi` engine ships in the image but needs a
-  Brave API key (not in the vault as of 2026-08-17) - settings.yml has
-  no env interpolation, so wiring it needs a key-in-settings decision.
+- **brave / qwant / mojeek**: intermittently IP-blocked (429/CAPTCHA/403); the
+  circuit breaker parks them automatically. qwant is a dead end (DataDome). A
+  `braveapi` engine ships in the image but needs a Brave API key (none
+  provisioned) - settings.yml has no env interpolation, so wiring it needs a
+  key-in-settings decision.
 
 Working general-web set when healthy: ddg, google cse, startpage anubis,
 mwmbl, wiby, marginalia, wikipedia (+ API verticals: github, stackoverflow,
@@ -89,15 +92,14 @@ arxiv etc., unaffected by IP blocks).
 ### Silent-empty results: escalate, don't reword
 
 SearXNG returns HTTP success with an empty/near-empty result set when
-engines decline - there is NO error signal distinguishing "no results
-exist" from "engines refused". On a long-tail local query
-(e.g. "<business> <neighbourhood> review"), 0-2 results means: check
-`unresponsive_engines` in the response once, then escalate to Exa
-(`web_research`) immediately. Rewording the same query family is the
-failure mode - the 2026-08-17 AF-gym survey burned two rounds rewording
-before falling back; Exa delivered on the first try. This is the reverse
-of the tool-routing rule (Exa 0-results -> SearXNG); both directions
-exist because the two stacks fail on different query shapes.
+engines decline - there is NO error signal distinguishing "no results exist"
+from "engines refused". On a long-tail local query (e.g. "<business>
+<neighbourhood> review"), 0-2 results means: check `unresponsive_engines` in
+the response once, then escalate to Exa (`web_research`) immediately.
+Rewording the same query family is the failure mode - it has burned rounds
+where Exa then delivered on the first try. This is the reverse of the
+tool-routing rule (Exa 0-results -> SearXNG); both directions exist because
+the two stacks fail on different query shapes.
 
 ## Fetch clean content
 
@@ -114,37 +116,48 @@ curl -s -X POST http://localhost:8889/extract \
   -H 'content-type: application/json' \
   -d '{"url":"https://example.com","force_js":true,"timeout":30}' | jq
 
-# Raw HTML (debug only — prefer /extract for normal use)
+# Raw HTML (debug only - prefer /extract for normal use)
 curl -s -X POST http://localhost:8889/raw \
   -H 'content-type: application/json' \
   -d '{"url":"https://example.com","timeout":10}' | jq -r .html
 ```
 
-Cap is `max_chars` (default 8000, max 64000). Trafilatura is fast path;
+Cap is `max_chars` (default 8000, max 64000). Trafilatura is the fast path;
 Playwright fallback for JS-heavy pages.
+
+### Anti-bot fallback order
+
+When a page will not render through the crawler, the order that works (the
+same four tiers the whisper-transcribe bot's scraper implements): the
+crawler's Crawl4AI/Playwright path -> FlareSolverr (crawler sidecar; solves
+CF challenges only) -> Wayback (`https://archive.org/wayback/available?url=`
+to find a snapshot, then the `id_` raw form of the snapshot URL for
+unmodified content) -> archive.ph. From pi, `archive_lookup` covers the
+Wayback tier. FlareSolverr is crawler-only: it does NOT fix SearXNG engine
+walls (DataDome on qwant, Anubis on startpage) - engine unblocking lives in
+custom engines like `startpage_anubis.py`, not the solver sidecar.
 
 ## API-driven pages (locator pattern)
 
 A page that renders near-empty through the crawler - HTTP success but
-footer-only, ~100 chars of markdown - is a SIGNAL, not a result: the
-content loads via XHR after render. Do not retry renders or toggle
-`force_js`. Pull the raw HTML (`/raw` or plain `curl`) and grep for the
-underlying REST endpoint:
+footer-only, ~100 chars of markdown - is a SIGNAL, not a result: the content
+loads via XHR after render. Do not retry renders or toggle `force_js`. Pull
+the raw HTML (`/raw` or plain `curl`) and grep for the underlying REST
+endpoint:
 
 ```bash
 curl -s "https://<site>/<locator-page>/" | rg -o '(wp-json[^"]*|/api/[^"]*|[^"]*\.json[^"]*)' | sort -u
 ```
 
-Then call the JSON endpoint directly - one call beats every render.
-Verified 2026-08-17: anytimefitness.sg/locations rendered footer-only;
-the raw HTML exposed `wp-json/anytime/v1/map-locations`, which returned
-all 160+ clubs with addresses, status, and signup URLs in one request.
-Store locators, maps, and "find a branch" pages are the usual suspects.
-The endpoint string usually lives in embedded JS of the INITIAL HTML, so
-plain `curl` suffices; only if the endpoint is injected post-render do
-you need the crawler's rendered path.
+Then call the JSON endpoint directly - one call beats every render. Example:
+a gym chain's SG locations page rendered footer-only; the raw HTML exposed a
+`wp-json/.../map-locations` route that returned all 160+ clubs with
+addresses, status and signup URLs in one request. Store locators, maps, and
+"find a branch" pages are the usual suspects. The endpoint string usually
+lives in embedded JS of the INITIAL HTML, so plain `curl` suffices; only if
+the endpoint is injected post-render do you need the crawler's rendered path.
 
-## OSINT — domain investigation
+## OSINT - domain investigation
 
 ```bash
 # Summary (top 15 subdomains, fast)
@@ -157,12 +170,12 @@ curl -sX POST http://localhost:8890/investigate/domain \
   -H 'content-type: application/json' \
   -d '{"domain":"example.com","mode":"full"}'
 
-# Long-running → returns { job_id }, poll /jobs/{id}
+# Long-running -> returns { job_id }, poll /jobs/{id}
 ```
 
 Aggregates DNS, certificate-transparency (crt.sh), subfinder, WHOIS.
 
-## OSINT — IP
+## OSINT - IP
 
 ```bash
 curl -sX POST http://localhost:8890/investigate/ip \
@@ -174,7 +187,7 @@ Returns geo (ipinfo.io), open ports + CVEs (Shodan InternetDB free tier),
 reverse DNS, reverse-IP correlation (hackertarget + OTX passive DNS).
 Set `include_shared_hosts:false` for fast geo-only.
 
-## OSINT — email
+## OSINT - email
 
 ```bash
 curl -sX POST http://localhost:8890/investigate/email \
@@ -183,9 +196,10 @@ curl -sX POST http://localhost:8890/investigate/email \
 ```
 
 Holehe (120+ services for platform registrations). HIBP breach check if
-`HIBP_API_KEY` env is set on the OSINT service.
+`HIBP_API_KEY` env is set on the OSINT service; without it the breach check
+is skipped silently.
 
-## OSINT — username
+## OSINT - username
 
 ```bash
 # fast (Sherlock, ~30s, 400 sites)
@@ -197,10 +211,10 @@ curl -sX POST http://localhost:8890/investigate/username \
   -d '{"username":"torvalds","mode":"deep","show_all":true}'
 ```
 
-Default caps hits at 30 to stay token-cheap; `show_all:true` for full list
-(common usernames like `torvalds` return >100).
+Default caps hits at 30 to stay token-cheap; `show_all:true` for the full
+list (common usernames like `torvalds` return >100).
 
-## OSINT — URL (urlscan.io)
+## OSINT - URL (urlscan.io)
 
 ```bash
 # Query existing scans (fast)
@@ -212,26 +226,26 @@ curl -sX POST http://localhost:8890/investigate/url \
   -d '{"url":"https://suspicious.example/","submit":true}'
 ```
 
-## OSINT — phone (libphonenumber)
+## OSINT - phone (libphonenumber)
 
 ```bash
 curl -sX POST http://localhost:8890/investigate/phone \
   -d '{"phone":"+14155552671"}'
 ```
 
-Returns country, region, carrier, line type (mobile/voip/toll-free), timezone, validity.
-Uses Google libphonenumber locally — instant, free, no API key.
+Returns country, region, carrier, line type (mobile/voip/toll-free), timezone,
+validity. Google libphonenumber locally - instant, free, no API key.
 
-## OSINT — VirusTotal reputation
+## OSINT - VirusTotal reputation
 
 ```bash
 curl -sX POST http://localhost:8890/investigate/threat \
   -d '{"target":"https://suspicious.example/"}'
 # Auto-detects hash (MD5/SHA1/SHA256), URL (with scheme), IP, or domain
-# Requires VT_API_KEY env on OSINT service (free tier: 500/day, 4/min)
+# Requires VT_API_KEY env on OSINT service (free tier: 500/day, 4/min - save shotgun queries)
 ```
 
-## OSINT — CVE lookup
+## OSINT - CVE lookup
 
 ```bash
 curl -sX POST http://localhost:8890/investigate/cve \
@@ -239,22 +253,25 @@ curl -sX POST http://localhost:8890/investigate/cve \
 ```
 
 NIST NVD free API. Returns description, CVSS, CWE weaknesses, top references.
-Pass `NVD_API_KEY` env to bump rate limit (5 → 50 req/30s).
+Pass `NVD_API_KEY` env to bump the rate limit (5 -> 50 req/30s).
 
-## OSINT — theHarvester (broader sweep)
+## OSINT - theHarvester (broader sweep)
 
 ```bash
 curl -sX POST http://localhost:8890/investigate/harvest \
   -d '{"domain":"example.com","limit":500,"sources":"bing,duckduckgo,crtsh,hackertarget,otx,rapiddns,urlscan"}'
 ```
 
-Slower and noisier than `/investigate/domain` - use when you want the broad sweep.
+Slower and noisier than `/investigate/domain` - use when you want the broad
+sweep.
 
 ## Geo pano pipeline (location scouting)
 
-Street-level imagery senses on the osint service (`https://osint.erfi.io`),
-backed by the keyless `streetlevel` GSV wrapper. Artifacts persist on servarr
-under `GEO_DIR` (`/mnt/user/appdata/research/geo`) in `<sweep_id>/` dirs.
+Street-level imagery senses on the osint service, backed by the keyless
+`streetlevel` GSV wrapper. Artifacts persist on servarr under `GEO_DIR`
+(`/data/geo` in the container; host bind `GEO_DIR_HOST` in compose.yaml) in
+`<sweep_id>/` dirs. Design + calibration notes:
+`~/infra/research/docs/plans/2026-08-15-geo-pano-pipeline.md`.
 
 ```bash
 # 1. Enumerate candidates across a whole area (Overpass; regex is POSIX, ,i applied)
@@ -294,160 +311,26 @@ mode with a tight crop beats zero-shot text for specific visual features.
 
 ## Platform access walls (social)
 
-- **Reddit: fully walled** (verified 2026-08-17; JSON API, old.reddit,
-  the crawler, and jina.ai all blocked). Bypass order:
+- **Reddit: fully walled** (JSON API, old.reddit, the crawler, and jina.ai all
+  blocked). This has been rediscovered from scratch in several sessions - do
+  not re-probe the blocked paths; start at the top of the bypass order:
   1. **PullPush API** (`https://api.pullpush.io/reddit/search/submission/?subreddit=<sub>&q=<query>`,
-     plus `/reddit/search/comment/`) - the reddit archive. WARNING: as of
-     2026-08-17 it 429s agent traffic ("no free scraping resources for
-     agents") - hours after it worked in the same morning's session. Try
+     plus `/reddit/search/comment/`) - the reddit archive. It 429s agent
+     traffic intermittently ("no free scraping resources for agents"). Try
      once; on 429 fall through.
-  2. **redlib mirrors** (e.g. `https://safereddit.com/r/<sub>/comments/...`,
-     verified serving 2026-08-17) - swap the host, keep the path. If a
-     mirror returns an Anubis PoW interstitial ("Verifying your
-     browser..."), retry through the crawler `/extract` with
-     `force_js:true` - Playwright solves the PoW (observed 2026-08-17 on
-     safereddit; plain fetches pass intermittently, it is rate/IP-based).
-     Caveat: `/extract` on a redlib thread page may yield the OP body but
-     drop the comment tree - comment-level detail is best-effort.
+  2. **redlib mirrors** (e.g. `https://safereddit.com/r/<sub>/comments/...`) -
+     swap the host, keep the path. If a mirror returns an Anubis PoW
+     interstitial ("Verifying your browser..."), retry through the crawler
+     `/extract` with `force_js:true` - Playwright solves the PoW (plain
+     fetches pass intermittently; it is rate/IP-based). Caveat: `/extract`
+     on a redlib thread page may yield the OP body but drop the comment tree.
   3. Crawler on `www.reddit.com` as last resort only.
-  This has been rediscovered from scratch in three separate sessions
-  (2026-08-06, 2026-08-16, 2026-08-17) - do not burn rounds re-probing
-  the blocked paths; start at the top of the bypass order.
-  Complement: SearXNG (`reddit r/<sub> <topic>` queries, ddg carries
-  them) is good for discovering canonical thread URLs; pair it with the
-  mirror for actual content.
+  Complement: SearXNG (`reddit r/<sub> <topic>` queries, ddg carries them) is
+  good for discovering canonical thread URLs; pair it with the mirror for
+  actual content.
 - **TikTok / Instagram**: hard-blocked. Don't attempt; say so and move on.
-- **Lemon8**: works via the plain static path (trafilatura, no
-  `force_js`). Good source for SG-local reviews.
-
-## SG rental comps (crawler service)
-
-Official-data rental comparables, pre-compacted server-side (HDB
-per-transaction rentals since 2021, URA per-project condo rent
-percentiles, HDB block info). Data source survey + design:
-`~/infra/research/docs/plans/2026-08-18-sg-rental-research-tooling.md`.
-
-```bash
-# Rebuild assets (monthly; ~1-2 min)
-curl -sX POST http://localhost:8889/sg/refresh
-
-# HDB radius comps for an address (degrades to town-level if the
-# block-coords map is absent)
-curl -sX POST http://localhost:8889/sg/rent-comps \
-  -H 'content-type: application/json' \
-  -d '{"address":"Blk 105 Ang Mo Kio Ave 4","flat_type":"4-ROOM","radius_m":800,"months":12}'
-
-# Condo project percentile series
-curl -sX POST http://localhost:8889/sg/rent-comps \
-  -H 'content-type: application/json' -d '{"project":"18 WOODSVILLE"}'
-```
-
-pi tools (preferred): `sg_rent_comps`, `sg_nuisance`, `sg_refresh`. The
-block-coords map (`sg-block-coords.json`, built by
-`scripts/geocode_hdb_blocks.py`, a multi-hour Nominatim batch) and the
-Master Plan zone grid (`sg-mp-grid.json`, built by
-`scripts/build_mp_grid.py` via `uv run`) live in the crawler's DATASET_DIR
-on servarr.
-
-Keyed tiers (SOPS `.env`, degrade silently when unset): `ONEMAP_TOKEN`
-(preferred SG geocoder; JWT expires ~3 days - set `ONEMAP_EMAIL` +
-`ONEMAP_PASSWORD` and the service refreshes it via getToken) and
-`LTA_DATAMALL_KEY` (bus-stops layer in /sg/nuisance, full stop set cached
-7 days).
-
-```bash
-# Location hazards for a point (dengue / zoning / rail+expressway noise)
-curl -sX POST http://localhost:8889/sg/nuisance \
-  -H 'content-type: application/json' -d '{"lat":1.315,"lon":103.764}'
-```
-
-## Place reputation (crawler service)
-
-Community-complaint digest for a named place: SearXNG discovery over
-reddit/HardwareZone/Lemon8/web, in-process extraction (reddit stays
-snippet-only - bot-walled), distilled to themes by gumshoe (local 9B on
-servarr; unreachable = raw sources, no summary).
-
-```bash
-curl -sX POST http://localhost:8889/reputation \
-  -H 'content-type: application/json' \
-  -d '{"place":"Tampines GreenVines","max_sources":8}'
-```
-
-pi tool (preferred): `place_reputation`. Env: `SEARXNG_INTERNAL_URL`
-(compose-internal), `GUMSHOE_URL` (default http://10.0.71.2:18080).
-
-## Sun scoring (crawler service)
-
-Direct-sun model for a unit: pysolar sun path vs a horizon built from
-HDB `max_floor_lvl` (via the block-coords map, 500m) + OSM
-`building:levels` (400m). Buildings spread across their angular width;
-absent layers degrade with notes (unshaded-sky, NOT an unblocked window).
-
-```bash
-curl -sX POST http://localhost:8889/sg/sun \
-  -H 'content-type: application/json' \
-  -d '{"lat":1.315,"lon":103.764,"floor":8,"facing":270}'   # 0=N 90=E 180=S 270=W
-```
-
-pi tool (preferred): `sg_sun`. Returns monthly direct-sun hours, the
-west-sun-after-3pm verdict, and the biggest obstructions in view.
-
-## Portal listings + churn history (crawler service)
-
-99.co newest island-wide rental listings via the v2 web search API
-(keyword params do NOT filter it - local substring filter; CF-challenged
-days fall back to FlareSolverr). Every fetch snapshots to
-`sg-listings.jsonl`: same id at a lower price = price drop; same unit
-under new ids = re-list (tenant churn). pi tools: `sg_listings`,
-`sg_listings_history`.
-
-```bash
-curl -sX POST http://localhost:8889/sg/listings \
-  -H 'content-type: application/json' -d '{"query":"ripple bay","limit":5}'
-curl -sX POST http://localhost:8889/sg/listings-history \
-  -H 'content-type: application/json' -d '{"query":"ripple bay"}'
-```
-
-## Dossier (crawler service)
-
-One-call rental report - identity + comps + nuisance + sun + listings +
-reputation, concurrent fan-out, each section degrades to a labelled
-error/skip entry instead of failing the report.
-
-```bash
-curl -sX POST http://localhost:8889/sg/dossier \
-  -H 'content-type: application/json' \
-  -d '{"address":"Blk 105 Ang Mo Kio Ave 4","flat_type":"4-ROOM","floor":8,"facing":270}'
-```
-
-pi tool (preferred): `sg_dossier`. `include_reputation:false` skips the
-slow harvest.
-
-## Flight noise (crawler service)
-
-Per-address aircraft noise from the stack's own ADS-B sampling (adsb.lol,
-keyless): a composer pipeline (`research-sg-flight-sample`, every 5 min)
-appends island-wide snapshots to `sg-flight-tracks.jsonl` (self-compacting
-to trailing 14d past 64MB); the query answers low passes (<3000ft) within
-radius, per-day rate, hour histogram, altitude band.
-
-```bash
-curl -sX POST http://localhost:8889/sg/flight-noise \
-  -H 'content-type: application/json' -d '{"lat":1.315,"lon":103.764}'
-```
-
-pi tool (preferred): `sg_flight_noise`. Thin until the sampler has days
-of accrual; Paya Lebar's move (~2030s) invalidates old windows.
-
-## Map UI (crawler service)
-
-`https://crawler.erfi.io/sg/map/` - Astro+Leaflet page over the SG layers
-(dengue polygons, 99.co listing markers, low-flight cells), click-to-probe
-a point for zoning/transport/flight stats. Same-origin API calls, so the
-edge LAN/tailnet gate covers it; WAN browsers 401 by design. Data:
-`GET /sg/map-data`. Source in `ui/` (bonkled conventions: Astro static,
-React island for the map only, IBM Plex Mono cream/ink tokens).
+- **Lemon8**: works via the plain static path (trafilatura, no `force_js`).
+  Good source for SG-local reviews.
 
 ## Long-running jobs
 
@@ -462,23 +345,18 @@ curl -s "http://localhost:8890/jobs/$JOB_ID"
 
 ## Tips
 
-- **Token discipline**: for OSINT, the wrapper caps results aggressively
-  (e.g. usernames capped at 30 hits). Pass `show_all:true` only when needed.
-- **VirusTotal**: free tier is 500/day, 4/min. Save shotgun queries for paid plan.
-- **HIBP**: requires `HIBP_API_KEY` env on OSINT service. Without it, email
-  endpoint skips breach check silently.
-- **Wayback fallback**: not in this skill - see the whisper-transcribe bot
-  scraper logic (commit 44da86c) for the 4-tier anti-bot pattern (Crawl4AI
-  -> FlareSolverr -> Wayback `archive.org/wayback/available` + `id_` raw form
-  -> archive.ph).
-- **FlareSolverr scope**: crawler-only. It does NOT fix SearXNG engine
-  walls (proven 2026-08-17: DataDome on qwant unsolvable, Anubis on
-  startpage not waited-out) - engine unblocking lives in custom engines
-  like `startpage_anubis.py`, not the solver sidecar.
+- **Token discipline**: the MCP wrapper caps results aggressively (usernames
+  at 30 hits, search at 10). Pass `show_all:true` / `mode:"full"` only when
+  needed; the formatters in `mcp/formatters/` own the budget.
+- Paid keys (HIBP, Shodan, VT, urlscan, ipinfo, NVD, Brave) are opt-in env on
+  the service and degrade silently when unset - a missing section in a result
+  is usually a missing key, not a bug.
 
 ## Related
 
-- Repo: `~/infra/research`
+- Repo: `~/infra/research` (AGENTS.md has the bounded contexts and the
+  no-mocks fixture rule); stack: `~/infra/research/compose.yaml`
 - MCP wrapper: `~/infra/research/mcp/research-server.py`
-- SearXNG instance is dockerised; check `~/infra/research/compose.yaml` for the stack.
-- Geo pipeline design + calibration notes: `~/infra/research/docs/plans/2026-08-15-geo-pano-pipeline.md`
+- `sg-rental.md` - Singapore rental suite. Read when the task is SG housing.
+- `open-ended-research` skill - the breadth-first survey method that uses
+  these tools.

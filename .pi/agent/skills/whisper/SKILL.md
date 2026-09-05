@@ -1,21 +1,27 @@
 ---
 name: whisper
-description: Use when transcribing audio or video via the local whisper-transcribe service - YouTube videos/playlists or local audio files - with translation, diarization, language hints, or hotwords. Fires on 'transcribe', 'whisper', 'YouTube transcript', 'diarize this call', 'subtitles'. Triggers a GPU mode swap on the llm-compose stack (llama-server pauses).
+description: "Use when transcribing audio or video via the local whisper-transcribe service - YouTube videos or playlists, local audio files, or OBS recordings on the /media mount - with translation, diarization, language hints, hotwords or voice prints, or when reviewing a recorded call with the video_* tools. Fires on 'transcribe', 'whisper', 'YouTube transcript', 'diarize this call', 'subtitles', 'video_extract'. NOT for LLM inference (llm-compose) or image generation (comfyui)."
 ---
 
 # Whisper Transcription
 
-WhisperX-backed transcription service. The MCP wrapper at
-`~/infra/ai/llm-compose/mcp/whisper-server.py` is the canonical Python client. This
-skill documents the same HTTP API for direct invocation when running outside
-opencode (e.g. Pi, scripts, ad-hoc curl).
+WhisperX-backed transcription service. The MCP wrapper
+(`~/infra/ai/llm-compose/mcp/whisper-server.py`, registered as `whisper` in
+`~/.pi/agent/mcp-servers.json`) is the tool surface; this skill documents the
+HTTP API for curl and scripts. The call-review tools (`video_extract`,
+`video_doc`, voice prints) are in `video-review.md` - read it when the task is
+reviewing a recorded call rather than getting a transcript.
 
 ## Service
 
 - **Base URL**: `http://localhost:7860` (env: `WHISPER_URL`)
-- **Runs on**: llm-compose stack, `whisper` service (RTX 5090 / 31 GB VRAM)
-- **GPU swap**: starting transcription stops llama-server. Proxy auto-swaps.
-- **Model lock**: if a swap/comfyui/train call 503s with "model lock active", an unattended loop has pinned the LLM preset (`llmc lock`). Do NOT `llmc unlock` without asking - check `curl -s localhost:11434/mode` (lock_owners shows who holds it, lock_queue shows who is waiting) and wait or coordinate.
+- **Runs on**: the `whisper-transcribe` compose stack on this dev box
+  (`~/infra/ai/whisper-transcribe/compose.yaml`: whisper, whisper-live, bot,
+  valkey, crawl4ai, flaresolverr), sharing the RTX 5090 with llm-compose.
+- **GPU sharing**: a transcription job swaps llama-server out; a 503 "model
+  lock active" means an unattended loop has pinned the LLM preset. The rule
+  and the etiquette live in the llm-compose skill ("One GPU job at a time") -
+  do not `llmc unlock` without asking.
 - **Model default**: turbo (override with `model` param)
 - **Extras**: VLM frame description (`/api/describe`) + OCR (`/api/image`) via
   the `vision` model reported in `/api/status`.
@@ -23,8 +29,8 @@ opencode (e.g. Pi, scripts, ad-hoc curl).
 ### Server-side files (the `/media` mount)
 
 The whisper container mounts the host's video directory at `/media`
-(`/mnt/d/Videos` on the host → `/media` inside the container). **Do NOT
-`docker inspect` the mounts or `ls` the host dir to find a file** — the
+(`/mnt/d/Videos` on the host -> `/media` inside the container). **Do NOT
+`docker inspect` the mounts or `ls` the host dir to find a file** - the
 service exposes the listing directly:
 
 ```bash
@@ -34,7 +40,7 @@ curl -s 'http://localhost:7860/api/media?refresh=1'               # bust TTL cac
 
 Returns `{"files":[{"name":"2026-06-19 14-00-39.mkv","path":"/media/..."}]}`,
 sorted newest-first. Pass the returned `path` straight to `/api/jobs` as
-`file_path` — it's already a container-side path, no upload needed. The
+`file_path` - it's already a container-side path, no upload needed. The
 Gradio UI's "Server file" picker is backed by this same endpoint.
 
 ## Endpoints
@@ -63,7 +69,7 @@ Returns `{ "filename": "/tmp/yt-dlp-XXXX/<id>.wav", "title": ...,
 server's filesystem (NOT your local FS). The download path is under
 **`.filename`** (NOT `.path`) - pass it to `/api/jobs` as `file_path`.
 
-### Transcribe a file (async via queue — canonical)
+### Transcribe a file (async via queue - canonical)
 
 `POST /api/jobs` is the canonical path: enqueues on the Valkey-backed FIFO
 so all consumers (bot, MCP, UI, curl) serialise. Returns `202 + job_id`.
@@ -87,11 +93,11 @@ curl -s "http://localhost:7860/api/jobs/$JOB"
 default now also returns `202 + job_id`. Pass `"wait": true` for the legacy
 sync shape (`{status, transcript, subtitle_file}` inline).
 
-### Upload a local file (your FS → server FS)
+### Upload a local file (your FS -> server FS)
 
 ```bash
 curl -sX POST http://localhost:7860/api/upload -F 'file=@./audio.mp3'
-# → {"file_path":"/tmp/upload-XXXX/audio.mp3", ...}  → feed to /api/jobs
+# -> {"file_path":"/tmp/upload-XXXX/audio.mp3", ...}  -> feed to /api/jobs
 ```
 
 ### Job polling
@@ -101,7 +107,7 @@ curl -s http://localhost:7860/api/jobs/<job_id>
 ```
 
 States: `queued | running | done | failed | cancelled`. Shape varies by
-status — when `done`, the transcript is nested: `.result.transcript`
+status - when `done`, the transcript is nested: `.result.transcript`
 (and `.result.subtitle_file` if a subtitle format was requested).
 `DELETE /api/jobs/<id>` cancels; `GET /api/queue` shows queue depth.
 
@@ -109,13 +115,13 @@ status — when `done`, the transcript is nested: `.result.transcript`
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `file_path` | string | — | Path on whisper server (`/api/yt-download`, `/api/upload`, or a `/media/...` path from `/api/media`) |
-| `url` | string | — | YouTube URL (only on `/api/yt-download` and yt_transcribe variants) |
+| `file_path` | string | - | Path on whisper server (`/api/yt-download`, `/api/upload`, or a `/media/...` path from `/api/media`) |
+| `url` | string | - | YouTube URL (only on `/api/yt-download` and yt_transcribe variants) |
 | `model` | enum | `turbo` | `tiny\|base\|small\|medium\|large\|turbo` |
 | `language` | string | `Auto-detect` | ISO code (`en`, `fr`) or `Auto-detect` |
-| `format` | enum | `txt` | `txt\|srt\|vtt\|json` — subtitle/output format (UI default `srt`) |
+| `format` | enum | `txt` | `txt\|srt\|vtt\|json` - subtitle/output format (UI default `srt`) |
 | `translate` | bool\|`"auto"` | `"auto"` | `"auto"` = LID pre-pass, translate non-English to English. `true` forces translate. `false` keeps source language. |
-| `diarize` | bool | `false` | Speaker labels (SPEAKER_00, SPEAKER_01, …) |
+| `diarize` | bool | `false` | Speaker labels (SPEAKER_00, SPEAKER_01, ...) |
 | `min_speakers` | int | `0` | Diarization floor (0 = auto) |
 | `max_speakers` | int | `0` | Diarization ceiling (0 = auto) |
 | `batch_size` | int | VRAM-derived | Override the auto batch (`default_batch_size` in `/api/status`) |
@@ -124,7 +130,7 @@ status — when `done`, the transcript is nested: `.result.transcript`
 | `initial_prompt` | string | "" | Context hint. Cap at 600 chars; longer eats hotword budget. |
 | `return_file` | bool | `true` | Set `false` to skip subtitle-file generation when only the transcript text is needed |
 | `cleanup` | bool | `false` | Remove `file_path` + its parent yt-dlp tmp dir on completion |
-| `wait` | bool | `false` | (`/api/transcribe` only) legacy sync mode — block and return result inline |
+| `wait` | bool | `false` | (`/api/transcribe` only) legacy sync mode - block and return result inline |
 
 ## Whisper prompt context
 
@@ -175,7 +181,7 @@ curl -sX PUT :7860/api/vocabulary -H 'content-type: application/json' \
 
 ## Common workflows
 
-### YouTube → transcript
+### YouTube -> transcript
 
 ```bash
 URL='https://youtube.com/watch?v=...'
@@ -219,131 +225,22 @@ JOB=$(curl -sX POST http://localhost:7860/api/jobs \
 ## Troubleshooting
 
 - **GPU error**: another service may be using GPU. Wait 30s; proxy auto-swaps.
-- **Resident VRAM**: whisper-live keeps large-v3 loaded on the GPU (~5.6 GiB,
-  measured 2026-08-13) even when idle - batch whisper idle-unloads after
-  ~300s but live does not. GPU-exclusive work (quant benches, >26 GB model
-  loads) must `docker stop whisper-transcribe-whisper-1
-  whisper-transcribe-whisper-live-1` first. NEVER `docker rm` them - they
-  are compose-managed; recover with `cd ~/infra/ai/whisper-transcribe &&
-  make up` (observed 2026-08-13: rm'd containers could not be `docker
-  start`ed).
+- **Resident VRAM**: whisper-live keeps large-v3 loaded on the GPU (~5.6 GiB)
+  even when idle - batch whisper idle-unloads after ~300s but live does not.
+  GPU-exclusive work (quant benches, >26 GB model loads) must `docker stop
+  whisper-transcribe-whisper-1 whisper-transcribe-whisper-live-1` first.
+  NEVER `docker rm` them - they are compose-managed and an rm'd container
+  cannot be `docker start`ed; recover with `cd ~/infra/ai/whisper-transcribe
+  && make up`.
 - **Empty transcript**: audio too quiet or language mismatch; try explicit `language` param.
 - **Long delay on YouTube**: yt-dlp deno path may need fresh remote-components. Check whisper service logs.
-- **YouTube 403 "unable to download video data"**: IP-throttle - YouTube rate-limits the host IP after a burst of downloads (observed 2026-08-17: fine for 2 videos, then every download 403'd for ~30 min). The server auto-retries each download through the `YT_DLP_PLAYER_CLIENTS` chain (default `default,android,ios,tv,mweb`; compose/.env overridable) - the android client usually still serves while the default is throttled. Check the whisper logs for `succeeded with fallback player_client=...` to confirm which client is working, and reorder the chain to put it first. If EVERY client 403s, the IP is fully hot: wait ~30-60 min, route yt-dlp through a different egress with `YT_DLP_EXTRA_ARGS` (raw arg passthrough, e.g. `--proxy socks5://host:1055`; also the PO-token path - pin `YT_DLP_PLAYER_CLIENTS` to the matching client), or use the escape hatch below.
+- **YouTube 403 "unable to download video data"**: IP-throttle - YouTube rate-limits the host IP after a burst of downloads (a couple of videos, then every download 403s for ~30 min). The server auto-retries each download through the `YT_DLP_PLAYER_CLIENTS` chain (default `default,android,ios,tv,mweb`; compose/.env overridable) - the android client usually still serves while the default is throttled. Check the whisper logs for `succeeded with fallback player_client=...` to confirm which client is working, and reorder the chain to put it first. If EVERY client 403s, the IP is fully hot: wait ~30-60 min, route yt-dlp through a different egress with `YT_DLP_EXTRA_ARGS` (raw arg passthrough, e.g. `--proxy socks5://host:1055`; also the PO-token path - pin `YT_DLP_PLAYER_CLIENTS` to the matching client), or use the escape hatch below.
 - **Escape hatch when yt-download is fully blocked**: download on any machine whose IP is clean (`yt-dlp -x --audio-format wav --extractor-args "youtube:player_client=android" <url>`), then push the file to the server with `POST /api/upload -F 'file=@./audio.wav'` and transcribe the returned `/tmp/upload-*` path via `/api/jobs` (or the whisper_transcribe tool's `file_path`). Note pi's yt_transcribe/yt_download tools always route through the server's own yt-dlp, so the hatch is inherently a bash curl flow, not a tool call.
 - **Path not found**: `file_path` must exist on whisper server's filesystem, not yours. Use `/api/yt-download` to materialise YouTube URLs first.
 
-## Video-to-docs / conversation review (video-review extension)
-
-The pi extension `video-review.ts` orchestrates the primitives above into a
-video-to-docs / call-review pipeline. Five tools:
-
-- **`video_extract`** - transcribe + diarize (word-level speaker timing),
-  optionally VLM-describe frames. Runs the slow GPU work ONCE, caches the
-  full bundle to `~/.local/share/video-review/<key>.json` (persistent; an
-  `index.json` beside the bundles enables cross-bundle lookups), and returns
-  only a compact summary + bundle path (the huge word array never enters
-  model context).
-- **`video_overlap`** - pure-TS conversation analysis over the cached bundle:
-  objective speech-overlap events, speaking-time %, turn-taking latency
-  (median entry gap per speaker), who-came-in-over-whom, pair clustering.
-- **`video_metrics`** - speaking-style metrics: per-speaker wpm, words/turn,
-  filler rate, turn-gap p25/median/p75 (p25 exposes the fast tail a median
-  hides), per-pair gap matrix, and question-flow classification
-  (self-answered vs assent vs elaboration after each question).
-- **`video_doc`** - markdown-ready evidence bundle (metadata + speaking-time
-  + diarized transcript + visual timeline + overlap summary). Transcript can
-  be filtered with `speaker=`, `start=`, `end=` to keep context small. Pass
-  **`output_path`** to write the markdown straight to disk and get back only
-  stats (path, bytes, section sizes) - the default for long calls so a
-  900+-segment transcript never enters model context.
-- **`video_enroll` / `video_name`** - voice-print management + client-side
-  relabel. `video_name` with `enroll:true` relabels AND enrolls in one step.
-  Bundles keep embeddings keyed by the ORIGINAL diarized label (stable ID);
-  `video_enroll` accepts either the label or the current display name.
-
-Depends on the `GET /api/artifact?path=...` endpoint (serves the word-level
-JSON the job writes server-side; path-guarded to the temp dir). `video_extract`
-passes `refresh:true` because the transcript cache stores text only and nulls
-`subtitle_file` on a hit.
-
-### Call-review workflow (the improved loop)
-
-1. **`video_extract`** on the recording. Read the summary carefully - it now
-   reports three advisories beyond the basics:
-   - *active speech vs wall time* - a call that is 30%+ silence is dead air;
-     note it, don't analyse it as talk.
-   - *owner-presence warning* - if the enrolled owner (`VIDEO_REVIEW_OWNER`,
-     default "Erfi") speaks <60s in a >10min recording, the mic was probably
-     not routed into the recording. Flag it to the user the same day instead
-     of discovering a dead recording a week later.
-   - *format suggestion* - heuristic from speaker count / identification /
-     dominance (`suggestFormat`): 2 named speakers -> "1:1", dominant speaker
-     >=60% + guests -> "customer", 3+ mostly-named -> "review".
-2. **Tag the format** via `video_metrics format=<suggestion>` (confirms the
-   guess and persists it on the bundle). Untagged calls do not accumulate
-   longitudinal baselines - the deltas-vs-prior-calls output only works when
-   calls are tagged consistently.
-3. **`video_doc` with `output_path`** for the transcript + evidence file;
-   write the notes doc from that file plus `video_metrics` output. Never let
-   a long transcript ride through model context.
-4. **Name speakers** from the extract's name suggestions / transcript cues
-   (`video_name`), enrol your recurring counterparts (`enroll:true`).
-
-**Vocabulary discipline** (`/api/vocabulary`, 60-term cap): public product /
-project / company names ONLY. No customer or account names, no colleague
-names (voice-print enrollment covers people), no internal program names, no
-unreleased roadmap terms. The file is readable over the API and its terms
-flow into every job's prompt - treat it as publishable.
-
-### Automatic speaker names (voice prints)
-
-Speaker identification is **server-side** so names land in every output (SPA,
-bot, curl, extension) - not just via pi. A voice print is a 256-d WeSpeaker
-embedding (from the diarization pipeline) tagged with a person's name, stored
-on the persistent `/data` volume (`/data/voiceprints.json`).
-
-- Diarized `format:json` jobs now emit `speaker_embeddings` ({label: 256-vec})
-  and, when prints match, `speaker_names` ({label: name}) - and the transcript
-  labels are rewritten to the names in ALL formats (txt/srt/vtt/json).
-- Matching is greedy one-to-one cosine (threshold `VOICEPRINT_THRESHOLD`,
-  default 0.5; self-cos ~1.0 vs cross-speaker ~0.13, so it is well separated).
-- Toggle with `IDENTIFY_SPEAKERS=0`.
-
-Endpoints:
-
-```bash
-# enroll from a clean clip (server embeds it)
-curl -sX POST :7860/api/voiceprints -d '{"name":"Erfi","file_path":"/media/clip.mkv","start":0,"end":20}'
-# or enroll a vector directly (e.g. pulled from a prior job's speaker_embeddings)
-curl -sX POST :7860/api/voiceprints -d '{"name":"Erfi","embedding":[...]}'
-curl -s   :7860/api/voiceprints            # list names + counts
-curl -sX DELETE :7860/api/voiceprints/Erfi # remove
-```
-
-Enrolling the same name twice appends a second reference vector (improves
-matching). From pi, the `video_enroll` tool wraps these (enroll from a cached
-bundle's speaker, or from a clip); `video_name` does client-side manual/LLM
-relabel of a cached bundle without re-running the server.
-
-**Host-from-track (future):** with multi-track OBS recordings, transcribing
-track 2 (mic) separately would name the host with zero ML. Not yet wired -
-enrolling your own voice print covers the host in the meantime, on single- and
-multi-track files alike.
-
-**Limitation - single-stream diarization cannot see dense simultaneous
-speech.** WhisperX transcribes one audio stream and assigns each word to
-exactly one speaker, so genuinely overlapping talk gets serialized rather
-than represented as two colliding word spans. `video_overlap` therefore
-detects turn-boundary collisions and reports the median-entry-gap signal
-reliably, but under-counts true talk-over. For an acoustically exact overlap
-measurement, record with **OBS multi-track** (mic on track 2, desktop audio on
-track 3, mkv container), then compare the isolated tracks with VAD/RMS - no
-diarization needed. New OBS recordings should enable this.
-
 ## Related docs
 
-- Extension: `~/dotfiles/.pi/agent/extensions/video-review.ts` (unit tests in `~/dotfiles/.pi/agent/tests/extensions.test.ts`)
-- Service repo: `~/infra/ai/whisper-transcribe`
+- `video-review.md` - the video_* tools, call-review workflow, voice prints. Read when reviewing a call.
+- Service repo + compose stack: `~/infra/ai/whisper-transcribe` (its AGENTS.md has the Makefile targets; `make` is canonical)
 - MCP wrapper (Python): `~/infra/ai/llm-compose/mcp/whisper-server.py`
-- Compose definitions: `~/infra/ai/llm-compose/compose.yaml` (whisper + bot services)
+- Extension source: `~/dotfiles/.pi/agent/extensions/video-review.ts`

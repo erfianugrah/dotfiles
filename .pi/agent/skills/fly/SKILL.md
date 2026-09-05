@@ -1,18 +1,18 @@
 ---
 name: fly
-description: Use when deploying or operating apps on Fly.io via flyctl - deploys, secrets, certs + custom DNS, machines, volumes + snapshots, scaling + auto-stop/start, private networking + .internal DNS, logs + debugging, cost optimization. Fires on 'fly.io', 'flyctl', 'fly deploy', 'fly.toml', 'machine won't start', 'volume snapshot', 'anycast'. Default to compose/k3s on the user's own hardware first (infrastructure-stack); Fly is for what they can't or don't want to self-host.
+description: Use when deploying or operating apps on Fly.io via flyctl - deploys, secrets, certs + custom DNS, machines, volumes + snapshots, scaling + auto-stop/start, private networking + .internal DNS, logs, cost. Fires on 'fly.io', 'flyctl', 'fly deploy', 'fly.toml', 'machine won't start', 'volume snapshot', 'anycast', 'registry.fly.io'. Default to compose/k3s on the user's own hardware (infrastructure-stack); Fly is for what they can't self-host. NOT for Terraform-managed cloud (terraform).
 ---
 
-# fly — fly.io operations
+# fly - fly.io operations
 
-This skill captures the workflows you'll actually do — lifecycle, secrets, certs, machines, debug. Skips generic "Hello World" tutorial content.
+This skill captures the workflows you'll actually do - lifecycle, secrets, certs, machines, debug. Skips generic "Hello World" tutorial content.
 
 List all apps in your org with `flyctl apps list`. Examples below use `<app>` as the app-name placeholder - substitute the real name.
 
-Command and flag existence was checked against **flyctl v0.4.77** (2026-08-03)
+Command and flag existence was checked against **flyctl v0.4.99** (2026-09-05)
 by running `--help` on every invocation in this file. Re-check before trusting
-a flag in a script: `flyctl <cmd> --help | rg <flag>`. Dollar figures below are
-order-of-magnitude only - the pricing page is authoritative.
+a flag in a script: `flyctl <cmd> --help | rg <flag>`. Dollar figures below
+are from the pricing page on the same date; the pricing page is authoritative.
 
 ## Auth + setup
 
@@ -21,17 +21,17 @@ flyctl auth login                                  # browser-based OAuth
 flyctl auth token                                  # print token for CI
 flyctl auth whoami                                  # confirm logged in + org
 
-# bash completion (one-time)
-flyctl completion bash > ~/.local/share/bash-completion/completions/flyctl
+# shell completion (one-time; redirect into your shell's completions dir)
+flyctl completion zsh      # or bash / fish
 ```
 
-## fly.toml — what matters
+## fly.toml - what matters
 
 Minimum-viable example for a single-image deploy:
 
 ```toml
 app = "<your-app>"
-primary_region = "fra"                # closest to your users — pick once
+primary_region = "fra"                # closest to your users - pick once
 
 [build]
   image = "<registry>/<image>:<pinned-tag>"   # NEVER `latest` (mirror compose discipline)
@@ -98,7 +98,7 @@ flyctl deploy --local-only
 flyctl deploy --build-only
 ```
 
-Flags that do NOT exist on `flyctl deploy` (v0.4.77), despite being widely
+Flags that do NOT exist on `flyctl deploy` (v0.4.99), despite being widely
 cited: `--dry-run`, `--skip-image-refresh`. Verify with
 `flyctl deploy --help | rg <flag>` before putting one in a script.
 
@@ -141,8 +141,8 @@ third-party registry credentials for image pulls - no `flyctl deploy` flag, no
 magic secret name, nothing in the docs. (An earlier version of this skill
 claimed `DOCKER_REGISTRY_USERNAME` / `DOCKER_REGISTRY_PASSWORD` secrets did
 this. They do not exist: zero hits across the flyio doc corpus, no flag in
-flyctl v0.4.77, and Fly's own answer on the request is "push to your app
-registry instead".) Mirror, or make the upstream image public.
+flyctl, and Fly's own answer on the request is "push to your app registry
+instead".) Mirror, or make the upstream image public.
 
 Useful adjacent commands:
 
@@ -155,10 +155,12 @@ There is no API to list tags in the Fly registry - a tag only becomes visible
 to Fly once it is part of a release.
 
 Gotchas:
-- **`flyctl auth docker` tokens expire after 5 minutes.** Re-auth immediately
-  before the push, not at the top of a long script; a slow push of a large
-  image can die partway. A `denied: authentication required` means re-run it,
-  not that the tag is wrong.
+- **`flyctl auth docker` tokens are short-lived** (the 5-minute figure is
+  observed, not documented - the flyio docs mirror only says the command
+  writes a token into `~/.docker/config.json`). Re-auth immediately before
+  the push, not at the top of a long script; a slow push of a large image
+  can die partway. A `denied: authentication required` means re-run it, not
+  that the tag is wrong.
 - Registry paths are per-app but **access is org-scoped**: you can push to
   `registry.fly.io/app-1` and deploy that same image on `app-2` in the same
   org (`flyctl deploy --app app-2 --image registry.fly.io/app-1:tag`). Useful
@@ -170,23 +172,23 @@ Gotchas:
   `--image`, keep the build keys out.
 
 `strategy` options worth knowing:
-- **rolling** (default) — one machine at a time, safest for stateful apps. Slowest.
-- **immediate** — all at once, fastest but momentary outage.
-- **bluegreen** — provision green, swap, retire blue. Best for stateless apps with health-checks.
-- **canary** — 1 machine first then progressive rollout. Good for risky changes.
+- **rolling** (default) - one machine at a time, safest for stateful apps. Slowest.
+- **immediate** - all at once, fastest but momentary outage.
+- **bluegreen** - provision green, swap, retire blue. Best for stateless apps with health-checks.
+- **canary** - 1 machine first then progressive rollout. Good for risky changes.
 
-## Secrets — the workflow
+## Secrets - the workflow
 
-Per your Vaultwarden-as-canonical-store discipline:
+The canonical store is the app repo's SOPS-encrypted env file (age, fleet
+recipient); Fly holds a copy. Stage from the decrypted env without ever
+printing a value:
 
 ```bash
-# pull from vault, stage into fly (no auto-deploy yet)
-DB_URL=$(bw get password <app>-db)
-SMTP_PW=$(bw get password <app>-smtp)
-flyctl secrets set --stage \
+# decrypt into the command's environment only, stage into fly (no auto-deploy yet)
+sops exec-env secrets.enc.env 'flyctl secrets set --stage \
   DB_URL="$DB_URL" \
-  SMTP_PASSWORD="$SMTP_PW" \
-  --app <app>
+  SMTP_PASSWORD="$SMTP_PASSWORD" \
+  --app <app>'
 
 # trigger the redeploy with all staged secrets in one shot
 flyctl secrets deploy --app <app>
@@ -209,9 +211,9 @@ rg -oP '^([A-Z_][A-Z0-9_]+)=' /path/to/<app>/.env.example | sed 's/=$//' | sort 
 diff /tmp/fly-needs.txt /tmp/fly-has.txt           # rows only in NEEDS = missing on fly
 ```
 
-If staging a sync script in `~/dotfiles/bin/`, name it `fly-sync-secrets-from-vault` and have it:
+If staging a sync script in `~/dotfiles/bin/`, name it `fly-sync-secrets` and have it:
 1. Read the app's needed env var names from `.env.example`
-2. Fetch each from `bw get <name>`
+2. Resolve each from the SOPS env via `sops exec-env` (or `secretctl exec`) - never into a shell variable that gets echoed
 3. Bulk `flyctl secrets set --stage` then `flyctl secrets deploy`
 
 ## Certs + custom DNS
@@ -220,9 +222,9 @@ If staging a sync script in `~/dotfiles/bin/`, name it `fly-sync-secrets-from-va
 # 1. Tell fly about your domain (must own DNS)
 flyctl certs add <host>.example.com --app <app>
 
-# 2. Configure DNS — fly prints the records to create
+# 2. Configure DNS - fly prints the records to create
 flyctl certs show <host>.example.com --app <app>
-# typically: A → fly app's anycast IPv4, AAAA → IPv6, _acme-challenge CNAME for cert issuance
+# typically: A -> fly app's anycast IPv4, AAAA -> IPv6, _acme-challenge CNAME for cert issuance
 
 # 3. Poll until issued (the pattern that times out pi's bash tool).
 #    Use bg_bash so the loop runs detached:
@@ -280,7 +282,7 @@ flyctl scale count 2 --region fra,iad --app <app>           # geo-distribute
 flyctl scale vm shared-cpu-2x --memory 512 --app <app>      # bump CPU + RAM
 # sizes: shared-cpu-1x..8x (cheapest), performance-1x..16x
 
-# auto-stop + auto-start (scale to zero — huge cost win for ntfy-style apps)
+# auto-stop + auto-start (scale to zero - huge cost win for ntfy-style apps)
 # set via fly.toml:
 # [http_service]
 #   auto_stop_machines  = "stop"        # "stop" / "suspend" / "off"
@@ -308,8 +310,8 @@ flyctl volumes create app_data --snapshot-id <snap-id> --size 5 --region fra --a
 ```
 
 Volume gotchas:
-- Volumes are **regional**, not global. A volume in `fra` can only attach to machines in `fra`. If you scale to multiple regions, each needs its own volume — they don't auto-replicate.
-- Snapshots are taken automatically every 24h (5 retained). Force one before risky upgrades.
+- Volumes are **regional**, not global. A volume in `fra` can only attach to machines in `fra`. If you scale to multiple regions, each needs its own volume - they don't auto-replicate.
+- Snapshots are taken automatically daily and kept 5 days by default; retention is settable from 1 to 60 days and `--scheduled-snapshots=false` disables them (flyio docs, volumes/snapshots). Force one before risky upgrades.
 - Volumes grow in place with `flyctl volumes extend` but **cannot shrink**. To go smaller: snapshot, `volumes create --snapshot-id` at the smaller size, move the machine over, destroy the old one.
 
 ## Private networking + .internal DNS
@@ -340,7 +342,7 @@ machine/app/address/region. Query them with `dig`, don't curl them.
 Your service must bind `fly-local-6pn` (aliased in `/etc/hosts`) or the 6PN
 address itself - binding only to `127.0.0.1` makes it unreachable over 6PN.
 
-Tailscale integration: Fly orgs can be added to a Tailscale tailnet via Tailscale's `flyctl` integration. Useful for letting your Unraid box reach Fly internal services without going public.
+Tailscale: the flyio docs mirror has no tailnet-integration page (only "run a Tailscale container alongside your code"), so treat "add the Fly org to the tailnet" as unverified. The verified pattern for letting the servarr NAS reach Fly-internal services is a Tailscale sidecar or `flyctl proxy`.
 
 ## Postgres - two products, don't mix them up
 
@@ -366,7 +368,7 @@ flyctl mpg attach <cluster> --app <client-app>
 flyctl mpg proxy                                         # local port -> managed cluster
 ```
 
-For most workloads, **NOT using Fly Postgres is cheaper** — connect to your own self-hosted PG via the `.internal` mesh (if your PG is on Fly too) or via Tailscale (to your Unraid PG).
+For most workloads, **NOT using Fly Postgres is cheaper** - connect to your own self-hosted PG via the `.internal` mesh (if your PG is on Fly too) or via Tailscale (to the PG on the servarr NAS).
 
 ## Debugging
 
@@ -380,13 +382,13 @@ flyctl logs --no-tail --json --app <app> | jq        # one-shot + JSON
 flyctl status --app <app>
 flyctl checks list --app <app>
 
-# SSH into a running machine (must be enabled — most images allow)
+# SSH into a running machine (must be enabled - most images allow)
 flyctl ssh console --app <app>
 flyctl ssh console --machine <id> --app <app>
 flyctl ssh console -C 'ls -la /data' --app <app>    # one-shot
 
 # port-forward to a private service (debugging without exposing)
-flyctl proxy 5432 --app <pg-app>                     # local :5432 → fly pg
+flyctl proxy 5432 --app <pg-app>                     # local :5432 -> fly pg
 
 # the do-everything-diag command
 flyctl doctor
@@ -399,7 +401,7 @@ flyctl auth token | head -c 40                       # CI-safe excerpt
 
 Three knobs:
 
-1. **VM size**: `shared-cpu-1x` 256MB is ~$3/mo. `performance-2x` 4GB is ~$30/mo. Pick the smallest that meets P95 latency.
+1. **VM size**: `shared-cpu-1x` 256MB is $2.02/mo on the pricing page (2026-09-05); performance sizes are an order of magnitude more - read the table before picking. Choose the smallest that meets P95 latency.
 2. **`auto_stop_machines` + `min_machines_running=0`**: idle apps pay $0 except for storage. For push / batch / notification apps with infrequent traffic, no-brainer.
 3. **Region count**: each region replicates VMs + volumes. Most personal apps need 1 region. Multi-region only for global anycast performance.
 
@@ -409,7 +411,7 @@ Check usage:
 flyctl orgs show <your-org>
 ```
 
-There is no `flyctl billing` command (v0.4.77) - invoices and usage are
+There is no `flyctl billing` command (v0.4.99) - invoices and usage are
 dashboard-only.
 
 ## Foot-guns (real ones)
@@ -417,7 +419,7 @@ dashboard-only.
 - **Secrets `set` triggers redeploy unless `--stage`**. Always `--stage` + batch + `deploy` for multi-secret updates.
 - **`flyctl certs check` polls slowly**. The status `Awaiting configuration` means DNS records aren't found yet; `DNS Validated` means cert is being issued; `Ready` means done. Issuance can take 5-15 min for Let's Encrypt rate limits. Use `bg_bash` for the polling loop (see "Certs" section above).
 - **Private third-party registries are not supported at all.** Machines pull server-side with no credentials; public ghcr.io / Docker Hub images work, private ones do not, and there is no secret or flag that changes this. Mirror into `registry.fly.io/<app>` (see "Pushing images to Fly's own registry").
-- **`.fly` vs `.fly.dev` confusion**: your app gets a free `<app>.fly.dev` hostname AND can have custom domains. Both work; don't disable the .fly.dev URL — it's useful for testing routing.
+- **`.fly` vs `.fly.dev` confusion**: your app gets a free `<app>.fly.dev` hostname AND can have custom domains. Both work; don't disable the .fly.dev URL - it's useful for testing routing.
 - **Machine ID vs app name**: a lot of `flyctl` commands work with either, but the `--machine` flag specifically wants the ID (looks like `1234ab567c89def`).
 - **`flyctl deploy` cancels prior in-flight deploys** automatically. Useful but surprising; if you pushed a typo + immediately re-pushed, the first push will be killed mid-rollout.
 - **Volume regional pin**: forgetting this leads to "no machines in region X" errors when you scale. Either co-locate volumes with the region you scale to, or use forks.
@@ -432,7 +434,7 @@ dashboard-only.
 | You need a managed TLS cert without running Caddy | Fly |
 | Cost-sensitive low-traffic side project | Fly + `auto_stop_machines` (scale to 0) |
 | You want to self-host on hardware you own | Compose + Caddy (your `infrastructure-stack` skill) |
-| Stateful complex (postgres + multiple services + cross-stack networking) | Compose (you have 12+ stacks already, no win on Fly) |
+| Stateful complex (postgres + multiple services + cross-stack networking) | Compose (the composer fleet already runs dozens of stacks, no win on Fly) |
 | Heavy compute or GPU | Your own boxes; Fly GPU is expensive |
 | You need to run > 1 region with the same data | Fly (anycast + LiteFS) or accept the latency tax of single-region self-host |
 

@@ -1,6 +1,6 @@
 ---
 name: lexicanum
-description: Use when authoring, editing, or restructuring docs on the user's public docs site lexicanum (repo ~/lexicanum, published at erfi.dev) - adding a guide or reference doc, setting taxonomy frontmatter (category/group/featured/blurb/aliases), renaming or moving a doc, choosing guide vs reference, the IEEE-footnote citation convention, or debugging its build/tests. Fires on 'lexicanum', 'erfi.dev docs', 'add a doc to the docs site', 'docs taxonomy', 'starlight sidebar'. NOT for the docs.erfi.io server (that is a different system) or for prose voice in emails/replies (erfi-voice).
+description: Use when authoring, editing, moving or restructuring docs on the user's public docs site lexicanum (repo ~/lexicanum, published at erfi.dev) - adding a guide or reference doc, taxonomy frontmatter, guide vs reference, the IEEE-footnote citation convention, or its build/tests. Fires on 'lexicanum', 'erfi.dev docs', 'add a doc to the docs site', 'docs taxonomy', 'starlight sidebar'. NOT for the docs.erfi.io mirror (a different system) or prose voice in emails/replies (erfi-voice).
 ---
 
 # lexicanum
@@ -15,17 +15,17 @@ style, and the verify checklist. This skill is the operational layer around it.
 
 ## Cross-referencing and exemplars (do this before writing)
 
-Two checks that are easy to skip and were skipped (2026-08-27, three new docs
-shipped with zero cross-links and prose pattern-matched off recent AI-written
-docs):
+Two checks that are easy to skip (new docs have shipped with zero cross-links
+and prose pattern-matched off recent AI-written docs):
 
 - **Calibrate voice off the two named exemplars, not off whatever is newest.**
   The baseline is `reference/cloudflare-supabase-architecture.mdx` and
-  `guides/usb4-10gbe-windows-tuning.mdx`, full stop. Docs written since the
-  AI-assisted era began are NOT a style source - several carry AI prose tells
-  (decorative bold, mystery-tease, participle tails) that must not propagate.
-  Read one exemplar end-to-end before drafting; match its density, its
-  measured-vs-asserted labelling, and its section skeleton.
+  `guides/10gbe-link-tuning.mdx`, full stop. Pre-2026-07 docs predate the
+  authoring contract and docs written since the AI-assisted era began are
+  NOT a style source either - several carry AI prose tells (decorative bold,
+  mystery-tease, participle tails) that must not propagate. Read one exemplar
+  end-to-end before drafting; match its density, its measured-vs-asserted
+  labelling, and its section skeleton.
 - **Cross-link to the older docs.** Every new doc should link inline (and/or in
   a closing `## Related docs` list) to the 2-4 existing docs it depends on,
   supersedes, or sits beside - the corpus convention is inline links like
@@ -81,7 +81,7 @@ aliases:                  # optional: old URLs -> redirects (on rename/move)
   `{/* prose-dollar: math-intentional */}`.
 - Pins are for corrections, not content. `tests/pins.test.ts` guards claims a
   review round PROVED wrong; pinning every new fact makes legitimate rephrases
-  break the build (the 2026-08-17 pin inflation). When a review corrects the
+  break the build. When a review corrects the
   doc, pin the correction - and when a build fails on a pin, ask whether the
   pin earned its place before rewriting prose to fit it.
 - Deployed HTML can be stale per-PoP: the Workers assets platform serves
@@ -95,14 +95,11 @@ aliases:                  # optional: old URLs -> redirects (on rename/move)
   ` -- ` in prose (SmartyPants en-dash).
 - `dot` fences need the house boilerplate (`bgcolor="transparent"`, no
   colors) - `tests/docs.test.ts` fails otherwise.
-- Pre-2026-07 docs predate the contract; exemplars are
-  `reference/cloudflare-supabase-architecture.mdx` and
-  `guides/usb4-10gbe-windows-tuning.mdx`. Equally: post-contract docs are often
-  AI-assisted - do not pattern-match prose off them either. Match the two named
-  exemplars only. A corpus-wide tell sweep (2026-08-28, six parallel reviewers
-  + a judge) removed the known tells from every post-contract doc and
-  normalised their spelling to British -ise; the regex-able subset now gates
-  in `tests/lib/mdx.ts` `LLM_MARKERS` (added: worth-hedges, honest-gap-label,
-  the-fix-colon). `REJECTED_MARKERS` there records why "the key insight" and
-  "deserves special mention" are NOT banned - both appear in the author's own
+- AI-tell gate: the regex-able subset of prose tells (worth-hedges,
+  honest-gap-label, the-fix-colon, and the rest) fails the build via
+  `tests/lib/mdx.ts` `LLM_MARKERS`; spelling is British -ise.
+  `REJECTED_MARKERS` there records why "the key insight" and "deserves
+  special mention" are NOT banned - both appear in the author's own
   pre-contract writing, which is the voice the corpus calibrates against.
+  Add a marker only for a tell that a review actually found; do not widen the
+  net speculatively.

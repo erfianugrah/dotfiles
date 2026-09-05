@@ -1,6 +1,6 @@
 ---
 name: comfyui
-description: Use when generating images with Stable Diffusion (SDXL/Illustrious/Flux checkpoints) via the local ComfyUI service, inspecting the generation queue, or retrieving past generations. Fires on 'generate an image', 'comfyui', an SDXL/Flux prompt, LoRA weights in a prompt, image history. Triggers a GPU mode swap - llama-server pauses during generation.
+description: "Use when generating images with Stable Diffusion (SDXL/Illustrious/Flux checkpoints) via the local ComfyUI service, inspecting the generation queue, or retrieving past generations. Fires on 'generate an image', 'comfyui', an SDXL/Flux prompt, LoRA weights in a prompt, image history. NOT for training a LoRA (lora-train) or describing video frames / OCR (whisper /api/describe)."
 ---
 
 # ComfyUI Image Generation
@@ -11,9 +11,16 @@ swapping between llama-server and ComfyUI automatically.
 ## Service
 
 - **Base URL**: `http://localhost:11434` (llm-compose proxy; env: `COMFYUI_PROXY_URL`)
-- **Routes**: `/comfyui/*` → ComfyUI HTTP API
+- **Routes**: `/comfyui/*` -> ComfyUI HTTP API
 - **Output dir**: `~/docker-volumes/comfyui/output/` (env: `COMFYUI_OUTPUT_DIR`)
-- **GPU swap**: triggered automatically; expect 20-60s startup if llama-server was active.
+- **GPU swap**: triggered automatically; expect 20-60s startup if llama-server
+  was active. A 503 "model lock active" means an unattended loop has pinned
+  the LLM preset - the rule and the etiquette live in the llm-compose skill
+  ("One GPU job at a time"); do not `llmc unlock` without asking.
+- **Local overrides**: `comfyui.local.env` in the llm-compose repo root (or
+  the cwd) is optional and gitignored - it does not exist by default. The MCP
+  server reads it if present (checkpoint, prompts, sampler defaults);
+  otherwise the built-in defaults below apply.
 
 ## Mode swap (manual)
 
@@ -23,9 +30,13 @@ curl -s http://localhost:11434/mode | jq
 
 # Force ComfyUI mode (or swap will happen on first /comfyui call)
 curl -sX POST http://localhost:11434/mode -d '{"mode":"comfyui"}'
+# equivalent: llmc mode comfyui / llmc comfyui open
 ```
 
-## Generate via the SDXL default workflow
+## Generate via a raw workflow (checkpoint override shown)
+
+The example overrides the checkpoint to an Illustrious model; the built-in
+default is `sd_xl_base_1.0.safetensors` (see the table below).
 
 ```bash
 WORKFLOW=$(cat <<'JSON'
@@ -66,11 +77,9 @@ Output is at `~/docker-volumes/comfyui/output/<filename>.png`.
 
 ### Single image with prompt override
 
-```bash
-# Easiest: use the pi comfyui_generate tool with prompt / negative_prompt / seed
-# overrides (defaults come from comfyui.local.env). Or send full workflow JSON
-# as above.
-```
+Easiest: the pi `comfyui_generate` tool with `prompt` / `negative_prompt` /
+`seed` / `checkpoint` overrides (defaults from `comfyui.local.env` when it
+exists, else the built-ins). Or send full workflow JSON as above.
 
 ### List recent generations
 
@@ -80,12 +89,12 @@ curl -s http://localhost:11434/comfyui/history | jq -r '
   .[] | "\(.key)  prompt: \(.value.prompt[2]."3".inputs.seed)"'
 ```
 
-## Default parameters
+## Default parameters (built-in; `comfyui.local.env` overrides)
 
 | Param | Default | Notes |
 |---|---|---|
-| `checkpoint` | `sd_xl_base_1.0.safetensors` (overridable) | Override via env or workflow |
-| `width × height` | 832 × 1216 (portrait) | Good SDXL: 1024×1024, 1216×832, 768×1344 |
+| `checkpoint` | `sd_xl_base_1.0.safetensors` | `CHECKPOINT=` in comfyui.local.env, the tool's `checkpoint` arg, or the workflow JSON. Must exist in `~/docker-volumes/comfyui/models/checkpoints/` |
+| `width x height` | 832 x 1216 (portrait) | Good SDXL: 1024x1024, 1216x832, 768x1344 |
 | `steps` | 30 | More = higher quality but slower |
 | `cfg` | 5 | Classifier-free guidance scale |
 | `sampler` | Euler | Sane default for SDXL |
@@ -94,14 +103,22 @@ curl -s http://localhost:11434/comfyui/history | jq -r '
 ## Tips
 
 - Prefix prompts with quality tags: `masterpiece, best quality`
-- Negative defaults are loaded from `comfyui.local.env`
-- The proxy returns immediately after submitting prompt; image generation runs async. Use `comfyui/history/{prompt_id}` to fetch when ready.
-- **WARNING**: Triggers GPU mode swap — llama-server stops for 20-60s.
-- **Model lock**: if a swap/comfyui/train call 503s with "model lock active", an unattended loop has pinned the LLM preset (`llmc lock`). Do NOT `llmc unlock` without asking - check `curl -s localhost:11434/mode` (lock_owners shows who holds it, lock_queue shows who is waiting) and wait or coordinate.
-- Do NOT call Read on the returned PNG path — viewing inlines base64 image data that exceeds the model's input limit. Generation creates the image for the human user; only Read it if explicitly asked to analyse.
+- The proxy returns immediately after submitting the prompt; generation runs
+  async. Use `comfyui/history/{prompt_id}` to fetch when ready.
+- Do NOT call Read on the returned PNG path - viewing inlines base64 image
+  data that exceeds the model's input limit. Generation creates the image for
+  the human user; only Read it if explicitly asked to analyse.
+
+## When NOT to use
+
+- Training a LoRA on a checkpoint, captioning a dataset, deploying a trained
+  LoRA into `models/loras/` - `lora-train` skill (`llmc train ...`).
+- Describing frames of a video or OCR on an image - the whisper service's
+  `/api/describe` and `/api/image` (whisper skill), not ComfyUI.
+- Pinning or unlocking the LLM preset - llm-compose skill.
 
 ## Related
 
 - Service repo: `~/infra/ai/llm-compose` (ComfyUI service: see `comfyui.Dockerfile`)
-- MCP wrapper: `~/infra/ai/llm-compose/mcp/comfyui-server.py`
+- MCP wrapper: `~/infra/ai/llm-compose/mcp/comfyui-server.py` (registered as `comfyui` in `~/.pi/agent/mcp-servers.json`)
 - Models: `~/docker-volumes/comfyui/models/`

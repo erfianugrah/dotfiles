@@ -1,6 +1,6 @@
 ---
 name: open-ended-research
-description: "Use for any open-ended research task where the answer is a SET of candidates to be narrowed, not a single lookup - comparing or buying products, picking vendors/services/tools, visa or relocation options, scouting locations, 'what are my options', 'alternatives to X', 'best X for Y', 'should I buy/choose'. Also fires when the user says the research is 'tunnel visioning' or asks 'are there no other options?' mid-task. Owns the METHOD (breadth-first, eliminate-don't-select, adversarial pass, provenance matrix); the `research` skill owns the tooling (SearXNG :8888, crawler :8889). NOT for single-answer lookups (who/what/when with one right answer) - just look it up."
+description: "Use when a research task's answer is a SET of candidates to be narrowed rather than a single lookup - comparing or buying products, picking vendors/services/tools, visa or relocation options, scouting locations, 'what are my options', 'alternatives to X', 'best X for Y', 'should I buy'. Also fires on 'tunnel visioning' or 'are there no other options?' mid-task. NOT for single-answer lookups (just look it up) or the search/crawl/OSINT tooling itself (research)."
 ---
 
 # Open-ended research: don't take the first answer
@@ -70,8 +70,8 @@ thing is not breadth:
   `site:lemon8-app.com <category> review`, a YouTube channel, a blogger
   with a per-location series. One curator with a fixed rubric beats 20
   scattered reviews because the rubric makes candidates directly
-  comparable. (2026-08-17: a single Lemon8 creator's per-outlet gym
-  reviews out-valued all scattered sources combined.)
+  comparable (a single Lemon8 creator's per-outlet gym reviews once
+  out-valued all scattered sources combined).
 
 Use the `research` stack (SearXNG multi-engine, crawler for JS-heavy pages)
 or `web_research`; SearXNG's engine diversity is itself breadth.
@@ -122,9 +122,9 @@ noise out of your context. Two rules learned the hard way:
 
 - Every research-subagent prompt MUST end with: "Do NOT dispatch further
   subagents - execute the searches yourself. Your final message must
-  contain the findings, not a plan." (2026-08-17: an adversarial-pass
-  subagent returned "I'll dispatch 5 parallel research subagents" as its
-  final message and exited - pure plan, zero work.)
+  contain the findings, not a plan." Without it a subagent has returned
+  "I'll dispatch 5 parallel research subagents" as its final message and
+  exited - pure plan, zero work.
 - When the corpus is large, ask each subagent to leave a raw-dump
   artifact (sources + snippets written to a file); it doubles as
   provenance for the matrix.

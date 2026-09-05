@@ -1,6 +1,6 @@
 ---
 name: terraform
-description: Use when writing or refactoring OpenTofu/Terraform .tf files, importing existing cloud resources into state (terraform import, cf-terraforming), setting up a new IaC repo (state backends, provider pinning, SOPS+age secrets, dir-per-environment), detecting drift, or debugging the dependency graph. Fires on 'terraform', 'opentofu', 'tofu plan/apply', '.tf', 'state backend', 'provider version', 'import this resource'.
+description: Use when writing or refactoring OpenTofu/Terraform .tf files, importing existing resources into state (import blocks, cf-terraforming), setting up an IaC repo (state backends, provider pinning, SOPS+age secrets, dir-per-environment), migrating the Cloudflare provider v4 to v5, or detecting drift. Fires on 'terraform', 'opentofu', 'tofu plan/apply', '.tf', 'state backend', 'provider version', 'tf-migrate'. NOT for the Cloudflare API/wrangler side (cloudflare-ops) or flyctl (fly).
 ---
 
 # Terraform / OpenTofu
@@ -9,7 +9,7 @@ description: Use when writing or refactoring OpenTofu/Terraform .tf files, impor
 
 1. **Prefer OpenTofu (`tofu`) over `terraform`.** Same HCL, drop-in-compatible, BSL-free, community-driven. The user already uses `tofu` locally. CI/automation should call `tofu`.
 2. **Pin the provider major.** `version = "~> 4.0"` lets you take patches but not breaking changes. Read provider CHANGELOGs before bumping the major.
-3. **State is the source of truth.** If state and reality diverge, fix state via `terraform import` / `terraform state rm` / `terraform state mv` — don't blow away resources.
+3. **State is the source of truth.** If state and reality diverge, fix state via `terraform import` / `terraform state rm` / `terraform state mv` - don't blow away resources.
 4. **Plan before apply, always.** `tofu plan -out=tfplan && tofu apply tfplan` so what gets applied is exactly what was reviewed.
 5. **One state per blast radius.** Group resources so a state corruption or accidental destroy only kills one logical unit (a zone, an app, an account). Smaller is safer.
 6. **No secrets in `.tf` or `.tfvars`.** SOPS+age, environment variables, or a secrets manager.
@@ -21,11 +21,11 @@ description: Use when writing or refactoring OpenTofu/Terraform .tf files, impor
 | License | MPL 2.0 (free, true OSS) | BSL 1.1 (source-available, not OSS) |
 | Compatibility | All HCL 1.x + providers + modules | Same |
 | Backend support | Same set + community backends | HashiCorp's list |
-| Encryption-at-rest for state | **Yes (native, since 1.7)** | No (must use cloud KMS) |
+| Encryption-at-rest for state | **Yes (native, 1.7+)** | No (must use cloud KMS) |
 | Deletion-time provisioners | **Yes (1.8+)** | No |
 | CLI | Drop-in `tofu` for `terraform` | `terraform` |
 
-Migration is `mv terraform.tfstate{,.bak} && tofu init && tofu plan` — state format is identical.
+Migration is `mv terraform.tfstate{,.bak} && tofu init && tofu plan` - state format is identical.
 
 The user runs OpenTofu locally (`tofu` binary). Default to `tofu` in any new repo.
 
@@ -40,7 +40,7 @@ This is the user's pattern:
 │   ├── main.tf
 │   ├── provider.tf
 │   ├── variables.tf
-│   ├── terraform.tfstate
+│   ├── terraform.tfstate        # local state (gitignored, never committed)
 │   └── secrets.enc.tfvars       # SOPS-encrypted
 ├── main_zone/                   # Zone-level resources (separate state)
 │   ├── dns.tf
@@ -63,9 +63,9 @@ This is the user's pattern:
 
 - Each top-level dir is an independent state. `tofu apply` in `main_zone/` doesn't touch `zero_trust/`.
 - Modules (`modules/dns_records/`) are reusable from any parent dir.
-- One blast radius per dir — accidental `destroy` only kills the dir's resources.
+- One blast radius per dir - accidental `destroy` only kills the dir's resources.
 
-**Avoid**: terraform workspaces for environments. Use directories. Workspaces share `.tf` source — drift in branching logic gets impossible to reason about.
+**Avoid**: terraform workspaces for environments. Use directories. Workspaces share `.tf` source - drift in branching logic gets impossible to reason about.
 
 ## Provider block (Cloudflare example, user's actual config)
 
@@ -81,7 +81,7 @@ terraform {
 }
 
 provider "cloudflare" {
-  # User's actual rate-limit defence — CF default of 4 req/s is conservative
+  # User's actual rate-limit defence - CF default of 4 req/s is conservative
   max_backoff = "10"
   min_backoff = "2"
   retries     = "5"
@@ -95,7 +95,7 @@ provider "cloudflare" {
 
 ```hcl
 terraform {
-  required_version = ">= 1.6, < 2.0"      # OpenTofu 1.6+ for state encryption
+  required_version = ">= 1.7, < 2.0"      # OpenTofu 1.7+ for native state encryption
   required_providers {
     cloudflare = { source = "cloudflare/cloudflare", version = "~> 4.0" }
     aws        = { source = "hashicorp/aws",        version = "~> 5.0" }
@@ -106,12 +106,13 @@ terraform {
 
 ## State backends
 
-### Local (default — fine for personal infra)
+### Local (default - fine for personal infra)
 
 ```hcl
 # No backend block needed; state lives in terraform.tfstate alongside .tf files.
-# Commit only terraform.tfstate.lock.info and .terraform.lock.hcl. NEVER commit
-# terraform.tfstate or terraform.tfstate.backup — they may contain secrets.
+# Commit ONLY .terraform.lock.hcl (provider pins). NEVER commit terraform.tfstate,
+# terraform.tfstate.backup (they may contain secrets) or the transient
+# .terraform.tfstate.lock.info - the .gitignore below covers all three.
 ```
 
 `.gitignore`:
@@ -125,7 +126,7 @@ terraform {
 !example.tfvars
 ```
 
-### Cloudflare R2 (S3-compatible — ideal for CF-heavy infra)
+### Cloudflare R2 (S3-compatible - ideal for CF-heavy infra)
 
 ```hcl
 terraform {
@@ -138,7 +139,8 @@ terraform {
     skip_region_validation      = true
     skip_metadata_api_check     = true
     skip_requesting_account_id  = true
-    # Locking: R2 supports object-version-based locking via use_lockfile = true (TF 1.10+)
+    # Locking: S3-native lockfile via use_lockfile = true (Terraform 1.10+; on
+    # OpenTofu check `tofu init` output accepts the argument for your version)
     use_lockfile                = true
   }
 }
@@ -224,7 +226,7 @@ If the repo has a pre-commit hook blocking unencrypted `*tfvars*`, keep an allow
 ### Environment variables (for tokens)
 
 ```sh
-export TF_VAR_cloudflare_api_token="..."   # → var.cloudflare_api_token
+export TF_VAR_cloudflare_api_token="..."   # -> var.cloudflare_api_token
 export CLOUDFLARE_API_TOKEN="..."          # provider auto-reads (preferred)
 ```
 
@@ -239,7 +241,7 @@ tofu plan -out=tfplan                # SAVE plan to a file
 tofu show tfplan                     # human-readable diff
 tofu apply tfplan                    # apply EXACTLY the saved plan
 
-# Per-resource targeting (debug only — never habitualize)
+# Per-resource targeting (debug only - never habitualize)
 tofu plan -target=cloudflare_record.api
 tofu apply -target=cloudflare_record.api
 
@@ -255,7 +257,7 @@ tofu apply destroy.plan
 
 For resources created outside Terraform (clicked in dashboard, created via CLI/API).
 
-### Modern: `import` blocks (TF 1.5+, OT 1.6+) — preferred
+### Modern: `import` blocks (TF 1.5+, OT 1.6+) - preferred
 
 ```hcl
 # Append to .tf, then plan + apply
@@ -285,15 +287,15 @@ tofu plan -generate-config-out=generated.tf
 tofu import cloudflare_record.api <zone-id>/<record-id>
 ```
 
-The CLI form only updates state — you still have to write the resource block by hand. Prefer `import` blocks.
+The CLI form only updates state - you still have to write the resource block by hand. Prefer `import` blocks.
 
 ### Bulk import for Cloudflare via `cf-terraforming`
 
-See the `cloudflare` skill — `cf-terraforming generate` + `cf-terraforming import` produces both the .tf and the import script for an entire resource type at once.
+See the `cloudflare-ops` skill - `cf-terraforming generate` + `cf-terraforming import` produces both the .tf and the import script for an entire resource type at once.
 
 ## `for_each` and `dynamic` blocks
 
-### `for_each` over a map (preferred over `count` — keys are stable)
+### `for_each` over a map (preferred over `count` - keys are stable)
 
 ```hcl
 variable "records" {
@@ -321,7 +323,7 @@ resource "cloudflare_record" "this" {
 # }
 ```
 
-Why `for_each` over `count`: removing the middle element of a `count`'d list shifts indices, causing destroy+recreate of everything after it. Maps are keyed by name — stable.
+Why `for_each` over `count`: removing the middle element of a `count`'d list shifts indices, causing destroy+recreate of everything after it. Maps are keyed by name - stable.
 
 ### `dynamic` blocks (for repeated nested blocks)
 
@@ -366,7 +368,7 @@ cat > .tflint.hcl <<'EOF'
 plugin "terraform" { enabled = true, preset = "recommended" }
 plugin "cloudflare" {
   enabled = true
-  version = "0.4.0"
+  version = "<x.y.z>"   # example pin - take the current tag from the ruleset's releases page
   source  = "github.com/terraform-linters/tflint-ruleset-cloudflare"
 }
 EOF
@@ -382,7 +384,7 @@ trivy config .                 # alternative scanner, catches misconfig
 ```yaml
 repos:
   - repo: https://github.com/antonbabenko/pre-commit-terraform
-    rev: v1.92.0
+    rev: <vX.Y.Z>   # pin to a release tag from the repo, not a branch
     hooks:
       - id: terraform_fmt
       - id: terraform_validate
@@ -392,32 +394,42 @@ repos:
 
 ## Migrations
 
-### Cloudflare provider v4 → v5 (relevant for user)
+### Cloudflare provider v4 -> v5 (relevant for user)
 
 v5 is a major schema rewrite. Key changes:
 
-- `cloudflare_record` → `cloudflare_dns_record` (resource name change, attribute rename `value` → `content`)
+- `cloudflare_record` -> `cloudflare_dns_record` (resource rename; attribute `value` -> `content`)
 - `cloudflare_ruleset` parameters restructured
-- New `account_id` required as top-level (no longer inferred)
+- `account_id` required at top level (no longer inferred)
 - Many implicit defaults removed (must be set explicitly)
 
-**Migration approach**:
+**Migration approach** (per the provider's version-5 migration and upgrade
+guides on the Terraform Registry, read 2026-09-05; the older Grit patterns
+are deprecated):
 
 ```sh
+# 0. Be on provider v4 >= 4.52.5 first - tf-migrate refuses older lock files
+#    (that release added the state-migration hooks v5 relies on).
+tofu init -upgrade && rg cloudflare -A2 .terraform.lock.hcl
+
 # 1. Snapshot current state
 cp terraform.tfstate terraform.tfstate.pre-v5
 
-# 2. Use the Cloudflare-provided migration tool
-go install github.com/cloudflare/terraform-provider-cloudflare/migration-helper@latest
-migration-helper --state terraform.tfstate --version 5
+# 2. Rewrite the HCL with Cloudflare's official tool (github.com/cloudflare/tf-migrate,
+#    release binaries). It transforms .tf only - resource renames, attribute
+#    changes, moved{}/import{} blocks - and bumps required_providers to v5.
+tf-migrate migrate --dry-run --source-version v4 --target-version v5   # preview
+tf-migrate migrate --source-version v4 --target-version v5             # in place, .bak backups
 
-# 3. Manual review of rewritten .tf
-# 4. tofu init -upgrade
-# 5. tofu plan        # expect SOME no-ops + SOME real changes; review carefully
-# 6. tofu apply
+# 3. State upgrades are AUTOMATIC on provider v5.19+ (built-in state
+#    upgraders run during plan/apply) - no state-editing step.
+tofu init -upgrade -backend=false && tofu init
+tofu plan        # expect SOME no-ops + SOME real changes; review every line
+tofu apply
 ```
 
-Stay on v4 until you have time to dedicate to the migration — it's not a casual bump.
+Stay on v4 until you have time to dedicate to the migration - it's not a
+casual bump, and the plan review is the real work.
 
 ### Refactoring resources (rename without destroy/recreate)
 
@@ -438,7 +450,7 @@ tofu state mv cloudflare_record.api_old cloudflare_record.api
 ## Drift detection
 
 ```sh
-# Plan-only — exits 0 if no drift, 2 if drift present
+# Plan-only - exits 0 if no drift, 2 if drift present
 tofu plan -detailed-exitcode -out=/dev/null
 # In CI: nonzero exit triggers alert / GitHub issue
 ```
@@ -466,19 +478,19 @@ tofu plan -out=tfplan && tofu show -json tfplan | jq '.resource_changes[] | sele
 
 ## Common footguns
 
-1. **Forgetting to `tofu init` after backend change** — the next plan fails cryptically. Re-init resolves.
-2. **Using `count` then removing the middle element** — destroys + recreates everything after. Use `for_each` with a map.
-3. **Sensitive vars leaking into plan output** — mark with `sensitive = true` in the variable block.
-4. **`terraform.tfstate` committed by accident** — secrets exposed. Always `.gitignore` + scan with `git log -p -- '*.tfstate'`.
-5. **`tofu destroy` in the wrong directory** — `pwd` before destroy, double-check, or use `-target` to scope.
-6. **Provider version drift between dev + CI** — pin in `.terraform.lock.hcl` AND commit it.
-7. **State locks held after Ctrl+C** — `tofu force-unlock <lock-id>` (only if you're sure no one else is applying).
-8. **Module changes not reflected** — `tofu init -upgrade` re-downloads modules.
-9. **Cloudflare `proxied = true` on records pointing to private IPs** — Cloudflare refuses. Set `proxied = false` for internal DNS.
-10. **Trying to `import` a managed resource** — error. Run `terraform state rm` first, then `import`.
+1. **Forgetting to `tofu init` after backend change** - the next plan fails cryptically. Re-init resolves.
+2. **Using `count` then removing the middle element** - destroys + recreates everything after. Use `for_each` with a map.
+3. **Sensitive vars leaking into plan output** - mark with `sensitive = true` in the variable block.
+4. **`terraform.tfstate` committed by accident** - secrets exposed. Always `.gitignore` + scan with `git log -p -- '*.tfstate'`.
+5. **`tofu destroy` in the wrong directory** - `pwd` before destroy, double-check, or use `-target` to scope.
+6. **Provider version drift between dev + CI** - pin in `.terraform.lock.hcl` AND commit it.
+7. **State locks held after Ctrl+C** - `tofu force-unlock <lock-id>` (only if you're sure no one else is applying).
+8. **Module changes not reflected** - `tofu init -upgrade` re-downloads modules.
+9. **Cloudflare `proxied = true` on records pointing to private IPs** - Cloudflare refuses. Set `proxied = false` for internal DNS.
+10. **Trying to `import` a managed resource** - error. Run `terraform state rm` first, then `import`.
 
 ## Related skills
 
-- **`cloudflare`** — actual CF resources (DNS / Workers / Pages / Zero Trust) + `cf-terraforming` import workflow.
-- **`infrastructure-stack`** — the compose stacks behind Caddy that the CF resources point to.
-- **`fly`** — `flyctl` for the fly.io control plane (no Terraform needed; `fly.toml` is the IaC).
+- **`cloudflare-ops`** - actual CF resources (DNS / Workers / Pages / Zero Trust) + `cf-terraforming` import workflow.
+- **`infrastructure-stack`** - the compose stacks behind Caddy that the CF resources point to.
+- **`fly`** - `flyctl` for the fly.io control plane (no Terraform needed; `fly.toml` is the IaC).
