@@ -1,82 +1,64 @@
 ---
 name: pg-analyser
-description: Use when auditing or optimizing a Postgres database's performance and producing an HTML/PDF report - Supabase projects via a Personal Access Token, or any Postgres via superuser connstring (no-PAT mode). Fires on 'pg-analyser', 'sbperf', 'database performance report', 'slow queries', 'advisors', 'fleet audit', 'reproduce supabase inspect', 'white-label a report', 'pgbench baseline'. Repo ~/work/pg-analyser (Bun, no build step).
+description: Use when auditing or optimizing a Postgres database's performance and producing an HTML/PDF report - Supabase projects via a Personal Access Token, or any Postgres via superuser connstring (no-PAT mode). Fires on 'pg-analyser', 'sbperf', 'database performance report', 'slow queries', 'advisors', 'fleet audit', 'reproduce supabase inspect', 'white-label a report', 'pgbench baseline'. NOT for the tuning rules themselves (supabase-postgres-best-practices) or platform ops (supabase).
 ---
 
 # pg-analyser - Postgres performance analyzer (formerly sbperf)
 
-Generates a ranked performance-and-security report for a Supabase project. The
-**default path needs only a Personal Access Token** - no DB password, no manual
-Grafana screenshots. It collects a **superset of the entire `supabase inspect`
-command set** (advisors, read-only SQL diagnostics, config, infra metrics, RLS
-audit, txid wraparound, edge-function stats) and renders one self-contained HTML
-report + Chromium PDF (a technical + business audit pyramid). An optional
-standalone plain-language one-pager is available via the `summary` command.
+Generates a ranked performance-and-security report for a Supabase project or
+any Postgres. The **default path needs only a Personal Access Token** - no DB
+password, no Grafana screenshots. It collects a superset of the `supabase
+inspect` command set (advisors, read-only SQL diagnostics, config, infra
+metrics, RLS audit, txid wraparound, edge-function stats) and renders one
+self-contained HTML report + Chromium PDF. `summary` adds an optional
+plain-language one-pager.
 
-There is also a **no-PAT customer-audit mode** (see below): given a superuser
-`--db-url` (and no resolvable PAT), pg-analyser runs transport-free - SQL diagnostics
-direct over the connstring, advisors from the self-hosted splinter lints, trends
-from Grafana - so you can audit a customer project you only have a connstring
-for. A single `--profile <file>.json` bundles that whole config.
+- **Repo:** `~/work/pg-analyser` - `cd ~/work/pg-analyser && bun run src/index.ts <cmd>`,
+  or the compiled `./pg-analyser <cmd>` after `bun run build`.
+- **Design, architecture, conventions, verified upstream facts:**
+  `~/work/pg-analyser/AGENTS.md` (sections "Architecture (bounded contexts)",
+  "Conventions", "Verified upstream facts"). This skill does not repeat them;
+  read AGENTS.md before changing code or attributing a finding to the
+  platform.
+- **Rules behind the findings:** the `supabase-postgres-best-practices` skill.
+- **Current flags:** `bun run src/index.ts --help` is authoritative; the
+  tables below were checked against it but the help wins.
 
-- **Repo:** `~/work/pg-analyser` - Bun runs `src/index.ts` directly, no build step.
-- **Run from the repo:** `cd ~/work/pg-analyser && bun run src/index.ts <cmd>`, or the
-  compiled binary `./pg-analyser <cmd>` after `bun run build`.
-- **Design + every gotcha:** `~/work/pg-analyser/AGENTS.md` and `~/work/pg-analyser/README.md`.
-- **Perf query source of truth:** the `supabase-postgres-best-practices` skill.
+## Three ways to reach a database
 
-Two SQL tiers behind one interface (`sqlrunner.ts`): the **PAT read-only runner**
-(`supabase_read_only_user`, default - audits a customer project with no password,
-just a PAT) and an opt-in **superuser tier** via `--db-url`/`PG_ANALYSER_DB_URL`
-(`DirectSqlRunner` over `Bun.SQL`) for your own projects or any Postgres - full
-access, all schemas, multiple/non-Supabase DBs, and `pg_stat_statements_reset()`
-windowing. `--db-url` augments the PAT (API planes + metrics still use the PAT);
-the connstring is a secret and is never written to `analysis.json` (only
-`meta.sqlSource`). PAT-only stays the default so password-free audit still works.
+1. **PAT read-only runner** (default): `SUPABASE_ACCESS_TOKEN`, or `supabase
+   login` (the CLI token at `~/.supabase/access-token` is read when the env
+   var is unset). Runs as `supabase_read_only_user`; no password.
+2. **Superuser tier** (`--db-url` / `PG_ANALYSER_DB_URL`): full access, all
+   schemas, `pg_stat_statements_reset()` windowing, non-Supabase DBs.
+   Augments the PAT (API planes + metrics still use it). `--db-url` is
+   repeatable; `--db-config <file>` (gitignored JSON `[{name?,ref?,dbUrl}]`)
+   is the list form; env fallback is `PG_ANALYSER_DB_URL` plus numbered
+   `PG_ANALYSER_DB_URL_2`, `_3`, ... The ref is derived from each connstring.
+   The connstring is a secret and is never written to `analysis.json`.
+3. **No-PAT mode**: no token resolvable (or `--no-pat` /
+   `PG_ANALYSER_NO_PAT=1`) plus a superuser `--db-url`: Management-API planes
+   are skipped with one summary note, advisors come from the vendored
+   splinter lints, trends from Grafana if configured, and the report carries a
+   banner naming what was not collected. This is the customer-audit path.
+   `--all` still needs a PAT.
 
-**Multiple DBs** (`dbtargets.ts`): `--db-url` is repeatable and there's a
-gitignored `--db-config <file>` (JSON `[{name?,ref?,dbUrl}]`). The Supabase ref
-is auto-derived from each connstring (pooler `role.ref` username or
-`db.<ref>.supabase.co` host), so a bare list needs no `--ref`. `full` sweeps
-targets into per-DB report dirs + an `index.html`; `snapshot` records each into
-the store. Env `PG_ANALYSER_DB_URL` is the single-DB fallback (ignored when --db-url/
---db-config are given). Per-DB failures degrade gracefully (SQL notes) rather
-than aborting the sweep.
-
-**No-PAT mode** (`collect(ref, null, ...)`): with NO PAT resolvable but a
-superuser `--db-url` (or `PG_ANALYSER_DB_URL` / `pg-analyser.databases.json`), pg-analyser runs
-transport-free - every Management-API plane is skipped (returns its fallback +
-one summary note, not per-plane 401 spam), advisors come from the vendored
-splinter lints (BOTH performance and security), SQL from the `--db-url`, trends
-from Grafana if configured. `meta.managementApi=false` drives a report banner
-stating what was NOT collected (provisioning/backups/pooler/metrics/analytics).
-This is the **customer-audit path**: a connstring + optional Grafana cookie, no
-PAT. Force it with `--no-pat` / `PG_ANALYSER_NO_PAT=1` even when a token exists.
-`--all` still needs a PAT (it enumerates projects via the API).
-
-**Profile** (`--profile <file>.json`, `profile.ts`): the whole customer-audit
-config in ONE gitignored JSON - `{ noPat, trendDays, grafana: { hostTemplate,
+**Profile** (`--profile <file>.json`): one gitignored JSON for the whole
+customer-audit config - `{ noPat, trendDays, grafana: { hostTemplate,
 datasourceUid, matcher, regions: { <region>: { cookie, uid?, host? } } },
-databases: [...] }`. `full --profile <f>` defaults to no-PAT (`noPat: true`),
-makes `databases[]` the sweep targets, and resolves trends **per project**: the
-region is derived from
-each connstring, mapped to that region's Grafana host/uid/cookie (each regional
-Grafana is a separate ALB, so a per-region session cookie). A region absent from
-the map -> that project's trends are skipped (SQL/advisors still run). Set
-`"noPat": false` in the profile to KEEP the PAT (Management-API planes + metrics)
-alongside the profile's Grafana graphs + superuser SQL - the fullest report;
-`--amcheck` is honoured on the profile sweep too (`full --profile <f> --amcheck`).
-Nothing
-internal is baked into the repo - hosts, UIDs, cookies, connstrings all live in
-the gitignored profile (`pg-analyser.profile.json`; keep `.example`).
+databases: [...] }`. Trends resolve per project by the region derived from
+each connstring (each regional Grafana is a separate ALB, so a per-region
+cookie). Profiles are **chainable**: `--profile a.json b.json` (or repeat the
+flag) combines them into one index, each DB keeping its own mode, Grafana and
+trend window. `"noPat": false` keeps the PAT planes alongside the profile's
+Grafana + superuser SQL. `--amcheck` is honoured on profile sweeps.
 
-**Branding + overlay** (presentation-only, both gitignored, keep `.example`):
-`--brand <file>` white-labels the report (logo, favicon, accent/link colours;
-precedence `--brand` > `PG_ANALYSER_BRAND` > `./pg-analyser.brand.json` > Supabase
-default). `--overlay <file>` is a ref-keyed **review overlay** - hide drill
-sections + append markdown notes at render time via the `drill()` choke-point,
-never touching `analysis.json` (precedence `--overlay` > `PG_ANALYSER_OVERLAY` >
-`./pg-analyser.overlays/<ref>.json` > `~/.pg-analyser/overlays/<ref>.json`).
+**Branding + overlay** (presentation-only, gitignored, keep `.example`):
+`--brand <file>` white-labels (precedence `--brand` > `PG_ANALYSER_BRAND` >
+`./pg-analyser.brand.json` > default). `--overlay <file>` is a ref-keyed
+review overlay - hide drill sections, append markdown notes at render time,
+never touching `analysis.json` (precedence `--overlay` > `PG_ANALYSER_OVERLAY`
+> `./pg-analyser.overlays/<ref>.json` > `~/.pg-analyser/overlays/<ref>.json`).
 
 ## When to reach for it
 
@@ -86,314 +68,142 @@ never touching `analysis.json` (precedence `--overlay` > `PG_ANALYSER_OVERLAY` >
 | Just the data, no render | `analyze --ref <ref>` -> `analysis.json` |
 | Re-render HTML from existing `analysis.json` | `report <dir>` |
 | Did a migration/index/tuning change help? | `diff <oldDir> <newDir>` or `diff --ref <ref>` (last 2 store snapshots) |
-| Prove it under concurrency (benchmark) | `bench --db-url <c> -f q.sql --name before` -> change one GUC -> same run `--name after` -> `bench --compare <idA> <idB>` (perf delta + pg_settings diff). Guardrails: client-saturation check, warmup + N runs, exact p50/p95/p99. Guide: `~/work/pg-analyser/docs/pgbench.md` |
+| Prove it under concurrency | `bench --db-url <c> -f q.sql --name before` -> change one GUC -> `--name after` -> `bench --compare <idA> <idB>` (perf delta + pg_settings diff). Guardrails: client-saturation check, warmup + N runs, exact p50/p95/p99. Guide: `~/work/pg-analyser/docs/pgbench.md` |
 | Gate CI on findings | `check <dir> --fail-on high\|med\|low` (+ `--category`, `--new-since <baselineDir>`); exits 1 on breach |
-| Optional plain-language one-pager | `summary <dir>` (standalone; NOT emitted by `full`/`report`/`pdf`) |
+| Plain-language one-pager | `summary <dir>` (standalone; not emitted by `full`/`report`/`pdf`) |
 | Merge external CSV/JSON trend series | `import-trends <dir> <file...>` |
-| PDF of an existing report | `pdf <dir>` (needs Chromium on PATH) |
-| Audit a subset of projects (PAT-only) | `full --ref a,b,c` / `full --ref-file refs.txt\|.csv` -> combined org/project `index.html` (repeatable + comma/space lists + file; deduped) |
-| Audit every project in the account/org | `full --all [--org <slug>]` -> `index.html` |
-| Maximal-coverage fleet audit (PAT + superuser) | `full --all --db-config <json>` - PAT enumerates + serves API/metrics; any project whose ref matches a connstring is auto-upgraded to the superuser SQL tier (deep SQL). Add `--amcheck` for integrity checks on matched projects |
-| Data-integrity check (corruption) | `--amcheck` (bt_index_check, light) or `--amcheck heap` (+ verify_heapam, heavy) - superuser + amcheck-installed only; never CREATEs it. On Supabase amcheck is bundled but supautils-gated as "unsafe", so only the `supabase_admin` superuser can `CREATE EXTENSION amcheck` (the `postgres` role cannot); a clean collection note fires if absent |
-| Audit a customer project you have NO PAT for | `--db-url <connstr>` with `--no-pat` (SQL + splinter advisors + Grafana) |
-| Audit a fleet of customer DBs (work) | `full --profile <file>.json` -> per-DB reports + index, per-region Grafana |
-| Accumulate infra trends, no Prom/Grafana | `snapshot --ref <ref>` on a schedule (see below) |
-| Trends from an existing Prometheus/Grafana | `--prometheus <url>` (+ `--prometheus-token`/`-cookie`/`-matcher` for auth'd datasources) |
-| Pick the trend query window | `--trend-days <n>` (default 30; `profile.trendDays` wins) |
-| White-label the report | `--brand <file>` (logo/favicon/colours) |
-| Add review notes / hide sections per project | `--overlay <file>` (ref-keyed, presentation-only) |
+| PDF of an existing report | `pdf <dir>` (needs Chromium on PATH or `PG_ANALYSER_CHROME`) |
+| Audit a subset of projects (PAT) | `full --ref a,b,c` / `full --ref-file refs.txt\|.csv` -> combined `index.html` |
+| Audit every project in the account/org | `full --all [--org <slug>]` |
+| Maximal-coverage fleet audit (PAT + superuser) | `full --all --db-config <json>` - projects whose ref matches a connstring are upgraded to the superuser SQL tier; add `--amcheck` |
+| Data-integrity check | `--amcheck` (bt_index_check) or `--amcheck heap` (+ verify_heapam, heavy). Superuser + amcheck installed only; never CREATEs it. On Supabase only `supabase_admin` can `CREATE EXTENSION amcheck` |
+| Audit a customer project with NO PAT | `--db-url <connstr> --no-pat` |
+| Audit a fleet of customer DBs | `full --profile <file>.json [more.json]` |
+| Accumulate infra trends, no Prom/Grafana | `snapshot --ref <ref>` on a schedule (below) |
+| Trends from an existing Prometheus/Grafana | `--prometheus <url>` (+ `--prometheus-token`/`-cookie`/`-matcher`) |
+| Trend query window | `--trend-days <n>` (default 30; `profile.trendDays` wins) |
+| Contention/incident scan window | `--incident-scan-days <n>` (default 7, capped by retention) |
 | Feed the corpus to Grafana retroactively | `export-prometheus <dir>` -> OpenMetrics -> promtool backfill |
-| Stand up the (optional) scraper stack | `scrape-init --ref <ref>` |
-| Pick a timeframe for analytics (API/function stats) | `--interval <15min..7day>` (max ~7d; nothing else is windowed) |
-| Reproduce `supabase inspect` without a password | any of the above - PAT read-only runner (default) |
-| Full-access SQL on your own project / any PG | `--db-url <connstr>` or `PG_ANALYSER_DB_URL` (superuser tier) |
-| Audit multiple superuser DBs in one run | repeatable `--db-url` or `--db-config <file>`; `full` -> per-DB reports + index |
-| Postgres tuning guidance behind the findings | `supabase-postgres-best-practices` skill |
-| Manage the platform itself (projects, keys, RLS) | `supabase` skill |
-
-## Commands
-
-```
-pg-analyser analyze  --ref <ref> [--out <dir>]   fetch all planes -> analysis.json
-pg-analyser report   <dir> [--store <db>]        analysis.json -> report.html (one combined doc)
-pg-analyser summary  <dir>                        -> summary.html (optional plain-language one-pager)
-pg-analyser pdf      <dir>                        -> report.pdf (needs Chromium)
-pg-analyser narrate  <dir>                        executive summary via LLM (PG_ANALYSER_LLM_*)
-pg-analyser narrate  <dir> --print-prompt         -> prompt.md to paste into any chat LLM
-pg-analyser narrate  <dir> --import <file>|-      embed a pasted LLM reply back (no endpoint)
-pg-analyser full     --ref <ref>                  analyze + report + pdf
-pg-analyser full     --ref <r1>,<r2> ...          audit a subset -> combined index (repeatable;
-                                             comma/space lists; snapshot loops, analyze rejects)
-pg-analyser full     --ref-file <refs.txt|.csv>   subset refs from a file (ref-shaped tokens only)
-pg-analyser full     --all [--org <slug>]         audit every project + index.html
-pg-analyser full     --all --db-config <json>     ...+ upgrade matched projects to superuser SQL (PAT+connstrings = max coverage)
-pg-analyser full     --profile <file>.json        no-PAT work sweep (per-region Grafana + customer DBs)
-pg-analyser full     --db-url <connstr> [--no-pat] superuser SQL tier (augments PAT, or sole source no-PAT)
-pg-analyser analyze  --ref <ref> --db-url <c> --amcheck[ heap]  opt-in integrity: bt_index_check (+ verify_heapam); superuser + ext only
-pg-analyser snapshot --ref <ref> [--store <db>]   collect + append to the history store
-pg-analyser diff     <oldDir> <newDir>            findings delta + per-query (queryid) regressions
-pg-analyser diff     --ref <ref> [--store <db>]   same, over the last 2 history-store snapshots
-pg-analyser check    <dir> --fail-on high|med|low CI gate; exit 1 on breach (+ --category, --new-since <dir>)
-pg-analyser bench    --db-url <c> [-f x.sql|-b tpcb-like]  pgbench with methodology guardrails -> run history
-pg-analyser bench    --list / --show <id> / --compare <a> <b>  read stored runs (--compare = perf + GUC diff)
-pg-analyser import-trends <dir> <file...>         merge external CSV/JSON series into analysis.trends
-pg-analyser export-prometheus <dir> [--ref <ref>] history store -> OpenMetrics for promtool backfill
-pg-analyser scrape-init --ref <ref>               write the (alternate) Prometheus+Grafana stack
-```
+| Stand up the optional scraper stack / alert rules | `scrape-init --ref <ref>` / `alerts-init [--ref <ref>] [--dir <d>]` |
+| Analytics timeframe (API/function stats) | `--interval <15min..7day>` (max ~7d; nothing else is windowed) |
+| Reproduce `supabase inspect` without a password | any of the above on the PAT runner |
+| Tuning guidance behind a finding | `supabase-postgres-best-practices` skill |
+| Manage the platform itself | `supabase` skill |
 
 Repo scripts: `bun run check` (biome write), `bun run typecheck`, `bun test`,
-`bun run check:api` (endpoints drift), `bun run check:inspect` (CLI inspect SQL
-drift), `bun run check:lints` (splinter lints vs the src/lints.ts fix catalog),
-`bun run build`.
+drift checks `check:api` (Management API endpoints vs live spec),
+`check:inspect` (CLI inspect SQL), `check:lints` (splinter lints vs
+`src/lints.ts`), `check:alerts` (alert-rule pack), `check:schemas`,
+`check:docurls` (doc links in findings), `check:pgversions`, and `bun run
+test:live` (acceptance against a real project - costs API calls). `bun run
+build` compiles the binary.
 
-**Report shape** (technical + business audit pyramid, one combined `report.html`
-/ `report.pdf`): verdict + Executive summary (deterministic hedged synthesis,
-or the LLM narrative when run) -> Resource snapshot (30-day sparklines from the
-store) -> What's looking good -> Findings worth addressing, each as *What's
-happening / Why it matters / What to do (+ copy-pasteable SQL) / How to verify*
-with a doc link + Advisor deep-link -> Evidence drill-down. Findings are
-deterministic (`heuristics.ts` catalog + `lints.ts` per-splinter-lint fixes);
-the LLM only writes the summary prose and is forbidden from inventing.
+**Report shape**: verdict + executive summary (deterministic, or the LLM
+narrative when run) -> resource snapshot (sparklines from the store) -> what's
+looking good -> findings, each as *What's happening / Why it matters / What to
+do (+ SQL) / How to verify* with a doc link -> evidence drill-down. Findings
+are deterministic (`heuristics.ts` catalog + `lints.ts` per-lint fixes); the
+LLM only writes summary prose and is forbidden from inventing.
 
 **LLM routes** (all optional): auto (`PG_ANALYSER_LLM_BASE_URL` + `_MODEL`),
-copy-paste (`narrate --print-prompt` -> paste into pi.dev/ChatGPT/Claude ->
-`narrate --import`), or skip (deterministic summary). A pi tool wrapper lives at
-`extensions/pg-analyser.pi.ts` (symlink into `~/.pi/agent/extensions/`) - its
-`narrate_prompt`/`narrate_import` actions make pi itself the LLM for the
-round-trip.
-
-## Auth
-
-Set `SUPABASE_ACCESS_TOKEN` (a PAT), **or** run `supabase login` - pg-analyser reads
-`~/.supabase/access-token` automatically when the env var is unset (resolution
-order: env var first, then CLI token; prints a one-line notice when the CLI
-token is used). The per-project `service_role` key for the metrics endpoint is
-auto-fetched via the Management API per run and never written to disk.
-
-**No PAT at all?** Provide a superuser `--db-url` (or `PG_ANALYSER_DB_URL` /
-`pg-analyser.databases.json` / a `--profile`) and pg-analyser runs transport-free - see
-no-PAT mode above. `--no-pat` / `PG_ANALYSER_NO_PAT=1` forces it even when a token is
-resolvable. `--all` is the one path that still requires a PAT.
-
-## Architecture (bounded contexts)
-
-```
-config.ts      zod env -> Config (access token, source)
-transport.ts   Transport interface + DirectTransport (auth + retry); null in
-               no-PAT mode (every Management plane then skipped)
-management.ts  typed, zod-parsed Management API wrapper (incl. the security-config
-               planes: config/auth, network-restrictions, ssl-enforcement)
-sqlrunner.ts   SQL tiers behind one interface: ManagementSqlRunner (PAT read-only,
-               default) + DirectSqlRunner (superuser --db-url via Bun.SQL)
-splinter.ts    self-hosted advisor: runs the vendored splinter.sql over --db-url
-               (fallback in PAT mode for the 42601 bug; PRIMARY in no-PAT mode)
-dbtargets.ts   multi-DB target parsing + ref/region-from-connstring derivation
-profile.ts     --profile: force-no-PAT + region-mapped Grafana + customer DBs
-sql.ts         the perf query set (superset of `supabase inspect db`)
-rls.ts         isUnwrappedAuth: flags un-wrapped auth.* calls in RLS policies
-metrics.ts     Prometheus text parser + DISPLAY-only allowlist (curate())
-collect.ts     orchestrate all planes -> validated Analysis; captures the
-               COMPLETE metrics corpus (all ~321 families, no curation)
-heuristics.ts  evergreen THRESHOLDS + per-finding metadata (why/how/verify/sql)
-lints.ts       per-splinter-lint fix catalog (concrete fix, not "go to Advisor")
-findings.ts    deriveFindings/derivePositives: the deterministic ranking pass
-               (incl. trend-driven capacity suggestions, data-aware). Also
-               securityConfigFindings() = pg-analyser-ORIGINAL Security findings from
-               the auth/network/SSL planes (not advisor passthrough), and the
-               extension-health findings (outdated ext, unindexed pgvector,
-               pg_cron nudge)
-diff.ts        computeDiff(baseline, current): findings appeared/resolved/severity-
-               changed + per-query regressions matched by pg_stat_statements
-               queryid (>=1.5x mean-exec = regression) + scalar deltas
-check.ts       evaluateGate: findings -> pass/fail by --fail-on severity (+
-               --category, --new-since baseline). CLI exits 1 on breach - CI gate
-trendstats.ts  trend primitives (slope/sustained/peak/projection) behind
-               sufficient() gating so short series never over-claim
-store.ts       SQLite history store (bun:sqlite) for the snapshot/trends path
-trends.ts      pure computeTrends: gauges + counter-derived rates, read-time
-               downsampling to ~300 pts/panel; --trend-days window, auto-scoped
-prometheus.ts  optional trends from an auth'd Prometheus/Grafana datasource
-promexport.ts  store -> OpenMetrics (timestamped) for `export-prometheus`;
-               promtool backfills a Prometheus TSDB (retroactive Grafana)
-narrate.ts     grounded LLM pass over corpus + findings -> narrative.md
-brand.ts       report white-labeling (--brand); overlay.ts ref-keyed review overlay
-report/render  Analysis -> self-contained HTML (utilitarian, print CSS)
-report/pdf     HTML -> PDF via headless Chromium (--print-to-pdf)
-scraper.ts     generate the alternate Prometheus+Grafana stack
-sync.ts        on-by-default upstream sync check -> report footer
-index.ts       CLI
-```
+copy-paste (`narrate --print-prompt` -> any chat LLM -> `narrate --import`),
+or skip. The pi tool wrapper is `extensions/pg-analyser.pi.ts` in the repo;
+the live `~/.pi/agent/extensions/pg-analyser.pi.ts` symlink points at the
+dotfiles copy `~/dotfiles/.pi/agent/extensions/pg-analyser.pi.ts`, not at the
+repo - update the dotfiles copy when the repo one changes. Its
+`narrate_prompt`/`narrate_import` actions make pi the LLM for the round-trip.
 
 ## Infra trends: pg-analyser is its own collector
 
-**No Supabase API returns multi-day infra history** (verified 2026-07): the
-metrics endpoint takes no time param (point-in-time scrape), and the analytics
-endpoints cap ~7d (`interval=1day` -> 24 hourly buckets). Time series **must**
-be accumulated going forward. pg-analyser does this itself - no Prometheus/Grafana.
-The trend query window is `--trend-days <n>` (default 30; `profile.trendDays`
-wins for a profile run) and **auto-scopes** to a project's real data span, so a
-young project charts its actual history instead of a mostly-empty 30 days.
+No Supabase API returns multi-day infra history: the metrics endpoint is a
+point-in-time scrape and the analytics endpoints cap at ~7 days. Time series
+must be accumulated going forward; pg-analyser does this itself.
 
 ```bash
 # schedule this (hourly cron / systemd timer):
 pg-analyser snapshot --ref <ref>
 #   -> full collect, appends to ~/.pg-analyser/history.db (SQLite, keyed by ref),
 #      prunes snapshots older than --retention-days (default 90; 0 = keep all)
-
-# any report then draws trends from accumulated history:
-pg-analyser report <dir>
+pg-analyser report <dir>      # draws trends from accumulated history
 ```
 
-- **Store**: single SQLite file at `~/.pg-analyser/history.db` (override `--store`),
-  keyed by ref so one store holds every project. Retains the full `Analysis`
-  JSON per snapshot **plus** denormalized `metric_samples`/`sql_scalars` for
-  cheap trend queries; deletes cascade on prune.
-- **Gauges** (load, free memory/disk, DB size, cache-hit) plot directly - one
-  point per snapshot.
-- **Counters** (`node_cpu_*`, `node_disk_*`, `node_network_*` `_total`) become
-  CPU utilization %, disk IOPS, and throughput - **rates need >=2 snapshots**.
-  All counter families are captured (see completeness note below), so any of
-  them is trendable even if the current report doesn't chart it yet.
-- **`--prometheus <url>` takes precedence** over the store when both exist
-  (report only fills trends from the store if no scraper trends are baked in).
-- **Retroactive Grafana**: `export-prometheus <dir> [--ref <ref>]` renders the
-  store as OpenMetrics with timestamps (all families TYPE=unknown to dodge OM
-  suffix strictness). It prints the verified backfill runbook: `promtool tsdb
-  create-blocks-from openmetrics` (two tokens) via the prom/prometheus image
-  (`--entrypoint promtool`, `--user 65534` to write the volume) imports into the
-  scrape-init stack; restart and Grafana queries history retroactively. Verified
-  vs prom/prometheus:v3.1.0. SVG trends remain the zero-infra fallback.
+- Gauges plot directly; counters (`node_cpu_*`, `node_disk_*`,
+  `node_network_*` `_total`) become rates and need >= 2 snapshots. The whole
+  scrape (~321 families) is stored; `curate()` in `metrics.ts` is a
+  display-only filter for the HTML table. Never gate storage behind it.
+- `--prometheus <url>` takes precedence over the store when both exist.
+- `export-prometheus <dir>` renders the store as OpenMetrics and prints the
+  promtool backfill runbook for the `scrape-init` stack.
+- **Trend gotcha**: snapshots closer together than the node_exporter scrape
+  interval see identical counters -> zero rates, and CPU utilisation is
+  correctly omitted rather than spiking. Hourly snapshots straddle real
+  scrape intervals; do not "fix" a zero rate by lowering the interval.
 
-### Trend gotcha
-
-Snapshots taken closer together than Supabase's node_exporter scrape interval
-see **identical counter values** -> zero deltas -> 0 rates, and CPU utilization
-is correctly *omitted* (can't divide 0/0) rather than spiking. This is expected;
-hourly cron snapshots straddle real scrape intervals and produce real rates.
-Don't "fix" a zero-rate trend by lowering the snapshot interval.
-
-## Completeness: the corpus is the product
-
-`collect` captures the **entire** metrics scrape - ~321 families / ~850 samples
-on a real project (node_exporter + postgres_exporter + pgbouncer + supavisor +
-gotrue + realtime + postgREST + db_sql + physical-replication lag). **Nothing is
-dropped at collection.** `curate()` in `metrics.ts` is a DISPLAY-only filter used
-solely by the HTML report's metrics table (shows ~70 key point-in-time metrics
-and notes "of N captured"); the full corpus is in `analysis.json` and the SQLite
-store. Never gate storage behind that allowlist. Design intent (2026-07):
-collect the whole corpus now; analysis/report/PDF becomes an LLM pass over the
-corpus later. The endpoint is essentially node_exporter + a postgres_exporter
-with some Supabase extras - it makes the project's internal Grafana unnecessary.
-
-## Verified upstream facts (Supabase, 2026-07)
-
-- Advisors REST `/v1/projects/:ref/advisors/{performance,security}` returns
-  `{ lints: [...] }` (richer than the CLI - includes INFO lints). The zod schema
-  accepts `lints` **or** `results` but fails loud if neither is present.
-- KNOWN BUG (2026-07): the hosted `advisors/performance` endpoint 400s with
-  `42601 ... 'storage.buckets'` - splinter's multi-statement storage-buckets
-  lint on the prepared-statement path (supabase/cli#4965; fixed in CLI, not the
-  hosted endpoint). `advisors/security` still works. FALLBACK: with `--db-url`,
-  pg-analyser runs the vendored `splinter.sql` itself over the simple-query protocol
-  (`splinter.ts` + `DirectSqlRunner.runMulti`) and fills `advisors.performance`
-  from it - so perf lints survive the hosted bug. Verified live: recovered 7
-  unindexed-FK + 3 unused-index lints on a project the API returned 0 for.
-- Read-only SQL: `POST /v1/projects/:ref/database/query/read-only` runs as
-  `supabase_read_only_user`; reaches `extensions.pg_stat_statements`, `pg_statio`,
-  catalogs. No DB password needed.
-- Metrics endpoint is a point-in-time scrape target, not a TSDB - see the trends
-  section for why 30-day history must be accumulated.
-- Per-function stats: `GET .../analytics/endpoints/functions.combined-stats?
-  interval=<window>&function_id=<id>` - needs the function `id` (not the slug);
-  collect.ts aggregates the per-time-bucket rows per function.
-- Timeframe is selectable ONLY for the analytics endpoints (API counts +
-  function stats) via `--interval` - enum `15min|30min|1hr|3hr|1day|3day|7day`,
-  max reach ~7 days (iso ranges are clamped by the API). Metrics are
-  point-in-time; pg_stat_statements is cumulative-since-reset. Longer horizons
-  need the snapshot history store.
-- `supabase inspect report` requires a `--db-url`/`--linked` (a password) and
-  emits raw CSV, no findings. pg-analyser runs password-free by default (PAT only)
-  AND, given a `--db-url` in no-PAT mode, does everything inspect does plus
-  ranked findings, splinter advisors, metrics, RLS audit, txid wraparound, and
-  edge-function stats the CLI lacks. Parity was checked against the CLI's
-  **actual query source**
-  (`github.com/supabase/cli apps/cli-go/internal/inspect/*/*.sql`), not its help.
-
-## Conventions & gotchas
+## Conventions that bite
 
 - **Every external response has a zod schema in `schemas.ts`.** Never
-  `.default([])` to paper over a shape mismatch - it silently masks upstream
-  changes. Use `.refine()` to fail loud; `collect.ts`'s per-source `safe()`
-  wrapper records the failure as a collection note without aborting the run.
-- **API-drift check** (`scripts/check-api-drift.ts`, run in CI): PRIMARY layer
-  pass/fails against the LIVE served spec (`api.supabase.com/api/v1-json`);
-  CROSS-CHECK advisory-diffs the live spec against the version-controlled docs
-  copy. When you add/rename a Management API call in `management.ts`, update the
-  manifest in that script.
-- **Metrics display-allowlist rot**: the metrics endpoint is NOT in the OpenAPI
-  spec, so the drift check can't catch renamed exporter families (e.g.
-  `pgbouncer_pools_cl_*` -> `_client_*`). This no longer affects *capture*
-  (everything is stored regardless), only the HTML display slice.
-  `test/metrics.test.ts` guards a representative slice - keep the `ALLOW` list in
-  `metrics.ts` matched to a real scrape so the display table stays useful.
-- **Generated reports contain live query text + a live scraper credential** -
-  `reports/` and scraper dirs are gitignored. Don't commit them.
-- **PDF** needs a system Chrome/Chromium on PATH (`chromium`, `google-chrome`,
-  ...) or `PG_ANALYSER_CHROME=/path/to/chrome`. `analyze`/`report` need no browser.
-- **Never run the compiled binary blindly** to "test" - prefer `bun test` /
-  targeted `bun run src/index.ts`. Live runs hit real projects (read-only, but
-  still real API calls); use a real `--ref` from `supabase projects list`.
-- **The installed binary lags the tree.** `~/.local/bin/pg-analyser` is whatever
-  was last built; a report's footer and `meta.sbperfVersion` name the version
-  that produced it. On 2026-09-03 a report was four releases behind the repo (0.10.1 vs
-  0.12.0) and half its suspect findings were already fixed on main. Rebuild
-  (`bun run build`) before re-running or attributing a finding to a live rule.
-- **`bun run check:pgversions` warns; `PG_ANALYSER_PGVER_UPDATE=1` only PRINTS
-  the refreshed table.** Apply it to `src/pgversions.ts` by hand and bump
-  `PG_VERSIONS_AS_OF`. Postgres ships minors at least every three months
-  (versioning policy); the table lagged 17.11 for over three weeks.
+  `.default([])` over a shape mismatch; `.refine()` to fail loud. The
+  per-source `safe()` wrapper in `collect.ts` records a failure as a
+  collection note instead of aborting.
+- **Generated reports contain live query text and a live scraper
+  credential.** `reports/`, scraper dirs, `pg-analyser.profile.json`,
+  `pg-analyser.databases.json` and the `sbperf.<ref>.profile.json` files in
+  the repo root are gitignored (`git check-ignore -v` on one shows the
+  `.gitignore` rule). Confirm with `check-ignore` before creating any new
+  file that holds a ref, cookie or connstring - the remote is public.
+- **Never run the compiled binary blindly to "test"**: `bun test` or a
+  targeted `bun run src/index.ts`. Live runs hit real projects (read-only,
+  but real API calls).
+- **Rebuild before attributing a finding.** `~/.local/bin/pg-analyser` is
+  whatever was last built; a report's footer and `meta.sbperfVersion` name the
+  version that produced it. Compare with `package.json` and `git log
+  v<that>..HEAD` first - a stale binary reports rules that main has already
+  fixed. `bun run build` before re-running.
+- **`check:pgversions` warns; `PG_ANALYSER_PGVER_UPDATE=1` only prints** the
+  refreshed table. Apply it to `src/pgversions.ts` by hand and bump
+  `PG_VERSIONS_AS_OF`. Postgres ships minors at least quarterly.
 
 ## Reviewing a report for overreach
 
-Findings are deterministic, so a report never invents data - a bad finding is a
-rule turning an ambiguous signal into a causal claim. Review in this order:
+Findings are deterministic, so a report never invents data - a bad finding is
+a rule turning an ambiguous signal into a causal claim. Review in this order:
 
-1. **Version first.** `meta.sbperfVersion` in `analysis.json` vs `package.json`,
-   then `git log v<that>..HEAD`. Attribute stale-binary issues separately.
+1. **Version first.** `meta.sbperfVersion` in `analysis.json` vs
+   `package.json`, then `git log v<that>..HEAD`. Attribute stale-binary issues
+   separately.
 2. **Trace every disputed number.** Each title's numbers come from a row in
-   `analysis.json` (`sql.*`) or a series in `trends[]` (Prometheus means over
-   the window). A python one-liner over the JSON beats reading the HTML.
+   `analysis.json` (`sql.*`) or a series in `trends[]`. A python one-liner
+   over the JSON beats reading the HTML.
 3. **Read the rule.** The inference lives in `src/findings.ts`; the prose in
    `src/heuristics.ts`. Ask: what other state produces this same signal?
    Known past overreaches: "counters were reset" from 0 live rows alone (an
    emptied queue table looks the same), "infinite recursion" from any
    self-referencing policy (only SELECT/ALL shapes, or write-only with a
    subquery-bearing SELECT policy, recurse), "footprint can't be explained"
-   from total bytes (TOAST + ANN index explained it), "never vacuumed" inside a
-   10-day stats window.
+   from total bytes (TOAST + ANN index explained it), "never vacuumed" inside
+   a 10-day stats window.
 4. **Settle Postgres semantics empirically, in-session.** `docker run -d
-   postgres:17-alpine` and reproduce the exact shape; check the docs page for
-   the claim you are about to encode. Three confident answers were wrong on
-   2026-09-03 (RLS recursion shapes; reltuples vs vacuum timestamps as the
-   reset discriminator; pg_relation_size vs pg_table_size for TOASTed tables).
-   Tear the container down afterwards.
+   postgres:17-alpine`, reproduce the exact shape, and read the docs page for
+   the claim before encoding it; confident answers about RLS recursion,
+   `reltuples` vs vacuum timestamps, and `pg_relation_size` vs
+   `pg_table_size` have all been wrong. Tear the container down afterwards.
 5. **Date the stats window.** pg_stat_statements age, checkpointer
-   `stats_reset` and a null pg_stat_database reset marker agreeing = an unclean
-   restart wiped everything then. Every counter-derived finding is "since
-   then"; `statsWindowDays()` in findings.ts is the helper.
-6. **Fix the rule, not the report.** Add the discriminating column to the SQL
-   (biggestTables gained `dead_rows`/`est_rows`/`maintained`), gate on it, add
-   a regression test with the real shape (anonymise customer object names), and
-   record the measured fact in AGENTS.md "Verified upstream facts".
+   `stats_reset` and a null pg_stat_database reset marker agreeing = an
+   unclean restart wiped everything then. Every counter-derived finding is
+   "since then"; `statsWindowDays()` in findings.ts is the helper.
+6. **Fix the rule, not the report.** Add the discriminating column to the SQL,
+   gate on it, add a regression test with the real shape (anonymise customer
+   object names), and record the measured fact in AGENTS.md "Verified
+   upstream facts".
 
 Customer identifiers (project refs, table and policy names, bucket names, node
-addresses) live in `reports/` (gitignored) and must not travel into tests,
-docs or commit messages - the repo remote is public.
+addresses) live in `reports/` and the gitignored profiles and must not travel
+into tests, docs or commit messages - the repo remote is public.
 
 ## See also
 
 - `~/work/pg-analyser/AGENTS.md` - authoritative conventions + verified-facts log.
 - `supabase` skill - API/CLI/auth reference for the platform itself.
-- `supabase-postgres-best-practices` skill - source of the perf queries.
+- `supabase-postgres-best-practices` skill - the rules behind the findings.
 - `sbshift` skill - the migration sibling; also a PAT + Management API tool.
 - `design-utilitarian` skill - the report's visual ethos.

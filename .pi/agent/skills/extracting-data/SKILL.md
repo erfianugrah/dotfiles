@@ -1,37 +1,24 @@
 ---
 name: extracting-data
-description: Use when about to write a shell pipeline that FINDS or EXTRACTS information - jq/JSON, rg/grep searching, find/fd file discovery, yq, duckdb, mlr, gron, htmlq, awk/sed/cut, fzf filtering, xargs - and when one of those comes back empty, errors, or returns something that looks wrong. Fires on "parse the response", "search the codebase for", "which files contain", "pull the field out of", "why did this jq/rg return nothing", "count the occurrences", reading a CSV/YAML/HTML/lockfile/JSONL, and any curl piped into jq. NOT for editing code (that is the minimal-diff ladder), reading credential VALUES (secret-handling), or pi session search (session_search / memledger_search own that).
+description: "Use when about to write a shell pipeline that FINDS or EXTRACTS information - jq/JSON, rg searching, fd file discovery, yq, duckdb, mlr, gron, htmlq, awk/sed, xargs - and when one comes back empty, errors, or looks wrong. Fires on 'parse the response', 'search the codebase for', 'which files contain', 'pull the field out of', 'why did this jq/rg return nothing', 'count the occurrences', any curl piped into jq. NOT for editing code, credential VALUES (secret-handling), or session-history search."
 ---
 
 # extracting-data
 
-Finding and extracting is the hot path. Measured over 400 sessions of this
-agent's own history, 24,388 tool calls:
-
-| tool | calls | share |
-|---|---|---|
-| bash | 16,342 | 67.0% |
-| edit | 1,987 | 8.1% |
-| read | 1,810 | 7.4% |
-| write | 880 | 3.6% |
-
-Of the 16,344 bash calls, 70.7% contain an extraction stage
-(`| jq/rg/grep/awk/sed/cut/head/tail/wc/sort/uniq`), 39.6% invoke a searcher,
-13.1% invoke `jq`. Roughly 60% of everything this agent does is search or
-extraction, against 11.7% for the two mutation tools.
-
-Every behaviour below was executed locally against the installed versions on
-2026-09-02, not recalled: `jq-1.8.2`, `rg 15.2.0`, `fd 10.5.0`, `fzf 0.74.3`,
+Finding and extracting is the hot path: measured over this agent's own
+session history, roughly 60% of tool calls are search or extraction and about
+12% are edits. Every behaviour below was executed locally against the
+installed versions (`jq-1.8.2`, `rg 15.2.0`, `fd 10.5.0`, `fzf 0.74.3`,
 `yq v4.53.3`, `mlr 6.21.0`, `dsq 0.23.0`, `duckdb v1.5.5`, `htmlq 0.4.0`,
-`sd 1.0.0`, `ast-grep 0.44.1`, GNU `xargs`. No `xsv`, no `jaq`. Re-verify
-before porting any of it to another box.
+`sd 1.0.0`, `ast-grep 0.44.1`, GNU `xargs`; no `xsv`, no `jaq`), not
+recalled. Re-verify before porting any of it to another box.
 
 ## Three questions before the pipeline
 
 1. **Is the answer already in context?** Endpoint shapes, canonical commands,
    file layouts and earlier tool results usually sit in the prepended rules or
-   a loaded SKILL.md. (2026-09-02: six calls guessing an API's JSON shape that
-   was written in the session's own system prompt.)
+   a loaded SKILL.md. Six calls guessing an API's JSON shape that was written
+   in the session's own system prompt is the observed failure.
 2. **What shape is the data?** Guessing the shape produces the parse errors
    below.
 3. **What is the cheapest probe that discriminates?** Rank probes by cost over
@@ -252,8 +239,8 @@ archive members.
 even with `-maxdepth`; `rg --files` is parallel and ignore-aware.
 
 ```bash
-rg --files ~/proj | rg -i '\.tsx?$'
-rg --files -g '*.ts' ~/proj/src
+rg --files ~/work | rg -i '\.tsx?$'
+rg --files -g '*.ts' ./src
 ```
 
 `fd` for what rg cannot express - and note its flags differ from rg's:
@@ -305,7 +292,7 @@ search matches nothing. Always `-r`.
 | SQL across mixed files | `dsq` | `dsq a.csv b.json 'SELECT ...'` |
 | Big CSV/Parquet/JSON(L) | `duckdb` | `duckdb -c "SELECT sum(a) FROM read_json_auto('f.jsonl')"` |
 | Code structure | `ast-grep` | `ast-grep --pattern 'foo($A)' -l ts` |
-| Symbols / references | `lsp` tool | accurate where regex is not |
+| Symbols / references | the `lsp` tool (pi extension `extensions/lsp/`) | accurate where regex is not; fall back to `ast-grep` where the tool is absent |
 
 `duckdb` reads csv/json/parquet off disk with SQL including globs
 (`'logs/*.json'`) - reach for it before writing Python to aggregate.
@@ -378,7 +365,7 @@ anything that might run under busybox or mawk.
 ## sed (GNU sed 4.10 here)
 
 House rule first: **do not use sed to edit source code** - `sd` for plain
-text, `ast-grep --rewrite` for structure, the `edit` tool for one-off
+text, `ast-grep --rewrite` for structure, the harness's edit tool for one-off
 surgical changes. sed earns its place for line-addressed work on streams and
 large files.
 
@@ -448,13 +435,14 @@ secretctl cmp 'sops:.env#K' 'docker:HOST/C#K'   # do they match?
 ```
 
 `rg -o 'PASSWORD=.*'` prints the password into the transcript and the synced
-session store. Full method: `~/.pi/agent/skills/secret-handling/SKILL.md`.
+session store. Full method: the `secret-handling` skill.
 
-## pi session logs
+## Session logs
 
-`session_search` and `memledger_search` are the access path. Drop to `jq` on
-the `.jsonl` only for what an index cannot answer - tool-call sequencing,
-timestamps, per-session statistics:
+History search tools are the access path: `session_search` /
+`memledger_search` in pi, `search_messages` / `search_ledger` (erfi-toolkit)
+in Claude Code. Drop to `jq` on the pi `.jsonl` files only for what an index
+cannot answer - tool-call sequencing, timestamps, per-session statistics:
 
 ```bash
 jq -r 'select(.type=="message" and .message.role=="assistant")
@@ -463,14 +451,9 @@ jq -r 'select(.type=="message" and .message.role=="assistant")
   | sort | uniq -c | sort -rn
 ```
 
-## Prior art
+## Provenance
 
-Surveyed 2026-09-02: `anthropics/skills`, `obra/superpowers` and
-`addyosmani/agent-skills` carry ZERO CLI/data skills between them - nothing
-upstream to adopt wholesale. Two references worth knowing: `ykotik`'s
-`data-processing` (MIT; jq/yq/gron/mlr/duckdb composition with "do not use
-when" guardrails) and `jpcaparas/skills`' `ripgrep` (unlicensed, so structure
-only - its decision-tree + verified-behaviours layout is the model here).
 Behavioural claims come from the upstream jq manual/FAQ and the ripgrep
-GUIDE/FAQ, then re-executed locally; where a published worked example
-disagreed with the installed binary (glob precedence), the binary won.
+GUIDE/FAQ, then re-executed locally on the versions listed at the top; where
+a published worked example disagreed with the installed binary (glob
+precedence), the binary won. Re-verify on any other machine.

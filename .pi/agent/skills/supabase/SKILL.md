@@ -1,35 +1,59 @@
 ---
 name: supabase
-description: "Use when doing ANY task involving Supabase. Triggers: Supabase products (Database, Auth, Edge Functions, Realtime, Storage, Vectors, Cron, Queues); client libraries and SSR integrations (supabase-js, @supabase/server, @supabase/ssr) in Next.js, React, SvelteKit, Astro, Remix; auth issues (login, logout, sessions, JWT, cookies, getSession, getUser, getClaims, RLS); Supabase CLI or MCP server; schema changes, migrations, security audits, Postgres extensions (pg_graphql, pg_cron, pg_vector)."
+description: "Use when building on or operating Supabase - wiring supabase-js, @supabase/server or @supabase/ssr; getClaims vs getUser vs getSession; reaching a project database without a DB password; the supabase CLI or MCP; schema iteration and migrations; RLS policy design; Edge Functions, Realtime, Storage, Auth, branching, pooler ports. NOT for a Postgres performance report (pg-analyser), a logical-replication migration (sbshift), or SQL/index/RLS-predicate tuning (supabase-postgres-best-practices)."
 metadata:
   author: supabase
-  version: "0.5.0"
+  version: "0.6.0"
 ---
 
 # Supabase
 
 ## Core Principles
 
-1. **Verify against current docs first.** Training data stale. Fn signatures, config.toml, API conventions change between versions. Look up before implementing.
-
-2. **Verify work.** Run test query after every fix. Unverified fix = incomplete.
-
-3. **Verify against upstream source before claiming SDK violations.** When a function "must take parameter X", read `node_modules/@supabase/.../<file>.js` to confirm. The May 2026 pastebin audit had two findings that were wrong because they assumed SDK contracts that didn't match the actual implementation — five minutes of source-reading would have caught both.
-
-4. **Recover, don't loop.** If approach fails 2-3 attempts, stop. Try different method, check docs, inspect error, review logs.
-
-5. **RLS by default.** Enable RLS on every table in exposed schemas. Private schemas: RLS as defense-in-depth. Create policies matching actual access model, not blanket `auth.uid()`.
+1. **Verify against current docs first.** Training data is stale. Function
+   signatures, `config.toml` keys and API conventions change between versions.
+   Look up before implementing (Docs Access below).
+2. **Verify work.** Run a test query after every fix. An unverified fix is
+   incomplete.
+3. **Read the SDK source before claiming a contract violation.** When a
+   function "must take parameter X", read
+   `node_modules/@supabase/.../<file>.js` to confirm. Findings built on an
+   assumed SDK contract have been wrong; five minutes of source-reading
+   catches them.
+4. **Recover, don't loop.** If an approach fails 2-3 attempts, stop. Try a
+   different method, check docs, inspect the error, review logs.
+5. **RLS by default.** Enable RLS on every table in exposed schemas. Private
+   schemas: RLS as defence-in-depth. Policies match the actual access model,
+   not a blanket `auth.uid()`. Predicate performance
+   (`(SELECT auth.uid())`, join minimisation) is in the
+   `supabase-postgres-best-practices` skill.
 
 ## Picking the right Supabase library
 
 | Use case | Library |
 |---|---|
-| **Edge Function / Worker / Vercel Function / Hono / Bun** with **header-based** auth (Bearer JWT) | **`@supabase/server`** ← default since May 2026 |
+| **Edge Function / Worker / Vercel Function / Hono / Bun** with **header-based** auth (Bearer JWT) | **`@supabase/server`** - the default for backend code |
 | **Next.js / SvelteKit / Astro / Remix** with **cookie-based** auth | `@supabase/ssr` |
 | **Browser client** (frontend, queries via PostgREST/Realtime) | `@supabase/supabase-js` |
-| **Worker BFF with HttpOnly cookies** (browser → Worker → Supabase, browser never sees JWT) | Hand-rolled with `@supabase/supabase-js` + `getServiceRoleClient` cache. `@supabase/server` is header-only and doesn't replace this. |
+| **Worker BFF with HttpOnly cookies** (browser -> Worker -> Supabase, browser never sees the JWT) | Hand-rolled `@supabase/supabase-js` + `getServiceRoleClient` cache. `@supabase/server` is header-only and does not replace this. |
 
-If you're hand-rolling auth verification, JWT parsing, two clients (user-scoped + admin), CORS, env-var wiring, or `_shared/*.ts` files inside an Edge Function or Worker — **stop and use `@supabase/server`** instead.
+If you are hand-rolling auth verification, JWT parsing, two clients
+(user-scoped + admin), CORS, env-var wiring, or `_shared/*.ts` files inside an
+Edge Function or Worker - stop and use `@supabase/server`.
+
+## Server-side identity: getClaims / getUser / getSession
+
+From the docs mirror `/docs/supabase/guides/auth/server-side/creating-a-client.md`:
+
+- `getClaims()` protects pages and data. It verifies the access token locally
+  (WebCrypto + cached JWKS) when the project uses asymmetric signing keys (the
+  default for new projects); with symmetric keys it calls `getUser` solely to
+  validate. Claims come from the JWT, never from a user lookup.
+- `getUser()` when you need a fresh, server-confirmed user record; it costs a
+  network call to Auth.
+- `getSession()` only when you need the raw access/refresh token to forward.
+  It is read from storage and not re-validated, so never trust its user
+  object for authorisation in server code (middleware, proxies, loaders).
 
 ## `@supabase/server` quickstart (default for backend code)
 
@@ -39,186 +63,143 @@ import { withSupabase } from 'npm:@supabase/server' // or '@supabase/server' on 
 export default {
 	fetch: withSupabase({ auth: 'user' }, async (req, ctx) => {
 		const { supabase, supabaseAdmin, userClaims, jwtClaims, authMode, authKeyName } = ctx;
-		// supabase       — RLS-scoped (user or anon depending on auth mode)
-		// supabaseAdmin  — bypasses RLS (service role)
-		// userClaims     — JWT-derived identity (id, email, role). null when not user-auth
-		// jwtClaims      — full JWT claims. null when not user-auth
-		// authMode       — 'user' | 'publishable' | 'secret' | 'none' (which mode matched)
-		// authKeyName    — when an apikey was used, the name from the plural env map (omitted for 'user' / 'none')
+		// supabase - RLS-scoped (user or anon depending on auth mode)
+		// supabaseAdmin - bypasses RLS (service role)
+		// userClaims - JWT-derived identity (id, email, role). null when not user-auth
+		// jwtClaims - full JWT claims. null when not user-auth
+		// authMode - 'user' | 'publishable' | 'secret' | 'none' (which mode matched)
+		// authKeyName - when an apikey was used, the name from the plural env map
 		const { data } = await supabase.from('todos').select();
 		return Response.json(data);
 	}),
 };
 ```
 
-**Auth modes** (declarative, single line tells you the security model):
+**Auth modes** (declarative, one line states the security model):
 
 ```ts
-withSupabase({ auth: 'user' }, …)               // valid user JWT required (default)
-withSupabase({ auth: 'none' }, …)               // unauthenticated OK (webhooks, health)
-withSupabase({ auth: 'secret' }, …)             // server-to-server, validates secret key
-withSupabase({ auth: 'publishable' }, …)        // validates publishable key — apikey header
-withSupabase({ auth: 'publishable:web_app' }, …) // named-key variant (specific entry in plural env map)
-withSupabase({ auth: 'secret:cron' }, …)        // named-key variant for secret keys
-withSupabase({ auth: ['user', 'secret'] }, …)   // first match wins
+withSupabase({ auth: 'user' }, ...)               // valid user JWT required (default)
+withSupabase({ auth: 'none' }, ...)               // unauthenticated OK (webhooks, health)
+withSupabase({ auth: 'secret' }, ...)             // server-to-server, validates secret key
+withSupabase({ auth: 'publishable' }, ...)        // validates publishable key - apikey header
+withSupabase({ auth: 'publishable:web_app' }, ...) // named-key variant (entry in plural env map)
+withSupabase({ auth: 'secret:cron' }, ...)        // named-key variant for secret keys
+withSupabase({ auth: ['user', 'secret'] }, ...)   // first match wins
 ```
 
-**Array fall-through semantics**: "first match wins. An absent credential falls through to the next mode; a present-but-invalid JWT rejects the request (no silent downgrade)." Important security property — a tampered JWT won't slip past `'user'` and quietly succeed as `'secret'`.
+- **Array fall-through**: first match wins. An absent credential falls
+  through to the next mode; a present-but-invalid JWT rejects the request (no
+  silent downgrade). A tampered JWT cannot slip past `'user'` and quietly
+  succeed as `'secret'`.
+- **Publishable-key auth is anonymous, not admin.** `ctx.supabase` is the
+  anon-role client (RLS applies); `userClaims`/`jwtClaims` are `null`. Use it
+  for client-key-gated public endpoints. `'secret'` is the mode where
+  `ctx.supabaseAdmin` bypasses RLS.
+- **Header convention**: `'user'` reads `Authorization: Bearer`;
+  `'publishable'`/`'secret'` read the `apikey` header. Both may be present;
+  `withSupabase` picks the mode that matches.
 
-**Publishable-key auth is anonymous, not admin.** `ctx.supabase` is the **anon-role** client (RLS still applies); `userClaims` and `jwtClaims` are `null`. Use it for client-key-gated public endpoints (catalog, marketing pages) where you want a "request came from a known client" check but still rely on RLS for what's visible. Different from `'secret'` where `ctx.supabaseAdmin` bypasses RLS.
+**What it gives you**: local JWT verification via JWKS (no per-request
+`auth.getUser(token)` round-trip), two pre-wired clients, CORS before the
+handler runs, named-key validation (rotate `cron` without touching `web_app`).
 
-**Header convention**: `'user'` reads the JWT from the `Authorization: Bearer` header. `'publishable'` / `'secret'` read the key from the `apikey` header. Both can be present; `withSupabase` picks the mode that matches.
+Framework adapters (Hono, H3, Elysia, NestJS), the `@supabase/server/core`
+primitives, config options and the v0-to-v1 rename map: read
+`reference/server-package.md` when generating code beyond the quickstart.
 
-**Framework adapters** (community-maintained, ship inside the core package - no separate install):
+### Env-vars read by `@supabase/server`
 
-| Framework | Import | Access pattern |
-|---|---|---|
-| Hono | `@supabase/server/adapters/hono` | `c.var.supabaseContext` |
-| H3 / Nuxt | `@supabase/server/adapters/h3` | `event.context.supabaseContext` |
-| Elysia | `@supabase/server/adapters/elysia` | `supabaseContext` in handler ctx (scoped resolve) |
-| NestJS | `@supabase/server/adapters/nestjs` | `withSupabase` guard + `SupabaseCtx` param decorator |
-
-```ts
-import { Hono } from 'hono';
-import { withSupabase } from '@supabase/server/adapters/hono';
-
-const app = new Hono();
-app.use('*', withSupabase({ auth: 'user' }));
-app.get('/todos', async (c) => {
-	const { supabase } = c.var.supabaseContext;
-	const { data } = await supabase.from('todos').select();
-	return c.json(data);
-});
-export default { fetch: app.fetch };
-```
-
-**No adapter handles CORS** - the `cors` config option is excluded from every adapter's config type. Use the framework's own CORS middleware (`hono/cors`, `@elysiajs/cors`, NestJS `enableCors`, etc.). Adapter auth failures throw the framework's native exception (`HTTPException` in Hono, `HttpException` in NestJS) with the original `AuthError` on `.cause`.
-
-**Typed clients (1.4+):** thread the generated `Database` type through the adapter generic - `withSupabase<Database>({ auth: 'user' })` - and `ctx.supabase` / `c.var.supabaseContext.supabase` become fully typed `SupabaseClient<Database>` (`/docs/supabase-server/docs/typescript-generics.md`).
-
-**Primitives** from `@supabase/server/core` when one handler needs multiple routes with different auth modes, custom response headers, or you're building an MCP/middleware/adapter:
-
-```ts
-import {
-	verifyAuth,           // (req, opts) → { data: { token, … } | error }
-	verifyCredentials,    // low-level: raw credentials instead of Request (SSR adapter use)
-	extractCredentials,   // pulls Authorization / apikey from a Request
-	createContextClient,  // (token?) → RLS-scoped client (user-token or anon)
-	createAdminClient,    // → service-role client
-	createSupabaseContext,// (req, opts) → full ctx in one call (verifyAuth + clients)
-	resolveEnv,           // (overrides?) → resolved env or error
-} from '@supabase/server/core';
-```
-
-### Config
-
-```ts
-withSupabase(
-	{
-		auth: 'user',     // who can call this function
-		cors: 'disabled',// 'default' | 'disabled' | { headers } (default: supabase-js CORS headers)
-		env: { url: '…' },// env overrides (optional)
-	},
-	handler,
-);
-```
-
-`cors` accepts `'default'` (standard supabase-js CORS headers), `'disabled'`, or `{ headers }` for custom headers (1.4+ shape). The boolean (`true`/`false`) and bare `Record<string, string>` forms are deprecated but still accepted. `env` overrides per-request env-var resolution (useful for tests and per-tenant routing).
-
-### Env-vars (read by `@supabase/server`)
-
-Plural map form (Supabase Edge Functions auto-injects these):
-
-| Variable | Format | Description |
-|---|---|---|
-| `SUPABASE_URL` | `https://<ref>.supabase.co` | Project URL |
-| `SUPABASE_PUBLISHABLE_KEYS` | **JSON map**: `{"default":"sb_publishable_…","web":"sb_publishable_…"}` | Named publishable keys |
-| `SUPABASE_SECRET_KEYS` | **JSON map**: `{"default":"sb_secret_…","cron":"sb_secret_…"}` | Named secret keys |
-| `SUPABASE_JWKS` | `{"keys":[…]}` or `[…]` | Inline JWKS for local JWT verification |
-
-Singular fallback form (local dev, self-hosted):
+Plural map form (Supabase Edge Functions auto-inject these):
 
 | Variable | Format |
 |---|---|
-| `SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_…` |
-| `SUPABASE_SECRET_KEY` | `sb_secret_…` |
-| `SUPABASE_JWKS_URL` | `https://…` (remote JWKS endpoint; used when `SUPABASE_JWKS` unset) |
+| `SUPABASE_URL` | `https://<ref>.supabase.co` |
+| `SUPABASE_PUBLISHABLE_KEYS` | JSON map `{"default":"sb_publishable_...","web":"sb_publishable_..."}` |
+| `SUPABASE_SECRET_KEYS` | JSON map `{"default":"sb_secret_...","cron":"sb_secret_..."}` |
+| `SUPABASE_JWKS` | `{"keys":[...]}` or `[...]` - inline JWKS for local verification |
 
-**Plural takes priority** when both are set. Old singular names (`SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) are **not** read — rename or wire via the `env` config option.
+Singular fallback (local dev, self-hosted): `SUPABASE_PUBLISHABLE_KEY`,
+`SUPABASE_SECRET_KEY`, `SUPABASE_JWKS_URL` (used when `SUPABASE_JWKS` unset).
+Plural takes priority when both are set. The old names `SUPABASE_ANON_KEY` /
+`SUPABASE_SERVICE_ROLE_KEY` are **not** read - rename, or wire via the `env`
+config option.
 
 ### Runtime notes
 
-- **Supabase Edge Functions** — env-vars auto-injected, zero config. **But** if you use `auth: 'publishable' | 'secret' | 'none'`, you MUST disable the platform-level JWT check in `supabase/config.toml`:
+- **Supabase Edge Functions**: env auto-injected. With `auth: 'publishable' |
+  'secret' | 'none'` you MUST disable the platform JWT check or the platform
+  rejects the request before `@supabase/server` sees it:
   ```toml
   [functions.my-function]
   verify_jwt = false
   ```
-  Otherwise the Edge Functions platform rejects the request before `@supabase/server` sees it.
-- **Cloudflare Workers** — enable `nodejs_compat` in `wrangler.toml`/`wrangler.jsonc` or pass env overrides via the `env` config option.
-- **Deno / Bun / Node** — works out of the box with `export default { fetch }`.
-
-### What it gives you for free
-
-- **Local JWT verification via JWKS.** No `auth.getUser(token)` network round-trip per request. Asymmetric JWT Signing Keys + JWKS endpoint resolved internally.
-- **Two pre-wired clients** in `ctx`: user-scoped (RLS respected) and admin (service role). No `createClient` boilerplate.
-- **CORS** handled before your handler runs (configurable per the table above).
-- **Named-key validation** — rotate the `cron` key without touching the `web_app` key.
+- **Cloudflare Workers**: enable `nodejs_compat`, or pass env overrides via
+  the `env` config option.
+- **Deno / Bun / Node**: `export default { fetch }` works out of the box.
 
 ### Status
 
-**v1.x - SemVer since v1.0.0 (May 6, 2026); latest 1.4.1 (Jul 2026), 1.5.0 in beta.** Breaking changes only ship as major bumps. Upstream self-describes v1.x as "Public Beta... still early" - expect new adapters and ergonomic improvements in minor releases. Check `npm view @supabase/server version` before citing a version.
-
-Docs:
-- `docs_read(path="/docs/supabase-server/README.md")` — API surface
-- `docs_read(path="/docs/supabase-server/MIGRATION.md")` — **v0 → v1 rename map** (`allow` → `auth`, `'public'` → `'publishable'`, `authType` → `authMode`, `claims` → `jwtClaims`)
-- `docs_read(path="/docs/supabase-server/docs/auth-modes.md")` — array syntax, named keys, error cases
-- `docs_read(path="/docs/supabase-server/docs/environment-variables.md")` — full env-var reference
-- `docs_read(path="/docs/supabase-server/docs/ssr-frameworks.md")` — composing with `@supabase/ssr` for Next.js / SvelteKit / Remix
-
-**Official skill**: Supabase ships a dedicated AI coding skill — `npx skills add supabase/server` — that an agent can install for fuller API context. Use it instead of (or in addition to) this skill's section when generating actual `@supabase/server` code.
+v1.x, SemVer since 1.0.0; upstream still self-describes it as "Public Beta".
+Check `npm view @supabase/server version` before citing a version or a
+feature's availability.
 
 ### When NOT to use `@supabase/server` alone
 
-- **Cookie-based session management** (browser-direct flows in Next.js, SvelteKit, Remix) — use `@supabase/ssr` as the cookie+refresh-rotation layer and **compose** with `@supabase/server` on top for verified claims + typed RLS/admin clients. See `docs/ssr-frameworks.md`. They're not replacements; they coexist.
-- **Worker-BFF flows** where the browser sends an HttpOnly cookie that the Worker translates into a server-side Supabase JWT before forwarding — the cookie management isn't `@supabase/server`'s problem, but you can still use `@supabase/server`'s primitives (`createContextClient(jwt)`, `verifyCredentials`) once you've extracted the JWT.
-- **PKCE OAuth bridges** with a custom `storage` shim. Hand-rolled `createClient` is still needed for the per-request storage shim.
+- **Cookie-based sessions** (browser-direct Next.js/SvelteKit/Remix): use
+  `@supabase/ssr` for cookie + refresh rotation and compose `@supabase/server`
+  on top for verified claims + typed clients (`docs/ssr-frameworks.md` in the
+  mirror). They coexist.
+- **Worker-BFF flows** where the Worker translates an HttpOnly cookie into a
+  JWT: cookie handling is yours, but `createContextClient(jwt)` /
+  `verifyCredentials` still apply once the JWT is extracted.
+- **PKCE OAuth bridges** with a custom `storage` shim: hand-rolled
+  `createClient` is still needed.
 
-The hand-rolled patterns below still apply to these cases.
+## Security checklist (any integration)
 
-## Security checklist (any flavour of integration)
-
-- **Auth/session security**
-  - Never use `user_metadata` (`raw_user_meta_data`) for authorization — user-editable. Use `raw_app_meta_data`/`app_metadata`.
-  - Deleting user doesn't invalidate tokens. Sign out/revoke first, keep JWT expiry short, validate `session_id` against `auth.sessions` for strict guarantees.
-  - `app_metadata`/`auth.jwt()` claims not fresh until token refresh.
-  - **`admin.signOut(jwt, scope)` takes a JWT, not a user UUID.** Internally posts `/logout?scope=…` with the JWT as bearer. Pass `'global'` to revoke every refresh token. Confirmed in `auth-js/dist/main/GoTrueAdminApi.js`.
-  - **`{{ .EmailActionType }}` does NOT work in most email templates** (confirmation, recovery, magic_link, invite, email_change) — renders empty. **Hardcode `type=` per template** (`type=signup`, `type=recovery`, etc.) using the `token_hash` flow, then `auth.verifyOtp({ token_hash, type })` server-side.
-  - **Anti-enumeration on signup**: Supabase returns success-shaped response with `user.identities = []` when email already exists. Detect and convert to HTTP 409 `email_taken` when threat model allows (public signup OK; medical/financial not).
-  - **Login error distinction**: `email_not_confirmed` (HTTP 403) only returned on correct password — anti-enumeration preserved for wrong-password guesses. Distinguish from `invalid_credentials` (HTTP 401) in your UI.
-
-- **API key exposure**
-  - Never expose `service_role`/secret key in public clients. Use publishable keys for frontend. `NEXT_PUBLIC_` env vars sent to browser.
-  - **Never log secrets via query strings.** Cloudflare logpush captures every log line. Reject sensitive query keys at the endpoint AND redact a known allowlist (`token`, `token_hash`, `code`, `access_token`, `refresh_token`) in the request logger. Body-only for secrets.
-  - **Open redirect defence**: never validate `next=` with `startsWith('/') && !startsWith('//')`. The WHATWG URL parser maps `\` to `/` for special schemes — `/\evil.com` becomes `https://evil.com/`. Use `new URL(next, request.url)` and assert `candidate.origin === request.origin`.
-
-- **RLS/views/privileged code**
-  - Views bypass RLS by default. Postgres 15+: `CREATE VIEW ... WITH (security_invoker = true)`. Older: revoke from `anon`/`authenticated` or use unexposed schema.
-  - UPDATE needs SELECT policy. Without it, updates silently return 0 rows.
-  - No `security definer` fns in exposed schemas.
-  - **`(SELECT auth.uid())` not bare `auth.uid()`** in policy predicates. The subquery emits `initPlan` so the value is computed once per statement instead of once per row. 94–99% latency improvement at scale per Supabase benchmarks.
-
-- **Storage**
-  - Upsert needs INSERT + SELECT + UPDATE. INSERT alone = replacement silently fails.
+- **Auth/session**
+  - Never use `user_metadata` (`raw_user_meta_data`) for authorisation - it
+    is user-editable. Use `raw_app_meta_data` / `app_metadata`.
+  - Deleting a user does not invalidate tokens. Sign out / revoke first, keep
+    JWT expiry short, validate `session_id` against `auth.sessions` for strict
+    guarantees. `app_metadata` / `auth.jwt()` claims are stale until refresh.
+  - `admin.signOut(jwt, scope)` takes a JWT, not a user UUID (posts
+    `/logout?scope=...` with the JWT as bearer; confirmed in
+    `auth-js/dist/main/GoTrueAdminApi.js`). `'global'` revokes every refresh
+    token.
+  - Email-template `type=` hardcoding, signup anti-enumeration and the
+    403-vs-401 login distinction: `reference/auth-flows.md`.
+- **API keys and logging**
+  - Never expose `service_role`/secret keys in public clients; `NEXT_PUBLIC_`
+    vars reach the browser.
+  - Never accept secrets in query strings - log pipelines capture every URL.
+    Reject sensitive query keys and redact an allowlist (`token`,
+    `token_hash`, `code`, `access_token`, `refresh_token`) in the request
+    logger. Body-only for secrets. Local secret policy: the `secret-handling`
+    skill.
+  - **Open redirect**: never validate `next=` with `startsWith('/') &&
+    !startsWith('//')`; the WHATWG parser maps `\` to `/`, so `/\evil.com`
+    becomes `https://evil.com/`. Use `new URL(next, request.url)` and assert
+    `candidate.origin === request.origin`.
+- **RLS / views / privileged code**
+  - Views bypass RLS by default: `CREATE VIEW ... WITH (security_invoker =
+    true)` (Postgres 15+); otherwise revoke from `anon`/`authenticated` or use
+    an unexposed schema.
+  - UPDATE needs a SELECT policy; without it updates silently return 0 rows.
+  - No `security definer` functions in exposed schemas.
+- **Storage**: upsert needs INSERT + SELECT + UPDATE policies
+  (`reference/storage.md`).
 
 More: `https://supabase.com/docs/guides/security/product-security.md`
 
-## Hand-rolled patterns (when `@supabase/server` doesn't fit)
+## Hand-rolled patterns (when `@supabase/server` does not fit)
 
-Skip this section if you're using `@supabase/server`. Below covers Worker BFF with HttpOnly cookies, PKCE OAuth bridges, and other custom flows.
+Skip if you are on `@supabase/server`. Covers Worker BFF with HttpOnly
+cookies, PKCE bridges and other custom flows.
 
 ### Server-side `createClient()` config
 
-Always pass these auth flags outside a browser:
+Outside a browser always pass:
 
 ```ts
 createClient(url, key, {
@@ -230,114 +211,92 @@ createClient(url, key, {
 });
 ```
 
-With these flags the client is stateless. Memoise by `(url, key)` for many-requests-per-isolate runtimes:
-
-```ts
-const cache = new Map<string, SupabaseClient>();
-export function getServiceRoleClient(url: string, key: string) {
-	const k = `${url}::${key}`;
-	return cache.get(k) ?? cache.set(k, createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } })).get(k)!;
-}
-```
-
-`createClient()` is non-trivial per-request cost. Caching turns 3 calls/request into 1 per isolate.
-
-**Per-request handler classes are safe.** Constructing a `class AuthHandlers` that owns the cached client on every request does NOT race across concurrent fetches in the same isolate — `this.client` is its own field on its own object. The "concurrent setSession race" trap only fires if you store the client at module scope AND call `setSession` (which mutates).
-
-**Do NOT cache PKCE-flow clients.** `signInWithOAuth` and `exchangeCodeForSession` need a custom `storage` shim (per-request capture/seed) that is not safe to share.
+The client is then stateless; memoise by `(url, key)` for
+many-requests-per-isolate runtimes - `createClient()` is a non-trivial
+per-request cost. Per-request handler classes owning the cached client are
+safe; the "concurrent setSession race" only fires with a module-scope client
+plus `setSession`. **Do not cache PKCE-flow clients** - `signInWithOAuth` and
+`exchangeCodeForSession` need a per-request `storage` shim.
 
 ### Worker BFF cookie pattern
 
-Browser → Worker → Supabase. Browser never sees JWT.
+Browser -> Worker -> Supabase; the browser never sees the JWT.
 
-- Auth flows: Worker sets `HttpOnly; Secure; SameSite=Strict` `sb-access-token` (1h) + `sb-refresh-token` (7d) cookies on success.
-- Session reads: `GET /api/auth/session` reads cookie, calls `auth.getUser(token)`, refreshes via `auth.refreshSession({ refresh_token })` when expired. Rate-limit this endpoint — it's a stolen-JWT validity oracle otherwise.
-- Single Worker endpoint owns all refresh — no multi-tab race possible.
-- PKCE OAuth: inject capture-only `storage` shim during `signInWithOAuth` to extract the `code_verifier`. Stash in a `sb-pkce-verifier` HttpOnly cookie. **MUST be `SameSite=Lax` not `Strict`** — the OAuth redirect is a cross-site top-level navigation; `Strict` drops the cookie.
-- Logout: `auth.admin.signOut(accessToken, 'global')` revokes every refresh token; cookie-clear is in addition.
+- Worker sets `HttpOnly; Secure; SameSite=Strict` `sb-access-token` (1h) +
+  `sb-refresh-token` (7d) cookies on success.
+- `GET /api/auth/session` reads the cookie, calls `auth.getUser(token)`,
+  refreshes via `auth.refreshSession({ refresh_token })` when expired.
+  Rate-limit it - otherwise it is a stolen-JWT validity oracle.
+- One Worker endpoint owns refresh - no multi-tab race.
+- PKCE: capture-only `storage` shim during `signInWithOAuth` to extract the
+  `code_verifier`; stash in an `sb-pkce-verifier` HttpOnly cookie that MUST
+  be `SameSite=Lax` - the OAuth redirect is a cross-site top-level
+  navigation and `Strict` drops the cookie.
+- Logout: `auth.admin.signOut(accessToken, 'global')` plus cookie clear.
 
-### CF Workers Rate Limiting binding
+### Rate limiting on Cloudflare Workers
 
-```jsonc
-"ratelimits": [
-	{ "name": "RL_AUTH_WRITE", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }
-]
-```
+Use the Rate Limiting binding, never an in-memory map (isolates do not
+coordinate across colos). `period` must be 10 or 60; `namespace_id` unique per
+account and per environment. Key on `CF-Connecting-IP`, then the first
+`X-Forwarded-For` token, then `'unknown'`; scope per endpoint. Fail open on
+binding error (log, pass) and no-op when the binding is undefined so tests need
+no stub.
 
-```ts
-const { success } = await env.RL_AUTH_WRITE.limit({ key: clientIp });
-if (!success) return c.json({ error: { code: 'rate_limited' }}, 429, { 'Retry-After': '60' });
-```
+### Browser-side encryption caveats
 
-- `period` MUST be 10 or 60 (Cloudflare-enforced).
-- `namespace_id` unique within account; different per env (e.g. 1001-1004 dev, 2001-2004 prod).
-- Key on `CF-Connecting-IP` → first `X-Forwarded-For` token → `'unknown'`. Scope per endpoint.
-- **Fail open** on binding error (log warn, pass request) — never block real traffic on infra issues. **No-op** when binding undefined (vitest, local astro dev) so tests don't need a stub.
+`sessionStorage`, not `localStorage`, for a client-cached master key
+(tab-scoped). None of it defends against XSS or storage-reading extensions -
+say so in SECURITY.md; an "encrypted" key beside its ciphertext in the same
+storage is theatre.
 
-In-memory per-isolate maps don't coordinate across the 200+ CF colos. Always use the binding.
+## Platform behaviours measured in supabase-lab
 
-## Measured platform behaviors (supabase-lab edge-resilience battery, 2026-08)
+Numbers live in the edge-resilience RUNLOG
+(<https://github.com/erfianugrah/supabase-lab/tree/main/experiments/edge-resilience>).
 
-All from the 25-module drill battery (<https://github.com/erfianugrah/supabase-lab/tree/main/experiments/edge-resilience> - RUNLOG has every number):
+- **PostgREST treats unknown query params as column filters and 400s.** Strip
+  probe-only params (`?_bust=`) before the origin fetch; keep them only in the
+  cache key.
+- **The spend cap is not a request-path circuit breaker.** Requests past a
+  quota still return 200; enforcement rides the billing path (notification ->
+  grace period -> Fair Use restrictions), not the API response at quota+1.
+- **Fresh-project Storage lags ACTIVE_HEALTHY** (`TenantNotFound`, then 429
+  SlowDown). Retry with backoff for the first minutes.
+- **Auth config defaults differ across project generations.** Config-parity
+  checks must diff only the keys you set, or record platform drift as
+  evidence.
+- **`auth.*` and `storage.*` never replicate managed-to-managed** (custom
+  schemas do). Standby auth posture = TPA token portability + SQL backfill or
+  forced re-login. Migration mechanics: the `sbshift` skill.
 
-- **PostgREST treats unknown query params as column filters and 400s.** A `?_bust=` cache-buster forwarded to the origin 400s every request. Strip probe-only params before the origin fetch; keep them only in the cache key.
-- **The spend cap is not a request-path circuit breaker.** 105 renders against the 100-transform Pro quota all returned 200 - the documented "further usage disallowed" rides the billing path (notification -> grace period -> Fair Use 402 restrictions), not the API response at quota+1.
-- **Fresh-project Storage lags ACTIVE_HEALTHY.** The storage API answers `TenantNotFound` until the tenant provisions, then 429 SlowDown while the pool settles - retry with backoff for the first minutes, don't fail.
-- **Auth config defaults differ across project generations** (`custom_oauth_max_providers` 32767 vs 3 on two projects created months apart). Config-parity checks must diff only the keys you set, or record platform drift as evidence.
-- **`auth.*` and `storage.*` never replicate** managed->managed at any size (custom schemas replicate in ~4s). Standby auth posture = TPA token portability + SQL backfill or forced re-login.
-- **Storage render path**: 400 InvalidRequest on an invalid source, SVG passes through unchanged, and the plain URL always serves the original - never a 5xx.
+## PostgREST error handling (client side)
 
-## PostgREST error handling
+- `PGRST116` on `.single()` means zero rows, not an error:
+  `if (error?.code === 'PGRST116') return null;`
+- An RLS-blocked DELETE returns `{ error: null, count: 0 }`. Request
+  `{ count: 'exact' }` and treat `count === 0` as "not deleted".
+- Catch Postgres `23505` (unique violation) and answer HTTP 409; do not let
+  the raw message reach the client as a 500. The SQL-side reasoning (TOCTOU,
+  constraint design) is in `supabase-postgres-best-practices`.
 
-- **`PGRST116`** ("Cannot coerce the result to a single JSON object") on `.single()` = zero rows. **Not** an error. Short-circuit:
-  ```ts
-  if (error?.code === 'PGRST116') return null;
-  ```
-- **RLS-blocked DELETE** returns `{ error: null, count: 0 }` — indistinguishable from "no row with that id" unless you check the count:
-  ```ts
-  const { count, error } = await client.from('x').delete({ count: 'exact' }).eq('id', id);
-  return !error && (count ?? 0) > 0;
-  ```
-- **Unique-violation TOCTOU**: pre-check then insert is a race. Catch Postgres error code `23505` and translate to HTTP 409 in your app layer; don't let the raw Postgres message propagate as 500.
-
-## Zod schema defence
-
-- **Length-cap every string** that flows into a `tsvector` / GIN-indexed column. `language: z.string().max(50)`, `title: z.string().max(100)`. Unbounded strings bloat indexes and waste storage.
-- **Strip server-side fields that should be client-only.** Encryption passwords, raw decryption keys, etc. should never appear in the server-side schema — even if you don't persist them, they transit through Worker memory and risk leakage via future logging middleware.
-
-## CSP gotchas for Realtime / `wss://`
-
-CSP `connect-src 'self'` **physically blocks** WebSocket to `wss://<ref>.supabase.co`. Before designing for browser-side Realtime, verify the frontend CSP allows it (`connect-src 'self' wss://<ref>.supabase.co`).
-
-If CSP is locked to `'self'` (Worker BFF stack), **don't install Realtime triggers** — they'll burn message quota with no subscriber. Two ways to end up with dead infrastructure:
-
-1. Trigger installed before frontend subscribes — every insert costs a quota message.
-2. CSP locked before Realtime subscriber added — subscriber can never connect.
-
-Verify the subscriber path works end-to-end before shipping the trigger.
-
-## Browser-side encryption caveats
-
-If you cache decryption keys client-side:
-
-- **`sessionStorage` not `localStorage`** for the master key — tab-scoped, cleared on close.
-- **None of this defends against XSS or storage-reading browser extensions.** Document this explicitly in SECURITY.md — co-locating an "encrypted" master key with the ciphertext in the same `localStorage` is theatrical security.
+**Zod at the edge**: length-cap every string that lands in a `tsvector` / GIN
+column (`z.string().max(N)`), and strip client-only fields (encryption
+passwords, raw keys) from server-side schemas even if you never persist them.
 
 ## Reaching a project's database (access hierarchy)
 
-**Read this BEFORE running `supabase link` or asking the user for a DB
-password.** The single most common failure here is the agent burning turns
-on `supabase link` + "paste me the pooler connection string / DB password"
-when `SUPABASE_ACCESS_TOKEN` alone already runs arbitrary SQL.
+Read this BEFORE running `supabase link` or asking for a DB password. The most
+common failure is burning turns on `supabase link` + "paste me the pooler
+string" when `SUPABASE_ACCESS_TOKEN` alone already runs arbitrary SQL.
 
-Tiers, cheapest first - stop at the first one that covers the task:
+Tiers, cheapest first - stop at the first that covers the task:
 
-1. **`SUPABASE_ACCESS_TOKEN` set (env) -> Management API. No DB password, no
-   `supabase link`, no pooler string.** This covers *every* project in the
-   account. It is the default path for ad-hoc SQL, inspection, schema pokes,
-   and one-off DDL/DML.
-   - List projects + refs: `supabase projects list` (reads the same token).
-   - Run ANY SQL (runs as `postgres`, full access):
+1. **`SUPABASE_ACCESS_TOKEN` set -> Management API.** No DB password, no
+   link, no pooler string; covers every project in the account. Default for
+   ad-hoc SQL, inspection, one-off DDL/DML.
+   - List projects + refs: `supabase projects list`.
+   - Run any SQL (as `postgres`):
      ```bash
      REF=<project-ref>
      q(){ curl -s -X POST "https://api.supabase.com/v1/projects/$REF/database/query" \
@@ -345,39 +304,28 @@ Tiers, cheapest first - stop at the first one that covers the task:
        -H "Content-Type: application/json" \
        -d "$(jq -cn --arg q "$1" '{query:$q}')"; }
      q "select version();"
-     q "create table public.foo(id int); insert into public.foo values (1);"
      ```
-   - Read-only variant (runs as `supabase_read_only_user`, entity refs must be
-     schema-qualified): `POST /v1/projects/$REF/database/query/read-only`.
-   - Multi-statement strings work in one call. Returns JSON rows.
-   - Same endpoint backs MCP `execute_sql` and (when linked) `supabase db query`.
-     The raw curl needs no link step, so prefer it for scratch work.
-
+   - Read-only variant (as `supabase_read_only_user`, schema-qualify
+     everything): `POST /v1/projects/$REF/database/query/read-only`.
+   - Multi-statement strings work in one call. Same endpoint backs MCP
+     `execute_sql` and (when linked) `supabase db query`.
 2. **`supabase` CLI subcommands** (`db`, `inspect`, `snippets`, `storage`,
-   `projects`, `config`) - also token-only for most operations. `supabase db
-   query` (v2.79.0+) routes to the same Management API endpoint once linked.
+   `projects`, `config`) - token-only for most operations.
+3. **DB password / pooler string (`psql`) - only when tier 1 cannot.** The
+   HTTP endpoint is single-request and cannot hold a session; you need a real
+   connection for `psql` meta-commands (`\copy`, `\d`), client-streamed
+   `COPY ... FROM STDIN`, `pg_dump`/`pg_restore`, `LISTEN`/`NOTIFY`, very
+   large result streaming. Get the string from Dashboard -> Connect (pooler
+   table below). Only then ask for the password.
 
-3. **DB password / pooler connection string (`psql`) - ONLY when tier 1 can't
-   do it.** The HTTP endpoint is single-request and can't hold a session, so
-   you need a real Postgres connection for:
-   - `psql` meta-commands: `\copy`, `\d`, `\dt` (client-side)
-   - client-streamed `COPY ... FROM STDIN` / bulk ingest
-   - `pg_dump` / `pg_restore`
-   - interactive / multi-round-trip sessions, `LISTEN`/`NOTIFY`
-   - very large result streaming
-   Get the string from Dashboard -> Project Settings -> Database -> Connection
-   string (session pooler, port 5432), or build it (see Connection pooling
-   below). Only THEN ask the user for the password.
-
-**Anti-pattern (do not do this):** `supabase link --project-ref X` followed by
-hunting `.env` files for `DATABASE_URL` and prompting the user for a password,
-when the task was "run this SQL" and `SUPABASE_ACCESS_TOKEN` was set the whole
-time. Check `env | grep SUPABASE_ACCESS_TOKEN` first; if present, go straight
-to tier 1.
+Check the token's presence without printing it:
+`[ -n "${SUPABASE_ACCESS_TOKEN+x}" ] && echo set || echo unset`.
 
 ## CLI
 
-Discover commands via `--help` — never guess.
+Discover commands via `--help` - never guess flags, and do not gate on
+remembered version numbers; `supabase --version` plus `<cmd> --help` is the
+check.
 
 ```bash
 supabase --help
@@ -385,379 +333,113 @@ supabase <group> --help
 supabase <group> <command> --help
 ```
 
-**Gotchas:**
-- `supabase db query` needs CLI v2.79.0+ — fallback: MCP `execute_sql` or `psql`
-- `supabase db advisors` needs CLI v2.81.3+ — fallback: MCP `get_advisors`
-- Always create migrations with `supabase migration new <name>`. Never invent filenames.
-
-Version check: `supabase --version`. Changelogs: [CLI docs](https://supabase.com/docs/reference/cli/introduction), [GitHub releases](https://github.com/supabase/cli/releases).
+- `supabase db query` and `supabase db advisors` fall back to MCP
+  `execute_sql` / `get_advisors` (or `psql`) when the installed CLI lacks them.
+- Create migrations with `supabase migration new <name>`. Never invent
+  filenames.
 
 ## Docs Access
 
-Before implementing, find relevant docs. Priority:
+Docs tool: in pi `docs_search` / `docs_read` / `docs_grep`; in Claude Code the
+erfi-toolkit `docs` tool (action=search|read|grep). Paths below are docs-mirror
+paths. Priority:
 
-1. `docs_search(query="...", source="supabase")` or `docs_grep` — docs-ssh has full Supabase docs
-2. `docs_read(path="/docs/supabase-server/README.md")` — `@supabase/server` API surface (mirrors `github.com/supabase/server`)
-3. `docs_read(path="/docs/supabase-server/docs/environment-variables.md")` — new plural env-var conventions
-4. `docs_read(path="/docs/supabase-server/MIGRATION.md")` — migrating existing Edge Functions to `@supabase/server`
-5. `docs_read(path="/docs/supabase-api/api/overview.md")` — Management API endpoints
-6. `docs_read(path="/docs/supabase-auth-api/api/overview.md")` — Auth API endpoints
-7. Web search for Supabase topics when docs-ssh doesn't cover it
+1. Search the `supabase` topic first; `docs_grep` / action=grep for exact
+   strings.
+2. `/docs/supabase-server/README.md` - `@supabase/server` API surface
+3. `/docs/supabase-server/docs/environment-variables.md` - plural env-var map
+4. `/docs/supabase-server/MIGRATION.md` - migrating Edge Functions to
+   `@supabase/server`
+5. `/docs/supabase-api/api/overview.md` - Management API endpoints
+6. `/docs/supabase-auth-api/api/overview.md` - Auth API endpoints
+7. Web search when the mirror does not cover it.
 
 ## MCP Server (optional, per-project)
 
-Supabase MCP disabled by default. Enable per-project when you need action tools (`execute_sql`, `get_advisors`, project management). Docs are already in docs-ssh.
+Disabled by default. Enable per project when you need action tools
+(`execute_sql`, `get_advisors`, project management). Setup:
+https://supabase.com/docs/guides/getting-started/mcp
 
-Setup if needed: [MCP setup guide](https://supabase.com/docs/guides/getting-started/mcp).
-
-**Troubleshooting connection:**
-
-1. Check reachability: `curl -so /dev/null -w "%{http_code}" https://mcp.supabase.com/mcp` — `401` = up, timeout = down.
-2. Check `.mcp.json` in project root. Missing? Create with URL `https://mcp.supabase.com/mcp`.
-3. Server reachable + config correct but no tools? User needs OAuth auth flow in agent → browser → reload session.
+Troubleshooting: `curl -so /dev/null -w "%{http_code}" https://mcp.supabase.com/mcp`
+(`401` = up); check `.mcp.json` has URL `https://mcp.supabase.com/mcp`;
+reachable + configured but no tools = the user still has to complete the OAuth
+flow in the browser and reload the session.
 
 ## Schema Changes
 
-**Use the Management API `database/query` (token-only, no link - see access hierarchy above), `execute_sql` (MCP), or `supabase db query` (CLI) for iterating on schema changes.** Run SQL directly, no migration history entries. Iterate freely, generate a clean migration when ready.
+Iterate with the Management API `database/query` (token-only), MCP
+`execute_sql`, or `supabase db query`: run SQL directly with no migration
+history entries, then generate one clean migration.
 
-Do NOT use `apply_migration` for local iteration — writes migration history every call. Can't iterate. `supabase db diff`/`supabase db pull` produce empty/conflicting diffs.
+Do NOT use `apply_migration` for iteration - it writes migration history on
+every call and `supabase db diff` / `db pull` then produce empty or
+conflicting diffs.
 
-**Commit workflow:**
+Commit workflow:
 
-1. Run advisors → `supabase db advisors` (CLI v2.81.3+) or MCP `get_advisors`. Fix issues.
-2. Review security checklist if changes involve views/fns/triggers/storage.
-3. Generate migration → `supabase db pull <descriptive-name> --local --yes`
-4. Verify → `supabase migration list --local`
+1. Advisors: `supabase db advisors` or MCP `get_advisors`. Fix issues.
+2. Security checklist if views/functions/triggers/storage changed.
+3. `supabase db pull <descriptive-name> --local --yes`
+4. `supabase migration list --local`
 
 ## Configuration IaC
 
-Project-level Supabase config belongs in `supabase/config.toml` (auth, SMTP, OAuth providers, email templates referenced by `content_path`, rate limits). Secrets via `env(VAR)` substitution from `.env`. Apply with `supabase config push`.
+Project config belongs in `supabase/config.toml` (auth, SMTP, OAuth
+providers, email templates via `content_path`, rate limits); secrets via
+`env(VAR)` from `.env`; apply with `supabase config push`.
 
-- The Management API (`PATCH /v1/projects/{ref}/config/auth`) is the only way to **read** live state — there's no `config pull`. Git is your source of truth.
-- Email templates: each `.html` file references the type-hardcoded URL pattern. Don't try to share a single template across types.
-- Rollback: there is no `config rollback`. `git revert` the toml + `config push`.
-- **Email rate limit**: bump `email_sent` from default 2/hr to 30/hr (or higher) once custom SMTP is wired. The default is the bottleneck behind most "email rate limit exceeded" reports.
+- The Management API (`PATCH /v1/projects/{ref}/config/auth`) is the only way
+  to read live state - there is no `config pull`. Git is the source of truth.
+- No `config rollback`: revert the toml commit in git, then `config push`.
+- **Email rate limit**: raise `email_sent` from the default 2/hr once custom
+  SMTP is wired; the default is behind most "email rate limit exceeded"
+  reports.
 
-## pg-cron expiry jobs
-
-**Batched DELETE pattern** — unbounded `DELETE WHERE expires_at < now()` holds row locks across the entire matching set. A spike of 50k+ rows expiring in one window stalls live reads/writes on overlapping rows.
-
-```sql
-DELETE FROM public.things
-WHERE id IN (
-	SELECT id FROM public.things
-	WHERE expires_at < now()
-	LIMIT 1000
-)
-```
-
-Batching at 1000 caps lock-hold time; pg-cron picks up the rest on the next cycle. Rows past `expires_at` are not user-visible (every read path should filter `expires_at > now()`) so spreading cleanup across cycles is invisible.
+pg_cron cleanup jobs (batched DELETE) are SQL-side: `supabase-postgres-best-practices`.
 
 ## Connection pooling (Workers / Edge Functions)
 
-Supabase exposes three ports per project — picking the wrong one breaks Workers/Edge Functions in subtle ways.
-
-| Port | Mode | When to use |
-|---|---|---|
-| `5432` | Direct (session) | Long-lived processes, migrations, `psql`, anything that needs `SET` / `LISTEN`. NEVER from Workers/Edge Functions. |
-| `6543` | Transaction (Supavisor) | **Default for Workers, Edge Functions, serverless.** Each query/transaction gets a fresh backend connection from the pool. |
-| `5432` (Supavisor) | Session-pooled | Long sessions through Supavisor's session-mode endpoint. Rare. |
-
-**Why it matters**: Workers spin up + tear down per request. Direct connections to `5432` exhaust Postgres `max_connections` in minutes under load. The transaction-mode pooler (`6543`) recycles connections per transaction.
-
-**Connection string**:
-
-```
-postgres://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
-                                                                          ^^^^ <-- transaction pooler port
-```
-
-**Edge Function gotcha**: `pg` (`node-postgres`) prepared statements break under transaction mode pooling because the prepared statement is bound to the backend connection, but the pool gives you a different backend on the next request. Either:
-
-- Disable prepared statements: `new Pool({ ..., max: 1, statement_timeout: 30000, query_timeout: 30000 })` and use `client.query()` without `pgp.prepare()`, OR
-- Use the official `@supabase/postgres-js` (`postgres.js`) which negotiates prepared statements correctly under Supavisor, OR
-- Use the PostgREST surface (`supabase.from('table')...`) which is HTTP — pooling not your problem.
-
-If `@supabase/server` is wiring your client, you get the right config for free.
-
-## Realtime channels (subscribe / broadcast / presence)
-
-Three channel modes — different infrastructure, different costs.
-
-```ts
-// 1. postgres_changes — listens to DB CDC events (INSERT/UPDATE/DELETE)
-//    Cost: counts toward your Realtime "messages" quota PER ROW per subscriber.
-//    Requires the table to be in supabase_realtime publication.
-const channel = supabase
-  .channel('todos-changes')
-  .on('postgres_changes',
-    { event: '*', schema: 'public', table: 'todos', filter: `user_id=eq.${userId}` },
-    (payload) => {
-      console.log(payload.eventType, payload.new, payload.old)
-    })
-  .subscribe()
-
-// Required (run once): enable the table in the publication
-//   ALTER PUBLICATION supabase_realtime ADD TABLE public.todos;
-// Required: RLS policy on todos for SELECT — Realtime respects RLS
-
-// 2. broadcast — pub/sub between clients, NO DB involvement
-//    Cost: only counts the messages you send.
-channel.on('broadcast', { event: 'cursor' }, ({ payload }) => {
-  console.log('cursor:', payload.x, payload.y)
-})
-channel.send({ type: 'broadcast', event: 'cursor', payload: { x: 100, y: 200 } })
-
-// 3. presence — tracks online users in a channel
-channel.on('presence', { event: 'sync' }, () => {
-  const state = channel.presenceState()  // { userId: [{ presence_ref, ... }] }
-})
-channel.track({ userId, online_at: new Date().toISOString() })
-
-// Cleanup
-supabase.removeChannel(channel)
-```
-
-**Auth for Realtime**: pass the user JWT during channel creation so RLS-protected `postgres_changes` work:
-
-```ts
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  global: { headers: { Authorization: `Bearer ${userJwt}` } },
-  realtime: { params: { eventsPerSecond: 10 } },   // client-side throttle
-})
-```
-
-**Free-tier quota** is small (200 concurrent + 2M messages/month). `postgres_changes` on a busy table burns through it fast — broadcast is cheaper if you only need fan-out, not DB CDC.
-
-## Storage (BFF upload pattern)
-
-For the Worker BFF stack (browser never sees the JWT), upload via Worker:
-
-```ts
-// Worker (Hono / Bun / Edge Function) — accepts multipart, proxies to Storage
-import { withSupabase } from '@supabase/server'
-
-export default {
-  fetch: withSupabase({ auth: 'user' }, async (req, ctx) => {
-    const { supabase, userClaims } = ctx
-    const form = await req.formData()
-    const file = form.get('file') as File
-
-    // Path with user ID prefix — RLS policy enforces user can only write to own dir
-    const path = `${userClaims.id}/${crypto.randomUUID()}-${file.name}`
-
-    const { data, error } = await supabase
-      .storage
-      .from('uploads')
-      .upload(path, file, { cacheControl: '3600', upsert: false })
-
-    if (error) return Response.json({ error: error.message }, { status: 400 })
-    return Response.json({ path: data.path })
-  }),
-}
-```
-
-**RLS policies on storage.objects** (must enable in dashboard or migration):
-
-```sql
--- Users can read/write only their own files
-CREATE POLICY "user_owns_path" ON storage.objects
-  FOR ALL TO authenticated
-  USING ((storage.foldername(name))[1] = auth.uid()::text)
-  WITH CHECK ((storage.foldername(name))[1] = auth.uid()::text);
-```
-
-**Public reads** for an avatar-style bucket: create the bucket as public, then anyone can GET via `https://<ref>.supabase.co/storage/v1/object/public/<bucket>/<path>`. RLS still gates writes.
-
-**Signed URLs** for time-limited private downloads:
-
-```ts
-const { data } = await supabase.storage.from('private').createSignedUrl(path, 60)
-// data.signedUrl is valid for 60s
-```
-
-## pgvector (semantic search)
-
-```sql
--- One-time: enable extension
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- Table for embeddings (OpenAI text-embedding-3-small = 1536 dims)
-CREATE TABLE documents (
-  id        bigserial PRIMARY KEY,
-  content   text,
-  embedding vector(1536),
-  user_id   uuid REFERENCES auth.users
-);
-
--- HNSW index (better recall than IVFFlat for most queries)
-CREATE INDEX ON documents USING hnsw (embedding vector_cosine_ops);
-
-ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "own_docs" ON documents FOR ALL USING (user_id = auth.uid());
-```
-
-**Query** (RPC for vector args; supabase-js can't bind `vector` natively):
-
-```sql
-CREATE OR REPLACE FUNCTION match_documents(
-  query_embedding vector(1536),
-  match_count int DEFAULT 5
-) RETURNS TABLE (id bigint, content text, similarity float)
-LANGUAGE sql STABLE
-AS $$
-  SELECT
-    d.id, d.content,
-    1 - (d.embedding <=> query_embedding) AS similarity
-  FROM documents d
-  WHERE d.user_id = auth.uid()
-  ORDER BY d.embedding <=> query_embedding
-  LIMIT match_count;
-$$;
-```
-
-```ts
-// Client
-const { data } = await supabase.rpc('match_documents', {
-  query_embedding: embedding,    // number[] of length 1536
-  match_count: 10
-})
-```
-
-**Index choice**:
-- **HNSW** — better recall, slower build, more memory. Default.
-- **IVFFlat** — faster build, lower memory, lower recall on small datasets. Use when corpus < 100k rows or memory-constrained.
-
-## pgmq (queues — for background work behind RLS)
-
-```sql
-CREATE EXTENSION IF NOT EXISTS pgmq;
-
--- Create a queue
-SELECT pgmq.create('image_processing');
-
--- Enqueue
-SELECT pgmq.send('image_processing', '{"path": "uploads/abc.jpg", "user_id": "uuid"}');
-
--- Consume (in a pg_cron job or Edge Function)
-SELECT * FROM pgmq.read('image_processing', 30, 5);
--- 30 = visibility timeout (seconds); 5 = max messages to read
-
--- Acknowledge
-SELECT pgmq.delete('image_processing', <msg_id>);
-
--- Or: archive instead of delete (keeps history)
-SELECT pgmq.archive('image_processing', <msg_id>);
-```
-
-**RLS via wrapper functions** — `pgmq.send`/`read` run as the queue owner. Don't expose them directly to PostgREST; instead wrap:
-
-```sql
-CREATE OR REPLACE FUNCTION enqueue_image(p_path text)
-RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
-DECLARE
-  msg_id bigint;
-BEGIN
-  -- RLS-equivalent check
-  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'unauthenticated'; END IF;
-  SELECT pgmq.send('image_processing', jsonb_build_object(
-    'path', p_path, 'user_id', auth.uid()
-  )) INTO msg_id;
-  RETURN msg_id;
-END $$;
-```
-
-**Worker pattern**: pg_cron job every minute reads up to N messages, calls an Edge Function (`pg_net.http_post`), Edge Function acks via `pgmq.delete`. Failed Edge Function returns leave the message visible after the 30s VT — automatic retry.
-
-## Database webhooks
-
-Supabase Database Webhooks send HTTP requests on INSERT/UPDATE/DELETE. Backed by `pg_net.http_post` from a trigger. Two flavours:
-
-```sql
--- 1. Built-in Webhooks UI (Dashboard → Database → Webhooks)
---    Manages the trigger + function for you. Use for simple "notify on insert".
-
--- 2. Direct pg_net (full control)
-CREATE OR REPLACE FUNCTION public.notify_external() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
-BEGIN
-  PERFORM net.http_post(
-    url := 'https://example.com/webhook',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'X-Signature', encode(hmac(row_to_json(NEW)::text, 'shared-secret', 'sha256'), 'hex')
-    ),
-    body := row_to_json(NEW)::jsonb,
-    timeout_milliseconds := 5000
-  );
-  RETURN NEW;
-END $$;
-
-CREATE TRIGGER on_new_thing
-  AFTER INSERT ON public.things
-  FOR EACH ROW EXECUTE FUNCTION public.notify_external();
-```
-
-**Caveat**: webhook delivery is fire-and-forget. `pg_net` retries on connection error but NOT on 5xx. For at-least-once delivery, write to `pgmq` first and have a consumer call the webhook with its own retry logic.
-
-## Branching (preview environments)
-
-Supabase Branching creates ephemeral project clones for PR previews. Per-branch:
-
-- Fresh Postgres with the production schema (no data unless you opt in)
-- Separate API keys, URL, JWT secret
-- Auto-runs migrations from the branch's `supabase/migrations/`
-
-```sh
-# Create a branch (CLI v1.131+)
-supabase branches create feature-x --persistent
-
-# List
-supabase branches list
-
-# Push schema to branch
-supabase db push --branch feature-x
-
-# Get connection details (URL + anon key)
-supabase branches get feature-x
-```
-
-**GitHub integration**: enable in dashboard → branches auto-create on PR open and tear down on PR close/merge. Each PR gets its own Supabase project with the PR's schema.
-
-**Cost**: branches are full projects billed per-hour ($0.01344/branch/hour on Pro+; branching is not available on the Free plan - the Free "limit of 2" is active projects, not branches). Persistent branches stay until manually deleted; preview branches auto-expire.
-
-**Detaching a persistent branch from its git branch without delete/recreate** (measured 2026-08-21, API + CLI): `PATCH /v1/branches/{branch_id}` with `{"git_branch":""}` clears the link - pushes to the git branch then produce a `Supabase Preview` check run with conclusion `skipped` and leave the branch untouched. `null` does NOT clear it (treated as field-absent, silently no-ops with a 200). CLI equivalent: `supabase branches update <name> --git-branch "" --project-ref <ref>`. Relink by setting the branch name back (validated against the connected repo). Adjacent: `DELETE` on a persistent branch 400s - PATCH `{"persistent":false}` first. Full guide: https://erfi.dev/guides/supabase-branch-detach-git-link/
-
-## Auth flows quick reference
-
-```ts
-// Magic link (passwordless email)
-await supabase.auth.signInWithOtp({ email: 'user@example.com',
-  options: { emailRedirectTo: 'https://<host>/auth/callback' } })
-
-// OAuth (Google, GitHub, etc. — configured in Dashboard → Authentication → Providers)
-await supabase.auth.signInWithOAuth({
-  provider: 'github',
-  options: { redirectTo: 'https://<host>/auth/callback' }
-})
-
-// Password
-await supabase.auth.signInWithPassword({ email, password })
-
-// MFA enrollment (TOTP)
-const { data } = await supabase.auth.mfa.enroll({ factorType: 'totp' })
-// data.totp.qr_code → show QR; user scans
-await supabase.auth.mfa.challengeAndVerify({ factorId: data.id, code: userCode })
-
-// SignOut
-await supabase.auth.signOut({ scope: 'local' })   // or 'global' to revoke all sessions
-```
-
-**Callback handling for SSR/BFF**: the callback URL receives `?code=...` (PKCE flow). Exchange via:
-
-```ts
-const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-// data.session has access_token + refresh_token. Set HttpOnly cookies on the response.
-```
-
-`@supabase/ssr` handles this automatically for Next.js / SvelteKit. `@supabase/server` doesn't — you write the callback handler yourself (it's <20 lines).
+Docs mirror `/docs/supabase/guides/database/connecting-to-postgres.md`. Copy
+the exact host from Dashboard -> Connect; the shared-pooler host carries a
+numeric segment before the region.
+
+| Path | Host:port | Mode | Use |
+|---|---|---|---|
+| Direct | `db.<ref>.supabase.co:5432` | session, no pooler | Migrations, `pg_dump`, long-lived backends, `SET`/`LISTEN`. IPv6 unless the IPv4 add-on. NEVER from Workers/Edge Functions. |
+| Shared pooler (Supavisor), session | `aws-<n>-<region>.pooler.supabase.com:5432` | session | Persistent backend on an IPv4-only network. |
+| Shared pooler (Supavisor), transaction | `aws-<n>-<region>.pooler.supabase.com:6543` | transaction | Serverless / Edge Functions / Workers on IPv4. |
+| Dedicated pooler (PgBouncer) | `db.<ref>.supabase.co:6543` | transaction only | Paid plans, co-located with Postgres; preferred for serverless when IPv6 or the IPv4 add-on is available. |
+
+Workers spin up and tear down per request; direct connections exhaust
+`max_connections` in minutes under load. Both poolers share one pool-size
+setting.
+
+**Prepared statements under transaction pooling**: `pg` (node-postgres)
+prepared statements bind to a backend connection the pool will not hand back.
+Either disable them, use the `postgres` driver (postgres.js), which
+negotiates prepared statements correctly under Supavisor, or use PostgREST
+(`supabase.from(...)`) where pooling is not your problem. `@supabase/server`
+wires the right config for you.
+
+## Product references (read when the task touches them)
+
+- `reference/realtime.md` - channel modes, Realtime auth, the CSP `wss://`
+  gotcha and dead-trigger trap.
+- `reference/storage.md` - BFF upload, `storage.objects` policies, signed
+  URLs, render-path behaviour.
+- `reference/pgvector.md` - embeddings table, HNSW vs IVFFlat, RPC query.
+- `reference/pgmq-webhooks.md` - queues behind RLS, `pg_net` webhooks and
+  their delivery caveat.
+- `reference/branching.md` - branch commands, cost, detaching from a git
+  branch.
+- `reference/auth-flows.md` - sign-in snippets, PKCE callback, email
+  template and enumeration rules.
+- `reference/server-package.md` - `@supabase/server` adapters, primitives,
+  config, migration map.
+
+## Related skills
+
+- `supabase-postgres-best-practices` - SQL, indexes, RLS predicates, locking,
+  pooler config on any Postgres.
+- `pg-analyser` - performance report for a project or any Postgres.
+- `sbshift` - logical-replication migration and upgrade rehearsal.

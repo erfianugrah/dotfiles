@@ -1,6 +1,6 @@
 ---
 name: sa-pov
-description: Use when running a Solutions-Architect Proof-of-Value (PoV) or Proof-of-Concept (PoC) for a prospect/customer on ANY product - scoping and negotiating success criteria, writing a customer-facing kickoff doc, validating each criterion live on a throwaway environment (not asserting it from docs), producing a solution runbook with real test evidence, and packaging the deliverable for how the customer consumes it (usually Google Docs). Product-agnostic methodology; pair with the relevant product skill (`supabase`, `cloudflare`, `fly`, etc.) for the technical depth of the thing under test. Fires on "PoV", "PoC", "proof of value/concept", "kickoff doc", "success criteria", "solution runbook", "customer evaluation".
+description: "Use when running a Solutions-Architect PoV/PoC for a prospect - scoping success criteria, a customer-facing kickoff doc, a solution runbook, or the Google Docs deliverable. Fires on 'PoV', 'PoC', 'proof of value/concept', 'kickoff doc', 'success criteria', 'solution runbook', 'customer evaluation'. NOT for the probe itself (validating-empirically) or lab prose (lab-writeup)."
 ---
 
 # sa-pov - Solutions-Architect Proof-of-Value / Proof-of-Concept engagements
@@ -17,7 +17,7 @@ capture the evidence, tear it down. A runbook that says "this works, here is the
 output" closes evaluations; one that says "per the docs, this should work" does not.
 
 This skill is the **methodology + packaging**. For the technical depth of whatever is under
-test, pair it with the product skill (`supabase`, `cloudflare`, `fly`, `terraform`, ...).
+test, pair it with the product skill (`supabase`, `cloudflare-ops`, `fly`, `terraform`, ...).
 
 ## Deliverables (three artifacts)
 
@@ -30,24 +30,23 @@ test, pair it with the product skill (`supabase`, `cloudflare`, `fly`, `terrafor
 3. **Combined doc** - kickoff (body) + runbook (Appendix A) merged into ONE markdown file
    for a single Google Docs handoff. See Packaging below.
 
-## Live validation methodology
+## Proving each criterion
 
-1. **Environment parity** - create the scratch environment in the customer's target region /
-   tier / plan so latency, residency, and plan-gating claims actually transfer. A PoV run on
-   a free tier in the wrong region proves nothing about the paid tier in the right one.
-2. **Provision programmatically** where the vendor exposes an API (project/tenant creation,
-   config, teardown). Poll to a healthy/ready state before testing; scripted setup is
-   repeatable and cite-able in the runbook.
-3. **Isolate side effects.** Prefer admin/provisioning paths that don't trip
-   rate limits or send real notifications (email/SMS caps, webhooks). Prove enforcement
-   (e.g. "unconfirmed sign-in is rejected") from config + a targeted negative test, not by
-   burning a live quota mid-suite.
-4. **Separate programmatically-provable from human-in-the-loop.** Most criteria are fully
-   scriptable. Some (a real IdP SSO assertion, a hardware step, a third-party approval) need
-   a human at the far end - prove those up to the boundary you control (e.g. redirect reaches
-   the IdP login page) and finish them live during the PoV with the customer present.
-5. **Tear down.** Scratch environments are usually billable and always a data-hygiene risk;
-   delete once evidence is captured. Never leave keys/dumps on disk.
+**REQUIRED SUB-SKILL: `validating-empirically`** - it owns how a claim about an external
+system gets turned into a probe (throwaway infra, the cheapest discriminating test,
+what counts as evidence, what to write when the probe was not run). Do not re-derive it
+here. The PoV-specific additions:
+
+1. **Environment parity.** Create the scratch environment in the customer's target
+   region / tier / plan so latency, residency and plan-gating claims transfer. A run on a
+   free tier in the wrong region proves nothing about the paid tier in the right one.
+2. **Human-in-the-loop boundary.** Some criteria (a real IdP SSO assertion, a hardware
+   step, a third-party approval) need a human at the far end. Prove them up to the
+   boundary you control (the redirect reaches the IdP login page) and finish them live
+   during the PoV with the customer present. Mark them as such in the runbook.
+3. **Teardown.** Scratch environments are billable and a data-hygiene risk; delete once
+   evidence is captured and delete local key dumps. Teardown is a checklist row, not an
+   afterthought.
 
 ## PoV gotchas (product-agnostic)
 
@@ -83,7 +82,7 @@ test, pair it with the product skill (`supabase`, `cloudflare`, `fly`, `terrafor
   individuals are **confidential**. Keep PoV docs in a **private** repo. Use generic
   scratch-environment names (`<slug>-pov-test`), never the customer's real identifiers.
 - Never commit credentials (API keys, tokens, service secrets). Delete local key dumps after
-  teardown.
+  teardown. Handling rules: the `secret-handling` skill.
 - Always **tear down** the scratch environment - it is billable and holds test data.
 
 ## Common mistakes
@@ -97,7 +96,11 @@ test, pair it with the product skill (`supabase`, `cloudflare`, `fly`, `terrafor
 
 ## Related skills
 
-Pair with the product skill for the technical depth of the thing under test - `supabase`
-(and `pg-analyser` / `sbshift` for its perf/migration angles), `cloudflare`, `fly`, `terraform`,
-etc. Also `paste-formatting` (mdclip for non-gdocs rich-text targets) and `erfi-voice`
-(customer-facing prose).
+- `validating-empirically` - the probe: designing and running the test that produces the
+  runbook's evidence.
+- `lab-writeup` - turning measured numbers into prose without ambiguity; its checklist
+  applies to runbook evidence cells too.
+- Product skills for the thing under test - `supabase` (and `pg-analyser` / `sbshift` for
+  its perf/migration angles), `cloudflare-ops`, `fly`, `terraform`.
+- `paste-formatting` (mdclip for non-gdocs rich-text targets) and `erfi-voice`
+  (customer-facing prose).

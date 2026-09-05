@@ -8,11 +8,10 @@ description: Use when turning a supabase-lab run into prose - a RUNLOG section, 
 ## Overview
 
 A lab run produces a JSON artifact with every number in it. The write-up is
-where those numbers get wrong: three independent review passes on the
-2026-09-02 pages (Edge Function limits, Auth end to end) found about a hundred
-defects, and nearly all fell into a dozen classes that recur. This skill is
-those classes as a checklist, the order to work in so they do not arise, and
-the reviewer brief to run before publishing.
+where those numbers go wrong: independent review passes over lab pages keep
+finding defects, and nearly all fall into a dozen classes that recur. This
+skill is those classes as a checklist, the order to work in so they do not
+arise, and the reviewer brief to run before publishing.
 
 The disposition: a number travels from the artifact to the page by paste, a
 measured row names what it measured, and anything the run did not do is
@@ -22,7 +21,11 @@ written as not done.
 
 1. **Render, do not recall.** `pvlab --facts evidence/<ts>/run-<stamp>.json
    --only EF08,EF09` prints each result's measurements as a table. Quote from
-   it. If a figure is not in the artifact, it is not a measurement.
+   it. If a figure is not in the artifact, it is not a measurement. `pvlab`
+   is the harness binary, built with `bun run build` in
+   `~/work/supabase-lab/harness/` to `~/work/supabase-lab/harness/dist/pvlab`;
+   it is not on PATH, so invoke it by that path (and rebuild it after the
+   harness changes - a stale binary renders stale facts).
 2. **Publish the evidence** with `make publish-evidence RUN=...` in the
    experiment (writes a redacted copy and its facts to `out/<date>/`). RUNLOG
    and docs cite `out/`, pinned to the lab commit, never `evidence/` (gitignored)
@@ -42,7 +45,7 @@ written as not done.
 
 ## The ambiguity classes (the checklist)
 
-Read every measured sentence against these. Each one cost a review round.
+Read every measured sentence against these. Each one has cost a review round.
 
 - **Which side.** Managed vs self-hosted GoTrue; PostgREST vs GoTrue as the
   verifier; API deploy vs CLI deploy; plain mode vs JWKS mode. "GoTrue accepts
@@ -84,38 +87,36 @@ Read every measured sentence against these. Each one cost a review round.
   docs; a single-request run does not test a shared warm worker. Say what the
   run's shape covers and what it does not.
 
-## The attribution classes (the 2026-09-03 review round)
+## The attribution classes
 
-The practices pass over 34 pages drew 75 findings on about 1,500 added
-lines, one per 20 lines. Few were the ambiguity classes above; most were a
-"Rests on" cell pointing at evidence that does not say what the row says.
+In a practices pass (adding "What to do about it" rows to existing pages) few
+findings are the ambiguity classes above; most are a "Rests on" cell pointing
+at evidence that does not say what the row says. Roughly one finding per
+twenty added lines is the going rate.
 
-- **The module did not measure the claim.** About 30 of the 75. Check the
+- **The module did not measure the claim.** The largest class. Check the
   module's own header and closeout, and the probe source under `lib/` for
-  what it actually hit: the RUNLOG prose said "Auth", `setup.ts` said
-  `GET /auth/v1/health` with an anon key, and three pages had built an
+  what it actually hit: RUNLOG prose said "Auth", `setup.ts` said
+  `GET /auth/v1/health` with an anon key, and pages had built an
   "authenticated Auth path" on it.
-- **The figure lives only in a page.** A "5 of 5 fresh projects" row was
-  cited by seven pages as a lab run; no RUNLOG or artifact holds it. Say
-  "this corpus's row, no lab record" in the cell.
+- **The figure lives only in a page.** A "5 of 5 fresh projects" row cited by
+  several pages as a lab run; no RUNLOG or artifact holds it. Say "this
+  corpus's row, no lab record" in the cell.
 - **Two runs in one sentence.** "Healthy in 154 s and the first admin write
-  failed" fused W21 (2026-08-17) with the provisioning note (2026-08-03).
+  failed" fused a module run with a provisioning note from a different day.
 - **Event order from the artifact.** The summary read "201 then 422"; the
   artifact had the 422 first, because a standby key already existed.
 - **Precision the artifact does not hold.** 154.924 ms against a recorded
   155-159 ms is a number nobody measured.
-- **Public docs move.** A practice resting on an August 401 for `sb_secret_`
-  keys met a September docs page that documents them; date the negative and
-  the re-check.
+- **Public docs move.** A practice resting on a 401 for `sb_secret_` keys met
+  a later docs page that documents them; date the negative and the re-check.
 - **A contradiction handed to a writer needs the evidence-side value**, or
   the writer picks one: told "1 minute vs 60 s disagree", one wrote 30 s.
 - **Fix the source of a paste.** New text copied an older gotcha's inverted
   polarity (`slot_name = none` leaves the publisher slot either way).
 
 Fixers reply one line per finding, "applied / adapted (how) / left (why)";
-"left" must quote the evidence line. The edit tool's provenance guard
-blocked literals two writers had just read in a file; the answer is to
-re-read the line and retry, not to route around it with a script.
+"left" must quote the evidence line.
 
 ## Every lab-backed page ends in practices
 
@@ -129,8 +130,7 @@ a result says so. "Be careful with X" is not a practice.
 
 ## Auditing older pages for practices (the subagent workflow)
 
-Used on 2026-09-02 across the 36 Supabase pages after the two new references
-got their practices sections.
+For a batch of existing pages that predate the practices rule.
 
 1. **Map.** For every doc in scope, list the experiments and module ids it
    cites (`rg -o "experiments/[a-z0-9-]+"` and the module-id regex) so each
@@ -140,18 +140,16 @@ got their practices sections.
    (B) gaps, each as one imperative sentence with the module id it rests on and
    where it goes; (C) what a practice would need that is not measured; (D) leaks
    and house-style slips seen in passing. One markdown file per doc in a
-   scratch directory. Docs audited today are excluded.
+   scratch directory. Docs audited the same day are excluded.
 3. **Write in parallel, one subagent per flagged doc.** Each adds the section
    from the audit file and the RUNLOG, cites module ids, follows the house
    rules (ASCII, British -ise, no watchlist words, no leaks), and does NOT run
    the build or commit - concurrent builds in one checkout collide on `dist/`.
 4. **Build once, then review.** `bun run build` on the batch; fix what fails.
-   Then the reviewer brief (above) on the diff as a fresh subagent; apply.
 5. **Review, then fix, as separate agents.** One reviewer per writer batch
    with the brief below, cross-checking against the RUNLOGs and probe source;
-   then one fixer per report, applying the rewrites verbatim. The 2026-09-03
-   run: 5 auditors, 5 writers, 5 reviewers, 5 fixers, about four million
-   tokens, 75 findings, all applied before one build.
+   then one fixer per report, applying the rewrites verbatim. All findings are
+   applied before one build.
 6. **Pins, commit, deploy, live check.** Add each new section as a required
    section in `tests/pins.test.ts`; after deploy, check every changed page for
    status, references, no stray math, and the leak sweep on the live HTML.
@@ -179,7 +177,7 @@ scan it.
   (outside a code span or fence) fails the build with "Unexpected character".
   Write "Micro to Small and back" or put the placeholder in backticks.
   `rg -n '<[a-z-]|<->' <files>` on the prose lines catches it before `bun run
-  build` does; it cost one build on 2026-09-03.
+  build` does.
 - **Dropped figures**: lexicanum's rule is that every figure, backticked
   identifier and URL at HEAD survives an edit unless dropped on purpose. Diff
   the token sets per file (backticks, URLs, numbers with units) between `git
@@ -215,18 +213,18 @@ sentence, not by adding a caveat next to it.
 
 ## What a reviewer will ask you to check
 
-Every external review that day ended with "check me on N". Answer each one
-explicitly in the reply: which claims rest on a source the page cannot cite,
-which observations were fetch artefacts (JSX stripped, diagram flattened,
-smart quotes from the renderer), which points are inferences from docs wording
-rather than measurements, and which the run cannot separate (per chain vs per
-project; window vs per invocation). Those answers become the page's "Not
-settled" text.
+External reviews end with "check me on N". Answer each one explicitly in the
+reply: which claims rest on a source the page cannot cite, which observations
+were fetch artefacts (JSX stripped, diagram flattened, smart quotes from the
+renderer), which points are inferences from docs wording rather than
+measurements, and which the run cannot separate (per chain vs per project;
+window vs per invocation). Those answers become the page's "Not settled" text.
 
 ## Related
 
 - `validating-empirically` - designing and running the probe.
 - `erfi-voice` - the register and the structural tells.
 - `epistemics` - provenance for every specific.
-- lexicanum `AGENTS.md`, "Docs that publish measured numbers" - the house
+- `sa-pov` - the same evidence discipline packaged for a customer runbook.
+- `~/lexicanum/AGENTS.md`, "Docs that publish measured numbers" - the house
   rules this skill's checklist feeds.
