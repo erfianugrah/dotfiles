@@ -73,8 +73,11 @@ install_each() {
   if [ ! -f "$list" ]; then echo "!! $label: $list not found - skipping" >&2; return 0; fi
   local name
   local -a names=() failed=()
+  # || true: grep exits 1 when the list is all comments/empty (and pipefail then
+  # fails the assignment under set -e, killing the script before the
+  # empty-list guard below runs - observed pattern, fixed 2026-09-05).
   # shellcheck disable=SC2046
-  names=( $(grep -v '^[[:space:]]*#' "$list" | grep -v '^[[:space:]]*$') )
+  names=( $(grep -v '^[[:space:]]*#' "$list" | grep -v '^[[:space:]]*$') ) || true
   [ "${#names[@]}" -eq 0 ] && return 0   # empty list: skip (also avoids set -u array trap on old bash)
   for name in "${names[@]}"; do
     if [ "$DRY_RUN" = 1 ]; then echo "+ $* $name"; continue; fi
@@ -121,7 +124,9 @@ do_local_bin() {
   run mkdir -p "$HOME/.local/bin"
   local tools=(mdclip)
   if [ ! -x "$DOTFILES/bin/stow-drift" ]; then
-    if command -v go >/dev/null 2>&1; then
+    if [ "$DRY_RUN" = 1 ]; then
+      echo "+ build stow-drift (go build, binary missing)"
+    elif command -v go >/dev/null 2>&1; then
       echo ">> building stow-drift (go found, binary missing)"
       (cd "$DOTFILES/bin" && run go build -ldflags="-s -w" -o stow-drift .)
     else
@@ -340,7 +345,10 @@ case "$OS" in
       brew_install_each $(grep -v '^[[:space:]]*#' "$DOTFILES/packages/brew.txt" | grep -v '^[[:space:]]*$')
       # Casks (GUI apps), only when the list exists and is non-empty -
       # save_packages regenerates it from 'brew list --cask' on the mac.
-      _casks="$(grep -v '^[[:space:]]*#' "$DOTFILES/packages/brew-cask.txt" 2>/dev/null | grep -v '^[[:space:]]*$' | tr '\n' ' ')"
+      # || true: a missing/all-comment brew-cask.txt makes the trailing grep
+      # exit 1 and pipefail would fail the assignment under set -e, killing the
+      # script before do_stow/do_local_bin/do_claude (fixed 2026-09-05).
+      _casks="$(grep -v '^[[:space:]]*#' "$DOTFILES/packages/brew-cask.txt" 2>/dev/null | grep -v '^[[:space:]]*$' | tr '\n' ' ')" || true
       if [ -n "$_casks" ]; then
         echo ">> installing casks via brew"
         # shellcheck disable=SC2086
@@ -351,7 +359,11 @@ case "$OS" in
     do_stow
     ;;
   *)
-    echo ">> no package manager mapping for '$OS' - stow links only"
+    if [ "$OS" = debian ]; then
+      echo ">> debian detected - stow links only (no apt mapping, by design)"
+    else
+      echo ">> no package manager mapping for '$OS' - stow links only"
+    fi
     do_stow
     ;;
 esac

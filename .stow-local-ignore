@@ -36,3 +36,9 @@ node_modules
 # 2026-08-30, 0 hits across all history) and must stay that way. Live settings
 # that are safe to share (theme/provider/visualizer) get hand-synced.
 .config/cliamp/config.toml
+# .ssh: NEVER stow-linked. The repo copy is reference only; the live ~/.ssh/config
+# must stay a REAL FILE everywhere - the fleet NixOS hosts carry per-host config
+# there (gh-fleet deploy alias, nixos-fleet README) and hearth's AGENTS.md
+# asserts test -L ~/.ssh/config fails. Stowing it also hard-conflicts on any box
+# with a real ~/.ssh/config (dev box) and aborts the whole stow.
+^/?\.ssh
