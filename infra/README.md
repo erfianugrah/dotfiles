@@ -113,7 +113,7 @@ NOT here: `~/dotfiles` (pi/shell config), `~/cf-stuff/erfianugrah-cf-tf`
 (Cloudflare Terraform), `~/work` (Supabase work repos).
 
 Sibling pi skills pointing into this tree: `eaves`, `xikectl`, `knotctl`,
-`knot-dns`, `gloryhole`, `caddy`, `composer`, `arr-stack`, `jellyfin`,
+`knot-dns`, `gloryhole`, `caddy`, `composer`, `arr-stack`,
 `tailscale-homelab`, `waf-api`, `souin`, `drawbridge`, `nixos`, `memledger`,
 `llm-compose`, `whisper`, `comfyui`, `lora-train`, `compose-backups`.
 

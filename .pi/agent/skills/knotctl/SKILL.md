@@ -1,275 +1,161 @@
 ---
 name: knotctl
-description: Use when making live DNS edits against the user's Knot authoritative server (erfi.io + lab.erfi.io, TSIG-keyed RFC 2136 over TCP) - add/rm/set/ls records, declarative YAML zone apply, TSIG key roles and ACLs, or the live smoke test. Fires on 'knotctl', 'add/change a DNS record', 'RFC 2136', 'TSIG key', 'zone apply', '_acme-challenge TXT'. NOT for resolver work (gloryhole) or DNS architecture (knot-dns). Source ~/infra/knotea/authority/cmd/knotctl/, binary ~/bin/knotctl.
+description: "Use when making live DNS edits against the user's Knot authoritative server (erfi.io + lab.erfi.io, TSIG-keyed RFC 2136 over TCP) - add/rm/set/ls records, declarative YAML zone apply from authority/zones/, TSIG key roles and NOTAUTH, or the live smoke test. Fires on 'knotctl', 'add/change a DNS record', 'RFC 2136', 'TSIG key', 'zone apply', 'zones-plan', '_acme-challenge TXT'. NOT for resolver work (gloryhole) or server-side config, ACLs and DNSSEC (knot-dns)."
 ---
 
-# knotctl — TSIG-keyed DNS editor
+# knotctl - TSIG-keyed DNS editor
 
-> **knotea merge (2026-06-16)** — knotctl source now lives in the knotea
-> monorepo at **`~/infra/knotea/authority/cmd/knotctl/`** (built via
-> `cd ~/infra/knotea/authority && make install-knotctl`). The legacy
-> `~/infra/knot-fly/cmd/knotctl/` checkout is retained until the P6 Fly cutover but is
-> no longer the build source. **Cutover done (2026-06-25):** the live RFC 2136
-> target is now knotea's anycast v4 **`137.66.1.170`** (the `glory-hole` Fly app's
-> embedded knotd); `knot-fly-mvp`/`169.155.56.21` is frozen and pending retirement
-> after the soak. Plans: `~/infra/knotea/docs/plans/2026-06-16-knotea-merge.md` +
-> `~/infra/knotea/docs/plans/2026-06-25-knotea-cutover-runbook.md`.
-
-Lives at `~/infra/knotea/authority/cmd/knotctl/`. Static Go binary, ~9.5MB, `CGO_ENABLED=0`,
-talks miekg/dns RFC 2136 directly to `knotd` on `137.66.1.170:53`. No shim,
-no Cloudflare API token, no `nsupdate -y` (which leaks secrets to argv) —
-just keyfiles + TSIG + auto-verify polling. See the M0.5 plan at
-`~/infra/knotea/authority/docs/plans/2026-05-25-knotctl-foundation.md` for the full design.
+Source `~/infra/knotea/authority/cmd/knotctl/` (knotea monorepo), binary `~/bin/knotctl`, built with `cd ~/infra/knotea/authority && make install-knotctl`. Static Go binary, `CGO_ENABLED=0`, speaks miekg/dns RFC 2136 over TCP to the live authority at `137.66.1.170:53` (knotea on the Fly app `glory-hole`, which proxies UPDATE to its loopback knotd - topology in the `knot-dns` skill). No shim, no Cloudflare token, no `nsupdate -y` (which leaks secrets to argv) - keyfiles + TSIG + auto-verify polling. Design doc: `~/infra/knotea/authority/docs/plans/2026-05-25-knotctl-foundation.md`.
 
 ## When to reach for it
 
-| Want to … | Reach for |
+| Want to ... | Reach for |
 |---|---|
 | One-off DNS edit on `erfi.io` or `lab.erfi.io` | `knotctl add/rm/set` |
-| Replace ALL records of (name, type) with N new values atomically | `knotctl set name TYPE v1 v2 v3` (multi-value) |
-| Treat a zone as YAML in git, reconcile drift | `knotctl apply zones/<zone>.yml` (this skill) |
-| Preview what an apply would change without writing | `knotctl apply <file> --dry-run` |
-| Inspect what's currently at a name | `knotctl ls` |
-| Dump the whole zone to disk | `knotctl export <zone>` (TSIG'd AXFR) |
-| Edit a CF-hosted zone (`erfi.dev`, `erfianugrah.com`) | `cloudflare` skill (still on CF) |
-| Debug Knot ACLs / config / Fly deploy | `knot-dns` skill (server side) |
-| Add a new TSIG key or ACL | `knot-dns` skill (`knotc conf-set` directly) |
-| Run a Caddy ACME challenge | Caddy already does this via `dns rfc2136`; see `caddy` skill |
+| Replace ALL records of (name, type) with N values atomically | `knotctl set name TYPE v1 v2 v3` |
+| Treat a zone as YAML in git, reconcile drift | edit `~/infra/knotea/authority/zones/<zone>.yml`, `make zones-plan`, `make zones-apply` |
+| Preview what an apply would change | `knotctl apply <file> --dry-run` / `make zones-plan` |
+| Inspect what is at a name | `knotctl ls` |
+| Dump the whole zone | `knotctl export <zone>` (TSIG'd AXFR; `--yaml` for the apply schema) |
+| Edit a CF-hosted zone (`erfi.dev`, `erfianugrah.com`) | `cloudflare-ops` skill - both still delegate to Cloudflare vanity NS (`dig NS <zone> +short`) |
+| Debug Knot ACLs / confdb / Fly deploy, add a TSIG key or ACL | `knot-dns` skill (`knotc conf-set` server-side) |
+| Run a Caddy ACME challenge | Caddy does this itself via `dns rfc2136` - `caddy` skill |
+| CF-compatible tooling (terraform-provider-cloudflare, dnscontrol, octodns) | the CF-shape HTTP API on the same app: host `knotea.erfi.io`, Fly port 2096, path `/client/v4`, bearer token; schema `~/infra/knotea/authority/docs/api.md` |
 
-`knotctl` is the operator-facing CLI (TSIG-keyed RFC 2136). It is NOT the
-CF-shape HTTP API - that ships separately and is now **live** on the merged
-`glory-hole` Fly app at `https://knotea.erfi.io:2096/client/v4` (bearer-token,
-in-process over the same loopback knotd). Full schema:
-`~/infra/knotea/authority/docs/api.md`. Use `knotctl` for wire-level operator edits;
-use the HTTP API for CF-compatible tooling (terraform-provider-cloudflare,
-cloudflare-go, dnscontrol, octodns).
+`knotctl` is the wire-level operator CLI. The HTTP API is a separate surface over the same loopback knotd; the JSON shapes match (`pkg/wire.Record` uses the Cloudflare `dns_records` tags), so scripts written against `knotctl --json` port over.
 
 ## Install + first-run
 
 ```bash
-# from the ~/infra/knotea/authority source tree (built with ldflags so --version is stamped)
-cd ~/infra/knotea/authority && make install-knotctl
-# installs to ~/bin/knotctl  (ensure ~/bin is on $PATH)
-
+cd ~/infra/knotea/authority && make install-knotctl   # -> ~/bin/knotctl, ldflags stamp --version
 knotctl --version
-# knotctl knotctl-v0.1.0 (commit <sha>, built <iso8601>)
+# knotctl v<monorepo tag>-<n>-g<sha> (commit <sha>, built <iso8601>, go...)
 
-# Bootstrap keyfiles from the operator-local env file (the one
-# `~/.knot-fly-mvp.env` that holds the TSIG secrets, mode 0600)
-knotctl keys import-env
-
+knotctl keys import-env        # bootstrap keyfiles from the operator env file (default ~/.knot-fly-mvp.env, mode 0600)
 knotctl keys list
-# acme     /home/erfi/.config/knotctl/keys/caddy-acme.key  [ok]
-# axfr     /home/erfi/.config/knotctl/keys/axfr-out.key  [ok]
-# write    /home/erfi/.config/knotctl/keys/knotctl.key  [ok]
+# acme     ~/.config/knotctl/keys/caddy-acme.key  [ok]
+# axfr     ~/.config/knotctl/keys/axfr-out.key    [ok]
+# write    ~/.config/knotctl/keys/knotctl.key     [ok]
 ```
 
-Each keyfile is BIND format, mode `0600` enforced by the loader (see
-`pkg/tsigclient/keyfile.go`). If perms drift loose the binary refuses to
-load it — `chmod 600 ~/.config/knotctl/keys/*.key`.
+Each keyfile is BIND format, mode `0600` enforced by the loader (`pkg/tsigclient/keyfile.go`). Loose perms make the binary refuse to load it: `chmod 600 ~/.config/knotctl/keys/*.key`. Never print a keyfile; `knotctl keys show <role>` deliberately shows metadata only. Comparing or rotating a key is the `secret-handling` skill.
 
-## The four key roles — DO NOT MIX UP
+## The four key roles - do not mix up
 
-This is the single most important thing in this skill. The four TSIG keys on
-the authority (the merged `glory-hole` Fly app, ex-`knot-fly-mvp`) each map to
-a narrow ACL. Using the wrong
-key for a record type produces `NOTAUTH (rcode=9)` → `knotctl` exits 2.
+Each TSIG key on the authority maps to a narrow ACL. The wrong key for a record type produces `NOTAUTH (rcode=9)` and exit 2.
 
-| Key role | Keyfile | ACL on Knot side | What it CAN do |
+| Key role | Keyfile | ACL on Knot | What it can do |
 |---|---|---|---|
-| `knotctl.` | `knotctl.key` | `knotctl_update` (A/AAAA/CNAME/MX/TXT/SRV/CAA/NS) | **The general-purpose write key.** Provisioned in M0.5 K0. Use this for arbitrary record types. |
-| `caddy-acme.` | `caddy-acme.key` | `acme_update` (TXT on `_acme-challenge.*`) | TXT only, only under `_acme-challenge.` labels. Caddy uses it via `dns rfc2136`. |
-| `caddy-ddns.` | `caddy-ddns.key` | `ddns_update` (A/AAAA only) | A/AAAA only. Reserved for DDNS hosts; not used by anything live today. |
-| `axfr-out.` | `axfr-out.key` | `axfr_out` (zone transfer) | **Read-only zone transfer (AXFR).** No writes. `knotctl export` uses this. |
+| `knotctl.` | `knotctl.key` | `knotctl_update` (A/AAAA/CNAME/MX/TXT/SRV/CAA/NS/DS) | The general-purpose write key. |
+| `caddy-acme.` | `caddy-acme.key` | `acme_update` (TXT on `_acme-challenge.*`) | Caddy's ACME key. TXT only, only under `_acme-challenge.` labels. |
+| `caddy-ddns.` | `caddy-ddns.key` | `ddns_update` (A/AAAA only) | Reserved for DDNS hosts; nothing live uses it. |
+| `axfr-out.` | `axfr-out.key` | `axfr_out` (zone transfer) | Read-only AXFR. `knotctl export` uses this. |
 
-Maps to: `knotctl add ... A` → uses `knotctl.` (role `write`). `knotctl
-export` → uses `axfr-out.` (role `axfr`). Caddy ACME → uses `caddy-acme.`
-under the hood, separate from `knotctl`.
-
-If you see `error: server rejected with NOTAUTH (rcode=9)`, the cause is
-≥99% "wrong key role for this record type", not a real auth failure. Check
-`knotctl keys show write` and confirm the key your call resolved to.
+`knotctl add/set/rm` use `knotctl.` (role `write`); `export` uses `axfr-out.` (role `axfr`). If you see `error: server rejected with NOTAUTH (rcode=9)` the cause is almost always "wrong key role for this record type", not a real auth failure - check `knotctl keys show write`.
 
 ## Workflows
 
 ### Add / replace / remove
 
-`knotctl add` polls the server after the write — exits 0 only when the
-record is queryable. Default verify timeout is 10s; tune with `--wait=5s`
-or skip entirely with `--no-wait` (returns immediately on server-ack).
+`add` and `set` poll the server after the write and exit 0 only when the record is queryable. Default verify timeout 10s; `--wait=5s` tunes it, `--no-wait` returns on server-ack.
 
 ```bash
-# Add a record
 knotctl add www.erfi.io A 192.0.2.1
 knotctl add mail.erfi.io MX "10 mx1.erfi.io"
-knotctl add _verify.erfi.io TXT '"some-token"'    # quote TXT bodies — RFC 1035 char-string
+knotctl add _verify.erfi.io TXT '"some-token"'    # quote TXT bodies - RFC 1035 char-string
 
-# Atomic replace, single value
-knotctl set www.erfi.io A 198.51.100.7
-
-# Atomic multi-value replace — ONE UPDATE message, bundled delete-rrset + N inserts.
-# No partial-rrset window even mid-flight; Knot processes as one transaction.
-knotctl set mail.erfi.io MX '10 mx1.erfi.io' '20 mx2.erfi.io'
+knotctl set www.erfi.io A 198.51.100.7                       # atomic replace, single value
+knotctl set mail.erfi.io MX '10 mx1.erfi.io' '20 mx2.erfi.io' # atomic multi-value: ONE UPDATE message
 knotctl set api.erfi.io  A  1.2.3.4 1.2.3.5 1.2.3.6
 
-# Remove
-knotctl rm www.erfi.io A 192.0.2.1        # specific (name, type, rdata) tuple
-knotctl rm www.erfi.io A                  # all A records at this name
-knotctl rm staging.erfi.io                # everything at staging.erfi.io
+knotctl rm www.erfi.io A 192.0.2.1        # specific (name, type, rdata)
+knotctl rm www.erfi.io A                  # all A at this name
+knotctl rm staging.erfi.io                # everything at the name
 ```
 
-`add` and `set` validate inputs against `wire.Record.Validate()` before
-sending - uneditable types (SOA; DNSKEY/RRSIG/NSEC*/CDS/CDNSKEY) exit 5
-client-side without touching the wire. `DS` is editable (delegation glue,
-since 2026-06-30). Empty content, missing name, TTL below 30s also exit 5.
-**`--wait` is also validated client-side before the wire op** — a bad
-`--wait` value never leaves a record behind. (This was a real bug fixed
-2026-05-27 in d8fe958 — the smoke's `bad --wait → ExitUsageError`
-assertion was silently writing a record on every run.)
+Validation happens client-side before anything hits the wire (`wire.Record.Validate()`): uneditable types (SOA, DNSKEY/RRSIG/NSEC*/CDS/CDNSKEY), empty content, missing name, TTL below 30s and a malformed `--wait` all exit 5 without writing. `DS` is editable (delegation glue for a child zone). Multi-value `set` shares (zone, name, type, ttl) across values; mixing types in one call errors client-side.
 
-For multi-value `set`, all values share (zone, name, type, ttl); only
-rdata differs. Mixing types across one `set` call errors client-side.
+### Declarative reconcile (apply) - zones as code
 
-### Declarative reconcile (apply)
+The source of truth for both live zones is `~/infra/knotea/authority/zones/erfi.io.yml` and `lab.erfi.io.yml` (schema and workflow in `zones/README.md`). Edit in git, plan, apply:
 
-For anything beyond a one-shot edit, write a zonefile and reconcile:
+```bash
+cd ~/infra/knotea/authority
+make zones-plan                 # dry-run every zones/*.yml, additive AND with --prune
+make zones-apply                # additive: adds + updates only
+make zones-apply ARGS=--prune   # also remove drift
+make zones-export               # regenerate zones/*.yml from live state (`knotctl export <zone> --yaml`) - only when bootstrapping or capturing out-of-band edits
+```
+
+Single-file form: `knotctl apply zones/lab.erfi.io.yml [--dry-run] [--prune]`. Schema:
 
 ```yaml
-# zones/lab.erfi.io.yml
 zone: lab.erfi.io
 default_ttl: 300
-
 records:
-  - { name: test, type: A,     content: 118.189.189.102 }
-  - { name: api,  type: A,     content: [1.2.3.4, 1.2.3.5] }   # multi-value
-  - { name: '@',  type: MX,    content: ['10 mail.lab.erfi.io'] }  # apex
+  - { name: test, type: A,     content: 10.0.10.1 }
+  - { name: api,  type: A,     content: [1.2.3.4, 1.2.3.5] }      # multi-value rrset
+  - { name: '@',  type: MX,    content: ['10 mail.lab.erfi.io'] } # apex
   - { name: www,  type: CNAME, content: lab.erfi.io, ttl: 60 }
   - { name: _spf, type: TXT,   content: '"v=spf1 -all"', comment: SPF }
 ```
 
-```bash
-knotctl apply zones/lab.erfi.io.yml --dry-run   # preview the plan
-knotctl apply zones/lab.erfi.io.yml             # additive: adds + updates
-knotctl apply zones/lab.erfi.io.yml --prune     # also removes drift
-```
-
 Properties to internalise:
 
-- **Additive by default.** Records in the live zone NOT in the YAML are
-  LEFT ALONE. `--prune` removes drift. Safer default than `terraform
-  apply` because hand-edits at the apex (NS, SOA) are never at risk.
-- **Idempotent.** Second `apply` of the same YAML prints
-  `0 set, 0 removed, N unchanged`. Diff is by rrset (`name`+`type`)
-  content + TTL, not by individual record.
-- **Safe by construction.** `--prune` will NEVER remove:
-  - Apex `NS` (would orphan the zone)
-  - `SOA` (server-managed)
-  - `DNSKEY` / `RRSIG` / `NSEC*` / `CDS` / `CDNSKEY` (DNSSEC, server-managed)
-  - `DS` - editable INTERACTIVELY (add/rm/set/ls) but excluded from
-    apply/export: a delegation DS may be daemon-managed by ds-push, and
-    a zone's own DS is published via the read-only CDS. apply rejects a
-    DS in YAML with a pointer back to `knotctl add`.
-  - Anything outside `IsReconcilable()`. Interactive `IsEditable()` is 10
-    types (A, AAAA, CNAME, MX, NS, TXT, SRV, CAA, PTR, DS); apply's
-    reconcilable set is those 9 minus DS.
-- **Multi-value-aware.** `content: [a, b, c]` becomes one rrset of three
-  records, replaced atomically via SetMany.
-- **Apex via `@`.** Resolves to the zone name.
-- **Per-op timeout (10s).** A single slow op can't block the whole apply.
-- **Verify only Sets.** Remove verification is racy on caches; we skip it.
+- Additive by default. Live records absent from the YAML are left alone; `--prune` removes drift. Safer than `terraform apply` because hand edits at the apex are never at risk.
+- Idempotent. A second apply prints `0 set, 0 removed, N unchanged`. Diff is by rrset (`name`+`type`) content + TTL.
+- `--prune` never removes apex `NS`, `SOA`, DNSSEC records, or `DS`. DS is interactive-only (`add/rm/set/ls ... --zone=<parent>`) because a delegation DS may be daemon-managed by ds-push; apply rejects a DS entry with a pointer back to `knotctl add`. Reconcilable set = editable set minus DS.
+- Multi-value `content: [a, b, c]` becomes one rrset replaced atomically.
+- Name resolution: `@` = zone apex; bare label joins the zone; an FQDN must be inside the declared zone (else an error with the line number). BIND convention: no trailing dot = relative, even with internal dots.
+- Per-op timeout 10s; only Sets are verified (remove verification is racy on caches).
+- Not transactional across rrsets: each (name, type) op is one UPDATE, but op #5 failing leaves ops 1-4 applied. Always `--dry-run` / `make zones-plan` first.
 
-Name resolution in YAML:
+Plan glyphs: `~` will Set, `-` will Remove (only with `--prune`), `=` unchanged; reasons `new`, `content changed`, `ttl changed`, `drift`, `unchanged`.
 
-- `@` → the declared zone (e.g. `lab.erfi.io`)
-- Bare label (`api`) → joined with zone → `api.lab.erfi.io`
-- FQDN must be within the declared zone, else error (`foo.other.tld`
-  rejected with line number)
-
-Sample apply output:
-
-```
-plan for lab.erfi.io (mode: additive) — 5 ops
-  ~ apply-api.lab.erfi.io  A      192.0.2.10, 192.0.2.11, 192.0.2.12  (new)
-  ~ apply-spf.lab.erfi.io  TXT    "v=spf1 -all"                       (new)
-  ~ apply-www.lab.erfi.io  CNAME  test.lab.erfi.io.                   (new)
-  ~ lab.erfi.io            MX     10 apply-mail.lab.erfi.io., 20 backup.lab.erfi.io.  (new)
-  = test.lab.erfi.io       A      118.189.189.102                     (unchanged)
-verify: 4/4 sets present
-ok: 4 set, 0 removed, 1 unchanged
-```
-
-Glyphs: `~` = will Set, `-` = will Remove (drift, only with `--prune`),
-`=` = no change. `Reason` annotations: `new`, `content changed`,
-`ttl changed`, `drift`, `unchanged`.
-
-The apply engine is in `pkg/reconcile/` (diff logic) + `pkg/zonefile/`
-(YAML schema) + `pkg/tsigclient/canonical.go` (content normalisation).
-Same reconciler will drive `knot-mig` (PLAN.md Task 6 — CF→knot-fly
-migration) when M3 lands.
+Content canonicalisation: miekg/dns appends the trailing dot to hostname rdata (`mail.erfi.io` -> `mail.erfi.io.`) and AXFR always returns that form. `pkg/tsigclient/CanonicaliseContent` normalises both sides before `reconcile.Plan`, so MX/CNAME/NS/SRV/PTR in YAML may be written with or without the dot and stay idempotent.
 
 ### Inspect
 
 ```bash
-knotctl ls www.erfi.io A          # human-readable table
-knotctl ls www.erfi.io            # ANY query (server may filter)
-knotctl ls www.erfi.io A --json   # JSON array, matches pkg/wire.Record shape
+knotctl ls www.erfi.io A          # table
+knotctl ls www.erfi.io            # ANY (server may filter)
+knotctl ls www.erfi.io A --json   # pkg/wire.Record shape
 
-knotctl export erfi.io            # full zone via TSIG'd AXFR (table)
-knotctl export erfi.io --json     # same, machine-readable
-knotctl export erfi.io | wc -l    # zone size check (~253 records as of M0.5 smoke)
+knotctl export erfi.io            # TSIG'd AXFR, table
+knotctl export erfi.io --json
+knotctl export erfi.io --yaml     # apply-compatible schema
 ```
 
-`ls` queries are unauthenticated (UDP/TCP DNS query, no TSIG). `export`
-uses the `axfr` role key.
-
-### `--json` is a global flag — works pre OR post subcommand
-
-K15.5 fixed the stdlib-flag-parse-stops-at-positional bug. Both work:
-
-```bash
-knotctl --json ls www.erfi.io A
-knotctl ls www.erfi.io A --json
-# identical output
-```
-
-JSON shape matches `pkg/wire.Record` (Cloudflare `/zones/{id}/dns_records`
-JSON tags), so scripts written against `knotctl --json` will keep working
-when M2's HTTP API ships. Same applies to `--no-wait` and `--wait`.
+`ls` is an unauthenticated DNS query; `export` uses the `axfr` role. `--json`, `--no-wait`, `--wait` are global flags and work before or after the subcommand.
 
 ### Manage keyfiles
 
 ```bash
-knotctl keys list                         # which roles present + path
-knotctl keys show write                   # metadata only — NEVER the secret
-knotctl keys import-env [PATH]            # default: ~/.knot-fly-mvp.env
+knotctl keys list                 # roles present + paths
+knotctl keys show write           # metadata only, never the secret
+knotctl keys import-env [PATH]    # default ~/.knot-fly-mvp.env
 ```
 
-`keys show` deliberately does NOT echo the secret (defense against the
-gotcha #25 leak class — see `~/infra/knotea/authority/AGENTS.md`). Read the file
-directly if you genuinely need the value.
-
-## Exit code contract — `$?` after any knotctl call
+## Exit code contract
 
 | Code | Meaning | Script reaction |
 |---|---|---|
-| 0 | Success (record written + verified queryable) | continue |
-| 1 | Write succeeded but verification timed out — record NOT yet visible | retry / investigate / accept |
-| 2 | Server rejected (NOTAUTH/FORMERR/REFUSED/etc., wrapped as `*tsigclient.RcodeError`) | check key role + ACL — usually "wrong key for record type" |
-| 3 | Config error — keyfile missing, loose perms, malformed YAML | fix the keyfile / config |
-| 4 | Network error — timeout, connection refused | check `KNOTCTL_SERVER` reachability |
-| 5 | Usage error — bad flags, missing args, uneditable type | fix the invocation |
-
-Idiomatic shell pattern:
+| 0 | Success (written + verified queryable) | continue |
+| 1 | Write succeeded, verification timed out | retry / investigate / accept |
+| 2 | Server rejected (NOTAUTH/FORMERR/REFUSED, `*tsigclient.RcodeError`) | wrong key role for the type, almost always |
+| 3 | Config error - keyfile missing, loose perms, malformed YAML | fix keyfile / config |
+| 4 | Network error - timeout, connection refused | check `KNOTCTL_SERVER` reachability |
+| 5 | Usage error - bad flags, missing args, uneditable type | fix the invocation |
 
 ```bash
 if knotctl set host.erfi.io A "$NEW_IP"; then
     log "DDNS update OK"
 else
     case $? in
-        1) log "Update sent but didn't propagate within --wait; investigate" ;;
-        2) log "Server rejected — almost certainly wrong key role" ;;
-        4) log "Couldn't reach the server — see Fly UDP hairpin gotcha #24" ;;
-        *) log "Other failure (exit=$?)" ;;
+        1) log "sent but not visible within --wait" ;;
+        2) log "server rejected - check key role" ;;
+        4) log "cannot reach the authority" ;;
+        *) log "other failure" ;;
     esac
     exit 1
 fi
@@ -277,194 +163,47 @@ fi
 
 ## Config layering
 
-Flag > env > YAML > defaults. Resolution at `pkg/config/loadConfig`.
-
-```bash
-# Highest precedence — flags
-knotctl --server [fdaa:5:8fc8:a7b:...]:53 --keydir /tmp/keys ls foo
-
-# Or via env (good for shell aliases)
-export KNOTCTL_SERVER=137.66.1.170:53
-export KNOTCTL_ZONE=erfi.io
-
-# Lowest precedence (other than defaults) — YAML at ~/.config/knotctl/config.yml
-cat > ~/.config/knotctl/config.yml <<'YAML'
-server: 137.66.1.170:53
-default_zone: erfi.io
-default_key: knotctl
-keydir: /home/erfi/.config/knotctl/keys
-keys:
-  write: knotctl
-  axfr:  axfr-out
-  acme:  caddy-acme
-YAML
-```
-
-Code defaults: server `127.0.0.1:53` (dev); point `KNOTCTL_SERVER` / `--server`
-at the prod authority `137.66.1.170:53`. The 4 environment
-variables: `KNOTCTL_SERVER`, `KNOTCTL_KEY` (default-key basename),
-`KNOTCTL_ZONE`, `KNOTCTL_KEYDIR`.
-
-## Sub-zone routing — `known_zones` config
-
-**Real bug fixed 2026-05-27** (commit d8fe958): the original
-`inferZone` always picked the last 2 labels of an FQDN, which silently
-mis-routed `foo.lab.erfi.io` to the `erfi.io` zone (writing it as a
-leaf record under the parent zone, where public queries — correctly
-routed to the deeper `lab.erfi.io` zone — returned NXDOMAIN).
-
-Fix: `Config.KnownZones` is a list of zones the client knows about;
-`InferZone` does longest-suffix-match. Defaults to `[erfi.io,
-lab.erfi.io]`. Unknown zones now error loudly instead of silently
-routing to the longest sibling.
+Flag > env > YAML > compiled defaults (`pkg/config/loadConfig`). Flags: `--config PATH` (default `~/.config/knotctl/config.yml`), `--server`, `--key`, `--keydir`. Env: `KNOTCTL_SERVER`, `KNOTCTL_KEY`, `KNOTCTL_ZONE`, `KNOTCTL_KEYDIR`. The compiled default server is `127.0.0.1:53` (dev), so the live config file is what points at prod - it holds exactly two keys and no secrets:
 
 ```yaml
 # ~/.config/knotctl/config.yml
+server: 137.66.1.170:53
 known_zones:
   - erfi.io
   - lab.erfi.io
-  # add more as you migrate zones off CF (erfi.dev, erfianugrah.com)
 ```
 
-Resolution precedence for `--zone` argument:
+`keydir` defaults to `~/.config/knotctl/keys` and the role -> keyfile map (`write`/`axfr`/`acme`) has sane defaults, so neither is set.
 
-1. Explicit `--zone=<name>` flag (overrides everything)
-2. Longest-suffix match against `known_zones`
-3. `default_zone` fallback (only if it's actually a suffix of the input)
-4. Hard error with helpful message
+## Sub-zone routing - `known_zones`
 
-If you see `cannot infer zone for "X": not a subdomain of any
-known_zones (...) or default_zone (...)` — add the zone to
-`known_zones` or pass `--zone=Y` explicitly.
+Zone inference is longest-suffix-match against `known_zones` (default `[erfi.io, lab.erfi.io]`), so `foo.lab.erfi.io` routes to `lab.erfi.io`, never to `erfi.io` as a leaf record (which would answer NXDOMAIN publicly because resolvers follow the deeper delegation). Precedence: explicit `--zone=<name>`, then longest suffix in `known_zones`, then `default_zone` if set and a real suffix, else a hard error: `cannot infer zone for "X": not a subdomain of any known_zones (...)`. Add the zone to `known_zones` or pass `--zone`. Add new zones here as they migrate off CF.
 
-## Canonical content for MX/CNAME/NS/SRV/PTR
+## Live smoke - `make smoke`
 
-miekg/dns canonicalises hostname rdata by appending the trailing dot
-(`mail.erfi.io` → `mail.erfi.io.`). AXFR responses always carry the
-canonical form; YAML typically omits the trailing dot. Without
-normalisation, the reconciler's content-diff would see `10 mail` ≠
-`10 mail.` and emit Set every run — idempotency would silently break.
+`cd ~/infra/knotea/authority && make smoke` (defaults `SMOKE_ZONE=erfi.io`; `SMOKE_ZONE=lab.erfi.io` exercises sub-zone routing). End-to-end against the real server: writes uniquely named `_smoke-knotctl-<ts>-<pid>.<zone>` / `_smoke-apply-...` records, exercises every subcommand including the full apply lifecycle (dry-run -> real -> idempotent -> prune), cleans up via `trap EXIT` on any exit path. Touches production DNS; the record names are unmistakable test artifacts. All green = green light to ship.
 
-`pkg/tsigclient/CanonicaliseContent` round-trips through `buildRR` to
-produce the canonical form. `apply` calls `Canonicalise(desired)` and
-`Canonicalise(current)` before `reconcile.Plan` so both sides compare
-the same string. Same machinery handles SRV's `0 5 5060 sipserver` →
-`0 5 5060 sipserver.`.
-
-For MX/CNAME/NS/SRV/PTR in YAML you can write either form — the
-canonical with-dot or the convenience without. They round-trip
-identically through apply.
-
-## Live smoke — `make smoke`
-
-37-assertion end-to-end against the real server. Writes uniquely-named
-test records (`_smoke-knotctl-<unix-ts>-<pid>.<zone>` +
-`_smoke-apply-<unix-ts>-<pid>.<zone>`), exercises every subcommand
-including the full apply lifecycle (dry-run → real → idempotent →
-prune), cleans up via `trap EXIT`.
-
-```bash
-cd ~/infra/knot-fly && make smoke
-# Defaults to SMOKE_ZONE=erfi.io. Pass SMOKE_ZONE=lab.erfi.io to
-# exercise the sub-zone routing path.
-
-# 37/37 green = green-light to ship.
-```
-
-Safe to run repeatedly. Safe to SIGINT. **Touches production DNS** — the
-smoke record names are unmistakable as test artifacts, and trap-cleanup
-removes them on any exit path (apply YAML is a `mktemp` file, also
-trap-cleaned).
-
-The smoke deliberately does NOT exercise wrong-key paths (would pollute
-the Knot audit log). NOTAUTH/FORMERR scenarios are covered by the unit
-tests in `cmd/knotctl/handlers_test.go` against the in-process
-`pkg/tsigtest` DNS server (the in-process server enforces zone-match
-NOTAUTH since 2026-05-27 — mirrors a real Knot daemon and catches the
-sub-zone routing regression class).
+The smoke deliberately does not exercise wrong-key paths (it would pollute the Knot audit log); NOTAUTH/FORMERR are covered by unit tests in `cmd/knotctl/handlers_test.go` against the in-process `pkg/tsigtest` server, which enforces zone-match NOTAUTH like a real knotd.
 
 ## Common failure modes
 
-### `error: keyfile X has loose permissions Y; want 0600`
-
-```bash
-chmod 600 ~/.config/knotctl/keys/*.key
-```
-
-### `error: server rejected with NOTAUTH (rcode=9)` (exit 2)
-
-Almost always "wrong key role for the record type." Check:
-
-1. `knotctl keys list` — is the keyfile for your role present?
-2. Are you implicitly using `caddy-ddns` (A/AAAA only) but trying to
-   write a TXT? Pass `--key knotctl` explicitly to force the
-   general-purpose key, or fix the `Keys` map in config.yml.
-3. Is the secret in your `.key` file actually the current one?
-   See gotcha #25 in `~/infra/knotea/authority/AGENTS.md` for the rotation procedure.
-
-### `error: update: network error: ... i/o timeout` (exit 4)
-
-The default server `137.66.1.170:53` is the public anycast IP. If you're
-running `knotctl` from inside a Fly machine in `fra`, the UDP hairpin
-block applies and queries timeout — but TCP works fine. `knotctl` uses
-TCP throughout, so this usually means a real outage, not the hairpin
-issue. See gotcha #24 in `~/infra/knotea/authority/AGENTS.md` for the full UDP/TCP
-matrix per source.
-
-### Verify timed out (exit 1) — write succeeded but record not yet queryable
-
-Rare with Knot (primary serves authoritative immediately). Possibilities:
-
-1. You wrote to one Knot instance and queried another (not possible
-   today — there's only one knot-fly machine; will matter at M3).
-2. The verify default of 10s isn't enough for some reason — `--wait=30s`
-   to extend, or `--no-wait` to skip and check by hand with `knotctl ls`.
-3. Bug in your args: the value you set might've been silently dropped
-   by the server (rare with TSIG'd RFC 2136). Run with `--no-wait` then
-   `knotctl ls` to see what's actually there.
+- `error: keyfile X has loose permissions Y; want 0600` -> `chmod 600 ~/.config/knotctl/keys/*.key`.
+- `error: server rejected with NOTAUTH (rcode=9)` (exit 2) -> wrong key role for the record type (`knotctl keys list`; pass `--key knotctl` explicitly), or the keyfile holds a rotated-out secret (compare with `secretctl cmp`, `secret-handling` skill; server-side rotation is in `~/infra/knotea/authority/AGENTS.md`).
+- `error: update: network error: ... i/o timeout` (exit 4) -> `knotctl` is TCP throughout, so this is a real reachability problem with `137.66.1.170:53`, not the Fly UDP-hairpin issue documented in knotea's AGENTS.
+- Verify timed out (exit 1) -> rare with a single primary. Extend with `--wait=30s`, or `--no-wait` then `knotctl ls` to see what landed.
 
 ## What knotctl is NOT
 
-- **Not a Cloudflare-API client.** `erfi.dev` + `erfianugrah.com` are still
-  on CF; use the `cloudflare` skill / wrangler / dnscontrol for those.
-- **Not the HTTP API.** The CF-shape REST API is now **live** in-process on
-  the `glory-hole` Fly app at `https://knotea.erfi.io:2096/client/v4`
-  (bearer-token, argon2id side-store, 16 endpoints over the same loopback
-  knotd). `knotctl` is the wire-level CLI; the JSON shape matches, so scripts
-  port over. Full schema + scopes + codegen pipeline:
-  `~/infra/knotea/authority/docs/api.md`.
-- **Mostly not for DNSSEC ops.** Knot's KASP manages keys + signing
-  automatically. DNSKEY/RRSIG/NSEC3/CDS/CDNSKEY can't be edited via
-  `knotctl` (uneditable-type validation rejects them client-side, exit
-  5), and `apply --prune` filters them out of the AXFR diff. The ONE
-  exception is `DS`: a child's delegation DS (e.g. `lab.erfi.io` DS
-  inside `erfi.io`) IS interactively editable - `knotctl add/rm/set/ls
-  <child> DS "<keytag> <alg> <digesttype> <digest>" --zone=<parent>`.
-  It is still excluded from `apply`/`export` (interactive-only). Since
-  2026-06-30 lab.erfi.io's DS into erfi.io is also auto-reconciled on
-  KSK rollover via same-server ds-push (confdb `remote[parent_loopback]`
-  + `zone[lab.erfi.io].ds-push`) - see gotcha #28 in
-  `~/infra/knotea/authority/AGENTS.md`.
-- **Not for zone-level config** (NS, SOA at apex, TSIG keys, ACLs). Use
-  `knotc conf-set` from the server side via the `knot-dns` skill. `apply
-  --prune` will NOT remove apex NS or SOA even if they appear in the
-  live AXFR.
-- **Not transactional across rrsets.** Each (name, type) op is atomic via
-  one UPDATE message, but a multi-op apply is NOT one big transaction.
-  If op #5 fails, ops 1-4 already landed. Use `--dry-run` to vet the
-  plan before committing.
+- Not a Cloudflare-API client: `erfi.dev` + `erfianugrah.com` stay on CF (`cloudflare-ops` skill).
+- Not the HTTP API: that is the in-process CF-shape REST surface described above; `knotctl` is the wire-level CLI.
+- Mostly not for DNSSEC: KASP manages keys and signing; DNSKEY/RRSIG/NSEC3/CDS/CDNSKEY are rejected client-side (exit 5) and filtered out of `apply --prune`. The one exception is a child delegation `DS` - interactive only: `knotctl add/rm/set/ls lab.erfi.io DS "<keytag> <alg> <digesttype> <digest>" --zone=erfi.io`. `lab.erfi.io`'s DS in `erfi.io` is also auto-reconciled on KSK rollover by same-server ds-push (`knot-dns` skill, AGENTS gotcha #28).
+- Not for zone-level config (apex NS/SOA, TSIG keys, ACLs): `knotc conf-set` server-side via the `knot-dns` skill. `apply --prune` never removes apex NS or SOA.
 
 ## Updating knotctl
 
-`knotctl` lives in `~/infra/knotea/authority/cmd/knotctl/`. Update via:
-
 ```bash
-cd ~/infra/knot-fly
-git pull
-make install-knotctl    # rebuilds with current commit SHA in --version
+cd ~/infra/knotea && git pull
+cd authority && make install-knotctl    # rebuilds with the current commit in --version
 ```
 
-If you're modifying knotctl itself, see `~/infra/knotea/authority/AGENTS.md` and the
-M0.5 plan. The test surface is comprehensive (~96 race-clean unit tests
-across 4 packages, plus the live smoke). Add tests when changing
-handlers; the `pkg/tsigtest` in-process server is the canonical helper.
+When changing knotctl itself: `~/infra/knotea/authority/AGENTS.md` first; add tests with the `pkg/tsigtest` in-process server for any handler change. Docs sources (erfi-toolkit docs tool): `knot-dns`, `miekg-dns-v2`.

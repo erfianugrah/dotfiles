@@ -1,50 +1,53 @@
 ---
 name: discord-wipe
-description: Use when deleting Discord messages the user owns (purge a guild/channel/DM, "delete all my messages", rolling retention), driving the discord-wipe-go CLI or its production daemon, changing retention, redeploying the servarr container, recovering its .env, or handling Discord errors like 50083 (thread is archived). Repo ~/discord-wipe-go (Go); the Python discord-wipe is deprecated. Sibling to `composer` (deploy path), `tailscale-homelab` (ssh).
+description: "Use when deleting Discord messages the user owns (purge a guild, channel or DM, 'delete all my messages', rolling retention), driving the discord-wipe-go CLI or its production daemon, changing retention or per-scope overrides, redeploying the discord-wipe composer stack, or handling Discord errors such as 50083 (thread is archived). Fires on 'discord-wipe', 'purge my messages', 'RETENTION_OVERRIDES'. NOT for the composer API itself (composer) or ssh access (tailscale-homelab)."
 ---
 
 # discord-wipe
 
-Drive the user's self-bot bulk deleter: repo `~/discord-wipe-go` (cobra CLI, image `ghcr.io/erfianugrah/discord-wipe-go`), prod = composer stack `discord-wipe` (checkout on router `/var/lib/composer/stacks/discord-wipe`, container on servarr via drawbridge). Deep operational corpus = the repo's own AGENTS.md (auto-loaded when cwd is the repo) - this skill is the cross-cwd subset.
+Self-bot bulk deleter for the user's own Discord messages: repo `~/discord-wipe-go` (Go, cobra CLI, image `ghcr.io/erfianugrah/discord-wipe-go`; the Python `discord-wipe` is deprecated). Prod is the composer stack `discord-wipe`, container `discord-wipe` on `servarr`, driven by composer on the router over drawbridge. The repo's `AGENTS.md` is the deep operational corpus (auto-loads when cwd is the repo); this skill is the cross-cwd subset. Layout drift: the repo lives outside `~/infra/` where every other stack is - leave it, but expect `~/infra`-wide searches to miss it.
 
-## Hard rules (every violation has burned us)
+## Hard rules
 
-- **Token NEVER enters the transcript.** Extract from the running container without printing:
-  `DISCORD_TOKEN=$(ssh servarr 'docker inspect discord-wipe --format "{{range .Config.Env}}{{println .}}{{end}}" | sed -n "s/^DISCORD_TOKEN=//p" | tr -d "\r"') <cmd>`
-  `docker exec ... printenv` FAILS (distroless, no printenv) and its error text gets captured as the "token" - real footgun. Never `--token` on the CLI (process list). Each pi bash call is a fresh shell - inline the extraction per call.
-- **Only-my-messages is load-bearing** (author-filtered search, export-only-own, 403 terminal). Never add a code path enumerating others' messages.
-- **`DELETE_DELAY` >= 0.3s floor** - account-level abuse heuristics, not just buckets.
-- **Dry-run first**, then real run with a FRESH state file: dry-run still `Mark()`s, so reusing its state file makes the real run's no-progress guard exit having deleted nothing.
-- **purge `--retention-days` defaults to 0 = delete EVERYTHING in scope** regardless of age. `run` defaults 14 (prod compose.yaml sets 7; the stack `.env` holds `DISCORD_TOKEN` + `RETENTION_OVERRIDES`).
-- **Per-scope retention (v1.2.0+)**: `RETENTION_OVERRIDES` / `--retention-override` entries `guild:<id>:<days>` / `channel:<id>:<days>` pin one scope's window; `run` only, live catch-up phase only (export phase always uses the global window). Malformed entries are fatal. Values are confidential - they live in `.env` + container env only, never in the public repo.
+- The token never enters the transcript. Never `--token` on the CLI (process list), never `docker exec ... printenv` (distroless: the error text lands on stdout and gets captured as the "token"), never extract it from `docker inspect ... Config.Env` to rebuild a file - that is exactly the copy-a-credential pattern the secret guard blocks. Credentials move only through `secretctl` and SOPS (`secret-handling` skill).
+- Only-my-messages is load-bearing (author-filtered search, export-only-own, 403 terminal). Never add a code path that enumerates other people's messages.
+- `DELETE_DELAY` has a 0.3s floor - Discord's account-level abuse heuristics watch overall frequency, separate from per-route buckets.
+- Dry-run first, then the real run with a FRESH state file: dry-run still `Mark()`s, so reusing its state makes the real run's no-progress guard exit having deleted nothing.
+- `purge --retention-days` defaults to 0 = delete EVERYTHING in scope regardless of age. `run` defaults to 14 days; prod `compose.yaml` sets `RETENTION_DAYS=7`.
+- Per-scope retention: `RETENTION_OVERRIDES` / `--retention-override` entries `guild:<id>:<days>` / `channel:<id>:<days>` pin one scope's window - `run` only, live catch-up phase only (the export phase always uses the global window). Malformed entries are fatal. The values are confidential: `.env` + container env only, never the public repo.
 
 ## Purge a scope (one-shot)
 
-1. Resolve ID type (snowflakes don't encode it): `discover`, or curl `guilds/<id>` vs `channels/<id>` and compare 200/404. Wrong scope = silently deletes nothing.
-2. `purge --guild|--channel <id> --dry-run --state /tmp/x.json` - search `total=` is the true volume.
-3. Real run via `bg_bash` (hours at ~2.5-4s/delete under 429 pacing) with a fresh dedicated `--state`. `bg_wait until_exit`.
-4. Verify: re-search, expect `total_results: 0` (allow ~90s search-index lag before believing a non-zero).
-- Archived threads (error 50083) are handled since v1.1.0: unarchive -> delete -> re-archive. Un-unarchivable threads leave messages unmarked for a later pass.
-- Early exit with `ok << total` = search-index lag (two empty pages). Re-run; state resumes.
+1. Resolve the ID type (snowflakes do not encode it): `discover`, or `GET guilds/<id>` vs `channels/<id>` and compare 200/404. Wrong scope silently deletes nothing.
+2. `purge --guild|--channel <id> --dry-run --state /tmp/x.json` - the search `total=` is the true volume.
+3. Real run in the background (hours at 2.5-4s per delete under 429 pacing) with a fresh dedicated `--state`; wait for exit.
+4. Verify: re-search and expect `total_results: 0` (allow ~90s of search-index lag before believing a non-zero).
+
+Archived threads (error 50083) are handled: unarchive -> delete -> re-archive; threads that cannot be unarchived leave messages unmarked for a later pass. An early exit with `ok << total` is search-index lag (two empty pages) - re-run, state resumes.
 
 ## Deploy / config change
 
-This stack has `auto_sync=true` but **NO auto-deploy**: a push auto-syncs the checkout (and git-cleans it, wiping `.env`) but never recreates the container. Deploy sequence:
+Two facts to check before touching prod, because the repo and the running stack have drifted:
 
-1. Commit + push `main` (release.yml rebuilds `:main`; tag `v*` for releases).
-2. `pull` via composer API on router, key piped on stdin (one curl per pipe - stdin is consumed):
+- The repo `AGENTS.md` describes a git-backed composer stack (`auto_sync=true`, no auto-deploy, checkout `/var/lib/composer/stacks/discord-wipe` on the router, `env_file: .env`). The servarr-nixos appdata-tier log (`~/infra/servarr-nixos/docs/migration/2026-09-02-appdata-tier-consolidation.md`) records the stack as NON-git since 2026-09-03: its compose was updated in place via `PUT /api/v1/stacks/discord-wipe` (field `compose`) and the repo is disconnected from it. `GET /api/v1/stacks/discord-wipe` on the composer API tells you which is true today; do not assume a push reaches prod.
+- Secrets are not yet converted: `~/discord-wipe-go/.env` is a plaintext file and the router-side `.env` was historically recreated by hand after every git-clean. Standing gap. The target state is a SOPS-encrypted `.env` committed with the stack (`sops-encrypt` skill) so composer decrypts at deploy and no re-creation step exists; `DISCORD_TOKEN` and `RETENTION_OVERRIDES` are set with `secretctl set` / `sops set`, never typed or piped from a running container.
+
+Deploy sequence once the stack state is known:
+
+1. Commit + push `main` (`release.yml` rebuilds `:main`; tag `v*` for releases).
+2. Composer `pull` then `up` (`?async=true`, poll `GET /api/v1/jobs/<id>`), API key piped on stdin - one curl per pipe, the stdin config is consumed by the first curl:
    `printf 'header = "X-API-Key: %s"\n' "$COMPOSER_API_KEY" | ssh router 'curl -s --config - -X POST "http://localhost:8080/api/v1/stacks/discord-wipe/pull?async=true"'`
-3. **Recreate `.env`** - every git-sync (the push-triggered auto-sync, or a manual pull/up) git-cleans untracked files, wiping it; `up` then fails `.env not found`. Pipe BOTH keys container -> file cross-host, verify `grep -c '^DISCORD_TOKEN='` = 1:
-   `ssh servarr 'docker inspect discord-wipe --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -E "^(DISCORD_TOKEN|RETENTION_OVERRIDES)=" | tr -d "\r"' | ssh router 'cat > /var/lib/composer/stacks/discord-wipe/.env; chmod 600 /var/lib/composer/stacks/discord-wipe/.env'`
-4. `up?async=true` same as pull, then poll `GET /api/v1/jobs/<id>`.
-5. Verify: `ssh servarr 'docker inspect discord-wipe --format "{{index .Config.Labels \"org.opencontainers.image.revision\"}}"'` matches the pushed SHA; logs show `pass start cutoff=` ~RETENTION_DAYS ago, NOT "now".
+   For a non-git stack, `PUT /api/v1/stacks/discord-wipe` with the new compose replaces `pull`.
+3. If `up` fails with `.env not found`, the stack is still on the plaintext-file model and the sync wiped it: restore it from the encrypted source of record (`sops -d` into place via `secretctl exec`, `secret-handling` skill) - never from the container.
+4. Verify: `ssh servarr 'docker inspect discord-wipe --format "{{index .Config.Labels \"org.opencontainers.image.revision\"}}"'` matches the pushed SHA; logs show `pass start cutoff=` about `RETENTION_DAYS` ago, not "now".
 
 ## Logs & state
 
-- Container logs: `GET /api/v1/containers/<id>/logs?tail=N&host=servarr` on the composer API (host= REQUIRED), or `ssh servarr 'docker logs discord-wipe'`.
-- Daemon data on servarr `/mnt/user/discord-wipe/` (`state/` RW, `export/` RO), owned 99:100. `state.Deleted` is never GC'd by snowflake age (v0.3.0 footgun).
-- State-loss recovery without a full re-grind: `seed-from-export` (only if a prior pass completed).
+- Logs: `GET /api/v1/containers/<id>/logs?tail=N&host=servarr` on the composer API (`host=` required), or `ssh servarr 'docker logs discord-wipe'`.
+- Data: `DISCORD_WIPE_DATA_DIR` with `state/` (RW) and `export/` (RO), owned `99:100` for the nonroot user. Live path since the 2026-09-03 tier consolidation is `/appdata/discord-wipe` (hot NVMe tier); the repo `compose.yaml` default still says `/tank/data/appdata/discord-wipe`, which was quarantined - fix the default when the repo and stack are reconnected.
+- `state.Deleted` is never GC'd by snowflake age: the IDs in it are old by definition, so any "drop older than X" re-attempts all of them next pass (`TestStateHasNoGCMethod` guards this).
+- State loss without a full re-grind: `seed-from-export` (token-less; only when a prior pass is known to have completed - it does not verify deletion). Stop the container, run once against the same mounts, bring the daemon back.
 
 ## Dev loop
 
-`go test ./... -race` (~30 tests), `go vet ./...`, `gofmt -l cmd/ internal/`, `CGO_ENABLED=0 go build ./cmd/discord-wipe/`. Bump `version` in `cmd/discord-wipe/main.go` for behaviour changes, tag `vX.Y.Z`, add a `BugN` regression test per fixed bug.
+`go test ./... -race`, `go vet ./...`, `gofmt -l cmd/ internal/`, `CGO_ENABLED=0 go build ./cmd/discord-wipe/`. Bump `version` in `cmd/discord-wipe/main.go` for behaviour changes, tag `vX.Y.Z`, add a `BugN` regression test per fixed bug.

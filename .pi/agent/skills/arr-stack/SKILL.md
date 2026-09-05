@@ -1,130 +1,111 @@
 ---
 name: arr-stack
-description: Use when working with the *arr stack on `servarr` — radarr / sonarr / bazarr / prowlarr (the four arrs), sabnzbd / qbittorrentvpn / flaresolverr (download infra), recyclarr / decluttarr / tdarr / tracearr (ops + transcode + tracing). Triggers on these service names; on TRaSH guides / quality profiles / custom formats / release profiles; on errors like "database disk image is malformed", "remove_orphans destroying downloads", "Episode N was unexpected considering folder name", EXDEV / ENOSPC in download paths, "No valid Arr instances found"; on indexer hygiene (Prowlarr API), manual import via API, hardlink-on-shfs questions, decluttarr v1→v2 schema migration, SAB queue auto-pauses. Stack runs in compose project `servarr` on Unraid, composer-managed. Sibling to `jellyfin` (consumer-side), `composer` (deploy), `caddy` (proxy), `tailscale-homelab` (ssh).
+description: "Use when operating the servarr media stack - sonarr, radarr, lidarr, bazarr, prowlarr, sabnzbd, qbittorrentvpn, slskd/soularr/beets, recyclarr, decluttarr, tracearr, jellyfin, seerr, navidrome. Fires on those names; on TRaSH guides, custom formats; on 'No files found are eligible for import', 'remote path mapping', 'No valid Arr instances found', SAB queue auto-pause, NVENC/GPU sharing, Seerr requests not grabbing. NOT for compose authoring (infrastructure-stack) or deploy (composer)."
 ---
 
 # arr-stack
 
-Single Unraid host (`servarr`), single docker-compose project (`servarr`), composer-managed. 14 services on `172.19.1.0/24`; `tracearr_backend` (172.19.2.0/24) for Tracearr's internal Postgres+Redis.
+Compose project `servarr` on the `servarr` NAS (NixOS + ZFS since 2026-08-26), composer-managed from the router. Live compose: `~/infra/servarr-compose/docker-compose.yml` (about 20 services). Its `AGENTS.md` has a "2026-08-26 NixOS cutover - READ FIRST" section plus per-service notes and `runbooks/` (`arr-stack-ops.md`, `music-pipeline.md`, `soularr-architecture.md`, `music-collection-recovery.md`, `2026-08-29-arr-fixes-and-rustnzb.md`, `lan-macvlan.md`). Those auto-load when cwd is the repo; this skill is the cross-cwd subset. Where the AGENTS.md prose still says `/rpool/cache/data/<svc>`, trust the compose file: that path was destroyed 2026-09-03 and the live hot tier is `/appdata/<svc>`.
 
-The stack repo (when checked out) ships its own AGENTS.md + runbooks/ — those auto-load when cwd is inside the repo. The rules below are the cross-cwd subset: facts the agent should respect even when working from elsewhere.
+## Storage - the TRaSH layout on ZFS
+
+| Tier | Host path | Mounted as |
+|---|---|---|
+| Hot (NVMe) | `/appdata/<svc>/config` (or `/data`, `/app` per service) | `/config` - DB, queue state, plugins |
+| Bulk (HDD raidz2) | `/tank/media` (`tv/ movies/ music/ torrents/ usenet/`) | `/data` in sonarr, radarr, lidarr, bazarr, decluttarr (roots `/data/tv`, `/data/movies`); `/data/media:ro` in jellyfin; `/media` + `/torrents` in qbit; `/data` in SAB |
+| Bulk | `/tank/anugrah` | `/anugrah` (jellyfin, read-only personal stash) |
+| Scratch (NVMe) | `/scratch/downloads/usenet/incomplete`, `/scratch/slskd-dl` | SAB unpack / par2 (shadow-mounted over `/data/usenet/incomplete`), slskd downloads |
+
+Everything media-touching sits on the single `tank/media` filesystem, so download -> import is an atomic hardlink (`copyUsingHardlinks: true` is correct; torrents keep seeding after import). Tier decisions and snapshots are the `zfs-storage` skill.
 
 ## Service quick reference
 
-| Service | Static IP | Port | External |
-|---|---|---|---|
-| Radarr | 172.19.1.2 | 7878 | `radarr.erfi.io` |
-| Sonarr | 172.19.1.3 | 8989 | `sonarr.erfi.io` |
-| Bazarr | 172.19.1.4 | 6767 | `bazarr.erfi.io` |
-| Prowlarr | 172.19.1.10 | 9696 | `prowlarr.erfi.io` |
-| SABnzbd | 172.19.1.19 | 6666 / 8080 | `sabnzbd.erfi.io` |
-| qBittorrent (VPN) | 172.19.1.22 | 8080 | `qbit.erfi.io` |
-| FlareSolverr | 172.19.1.18 | 8191 | (internal only) |
-| Tdarr | 172.19.1.6 | 8265 | `tdarr.erfi.io` |
-| Tracearr | 172.19.1.23 | 3000 | `tracearr.erfi.io` |
-| Recyclarr | (sleep daemon, no port) | — | — |
-| Decluttarr | (no port) | — | — |
+Edge Caddy on the router proxies `<svc>.erfi.io` to each service's macvlan LAN IP (`10.0.71.x`) or host-published port; the servarr-local Caddy is retired.
 
-API-key extraction (servarr does not ship `rg` — use `grep`/`awk`):
+| Service | `servarr` IP | LAN IP | Port | External |
+|---|---|---|---|---|
+| Radarr | 172.19.1.2 | 10.0.71.22 | 7878 | `radarr.erfi.io` |
+| Sonarr | 172.19.1.3 | 10.0.71.23 | 8989 | `sonarr.erfi.io` |
+| Bazarr | 172.19.1.4 | 10.0.71.24 | 6767 | `bazarr.erfi.io` |
+| Lidarr | 172.19.1.7 | 10.0.71.27 | 8686 | `lidarr.erfi.io` |
+| Soularr | 172.19.1.8 | 10.0.71.28 | 8265 | `soularr.erfi.io` |
+| Beets | 172.19.1.9 | 10.0.71.29 | 8337 | - |
+| Prowlarr | 172.19.1.10 | 10.0.71.30 | 9696 | `prowlarr.erfi.io` |
+| FlareSolverr | 172.19.1.18 | - | 8191 | internal only |
+| slskd (in `wg-pia-slskd` netns) | 172.19.1.16 | host `10.0.71.2:5030` | 5030 | `slskd.erfi.io` |
+| SABnzbd | 172.19.1.19 | 10.0.71.39 | 8080 | `sabnzbd.erfi.io` |
+| qBittorrent (VPN) | 172.19.1.22 | host `10.0.71.2:8180` | 8080 | `qbit.erfi.io` |
+| Tracearr | 172.19.1.23 (+172.19.2.2) | 10.0.71.45 | 3000 | `tracearr.erfi.io` |
+| tracearr-db / tracearr-redis | 172.19.2.3 / 172.19.2.4 | - | - | `tracearr_backend` only |
+| Recyclarr | 172.19.1.5 | - | - | `sleep infinity`; composer `docker_exec` target |
+| Decluttarr | 172.19.1.12 | - | - | - |
+| Jellyfin | 172.19.1.15 (+172.19.30.2) | 10.0.71.35 | 8096 | `jellyfin.erfi.io` |
+| Seerr | 172.19.1.21 (+172.19.30.3) | 10.0.71.41 | 5055 | `seerr.erfi.io` |
+| Navidrome | 172.19.1.17 (+172.19.30.4) | 10.0.71.37 | 4533 | `navidrome.erfi.io` |
+
+Networks: `servarr` 172.19.1.0/24, `tracearr_backend` 172.19.2.0/24, `media` 172.19.30.0/24 (consumer cross-stack link), `lan` macvlan 10.0.71.0/24 on `enp36s0f1`.
+
+API-key extraction (arr products are XML, SAB is ini; qBit auth is by `WEBUI_PASSWORD` env and the `servarr` subnet is whitelisted):
 
 ```bash
-# arr products (radarr / sonarr / prowlarr / bazarr — XML-config based, ApiKey element)
-ssh servarr 'grep -oP "ApiKey>\K[^<]+" /mnt/user/data/<svc>/config/config.xml'
-
-# SABnzbd (ini format)
-ssh servarr 'grep "^api_key" /mnt/user/data/sabnzbd/config/sabnzbd.ini | awk "{print \$3}"'
-
-# qBit — auth via WEBUI_PASSWORD env (subnet 172.19.1.0/24 is whitelisted, bypasses auth)
+ssh servarr 'grep -oP "ApiKey>\K[^<]+" /appdata/<svc>/config/config.xml'
+ssh servarr 'grep "^api_key" /appdata/sabnzbd/config/sabnzbd.ini | awk "{print \$3}"'
 ```
 
-For decluttarr / recyclarr, `SONARR_API_KEY` / `RADARR_API_KEY` come from the stack's gitignored `.env`.
+Decluttarr / recyclarr read `SONARR_API_KEY` / `RADARR_API_KEY` from the stack's SOPS-encrypted `.env` (never print them - `secret-handling` skill).
 
-## Load-bearing rules — do not violate
+## Load-bearing rules
 
-1. **Composer-managed deploy**: edit the stack's `docker-compose.yml`, push, then `POST /api/v1/stacks/servarr/up` (NOT `restart` — restart reuses old config). Sibling **composer** skill has the full deploy quirks (sync vs up, WAF + UA gating, pipeline `cmd` field, response shape).
+1. Composer-managed deploy: edit the compose, push (webhook -> sync + `up`), or `POST /api/v1/stacks/servarr/up` - never `restart`, which reuses old config. Quirks in the `composer` skill.
+2. GPU: RTX 3080 Ti, claimed with CDI `devices: [nvidia.com/gpu=all]` - NOT `runtime: nvidia` (NixOS dockerd has no nvidia runtime registered). Shared by jellyfin (live transcode) and bazarr (Whisper subtitles); a single NVENC card, so heavy subtitle batches degrade live playback. tdarr is gone (removed 2026-06-15).
+3. Hardlink convention: every media-touching service mounts `/tank/media` and the arrs see it as `/data`. Anything that mounts a subdirectory under a different container path needs a remote path mapping in every arr that uses it.
+4. qBit auth: WebUI user is `anugrah`, not `admin`; `172.19.1.0/24` bypasses auth via `AuthSubnetWhitelist`; five failed logins ban the IP for 1h in memory (`docker restart qbittorrentvpn` clears).
+5. Decluttarr `remove_orphans` stays OFF: Sonarr returns `seriesId: null` for legit season packs at queue-write time, so the job deletes real downloads. The other jobs run. Decluttarr v2 uses a `config.yaml`, not the v1 env vars - v1 keys are silently ignored and the container exits every 30s with `No valid Arr instances found in the config`.
+6. SAB `download_free = 200G` stays set (Folders -> Minimum Free Disk Space). Without it par2/unrar can hit ENOSPC mid-write and the queue auto-pauses with `pause_reason: null`.
+7. Download clients in every arr MUST have a category (`tv` / `movies` / `music`). A client without one lands single-file grabs bare in the save path; the arr then reports `No files found are eligible for import` and re-grabs forever, while manual import works (the tell).
+8. Composer pipeline `docker_exec` step config field is `cmd` (not `command`, `args`, `argv`) - wrong field = pipeline runs that "succeed" in 0.0s. Reference: the `recyclarr-sync` pipeline.
+9. Bash quoting trap on arr/Prowlarr JSON payloads: indexer `helpText` contains `(` `)`; inline `-d "$PAYLOAD"` breaks. Tempfile + `--data-binary @file`, or use `arrctl`.
 
-2. **GPU contention on the GTX 1070**: Pascal NVENC gen 6, single chip. Three services share it via `runtime: nvidia`: jellyfin (live transcode), tdarr (background re-encode), bazarr (Whisper subtitle gen). Don't queue Tdarr work while Jellyfin is actively transcoding.
+## DNS - containers resolve via knotea
 
-3. **Hardlinks on shfs are structurally broken**: `torrents/X/file.mkv` and `media/X/file.mkv` only land on the same physical disk by luck (shfs spreads files across `/mnt/diskN/` based on Unraid's allocator). Sonarr/Radarr fall through to non-atomic move on `EXDEV`. **Torrents lose seeding after import — expected** until storage migrates to mergerfs or single-disk. Do not "fix" by toggling `copyUsingHardlinks`; the setting is correct (true).
+Every NixOS host pins `networking.nameservers = ["10.0.10.5"]` (knotea on the router) with tailscale `accept-dns=false`, and servarr-nixos pins `virtualisation.docker.daemon.settings.dns = ["10.0.10.5"]` so Docker's embedded resolver forwards there regardless of restart order. If `*.erfi.io` resolves to public Cloudflare IPs from a container, or containers SERVFAIL on everything, tailscale has rewritten resolv.conf or dockerd is holding a stale resolver - fix the pin, restart dockerd.
 
-4. **qBit auth quirks**: WebUI username is `anugrah`, NOT `admin`. Subnet `172.19.1.0/24` is whitelisted via `AuthSubnetWhitelist` so servarr-internal callers bypass auth. After 5 failed auths, IP-banned for 1h (in-memory; `docker restart qbittorrentvpn` clears).
+## Remote path mappings
 
-5. **Decluttarr `remove_orphans` is OFF** for cause (false-positive on legit season packs / underscore-format releases): decluttarr defines "orphan" as items where Sonarr returns `seriesId: null`, which fires on legit season packs that Sonarr can't enumerate at queue-write time. Other 6 jobs run. Do not re-enable without an upstream fix.
+qBit reports `/media/torrents/...`; the arrs see the same tree as `/data/torrents/...`. Each of sonarr / radarr / lidarr needs `remotePath: /media/torrents/` -> `localPath: /data/torrents/` keyed to the EXACT host string the download client is configured with (currently `172.19.1.22`). Sonarr/Radarr match mappings by that field, so a mapping keyed to a hostname never applies to a client configured by IP and vice versa - the symptom is "directory does not exist inside the container" although the path exists. SAB and the arrs share `/data`, so SAB needs no mapping.
 
-6. **SAB on `/mnt/cache/` direct, not `/mnt/user/`** (slamanna pattern, 2026-05-24): keeps unpacks off shfs. `download_free: 200G` MANDATORY — without it, par2/unrar hits ENOSPC mid-write and the queue auto-pauses with `pause_reason: null`.
+## Prowlarr
 
-7. **Composer pipeline `docker_exec` step config field is `cmd`** — not `command`, `argv`, `args`, `Cmd`. Wrong field = silent no-op pipeline run. Reference example: `recyclarr-sync` pipeline (id `pl_18c6c25ac2a27ac2_ad83c4f6`).
+- Sonarr app sync categories must be the 5000-series (`[5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080]`), not 2000-series: otherwise every Newznab query carries movie cats and interactive searches return 0 results while Prowlarr finds them fine. Check the `cat=` parameter in Sonarr's debug log.
+- The FlareSolverr indexer proxy needs `tags: [1]` matching the `flaresolverr` tag on the Cloudflare-protected indexers (1337x, KickAssTorrents); without the tag the proxy exists but never engages and indexer tests fail with generic connection errors.
 
-8. **Bash quoting trap on Prowlarr/arr API payloads**: indexer JSON contains `(` `)` in helpText. Inline `-d "$PAYLOAD"` triggers "syntax error near unexpected token `('`". Always tempfile + `--data-binary @file`.
+## Music pipeline (lidarr -> soularr -> slskd, beets on the side)
 
-## DNS: all containers resolve via knotea, not Tailscale
-
-The fleet-wide tailnet profile (nixos-fleet) sets `accept-dns=false` on every NixOS host and pins `networking.nameservers = [ "10.0.10.5" ]` (knotea on the router). servarr-nixos additionally pins `virtualisation.docker.daemon.settings.dns = [ "10.0.10.5" ]` so Docker's embedded DNS (127.0.0.11) forwards to knotea regardless of when the daemon last restarted.
-
-Two failure modes this prevents (both hit 2026-08-30):
-
-- **Tailscale accept-dns hijack**: `tailscaled` rewrites `/etc/resolv.conf` to 100.100.100.100, bypassing knotea's 44 split-horizon erfi.io overrides. `*.erfi.io` resolves to public Cloudflare IPs instead of 10.0.10.1. Symptoms: arrs connect to the public edge instead of the internal one, hairpinning through the internet.
-- **Docker resolver staleness**: after the host resolv.conf flips, Docker's embedded DNS (127.0.0.11) still forwards to the old resolver until the daemon restarts. Containers SERVFAIL on everything. Fix: restart Docker or pin daemon.settings.dns.
-
-## Remote path mappings: hostname, not IP
-
-The arrs' qBit download-client configs use `host: qbit.erfi.io`. Remote path mappings must use the SAME host string - Sonarr/Radarr match mappings by exact host field. A mapping keyed to `172.19.1.22` never applies when the client connects via `qbit.erfi.io`, and Sonarr reports "directory does not exist inside the container" even though the path exists.
-
-Correct mapping (all three arrs):
-```
-host: qbit.erfi.io
-remotePath: /media/torrents/
-localPath: /data/torrents/
-```
-
-## Prowlarr app sync categories
-
-Prowlarr's Sonarr app must sync with TV categories (5000-series), not movie (2000-series). If syncCategories includes 2000-series, Sonarr's Newznab queries to every indexer include movie cats and return 0 results for TV shows. Correct Sonarr syncCategories: `[5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080]`.
-
-Symptom: interactive release search returns 0 results even though Prowlarr finds them fine when queried directly. Check Sonarr's debug log for the `cat=` parameter in the Newznab URL.
-
-## Rustnzb queue pause
-
-Rustnzb can end up with its queue globally paused (the SAB-compat API returns `"paused": true` in the queue response). Jobs get accepted from arrs but never download. Fix: call `mode=resume` on the rustnzb SAB-compat API (same as SABnzbd's API). The arr shows the item as "paused" in its queue.
-
-## FlareSolverr tag wiring
-
-Prowlarr's FlareSolverr indexer proxy (`indexerproxy` API, id=1) needs `tags: [1]` matching the tag ID on the Cloudflare-protected indexers (1337x, KickAssTorrents). The tag is `flaresolverr` (id=1). Without the tag, the proxy exists but never engages - indexer tests fail with generic connection errors.
+Lidarr holds the catalog (`/data/music`), Soularr polls Lidarr's wanted/cutoff-unmet list and drives slskd searches + transfers over the PIA WireGuard netns (`wg-pia-slskd`); downloads land on `/scratch/slskd-dl` and import through Lidarr. Beets runs read-only against `/music` for library hygiene only - it is not in the import path and never re-tags the library. Design and safety rules: `runbooks/music-pipeline.md`, `runbooks/soularr-architecture.md`, `runbooks/music-collection-recovery.md`.
 
 ## arrctl - the executable form of these mechanics
 
-`~/infra/arrctl` (Go, stdlib-only, static binary) encodes the arr operations
-this skill describes as tested, named commands, so a nuke+rebuild or a manual
-import is a scripted sequence, not hand-rolled curl. Reach for it instead of
-`-d "$PAYLOAD"` (which also trips the rule-8 quoting trap). It has its own
-README/AGENTS (auto-load when cwd is inside the repo); the load-bearing facts:
+`~/infra/arrctl` (Go, stdlib-only, static) encodes the arr operations as tested commands: `import` (the verified `GET /manualimport -> POST ManualImport -> Rename*` flow with the command outcome checked, so "imported 0" is a non-zero exit), `naming set` (TRaSH naming with apply-and-verify, handles the Sonarr nested-audiocodec render bug), `export` / `restore` (0600 config dumps; restore recreates into a fresh instance), `restructure` (destructive folder canonicalisation, dry-run by default, `-execute` + inode-aware guards + `-opslog`), `clients pause/resume` (SAB + nzbget). It is a flake input of `~/infra/servarr-nixos` and installed on the NAS (`nix flake update arrctl` there to bump); details in `~/infra/arrctl/AGENTS.md`. Reach for it instead of hand-rolled curl.
 
-- **import-existing** (`arrctl import -app X -id N`): the verified
-  `GET /manualimport -> POST ManualImport -> Rename*` flow. seriesId+episodeIds
-  (Sonarr) or movieId (Radarr) at the TOP level; the pushed command's outcome
-  is CHECKED, so a "completed, imported 0" run is a non-zero exit, not a
-  silent success.
-- **TRaSH naming** (`naming set -app X`): applies the profile for the running
-  major version via apply-and-verify (PUT candidate, read the server render,
-  reject on residual `{`/`}`, restore if dirty). Handles the Sonarr 4.0.19
-  nested-audiocodec render bug.
-- **export/restore** (M1/M3 nuke safety net): `export` writes config 0600;
-  `restore` recreates into a fresh instance (strips ids, POSTs) and exits
-  non-zero on any failure.
-- **restructure** (M2, DESTRUCTIVE): canonical folder renames + `[imdb]`-tree
-  deletes; **dry-run by default**, `-execute` required, inode-aware guards,
-  `-opslog` audit. Backstop is the `tank/media@pre-merge-20260901` snapshot.
-- **clients pause/resume**: SAB (parses the status body, redacts the apikey)
-  + nzbget queue control before a restructure.
+## Consumer side (jellyfin, seerr, navidrome)
 
-No deployed binary path yet - it is scp'd to `servarr:/tmp/arrctl` and run
-inside the app netns (see its AGENTS.md).
+Each consumer sits on `servarr` (to reach the arr APIs) and on `media` 172.19.30.0/24 (reserved for consumer-only services that should not see download infrastructure).
+
+| Service | Mounts | Notes |
+|---|---|---|
+| Jellyfin | `/appdata/jellyfin/library:/config`, `/tank/media:/data/media:ro`, `/tank/anugrah:/anugrah` | GPU via CDI (rule 2). Its library DB stores `/data/media/...` paths, so it keeps the `/data/media` mount while the arrs moved to `/data` |
+| Seerr | `/appdata/jellyseerr/config:/app/config` (`settings.json` lives there, holds arr API keys - filesystem perms are the boundary) | Settings -> Services -> Sonarr/Radarr must use internal IPs `http://172.19.1.3:8989` / `http://172.19.1.2:7878`, never the `*.erfi.io` URLs (WAF + TLS hop, breaks on any edge hiccup) |
+| Navidrome | `/appdata/navidrome/data:/data`, `/tank/media/music:/music:ro` | `ND_*` env (Spotify / Last.fm keys, password encryption key) come from the SOPS `.env`. The password encryption key is irreversible - losing it makes every Navidrome password unusable; keep it in the encrypted `.env` in git (`secret-handling` skill) |
+
+When a Seerr request never grabs, the failure is upstream (Sonarr/Radarr could not bind a release, decluttarr, indexer offline) - debug from the arr side. `jellyfin.erfi.io` and `seerr.erfi.io` are exposed without forward-auth; their own logins are the boundary, so keep admin passwords strong and signup disabled.
 
 ## Sibling skills
 
-- **`jellyfin`** — consumer-side (jellyfin/seerr/navidrome). Seerr requests upstream into Sonarr/Radarr via API integration.
-- **`composer`** — GitOps deploy mechanism. `sync` ≠ `up` ≠ `restart`. WAF on composer.servarr.erfi.io blocks bare-curl mutations — internal-network workaround documented.
-- **`caddy`** — `*.erfi.io` reverse proxy + TSIG ACME path against Knot.
-- **`tailscale-homelab`** — `ssh servarr` access; the `docker exec / docker logs / docker restart` triple that runs everything else.
-- **`infrastructure-stack`** — bridge-net + static-IP + expose-only-no-ports conventions this stack exemplifies.
-- **`research`** — the `osint_*` / `web_research` tools for indexer reputation lookups.
+- `composer` - deploy mechanism; `sync` vs `up` vs `restart`, pipelines, WAF on the public API.
+- `infrastructure-stack` - compose authoring conventions (bridge + static IP, expose-only, macvlan `lan`).
+- `zfs-storage` - which tier state belongs on, snapshots, backups.
+- `caddy` - the edge proxy for `*.erfi.io`.
+- `tailscale-homelab` - `ssh servarr`.
+- `research` - indexer reputation lookups.
+
+Docs sources (erfi-toolkit docs tool): `servarr`, `trash-guides`, `sonarr-api-v5`, `radarr-api`, `prowlarr-api`, `sabnzbd`, `qbittorrent`, `recyclarr`, `bazarr`, `lidarr-api`, `jellyfin`, `jellyseerr`, `navidrome`.
