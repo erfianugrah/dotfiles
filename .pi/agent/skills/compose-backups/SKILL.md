@@ -1,11 +1,11 @@
 ---
 name: compose-backups
-description: Use when adding an automated backup sidecar to any of the user's docker-compose stacks, debugging or restoring from a backup sidecar, or reviewing backup coverage. Fires on 'backup this stack', 'offen', 'docker-volume-backup', 'restore drill', 'pg_dump to R2/MinIO', 'retention pruning'. Sibling to infrastructure-stack (stack conventions), composer (deploy path).
+description: Use when adding an automated backup sidecar to any of the user's docker-compose stacks, debugging or restoring from a backup sidecar, or reviewing backup coverage. Fires on 'backup this stack', 'offen', 'docker-volume-backup', 'restore drill', 'pg_dump to R2/MinIO', 'retention pruning'. NOT for sanoid/syncoid snapshots or the nix pg_dump timers on servarr (zfs-storage), stack conventions (infrastructure-stack), or the deploy path (composer).
 ---
 
 # Compose stack backups (offen/docker-volume-backup pattern)
 
-Validated end-to-end on vaultwarden-compose 2026-08-09 (encrypted upload, restore drill with byte-identical row counts, failure-notification e2e). Canonical live example: `~/infra/vaultwarden-compose/deploy/edge/compose.yaml`.
+Canonical live example: `~/infra/vaultwarden-compose/deploy/edge/compose.yaml` (encrypted upload, restore drill with byte-identical row counts, failure-notification e2e all exercised).
 
 ## The standard sidecar
 
@@ -61,11 +61,11 @@ that the backup container also mounts:
 - docker.sock in the backup container is root-equivalent on the host -
   accepted on the user's single-purpose hosts; flag it when the host is shared.
 
-## Hard-won footguns (all hit or verified 2026-08-09)
+## Footguns
 
 1. **Unrecognised env vars are SILENTLY IGNORED.** `BACKUP_EXCLUDE_REGEX`
-   (wrong) vs `BACKUP_EXCLUDE_REGEXP` (correct) shipped a full icon_cache in
-   the first tarball with zero warnings. After ANY config change, download the
+   (wrong) vs `BACKUP_EXCLUDE_REGEXP` (correct) ships a full icon_cache in
+   the tarball with zero warnings. After ANY config change, download the
    next artifact and inspect its contents (`tar -tzf`) - never trust the
    config render. Check exact names against the configuration reference:
    https://offen.github.io/docker-volume-backup/reference/
@@ -78,10 +78,10 @@ that the backup container also mounts:
    userinfo part: `smtp://user%40gmail.com:<app-password>@smtp.gmail.com:587/?fromAddress=<addr>&toAddresses=<addr>`.
    Test before wiring with
    `docker run --rm ghcr.io/nicholas-fedor/shoutrrr send --url "$URL" --message test`.
-4. **Composer-managed stack .env files are SOPS ciphertext at rest on the
-   host** (`/var/lib/composer/stacks/<stack>/.../.env` yields `ENC[...]` values
-   to grep). Composer decrypts in-memory only during deploy. To read live
-   values on the host: `docker exec <container> printenv <VAR>`.
+4. **Composer-managed `.env` files are ciphertext at rest on the host**, so
+   grepping them yields `ENC[...]`. To read a live value on the host:
+   `docker exec <container> printenv <VAR>` (never print it into the
+   transcript; `secret-handling` skill). The decrypt cycle is in `composer`.
 5. **What to exclude**: re-derivable caches (icon_cache, thumbnails). Beyond
    size, vaultwarden's icon_cache filenames are plaintext `<domain>.png` -
    they leak which sites have vault entries. With client-side age encryption
@@ -97,27 +97,26 @@ that the backup container also mounts:
 8. **servarr_lan macvlan IPs**: before assigning a static IP to a new sidecar,
    list occupancy first -
    `ssh servarr 'docker network inspect servarr_lan --format "{{range .Containers}}{{.Name}} {{.IPv4Address}} {{end}}"'`.
-   Guessing collides (10.0.71.58 was revista; gitea_backup landed on .61).
-   MAC convention is `02:42:0a:00:47:<last-octet-in-hex>`.
-9. **`cap_drop: ALL` breaks reads of non-root-owned data** (hit on gitea
-   2026-08-10): capability-less root has CapEff=0, so the tar walk gets EACCES
-   on uid-1000-owned 0770/0600 files (rootless-image data dirs on Unraid,
-   e.g. `open /backup/config: permission denied`). If you harden the sidecar
+   Guessing collides with a sibling stack's container. MAC convention is `02:42:0a:00:47:<last-octet-in-hex>`.
+9. **`cap_drop: ALL` breaks reads of non-root-owned data**: capability-less
+   root has CapEff=0, so the tar walk gets EACCES on uid-1000-owned 0770/0600
+   files (rootless-image data dirs; symptom `open /backup/config: permission
+   denied`). If you harden the sidecar
    with `cap_drop: ALL`, also add `cap_add: [DAC_READ_SEARCH]` - read/search
    bypass only, no write (mounts are `:ro` anyway). Verify after rollout with
    `docker exec <stack>_backup ls /backup/<each-mount>`; the walk error only
    names the FIRST unreadable dir, siblings fail too. vaultwarden never hit
    this because its sidecar has no cap_drop at all.
 
-## Storage policy (user's, 2026-08-09)
+## Storage policy
 
-- Cloudflare R2 bucket `vault` is VAULTWARDEN-ONLY. Everything else backs up to
-  self-hosted MinIO at `https://cdn.erfi.io` (on servarr).
+- Cloudflare R2 bucket `vault` is for the vaultwarden stack ONLY. Everything
+  else backs up to self-hosted MinIO at `https://cdn.erfi.io` (on servarr).
 - Router-hosted (MS-01) bridge-attached containers CANNOT reach MinIO
   (bridge->LAN 10.0.0.0/8 is policy-dropped). R2 works because bridges get WAN
   egress. A router-local stack that must reach MinIO needs `network_mode: host`.
-- age recipient above is the shared infra key; private half lives in
-  `~/.config/sops/age/keys.txt` (dev box) + MS-01 composer + Vaultwarden item.
+- The age recipient above is the shared infra key. Where the private half
+  lives and how it is escrowed: `secret-handling` skill.
 
 ## Rollout checklist
 
@@ -142,6 +141,6 @@ that the backup container also mounts:
 ## Known gap (accepted)
 
 No dead-man switch: email fires on in-process failure, but a dead container /
-dead host sends nothing. Parked until the centralized monitoring stack lands;
-the hook is an offen `copy-post` label running busybox wget (present in the
-image) against a ping URL.
+dead host sends nothing. monitoring-compose has no dead-man receiver yet; when
+it does, the hook is an offen `copy-post` label running busybox wget (present
+in the image) against a ping URL.

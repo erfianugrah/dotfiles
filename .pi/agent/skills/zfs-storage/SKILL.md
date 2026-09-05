@@ -1,6 +1,6 @@
 ---
 name: zfs-storage
-description: Use when working on the ZFS + declarative-durability layer of the servarr NixOS NAS (~/infra/servarr-nixos modules/storage.nix + backup.nix) - deciding which tier app state lives on (hot NVMe /appdata vs bulk HDD /tank/appdata), designing datasets/recordsize/ashift, the sanoid snapshot templates + syncoid off-pool replication + nix pg_dump timers, or debugging snapshot/backup coverage. Fires on 'which tier', 'appdata placement', 'sanoid', 'syncoid', 'apphot', 'pg_dump timer', 'recordsize', 'snapshot not freeing space', 'zfs dataset on servarr'. NOT for migctl bulk moves (migrating-bulk-data), compose backup sidecars like offen/docker-volume-backup (compose-backups), NixOS deploy mechanics (nixos), or ZFS mount/import internals in depth (the lexicanum zfs-on-nixos reference this skill points at).
+description: Use when deciding which servarr tier app state lives on (hot NVMe /appdata vs bulk HDD /tank/appdata), dataset/recordsize design, or sanoid snapshots, syncoid replication or the nix pg_dump timers (~/infra/servarr-nixos storage.nix + backup.nix). Fires on 'which tier', 'appdata placement', 'sanoid', 'syncoid', 'apphot', 'pg_dump timer', 'recordsize', 'snapshot not freeing space'. NOT for migctl moves (migrating-bulk-data), offen sidecars (compose-backups), or NixOS deploys (nixos).
 ---
 
 # ZFS + declarative durability - servarr NAS
@@ -32,7 +32,8 @@ redundancy. Full table + reasoning: lexicanum `appdata-tiering-zfs`.
 ## Pools - 3, by hardware role
 
 - `rpool` (970 NVMe TLC, non-redundant): `/`, `/var/lib/docker`, `/appdata`,
-  `/appdata/pg`. ashift=9. ARC capped 16GiB.
+  `/appdata/pg`. ashift left auto at create (effective 9; accepted in
+  `docs/plans/2026-09-02-zfs-layout-reconciliation.md` F14). ARC capped 16GiB.
 - `tank` (raidz2 HDD): `/tank/{media,anugrah,appdata,data,backups}`. Created by
   hand at cutover (NOT disko); mounts + policy in storage.nix.
 - `scratch` (P2 QLC NVMe, `sync=disabled`): downloads + transcode temp.

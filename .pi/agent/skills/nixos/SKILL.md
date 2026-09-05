@@ -1,11 +1,11 @@
 ---
 name: nixos
-description: Use when changing, evaluating, or deploying ANY of the user's three NixOS hosts - router/edge (~/infra/router, flake .#router), hearth/erfipie Pi (~/infra/hearth, .#erfipie), servarr NAS (~/infra/servarr-nixos, .#servarr). Covers the uniform `make deploy` interface, per-host GitHub deploy keys, eval gates, rollback, the fleet conventions (explicit MTU, clone-force-reset, never-edit-on-host), and the nixos-fleet monorepo consolidation. Fires on 'deploy the router/NAS/Pi', 'nixos-rebuild', 'flake update', 'add a module to <host>', 'NixOS config'. NOT for read-only router ops queries (eaves), the turing-pi RK1 cluster (that is Talos/OpenTofu - see ~/infra/bombe), compose stacks on those hosts (composer/infrastructure-stack), or non-NixOS boxes.
+description: Use when changing, evaluating, or deploying any of the user's NixOS hosts - router/edge (~/infra/router), hearth/erfipie Pi (~/infra/hearth), servarr NAS (~/infra/servarr-nixos) - or the shared nixos-fleet profile library. Fires on 'deploy the router/NAS/Pi', 'nixos-rebuild', 'flake update', 'add a module to <host>', 'NixOS config', 'fleet profile'. NOT for read-only router ops (eaves), the RK1 cluster (Talos, ~/infra/bombe), compose stacks on the hosts (composer), or ZFS policy (zfs-storage).
 ---
 
 # NixOS fleet
 
-Four hosts, one set of conventions. The dev box (WSL) is NOT NixOS: it has
+Three hosts, one set of conventions. The dev box (WSL) is NOT NixOS: it has
 `nix` 2.35.2 for **eval only** - single-user, no daemon socket, no
 `nixos-rebuild`. Never hunt for `nixos-rebuild` here; every host builds its
 own system natively.
@@ -14,9 +14,9 @@ own system natively.
 
 | Host | Repo | Flake | Clone on host | Runs as | Gate |
 |---|---|---|---|---|---|
-| router (MS-01 edge) | `~/infra/router` | `.#router` | `/etc/nixos` | root | `eaves doctor` (16 checks) |
+| router (MS-01 edge) | `~/infra/router` | `.#router` | `/etc/nixos` | root | `eaves doctor` |
 | servarr (NAS, X570D4U) | `~/infra/servarr-nixos` | `.#servarr` | `/etc/nixos` | root | `.pi/check-acceptance.sh` |
-| hearth (erfipie, Pi, aarch64) | `~/infra/hearth` | `.#erfipie` | `~/hearth` | erfi + sudo | none yet |
+| hearth (erfipie, Pi, aarch64) | `~/infra/hearth` | `.#erfipie` | `/home/erfi/hearth` | erfi + sudo | none yet |
 
 Addresses: router `10.0.69.1`, servarr `10.0.71.2`, hearth `10.0.69.7`.
 
@@ -29,15 +29,17 @@ today - x86_64 cross-compilation unsupported, needs binfmt).
 
 ```bash
 cd ~/infra/<repo>
-make deploy   # eval/doctor gate -> git push -> host fetch+reset -> nixos-rebuild switch
+make deploy   # gate -> git push -> host fetch+reset (hearth: pull --ff-only) -> nixos-rebuild switch
 make diff     # same but dry-build / dry-activate: no activation
-make check    # local eval-only smoke (nix eval on the dev box)
+make check    # eval-only smoke (servarr-nixos, hearth; the router repo has `make doctor` instead)
 ```
 
-All three repos expose the same verbs. Internals differ only where the host
-forces it (hearth pulls as `erfi` then `sudo`; router adds the doctor gate;
-servarr runs the acceptance eval on the router because the dev box is
-single-user nix). `make deploy` refuses a dirty or unpushed tree.
+Same verbs across the three repos, with two exceptions: the router Makefile has
+no `check` (its gate is `eaves doctor`, run after the switch and standalone via
+`make doctor`), and hearth's on-host step is `git pull --ff-only` as `erfi` then
+`sudo nixos-rebuild`, so a diverged clone stops the deploy instead of being
+reset. servarr's `deploy` runs `.pi/check-acceptance.sh` first. `make deploy`
+refuses a dirty tree on router and servarr.
 
 The `nixos-rebuild` leg trips the dangerous-cmd-guard `nixos_rebuild` confirm
 prompt. That is intended - answer it, don't engineer around it.
@@ -47,13 +49,14 @@ prompt. That is intended - answer it, don't engineer around it.
 1. **Declare MTU explicitly, even at the default 1500.** networkd and the
    NixOS activation manage MTU *only when the option is present*. Deleting
    `MTUBytes`/`mtu` does not restore the default - it stops managing the
-   value and the last-set MTU lives on the interface forever. On 2026-08-26 a
-   jumbo revert left the router trunk at 9014 and servarr's NIC at 9000
-   through green rebuilds; both needed manual `ip link set ... mtu 1500`.
-   Same class of trap applies to any "absence means default" option.
-2. **The host clone is a cache, never an edit surface.** Deploys
-   `git fetch && git reset --hard origin/main`, so anything edited on the box
-   is destroyed silently. Source of truth is `origin/main`, always.
+   value and the last-set MTU lives on the interface forever - a jumbo revert
+   once left both router and servarr NICs at 9000+ through green rebuilds
+   until a manual `ip link set ... mtu 1500`. Same class of trap applies to
+   any "absence means default" option.
+2. **The host clone is a cache, never an edit surface.** router and servarr
+   deploys `git fetch && git reset --hard origin/main`, so anything edited on
+   the box is destroyed silently; hearth's `pull --ff-only` fails instead.
+   Source of truth is `origin/main`, always.
 3. **Per-host GitHub deploy key, never copied off the host.** Pattern:
    key `id_gh_<host>` + ssh alias `gh-<host>` in that user's `~/.ssh/config`
    + remote `git@gh-<host>:erfianugrah/<repo>.git`. Read-only deploy key
@@ -61,14 +64,14 @@ prompt. That is intended - answer it, don't engineer around it.
    are not escrow-worthy; the sops age keys ARE.
    - Verify: `ssh <host> 'ssh -T git@gh-<host>'` -> "successfully authenticated".
    - A remote of plain `git@github.com` is a bug: it works only by
-     default-key probing and breaks the moment a second key appears (hearth
-     had exactly this until 2026-08-26).
+     default-key probing and breaks the moment a second key appears.
 4. **Eval before activate.** `make check` locally, or the host's own gate.
    Never let a syntax/type error be discovered by the activation.
 5. **Secrets: sops-nix, per-host age key on the box.** No plaintext in any
-   repo. Each host's age private key lives only on that host and is escrowed
-   in Bitwarden; `.sops.yaml` in the repo lists recipients. Key paths are in
-   the host's own module - look there, don't hardcode them in notes.
+   repo. Each host's age private key lives only on that host (escrow and
+   custody rules: `secret-handling` skill); `.sops.yaml` in the repo lists
+   recipients. Key paths are in the host's own module - look there, don't
+   hardcode them in notes.
 
 ## Rollback
 
@@ -113,7 +116,7 @@ key-only, erfi+wheel, opt-in root key backstop, tailscale), `net`
 `accept-dns=false` on tailscale, knotea 10.0.10.5 as fleet resolver,
 /etc/hosts tailnet node map replacing MagicDNS).
 
-**A monorepo was tried and rejected the same day (2026-08-26).** Almost
+**A monorepo was tried and rejected.** Almost
 nothing in these configs is reusable - hearth's `iot.nix` is 2266 lines of HA
 templates/dashboards, the router's value is nftables/kea/VLANs, servarr's is
 ZFS/disko/nvidia. `nixpkgs.follows` also dissolves the shared-lock blocker:
@@ -122,19 +125,17 @@ inputs (`eaves`, `nixpkgs-tailscale`, `disko`, `sops-nix`) stay put. Per-host
 skew becomes the feature - the Pi wanting a CLI tool cannot drag the router
 into a rebuild.
 
-**Adoption status**: hearth DONE (2026-08-26, verified live: 0 failed units,
-HA+ESPHome 200, zsh is the login shell). router DONE (2026-08-28, `shell`
-profile only - hosts import base/admin/net as subset; router's inline
-fleet-lite `systemPackages` copy removed, router/network/debug + lazydocker
-stay inline). Router-side fleet access uses a THIRD router-side deploy key
-(`/root/.ssh/id_gh_fleet` + `gh-fleet` Host alias), mirroring the eaves
-pattern - the fleet repo stays private. servarr pending, on its own schedule.
+**Adoption**: all three hosts import the fleet input. Hosts take profiles as
+a subset (router: `shell` only; router/network/debug + lazydocker stay
+inline). Each host reaches the private fleet repo with its own extra deploy
+key (`/root/.ssh/id_gh_fleet` + `gh-fleet` Host alias, since
+`nixos-rebuild` runs as root).
 
 Fleet-repo commands: `make check` (eval both arches), **`make cache`**
 (aarch64 substitute check - run this whenever `shell.nix` gains a package),
 `make attrs`, `make fmt`.
 
-### Tailnet profile (2026-08-30)
+### Tailnet profile
 
 The `tailnet` profile is the fleet DNS doctrine: knotea resolves, MagicDNS
 does not. It sets `services.tailscale.extraSetFlags = [ "--accept-dns=false" ]`
@@ -146,16 +147,16 @@ devices are a one-line addition to `fleet.tailnet.nodes`.
 Why: `tailscaled` with `accept-dns=true` (the default) rewrites
 `/etc/resolv.conf` to 100.100.100.100, bypassing knotea's 44 split-horizon
 erfi.io overrides. On servarr this meant arrs connected to public Cloudflare
-IPs instead of the edge Caddy (10.0.10.1). The profile pairs with knotea
-1.4.9's split-horizon NODATA fix (AAAA queries for local-A-only names
-return NODATA instead of leaking the public CDN AAAA).
+IPs instead of the edge Caddy (10.0.10.1). The profile pairs with knotea's
+split-horizon NODATA behaviour (AAAA queries for local-A-only names return
+NODATA instead of leaking the public CDN AAAA).
 
 Docker on servarr additionally pins `daemon.settings.dns = [ "10.0.10.5" ]`
 (servarr-nixos `modules/docker.nix`) because Docker's embedded DNS
 (127.0.0.11) caches the host resolver at daemon start - a post-boot
 resolv.conf change leaves containers forwarding to the stale resolver.
 
-### Adoption gotchas (all paid for on hearth)
+### Adoption gotchas
 
 - **`nixos-rebuild` runs as root**, so a `git+ssh` input needs the `gh-fleet`
   alias in `/root/.ssh/config`, not just the login user's. First deploy died
@@ -164,10 +165,10 @@ resolv.conf change leaves containers forwarding to the stale resolver.
   repo needs a SECOND key for nixos-fleet.
 - **Use `lib.mkDefault`** for anything a host may tighten (hearth sets
   `PermitRootLogin = "no"` over the profile; otherwise it is a conflict).
-- **aarch64 source-builds are a real gate.** `glances` 4.5.5 has no aarch64
-  substitute, so the Pi compiled it and its test suite failed (14 failures),
-  killing `nixos-rebuild` - while `nix flake check`, both eval arches AND a
-  whole-host eval were green. Arch inventory: x86_64 = router + servarr,
+- **aarch64 source-builds are a real gate.** A package with no aarch64
+  substitute gets compiled on the Pi, and a failing upstream test suite then
+  kills `nixos-rebuild` - while `nix flake check`, both eval arches AND a
+  whole-host eval were green (`make cache` in the fleet repo catches this). Arch inventory: x86_64 = router + servarr,
   aarch64 = hearth + RK1 nodes; both permanent.
 - **Eval cannot catch a wrong package attr**: `git-delta` evaluates fine in a
   list, fails at build. The attr is `delta`. Nor can it catch
@@ -177,7 +178,7 @@ resolv.conf change leaves containers forwarding to the stale resolver.
 ### Dotfiles on an adopted host
 
 The `shell` profile ships BINARIES; config comes from `~/dotfiles` cloned on
-the host. Two traps, both hit on hearth 2026-08-26:
+the host. Two traps:
 
 - Clone over **https**, not `git@github.com:`. A host's existing keys are
   repo-scoped GitHub DEPLOY keys and cannot be reused for another repo;
@@ -196,4 +197,4 @@ the host. Two traps, both hit on hearth 2026-08-26:
 Read-only router ops queries (DHCP leases, NAT, conntrack) -> `eaves`.
 Compose stacks running ON these hosts -> `composer` /
 `infrastructure-stack`. Switch/VLAN config -> `xikectl`. ZFS/NAS storage
-policy -> the servarr repo's own docs. SSH transport/tailnet -> `tailscale-homelab`.
+policy -> `zfs-storage`. SSH transport/tailnet -> `tailscale-homelab`.

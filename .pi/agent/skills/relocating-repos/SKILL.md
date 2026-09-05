@@ -3,11 +3,10 @@ name: relocating-repos
 description: >-
   Use when moving, renaming, or consolidating directories or git repos on a
   machine - "move X into Y", merging dirs into a parent, "these should live
-  together", "tidy up this directory tree". Covers the pre-move entanglement
-  survey, the cross-tree reference sweep, and post-move verification. Prevents
-  the classic failures - stale path references in configs/docs, lost git
-  worktrees, dirty-tree data loss, symlinked-vs-real config copy drift. NOT for
-  single-file moves inside one repo (plain mv is fine) or cross-machine transfers.
+  together", "tidy up this directory tree", "the old path is still referenced
+  somewhere", a git worktree broken by a move. NOT for single-file moves inside
+  one repo (plain mv is fine), cross-machine or bulk-data transfers
+  (migrating-bulk-data), or git errors unrelated to a move (git-troubleshooting).
 ---
 
 # Relocating Repos
@@ -106,7 +105,7 @@ copy and update BOTH, then `diff` to prove sync. Otherwise the drift bites
 weeks later.
 
 **Word-boundary care:** anchor patterns so a repo name that is also a common
-word doesn't rewrite prose (e.g. replace `~/composer/` with the trailing
+word doesn't rewrite prose (e.g. replace `~/infra/composer/` with the trailing
 slash, never bare `composer`).
 
 ### 5. VERIFY

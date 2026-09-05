@@ -1,6 +1,6 @@
 ---
 name: migrating-bulk-data
-description: Use when moving large data sets (100GB+) between machines or disks where the source gets wiped or reused afterward and correctness must be proven first - NAS rebuilds, disk replacements, server consolidation, array-to-ZFS moves, staging through an intermediate drive. Fires on "migrate the array", "copy everything before wiping", "verify the copy is correct", "are we certain it is all there", "stage then wipe", "move X TB to the new box". Primary tool is migctl (~/infra/migctl); scripts/ are the independent fallback/checker. NOT for same-machine directory/repo moves (relocating-repos) or ongoing backup setup (compose-backups).
+description: Use when moving large data sets (100GB+) between machines or disks where the source gets wiped or reused afterward and the copy must be proven correct - NAS rebuilds, disk replacements, array-to-ZFS moves, staging via an intermediate drive. Fires on "migrate the array", "copy everything before wiping", "verify the copy is correct", "are we certain it is all there", "stage before wiping", "migctl". NOT for same-machine directory/repo moves (relocating-repos) or ongoing backups (compose-backups).
 ---
 
 # Migrating Bulk Data with Proof
@@ -34,7 +34,7 @@ inventory -> manifest (keep/skip) -> stage -> fixture-test the verifier
    data, source shutdown) waits for explicit confirmation. Never chain an
    irreversible step to an automated check.
 
-## Failure modes vs passes (validated empirically 2026-08-22)
+## Failure modes vs passes (fixture-proven)
 
 | Failure mode | Transfer itself | P1 size+mtime | P2 content |
 |---|---|---|---|
@@ -84,14 +84,16 @@ state is freshly validated too.
 
 ## Tooling: migctl (primary) + shell scripts (fallback/checker)
 
-**migctl** (`~/infra/migctl`, `make deploy` -> `/home/erfi/bin/migctl`, run as
-`sudo migctl`) is the
-primary tool. It is this skill's executable form: plan.json declaration +
+**migctl** (`~/infra/migctl`; `make install` puts it at `$HOME/.local/bin/migctl` on
+the dev box, `make deploy` scp's it to the NAS as `/home/erfi/bin/migctl`, run
+there as `sudo /home/erfi/bin/migctl ...`) is the primary tool. It is this skill's executable form: plan.json declaration +
 append-only events.jsonl state + folded status. Verdicts are parsed from rsync
 `--stats`, never rc.
 
 ```
-migctl init/validate/inventory/probe/run/status/coverage/gate/report/note/stop
+migctl init/validate/inventory/probe/run/status/coverage/gate/report/note/waive/stop
+migctl scrub/scrub-status/scrub-wait/scrub-record      # zpool scrub lifecycle on the dest
+migctl expand/expand-status/expand-wait/expand-record  # raidz expansion lifecycle
 ```
 
 Key behaviors: `probe` fixture-tests the verifier before any p2 run; `run` audit
