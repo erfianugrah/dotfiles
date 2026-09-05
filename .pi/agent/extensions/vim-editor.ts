@@ -147,6 +147,6 @@ class VimEditor extends CustomEditor {
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
-		ctx.ui.setEditorComponent((tui, theme, kb) => new VimEditor(tui, theme, kb));
+		ctx.ui.setEditorComponent((tui, theme, kb) => new VimEditor(tui, theme, kb, { embedWorkingStatus: true }));
 	});
 }
