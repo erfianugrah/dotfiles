@@ -8,7 +8,7 @@
  *   ./render-graphs.js <skill-directory> --combine # Combine all into one diagram
  *
  * Extracts all ```dot blocks from SKILL.md and renders to SVG.
- * Useful for helping your human partner visualize the process flows.
+ * Useful for helping the user visualize the process flows.
  *
  * Requires: graphviz (dot) installed on system
  */

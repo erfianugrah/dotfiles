@@ -1,6 +1,6 @@
 ---
 name: self-correcting-loop
-description: Use when the user wants to set an agent in an unattended loop, run a task autonomously, or self-correct without supervision until objective sensors pass - build/lint/test/typecheck gates, architecture fitness, mutation testing, security scans, headless-browser DOM asserts, LLM-as-judge, pixel-diff visual regression, prose linting. Fires on 'set an agent in a loop', 'run a loop', 'self-correcting', 'harness.json', 'UI/UX gate against a dev server', 'make a weaker model reliable on a scoped task'. The model never decides done - the sensors do.
+description: "Use when the user wants to set an agent in an unattended loop or run a task autonomously until objective sensors pass - build/lint/test/typecheck gates, mutation testing, security scans, headless-browser DOM asserts, LLM-as-judge, pixel-diff, prose linting. Fires on 'set an agent in a loop', 'run a loop', 'self-correcting', 'harness.json', 'UI/UX gate against a dev server', 'make a weaker model reliable'. NOT for per-task subagents inside one session (subagent-driven-development)."
 ---
 
 # Self-correcting loop
@@ -25,173 +25,43 @@ mechanics rather than invented here.
 
 [^bun]: <https://bun.com/blog/bun-in-rust>
 
-## The mechanism
+## The governor in one screen
 
-```
-checkpoint = git index (best known good)
-repeat until every sensor exits 0, OR maxIterations spent:
-    pi -p  <task + previous iteration's failing sensor output + loop notes
-            + rolled-back attempt history (negative knowledge)>
-    jail the agent (bwrap: ro /, rw repo+tmp, overlayfs on ~/.pi/agent,
-        masked ~/.ssh et al) - unless sandbox: "off"
-    undo any agent-run git commit/reset (HEAD back + checkpoint restored)
-    re-impose the checkpoint index (index-guard)
-    revert any edits outside writeScope
-    run sensors (build / vet / test / tsc / clippy / astro check ...)
-        each under a wall-clock budget + optional cgroup caps
-    all pass?       -> STOP, success                 (deterministic gate)
-    fewer failures? -> checkpoint (keep), continue
-    stalled/worse?  -> ROLL BACK to checkpoint; on repeated stalls, escalate
-                       to the next model on the ladder
-    append a per-iteration record to .pi/harness-report.json
-```
+The loop is a deterministic outer harness around a fresh `pi -p` per
+iteration: run the sensors, feed the failing output back as the next prompt,
+stop only when every sensor exits 0. Around that bare loop (all deterministic,
+no extra model calls):
 
-The governor around the bare loop (all deterministic, no extra model calls):
+- **git checkpoint + regression rollback** - the index is the best-known-good state; an iteration that regresses or stalls is reverted
+- **writeScope fence** - out-of-scope edits reverted each iteration (kills the test-weakening cheat)
+- **ref-guard + index-guard** - agent-run `git commit`/`git reset`/`git stash`/`skip-worktree` cannot move or destroy the checkpoint
+- **wall-clock budgets** - every sensor and every agent iteration is bounded; a process past its budget is process-group-killed and reported, never hung
+- **process reaping + PID namespace** - nothing a sensor or agent backgrounds survives it
+- **resource limits** - optional `systemd-run --scope` cgroup per sensor
+- **model escalation ladder** - cheapest rung first, climb after `stallPatience` no-progress iterations
+- **bwrap sandbox** - read-only `/`, writable repo + /tmp, `~/.pi/agent` on a discarded overlay, secret dirs masked
+- **negative-knowledge history** - rolled-back attempts are injected into later prompts so a fresh iteration cannot repeat a proven dead end
+- **hot-reloaded `rules` and `guide`** - steer a running loop by editing the manifest
+- **standing anti-cheat guardrails** in every prompt, plus `after` gating so expensive sensors wait for the cheap ones
+- **run report + run log + cross-repo journal** - `.pi/harness-report.json`, `.pi/harness-run.log`, `~/.local/share/loop/runs.jsonl`
 
-- **git checkpoint + regression rollback** - the git index is the best-known-
-  good state. An iteration that increases the failing-sensor count (or makes no
-  progress) is reverted, so the loop can never degrade the tree.
-- **write-scope enforcement** - `writeScope` globs fence what the agent may
-  touch; out-of-scope edits are reverted each iteration. This structurally
-  kills the test-weakening cheat (keep tests outside the scope) and replaces
-  hand-written "integrity" guard sensors.
-- **ref-guard** - if the agent runs `git commit`/`git reset` mid-iteration
-  (plan docs often instruct per-task commits), the move is undone before the
-  footprint capture: HEAD back to the checkpoint. Without this a commit made
-  the fence blind (worktree == index = "nothing changed") and baked
-  out-of-scope edits into history - observed live on 2026-07-25 in the eaves
-  loop run. The iteration prompt also forbids git ref mutations outright.
-- **index-guard** - the checkpoint index is re-imposed from its `write-tree`
-  snapshot after EVERY iteration (no-op for honest agents). Neutralizes the
-  HEAD-preserving attacks: `git reset --hard` / `git checkout -- .` (destroy
-  the staged-but-uncommitted checkpoint), `git update-index --skip-worktree`
-  (hides a tracked file from `git diff` = fence evasion), and `git stash`
-  (hides work from sensors; detected via refs/stash and surfaced as a loop
-  note). Tests A/B in loop-index-guard.integration.test.ts are proven to
-  fail with the guard disabled.
-- **wall-clock budgets** - every sensor gets `timeoutMs` (default 600s,
-  per-sensor override) and every agent iteration gets `agentTimeoutMs`
-  (default 1800s). A process that exceeds its budget is KILLED and reported as
-  a failure, never as a hang. Both spawn sites were previously unbounded, so a
-  wedged suite or a stuck `pi -p` stalled the run with no rollback, no
-  escalation and no report entry. The kill goes through GNU `timeout`, which
-  signals the process GROUP - Bun's native spawn timeout reaps only the direct
-  child, leaving grandchildren alive holding the inherited stdout pipe (so
-  nothing reading the loop's output ever sees EOF), plus ports and disk.
-  Verified in `loop-timeout.integration.test.ts`; the orphan count on a wedged
-  agent went 1 -> 0 with the group kill.
-- **PID-namespace containment for the sandboxed agent** - the jail adds
-  `--unshare-pid`, so bwrap is PID 1 of a namespace the kernel tears down
-  whole when it exits. This is NOT redundant with the group kill: bwrap's
-  `--new-session` calls `setsid(2)`, which moves the sandbox out of the
-  process group GNU `timeout` signals, so the deadline reaps bwrap and
-  leaves its descendants running. Found 2026-08-04 when a killed agent kept
-  editing a repo for 11 more minutes - the worst failure this loop can have,
-  because the governor's checkpoint/rollback accounting no longer covers it
-  and the survivor works from stale sensor feedback. `--proc` was already
-  present and is only correct inside a new PID namespace anyway.
-- **resource limits** *(Bun)* - optional `limits` (`memoryMax` / `cpuQuota` /
-  `tasksMax`) wraps each sensor in a transient `systemd-run --user --scope`
-  cgroup. Sensors run OUTSIDE the bwrap jail, so nothing else bounds them; the
-  Bun run crashed its machine repeatedly on tests that exhausted memory,
-  sockets and disk before they reached for cgroups. The scope also makes the
-  timeout kill tree-wide by construction.
-- **model escalation ladder** - start on the cheapest model; climb a rung after
-  `stallPatience` consecutive no-progress iterations. Strength on demand.
-- **agent sandbox (bwrap)** - the writeScope fence is repo-scoped; the jail
-  covers the rest of the filesystem. `/` is read-only, only the repo cwd and
-  /tmp are writable, and `~/.pi/agent` sits under an overlayfs copy-on-write
-  mount: pi can write its locks/session files (discarded at exit - loop agent
-  sessions never pollute the FTS index), but extensions/skills/auth/settings
-  are untouchable, including the stow symlink chain (plain rw-bind + per-file
-  ro-binds can't do this - bwrap can't mount over absolute symlink chains, and
-  per-file binds don't stop symlink REPLACEMENT). Secret dirs (~/.ssh,
-  ~/.gnupg, ~/.aws, ~/.kube, ~/.config/gh) are masked with tmpfs (resolved
-  through symlinks). Network stays up - pi needs the model gateway. Sensors
-  and the judge run OUTSIDE the jail (operator-configured, trusted).
-- **negative-knowledge history** - each iteration's touched files are recorded
-  BEFORE any revert, and rolled-back attempts are injected into later prompts
-  ("Previous approaches that were rolled back - do not repeat them"). A fresh
-  `pi -p` otherwise can't tell a dead end from an untried path, so it can
-  re-attempt the exact approach iteration N-3 already proved wrong.
-  `formatAttemptHistory` caps the block at the 5 most recent rolled-back
-  attempts and truncates long file lists, so the prompt stays sharp.
-- **standing rules, hot-reloaded** *(Bun)* - `rules` is appended verbatim to
-  every prompt and RE-READ from the manifest between iterations, so a human
-  watching a run can correct the loop without killing it. This is the article's
-  central operating discipline made mechanical: when the output is wrong, fix
-  the process that generates the code, not the code. ("Claude interpreted 'get
-  all the crates to compile' as 'stub out the functions'... one prompt edit and
-  a few hours later, these things stopped happening.") Only `rules` and `guide`
-  are hot - changing sensors or scope mid-run would invalidate the checkpoint
-  and progress accounting.
-- **binding conventions** *(Bun)* - `guide` lists paths the agent must read
-  first (a porting guide, a lifetimes table, an interface spec). Because each
-  iteration is a fresh `pi -p`, an on-disk guide is the ONLY channel that
-  carries conventions across iterations. The Bun run spent ~3h producing
-  `PORTING.md` and a per-struct-field `LIFETIMES.tsv`, adversarially reviewed
-  *the documents* before writing any code, and checked every implementer
-  against them. Paths are injected, not contents, so a large guide does not
-  bloat every prompt.
-- **run report** - `.pi/harness-report.json` records model, failing-count
-  trend, kept/rolled-back, escalations, scope violations, changed files,
-  per-sensor durations, and timeout flags (`timedOut`, `agentTimedOut`) per
-  iteration.
-
-Two properties make this work on weak models:
-
-1. **Fresh context per iteration.** Each `pi -p` is a new session. State lives
-   in the *filesystem* (the model's prior edits) plus the *injected sensor
-   feedback* - never in a bloating conversation that drifts. A weak model with
-   a small, sharp prompt beats a strong model with a polluted 200-turn context.
-2. **The sensor is the judge.** `go test` exit code is not negotiable. The
-   model cannot hallucinate green. `buildPrompt` also injects anti-cheat
-   guardrails because gaming the sensor is the #1 weak-model failure mode.
-   The list is empirical, not imagined - test-weakening and git-ref mutation
-   came from this loop's own runs, and two more come from the Bun rewrite:
-   - *no stubbing*: "let's get all the crates to compile" was read as "stub out
-     the functions with compilation errors". A build sensor is trivially
-     satisfied by `unimplemented!()` / `throw new Error("not implemented")`, so
-     the prompt states that a check satisfied by a stub is a FAILED iteration.
-   - *no justifying essays*: "If you need a paragraph-long comment to justify
-     why the workaround is OK, the code is wrong - fix the code." Used verbatim
-     as a reviewer rejection rule; long explanatory comments turned out to be a
-     reliable tell for a bad workaround.
-
-   **These guardrails are STANDING - they render on every iteration including
-   the first.** They used to live only inside the failure-feedback block, so a
-   task the model one-shot received *no guardrails at all*: the iteration-1
-   prompt was literally the task string. Found 2026-08-04 by an A/B that
-   returned a null because every run converged in one iteration and the rule
-   under test was never in the prompt. "Don't weaken tests" is a property of
-   how the loop works, not advice about a particular failure. Only the two
-   genuinely failure-scoped lines ("don't touch code unrelated to these
-   failures", "make the smallest change") stay in the feedback block.
-
-   **Measured effect of the anti-stub rule: none, at this difficulty.** A/B on
-   a build-only gate (8 specified functions, `go build` fully satisfiable by
-   stubs, hidden acceptance suite scoring the result), 3 runs per arm on
-   claude-haiku-4-5: *identical* 8/8 hidden pass, 0 stub markers, 1 iteration,
-   in both arms. Controls were sound - a correct implementation scores 8/8,
-   pure stubs score 0/8 and still pass the gate. So the rule is unfalsified
-   but unproven as a behaviour-changer: the model simply did not want to stub
-   8 well-specified textbook functions. The Bun case that motivated it was a
-   16,000-error Rust port where implementing correctly was genuinely hard, and
-   that difficulty is the variable this experiment could not reproduce.
-
-   Practical consequence: **treat the prompt rule as free but unproven, and
-   rely on the `no-stubs` counter sensor for the actual guarantee.** A prompt
-   rule is unenforceable by construction; a counter is a gate. If you only
-   have budget for one, take the sensor. Harness for re-running the A/B at
-   higher difficulty: `~/.local/share/loop-validation/build-gate/`.
+Each mechanism, the failure it exists for, and what the A/Bs measured:
+docs/governor.md (read when a run did something you did not expect, or before
+changing loop.ts).
 
 ## Files
 
 | File | Role |
 |---|---|
-| `harness.ts` | Pure core: manifest schema/validation, prompt + feedback + attempt-history builders, stack detection, glob/scope, decide/ladder logic. Unit-tested. |
-| `loop.ts` | CLI driver (Bun): spawns `pi -p`, runs sensors, git checkpoint/rollback, scope guard, escalation, report. |
-| `presets/*.json` | Starter manifests per stack (go/node/rust/astro/python). |
+| `harness.ts` | Pure core: manifest schema/validation, prompt + feedback + attempt-history builders, stack detection, glob/scope, decide/ladder logic, run classification. Unit-tested. |
+| `loop.ts` | CLI driver (Bun): spawns `pi -p`, runs sensors, git checkpoint/rollback, scope guard, ref/index guards, sandbox, escalation, report, journal. |
+| `presets/*.json` | Starter manifests per stack (go/node/rust/astro/python/docs), each sensor with a canary. |
+| `package.json` | `@erfianugrah/pi-loop`: `bin` entries for the five CLIs, `bun test`. |
+| `README.md` | 30-second start for the package; this SKILL.md is canonical. |
+| `docs/governor.md` | The mechanism and every governor guard, with the failure each exists for. |
+| `docs/models.md` | Model ladder notes: gateway rungs, OpenRouter fallback, local rung rules, judge-only-red endgame. |
+| `docs/sensors.md` | `browser-assert`, `judge` (code + visual), `pixel-diff`, `prose-lint` reference. |
+| `docs/lessons.md` | Harnessability lessons: sensor shapes, verify-sensors, journal, reading a run, vacuous sensors, operator traps. |
 | `harness.test.ts` | Unit tests for the pure helpers. |
 | `loop.integration.test.ts` | End-to-end governor test with a scripted fake agent (rollback / stall+escalate / scope-revert / pass) - no real model needed. |
 | `loop-timeout.integration.test.ts` | Wall-clock budgets: hung sensor killed + rendered as a HANG, per-sensor override, fast sensor untouched, hung agent reaped, `--trial` stall verdict. Each case would hang forever without the deadline. |
@@ -201,23 +71,39 @@ Two properties make this work on weak models:
 | `loop-logpath.integration.test.ts` | Redirecting the run log INTO the repo is eaten by the scope guard: 3-arm A/B (outside repo / inside repo / no writeScope) plus the pre-checkpoint warning. |
 | `loop-runlog.integration.test.ts` | The loop owns its trace: `.pi/harness-run.log` with no redirection, appends across runs, `--no-log`, loop artifacts are not dirt / not scope violations / not changed-files / never staged / not deleted by a rollback's `git clean`, a failing sensor's output survives into the report, and `loop report` renders + fails cleanly. |
 | `loop-reap.integration.test.ts` | A sensor or agent that backgrounds a process leaves nothing alive: the leak that made four feature sensors pass against an unimplemented tree. Also pins that reaping happens AFTER the output drain, so the diagnosis survives. |
+| `loop-dirty.integration.test.ts` | Dirty-tree guard: aborts (exit 2) without `--allow-dirty`, proceeds with it, `--dry` is exempt. |
+| `loop-freeze.integration.test.ts` | Freeze mode: a baseline failure is red without `--freeze`, tolerated with it; only NEW failures gate. |
+| `loop-head-reset.integration.test.ts` | Ref-guard: an agent-run `git commit` is undone (HEAD back to the checkpoint, checkpoint tree re-read) and the scope fence still fires on the committed files. |
+| `loop-index-guard.integration.test.ts` | Index-guard: `update-index --skip-worktree` evasion neutralized, `reset --hard` cannot destroy the staged checkpoint, `stash` is detected and surfaced. Each case proven to fail with the guard disabled. |
+| `loop-sandbox.integration.test.ts` | bwrap jail: escape attempts fail when sandboxed, the same escape succeeds with `sandbox: "off"` (discrimination), `"require"` without bwrap aborts (exit 2) before any iteration. |
+| `loop-subdir-scope.integration.test.ts` | writeScope matching when the loop runs in a SUBDIR of the repo: an in-scope edit is not mis-flagged (repo-root vs cwd-relative paths). |
+| `loop-journal.integration.test.ts` | Run journal: one JSON line per completed run in `$LOOP_JOURNAL`, `already-green` early exit with zero iterations, failure-mode tags, `loop history` table and `--json`. |
 | `browser-assert.ts` | Dependency-free headless-Chromium sensor (CDP over Bun's WebSocket - no puppeteer/playwright). Ordered flow steps (wait/click/type/press/assert/screenshot) + viewport/full-page. The behaviour-harness layer for web targets; also a UI live-smoke tool. |
+| `browser-assert.parse.test.ts` | Arg parser: url first, defaults, step ORDER preserved across kinds, `--type` arity, viewport/full-page/timeout, bad-input rejection. |
+| `browser-assert.cdp.test.ts` | The CDP client never hangs the sensor: timeout on a wedged browser, reject on a dropped socket, reject after close. |
 | `browser-assert.integration.test.ts` | Drives real Chromium against a fixture page (skips if no browser). |
-| `judge.ts` | Inferential (LLM-as-judge) sensor with two modes: CODE (feeds the git diff + spec to a second `pi -p`) and VISUAL (screenshots a live URL via browser-assert and has a vision model assess the rendered UI/UX). Both gate on `VERDICT: PASS/FAIL`. The computational sensors check the code compiles/passes; this checks it did the *right thing* / *looks right*. Fail-closed by default. |
-| `judge.{parse,integration}.test.ts` | Unit (arg + verdict parsing) and end-to-end (scripted fake judge via `$LOOP_JUDGE_CMD`) tests. |
-| `pixel-diff.ts` | Computational visual-regression sensor: diffs a capture against a committed approved-baseline PNG (YIQ perceptual threshold, AA-tolerant). Zero-dep - PNG decode/encode via `node:zlib`. The deterministic half of the visual gate. |
-| `pixel-diff.{parse,integration}.test.ts` | Unit (decode/encode round-trip, YIQ delta, diff logic) and end-to-end (baseline lifecycle, tolerance, `--url` capture) tests. |
-| `prose-lint.ts` | Computational prose sensor: markdown-aware segmentation, a slop score over discriminating lexical categories, and structural gates a rewrite cannot satisfy by cheating. Zero-dep. The deterministic half of the writing gate, as `pixel-diff` is for UI. |
-| `prose-lint.{parse,integration}.test.ts` | Unit (segmentation, sentence splitting, each detector, threshold evaluation) and end-to-end (exit codes, `--before HEAD` fact retention against a real git repo, ratchet lifecycle, config merge) tests. |
+| `judge.ts` | Inferential (LLM-as-judge) sensor with two modes: CODE (feeds the git diff + spec to a second `pi -p`) and VISUAL (screenshots a live URL via browser-assert and has a vision model assess the rendered UI/UX). Both gate on `VERDICT: PASS/FAIL`. Fail-closed by default. |
+| `judge.parse.test.ts` | Arg + verdict parsing (including markdown-decorated verdicts). |
+| `judge.integration.test.ts` | End-to-end with a scripted fake judge via `$LOOP_JUDGE_CMD`: code gate, visual gate, adversarial N, empty-diff short-circuit. |
+| `pixel-diff.ts` | Computational visual-regression sensor: diffs a capture against a committed approved-baseline PNG (YIQ perceptual threshold, AA-tolerant). Zero-dep - PNG decode/encode via `node:zlib`. |
+| `pixel-diff.parse.test.ts` | Decode/encode round-trip, YIQ delta, diff logic, arg parsing. |
+| `pixel-diff.integration.test.ts` | Baseline lifecycle (missing baseline written + FAIL, `--update-baseline`), tolerance, `--url` capture. |
+| `prose-lint.ts` | Computational prose sensor: markdown-aware segmentation, a slop score over discriminating lexical categories, and structural gates a rewrite cannot satisfy by cheating. Zero-dep. |
+| `prose-lint.parse.test.ts` | Segmentation, sentence splitting, each detector, threshold evaluation. |
+| `prose-lint.integration.test.ts` | Exit codes, `--before HEAD` fact retention against a real git repo, ratchet lifecycle, config merge. |
 
 ## Usage
 
-This skill is also the `@erfianugrah/pi-loop` package. Get the `loop` and
-`browser-assert` commands on PATH once:
+This skill is also the `@erfianugrah/pi-loop` package (Bun >= 1.3, zero
+runtime dependencies). Get the five bins on PATH once:
 
 ```bash
-cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`, `judge`
+cd ~/.pi/agent/skills/self-correcting-loop && bun link   # provides `loop`, `browser-assert`, `judge`, `pixel-diff`, `prose-lint`
 ```
+
+Each bin prints its usage when run with no or bad arguments (`loop` alone
+lists `run|init|verify-sensors|report|history`); there is no `--help` flag.
+Without `bun link`: `bun ~/.pi/agent/skills/self-correcting-loop/loop.ts run`.
 
 Then, from the **target project root** (the repo the loop should work on):
 
@@ -277,9 +163,9 @@ that genuinely needs three iterations looks identical at N=2, which is why the
 message says "check these first" rather than declaring the harness broken.
 
 A failing set that does not move is almost never "needs more iterations" - it
-is a harness bug. The 2026-08-02 run below burned five iterations and ~30
-minutes before the sensors were diagnosed as the problem; a trial would have
-said so in one.
+is a harness bug. A real run burned five iterations and ~30 minutes before the
+sensors were diagnosed as the problem (docs/lessons.md, "Feature sensors must
+be red at baseline"); a trial would have said so in one.
 
 ### Steering a run without killing it *(Bun)*
 
@@ -288,8 +174,6 @@ you are watching a run and see the agent do something dumb, append a rule to
 `.pi/harness.json` and save - the next iteration obeys it. Fix the process
 that generates the code, not the code. An invalid/half-saved manifest is
 ignored (last good values are kept), so editing mid-run cannot crash the loop.
-
-Without `bun link`, invoke directly: `bun ~/.pi/agent/skills/self-correcting-loop/loop.ts run`.
 
 Env hooks (mainly for tests): `LOOP_PI_CMD` (agent command, default `pi` -
 integration tests substitute a scripted fake), `LOOP_SANDBOX` (override the
@@ -303,61 +187,9 @@ from that checkpoint index, never from HEAD - so pre-existing uncommitted
 changes round-trip intact, and only files the agent actually touched since
 the last checkpoint are scope-checked or rolled back.
 
-Two adjacent operator traps, both observed on 2026-08-12 (llm-compose):
-
-- **Do not move/delete a file a guard sensor references to make the tree
-  "clean" for a run.** The guard goes red at baseline, and the agent's
-  cheapest path back to green is inside its writeScope - weakening the test.
-  (A preset TOML parked in /tmp made `test_load_all_presets` fail; the agent
-  deleted the preset name from the expected set. The judge caught it, but the
-  run was unfixable: restoring the file was outside `writeScope`.) Fix the
-  baseline honestly, or commit the file, before running.
-- **A killed run leaves the checkpoint's `git add -A` staged.** The next
-  `git commit` you make sweeps the agent's staged work into YOUR commit.
-  After killing a loop mid-iteration, `git status` and unstage/restore
-  deliberately before committing anything; check `git show --stat HEAD`
-  for surprise passengers. (Pre-2026-07-24 the
-scope guard restored violations from HEAD and diffed against HEAD, which
-destroyed uncommitted out-of-scope work; regression-tested in
-loop.integration.test.ts.)
-
-A second 2026-07-24 lesson: on an ADDITIVE-feature task every sensor passes
-at baseline, so the loop exits "nothing to do" without iterating. Encode the
-desired end state as a feature-present sensor that FAILS pre-change (e.g.
-`rg -q <new-symbol> <file>`, `jq -e '.x == false' <cfg>`) - that is what
-gives the loop something to converge on.
-
-Mark those `"expect": "fail"`. The run is REFUSED (exit 2) if such a sensor
-passes at baseline, because a feature sensor that is already green gates
-nothing - the loop can converge having built nothing and still report PASS.
-Guards (build/lint/test) default to `"expect": "pass"` and are never flagged.
-The symmetric case is `"kind": "premise"` - a sensor that must be GREEN at
-baseline because it encodes a factual claim the spec depends on; red there
-means the spec is wrong and the run is refused before a token is spent.
-
-Two failure modes this encodes, both observed on a real run (2026-08-02,
-eaves roadmap Tier 1):
-
-- **Non-discriminating.** Four sensors passed before a line was written,
-  because the CLI's handlers silently ignored unknown trailing args - so
-  `show interfaces terse` already exited 0 printing the default table.
-  Assert the DIFFERENCE: terse must NOT carry the MAC column, the resolved
-  log must NOT contain kea lines, the chain view must NOT be the tables
-  summary.
-- **Over-specified, therefore unsatisfiable.** Two sensors asserted
-  IMPLEMENTATION LOCATION (`rg 'destination' internal/show/show.go`) and
-  exact doc PHRASING (`rg 'ruleset table' README.md`). The model put the
-  filter in the pure parse layer (better) and wrote `ruleset [table <t>]`
-  (standard usage syntax) - both correct, both red. Five iterations and
-  ~30 minutes burned before the sensors were diagnosed as the bug. Assert
-  BEHAVIOUR (`--json ... | jq -e 'length == 3'`), not where code lives or
-  how prose is worded. If a sensor stays red across 3+ iterations while the
-  feature demonstrably works by hand, suspect the sensor first.
-
-A doc sensor should also grep NEGATIVELY for statements the change
-falsifies ("no X yet", a stale count, "duplicates the const"). Presence-only
-doc checks pass while the rest of the file still contradicts the feature -
-that exact gap shipped a doc asserting the opposite of five shipped items.
+Operator traps around dirty trees, killed runs and baseline-green feature
+sensors: docs/lessons.md ("Operator traps", "Feature sensors must be red at
+baseline") - read before the first run on a repo you care about.
 
 `run` exit codes: `0` all sensors green, `1` still red after budget, `2` manifest/usage error, `3` all green, pending human review
 
@@ -395,25 +227,12 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
 
 - `task` - the feed-forward instruction. Keep it scoped; one module/feature.
 - `expect` - `"fail"` marks a FEATURE sensor that must be red on the unchanged
-  tree; the run is refused if it is green (see the discrimination lesson
-  above). Omit it for guards.
+  tree; the run is refused if it is green (docs/lessons.md, "Feature sensors
+  must be red at baseline"). Omit it for guards.
 - `humanGate` - optional boolean (default false). If true, a converged run
   prints PENDING HUMAN REVIEW and exits `3` instead of `0`, so CI can route
   green-but-high-blast-radius work through a human gate. The baseline-green
   early exit is unaffected.
-- **Judge-only-red endgame (operator policy, not a harness flag).** If every
-  computational sensor is green and the judge is the ONLY red sensor for 3
-  consecutive iterations, stop the run and land the judge's remaining list
-  by hand (or one frontier-worker pass) - do not burn the rest of the
-  iteration budget pleasing a fail-closed judge with a weaker writer.
-  Measured 2026-08-13: a local rung orbited a frontier judge for 6
-  iterations, each rewrite fixing the named items and inventing fresh
-  breakage; the operator landed the list first try. Two preconditions
-  before treating a run as judge-only-red: (1) add cheap computational
-  floor sensors for shape invariants first - kept-on-changed failure text
-  can let a strictly-worse diff survive when the judge is the sole red;
-  (2) confirm the judge's remaining asks are enumerable nits, not a real
-  design objection - this policy covers taste/schema nits, not substance.
 - `after` - names of sensors that must PASS in the same pass before this one
   runs. Cost control for expensive gates: on a real run the judge cost 147s of
   a frontier model per iteration while the other 22 sensors together took under
@@ -429,7 +248,7 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
   on. It must be green at baseline; red refuses the run because the spec is
   wrong, not the tree. Baseline-only: it never gates an iteration, never reaches
   the model, and is skipped by `verify-sensors`. Cannot carry `expect` or
-  `canary`. See "Count the spec's universals" below.
+  `canary`. See docs/lessons.md, "Count the spec's universals".
 - `sensors` - the feedback controls. Each `cmd` runs under `bash -lc`; exit 0 =
   pass. Order them cheap-to-expensive (build before test) - all must pass. Each
   sensor may carry an optional `hint` string, appended to the feedback when it
@@ -438,161 +257,10 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
 - `models` - the escalation ladder, cheapest first (`""` = pi default). Legacy
   `model` (string|null) is still accepted and normalized to a one-rung ladder.
   CLI `--model` overrides to a single rung.
-  - **Cheap-but-accurate open-weight rungs (via the opencode-zen gateway; ids
-    verified in `~/.pi/agent/models-store.json`, which the picker refreshes).**
-    `opencode/deepseek-v4-pro` is the cheapest near-frontier rung (top
-    open-weight SWE-bench Verified; Artificial Analysis clocks it ~40x cheaper
-    per task than Opus 4.8). `opencode/glm-5.2` is the best accuracy-per-dollar
-    rung (top open-weight on the AA Intelligence Index, beats GPT-5.5 on
-    SWE-bench Pro, roughly 6-8x cheaper output than Opus). The two make a strong
-    cheap base under a frontier top (`anthropic/claude-sonnet-5`, or
-    `claude-opus-4-8` only if you want the ceiling). `opencode/deepseek-v4-flash-free`
-    is a $0 bottom rung for high-volume iterations. Working example:
-    `~/infra/knotea/.pi/harness.json` uses
-    `["opencode/deepseek-v4-pro", "opencode/glm-5.2", "anthropic/claude-sonnet-5"]`.
-  - **Gotcha: Kimi K3 is NOT a cheap rung.** It matches Opus 4.8 on quality (AA
-    Intelligence Index ~57) but is frontier-priced (~$3/$15 per M). It IS in
-    the opencode-zen catalog (`opencode/kimi-k3`). For a Kimi rung use `opencode/kimi-k2.5`
-    (cheapest) / `kimi-k2.6` / `kimi-k2.7-code` (coding-tuned). Re-verify all ids
-    before relying on them - gateway catalogs drift, and exact prices rot faster
-    than the ladder strategy does.
-  - **OpenRouter fallback ladder.** When the opencode-zen gateway returns 401
-    `CreditsError` (balance exhausted), the `openrouter` provider is a working
-    fallback - pi reads the same `~/.pi/agent/auth.json` and routes to
-    OpenRouter instead. Worker rung: `deepseek/deepseek-v4-pro`. Judge rung:
-    `moonshotai/kimi-k3`. OpenRouter's low-balance signature is HTTP 402 with a
-    `lower max_tokens / prompt size` message; a native Anthropic rung
-    (`anthropic/claude-sonnet-5`) completed the 2026-08-11 memledger run after
-    both gateways hit their balance limits. Add these ids to the ladder so the
-    loop automatically traverses gateways when one is drained.
-  - **Gotcha: Kimi K3 reasoning cliff on OpenRouter (since 2026-08-19/20).**
-    K3's per-turn think-rate dropped from 87-99% to 23-30%, scaling with
-    context (>150k prompt tokens: 4-15% vs 88-100% before). A judge that is
-    not thinking rubber-stamps iterations, so treat the K3 judge-rung and
-    escalation-pairing recommendations above as suspended for
-    `openrouter/moonshotai/kimi-k3` until confirmed fixed.
-    `deepseek-v4-pro` held 97% at >=100k on the same days - use it as the
-    OpenRouter judge instead. Single-turn probes still reason (suppression
-    is specific to long multi-turn session shape), so a smoke test will not
-    catch it; verify via the session-jsonl reasoning-vs-context cross-tab
-    (method: https://erfi.dev/guides/diagnosing-llm-reasoning-cliffs/).
-    opencode-zen's K3 path reasoned in a 163k single-shot probe on 2026-08-23
-    but is untested in long sessions - cross-tab it before trusting it as a
-    judge.
-  - **$0 local rung (llama-server provider, llm-compose proxy on the 5090).**
-    `llama-server/loop` (Qwen3.8 27B Dense, agentic-tuned preset - migrated
-    from Gemma 4 26B-A4B MoE on 2026-08-27) is a real worker rung for judged
-    loops, not just a toy. Gemma-era A/B on the same scoped task (proxy
-    /metrics route, kimi-k3 judge both runs) passed in 2 iterations / 8 min
-    vs the old `qwen36-moe`'s 3 iterations / 15 min - the MoE generation-speed
-    and instruction-following edge showed as wall-clock; Qwen3.8's medium
-    effort keeps thinking traces leaner than Gemma 4's 10K+ xhigh binges, so
-    the wide-window rules below stay load-bearing.
-    Two operational requirements, both observed live on 2026-08-12: **lock the
-    preset first** (`llmc lock loop --owner "$PI_SESSION_ID" --wait` -
-    `--wait` queues FIFO if another preset is pinned) or any other
-    client of the proxy (Open WebUI re-POSTs the previously-selected model)
-    evicts the worker's model mid-iteration; and keep the judge on a hosted
-    frontier model - the local rung writes, the frontier judges, so the only
-    cost is a per-iteration review call.
-  - **Local-rung ceiling + the working-window rules (Gemma 4 26B, measured
-    2026-08-12, llm-compose concurrency build - NOT re-validated on the
-    Qwen3.8 loop preset).** Gemma 4 26B one-shots scoped tasks
-    (single-file, ~3-hunk semantic changes with a contract probe) but stalls
-    on multi-file refactors - pair it with a frontier escalation rung
-    (`["llama-server/loop", "openrouter/moonshotai/kimi-k3"]`) for anything
-    bigger. To make the local rung reliable at all you must size its working
-    window: (1) the loop preset needs a WIDE context (262144) - at 131072 the
-    85% auto-compact threshold (~111K tokens) killed every iteration, because
-    big file reads plus 10K-token thinking traces eat ~15K/turn; (2) pass
-    `PI_COMPACT_FRACTION=0.95` for headroom; (3) bump `agentTimeoutMs` to
-    3600000 - 1800s is too tight for a thinking MoE on multi-file tasks (two
-    iterations died mid-work at the deadline); (4) slice manifests to ~3-hunk
-    scope and put EDIT DISCIPLINE in `rules` (no whole-file rewrites, exact
-    oldText from a fresh read, `python3 -c 'import <module>'` after every
-    edit) - unsliced, the model corrupted proxy.py with syntax errors on 4
-    straight iterations; sliced, it converged in 3; (5) for precise contracts,
-    an operator-owned acceptance probe OUTSIDE writeScope (e.g.
-    `.pi/lock-owners-probe.py`, booting the real handler over HTTP) is the
-    strongest sensor form - the agent cannot edit it, and its named check
-    failures are exactly the feedback a weak model needs.
-  - **Judge-gated schema-exact JSON is beyond the local rung (measured
-    2026-08-13, hearth power dashboard loop, 6 iterations + trial).** Gemma
-    26B one-shot ~95% of a 4-file task (render.sh job, compose changes,
-    16-panel dashboard, valid PromQL) in iteration 1, then ORBITED the
-    frontier judge for 6 iterations without converging: every rewrite fixed
-    the judge's named items and invented fresh schema errors (drawMode/
-    stackType keys, matcher `type` vs `id`, raw-tab corruption inside
-    strings, gridPos deleted wholesale). Practical endgame: when the judge's
-    list is down to enumerable schema placements and the local rung has
-    rewritten the file 3+ times, the operator lands the list by hand (judge
-    went green first try). Adjacent traps, all observed: (1) **kept-on-
-    changed-failure-content sinks the floor** - when the judge is the ONLY
-    red sensor, a strictly-worse diff (gridPos deleted, datasource type
-    corrupted) is KEPT because the failure text changed; add a cheap
-    computational floor sensor for shape invariants (gridPos keys,
-    datasource `type`) so regressions flip a guard red and force rollback.
-    (2) **Mid-run guide edits are futile** - the scope guard restores
-    tracked out-of-scope files from the checkpoint, including the operator's
-    own guide enrichment; enrich the guide BETWEEN runs. (3) The scope guard
-    otherwise works exactly as designed: 33 out-of-scope agent writes (a
-    split-into-p1..p17.json strategy) reverted cleanly. (4) A strong
-    anti-hallucination sensor form: validate every metric name in dashboard
-    exprs against the LIVE endpoint (caught `hearth_sensor_power_sw`).
-    (5) A trial/run that dies mid-iteration leaves the governor's checkpoint
-    staged in the index; recover the pre-run state with
-    `git restore --source=HEAD --staged --worktree -- .`
-  - **Local-rung ceiling refined (measured 2026-08-17/18, supabase-lab
-    battery, 6 modules):** the single-file ceiling is really a
-    single-CONTRACT ceiling. X03 (one API claim, ~150 lines, live pair
-    already up) one-shotted probe-green in iteration 1. Anything with 4+
-    result rows, two systems (Supabase + a gateway), or ~400 lines (M01,
-    M02, L01) thrashed: mid-write regressions rolled back, malformed
-    `peg-gemma4` output, markdown bold leaked into a FILENAME, confessional
-    comments left in code ("typo I introduced", "fix in a second"), and a
-    fabricated error excuse ("project host unreachable") when the real bug
-    was its own wrong URL constant. Two of six drafts SMUGGLED SECRETS
-    (token values into serialized results via extra fields / raw 200 bodies
-    with rotated tokens) - the frontier judge caught both; never run the
-    local rung without a judge sensor on anything touching credentials.
-    Working pattern: let the loop reach probe-green, then the operator
-    lands judge nits by hand - every hand-landing was under 15 targeted
-    lines. Also: (1) check the new module's id against `pvlab --list`
-    BEFORE writing the manifest - two of my manifests hit pre-existing id
-    collisions (P01, I04) and the `registered` expect-fail sensor then
-    passes at baseline, refusing the run; (2) `loop run` needs a green
-    BASELINE - two sessions found pre-existing typecheck breakage in
-    sibling experiments that blocked every run until fixed by hand; (3)
-    bg_task tmux sessions do NOT inherit the caller's env - a probe that
-    reads secrets from the environment silently falls back to placeholders
-    and 401s unless wrapped in `bash -lc`.
-  - **Concurrent loops (llm-compose).** The proxy lock is a SHARED lock with
-    named owners: each loop `llmc lock loop --owner <session-id>`, unlock
-    releases only that owner. Concurrent loops must share ONE preset (the
-    `loop` preset runs `parallel_slots = 1`, 262144 ctx); loops on DIFFERENT
-    presets queue instead of fighting - `llmc lock <preset> --wait` joins a
-    FIFO and the grant lands when the current owners drain (a contended
-    lock without --wait 409s; it NEVER hijacks the running model - the
-    pre-2026-08-17 hijack killed a loop mid-iteration). Same-repo loops need
-    a separate git worktree each; and loop sensors must never rebuild/restart
-    the stack that serves them (a proxy restart kills the other loop's
-    in-flight request). Since 2026-08-12 (llm-compose a566af5) the lock is
-    persisted via the proxy state file and SURVIVES a proxy restart - so a
-    loop that exits without unlocking leaves the pinned model resident,
-    holding VRAM indefinitely (observed 2026-08-13: Gemma 26B squatting
-    22.5 GiB for hours after loop end). Always `llmc unlock --owner <id>`
-    in loop teardown; `llmc unlock` (ownerless) force-clears a stale set.
-  - **Judge-idiom evidence.** In the 2026-08-11 memledger-summarise loop the
-    `moonshotai/kimi-k3` judge caught a degenerate-filter threshold drift (40
-    -> 27) plus a fabricated `the contract test pins this` justification
-    comment that every deterministic sensor (build, test, lint, vuln, secrets)
-    passed green. The judge sensor earns its cost - it catches plausible-looking
-    incorrectness that deterministic sensors are structurally blind to.
-  - **Contract-fixture distance rule.** Keep contract-test fixture values far
-    from any threshold you intend to freeze. A 27-character fake-LLM summary
-    fixture silently pinned the summarise-filter threshold below the intended
-    40 in the 2026-08-11 run, forcing the implementation to drift. The agent
-    correctly adapted to the test - the test was simply wrong.
+  Rung recommendations - gateway-hosted open-weight rungs, the OpenRouter
+  fallback ladder, the $0 local llama-server rung and its working-window
+  rules, and the judge-only-red endgame policy - are in docs/models.md (read
+  when picking a ladder or when a gateway drains mid-run).
 - `stallPatience` - consecutive no-progress iterations before climbing a rung.
 - `timeoutMs` / `agentTimeoutMs` - wall-clock budgets in ms (defaults 600000 /
   1800000). A sensor may override with its own `timeoutMs`; give the slow tier
@@ -607,7 +275,7 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
   **Hot-reloaded between iterations** - this is the mid-run steering lever.
 - `canary` (per sensor) - a command planting the fault the sensor catches;
   drives `loop verify-sensors`. Absent = that sensor is reported unverified.
-  Sensor-authoring trap observed 2026-08-12: mind PIPELINE exit codes -
+  Sensor-authoring trap: mind PIPELINE exit codes -
   `cmd | rg -c x | awk '{exit ($1 >= 3 ? 0 : 1)}'` passes vacuously when the
   input is empty (awk exits 0 on no lines), so the sensor was green at
   baseline and the run would have been refused. Prefer
@@ -628,886 +296,30 @@ that exact gap shipped a doc asserting the opposite of five shipped items.
   though git reports repo-root-relative paths internally.
   Empty = unrestricted. Requires the target to be a git repo.
 
-  **The fence shapes the architecture, so draw it with that in mind.** A
-  worked example: a run built an HTTP API over an existing CLI, with
-  `internal/parse` deliberately out of scope ("this is transport, not
-  parsing"). The agent needed lease-filter validation in both the CLI and the
-  API. Duplicating it is the thing a reviewer rejects, and the shared home for
-  it - `internal/parse` - was fenced off. So it put the shared code in the new
-  transport package and had the CLI import it, inverting the layering; that
-  created an import cycle for one endpoint, which it broke by duplicating a
-  struct and injecting a callback, under a four-line comment explaining why.
-
-  Every step is locally reasonable and the result is wrong. The fence
-  protected the module it named and deformed everything around it. When you
-  scope a run, ask where shared code will have to go, and if the answer is
-  "nowhere good", widen the scope to a small shared package rather than
-  leaving the agent to invent a home for it.
+  The fence also shapes the architecture the agent can produce: fencing off
+  the natural home for shared code makes the agent invent a worse one.
+  Worked example in docs/lessons.md ("The fence shapes the architecture").
 - `sandbox` - `"auto"` (default: jail the agent with bwrap when available,
   warn + run bare otherwise), `"require"` (abort without bwrap), `"off"`.
   `LOOP_SANDBOX` env overrides; `LOOP_BWRAP` points at a specific bwrap
-  binary. See the governor bullet above for the jail semantics.
+  binary. Jail semantics: docs/governor.md.
 
 > The governor (checkpoint/rollback/scope/escalation) needs a **git repo** with
 > a committed baseline. Without git it degrades to feed-forward-only and warns.
 
-## Making the target harnessable (this is where the leverage is)
-
-The loop is only as good as its sensors. A weak model succeeds when the
-sensors are **specific and deterministic**. Raise sensor quality by:
-
-- **Tight contracts.** A small interface/trait + a **conformance test suite**
-  any implementation must pass turns "is this code good?" (inferential, hard)
-  into "does `go test ./conformance/...` pass?" (computational, trivial). This
-  is why plugin/provider systems loop so well - the module boundary *is* the
-  sensor.
-- **A golden reference** the task can say "copy providers/mock and adapt".
-  Weak models are far better at "make it like that" than "invent from spec".
-- **Recorded fixtures** (VCR-style cassettes) for anything that hits a network,
-  so real request/response shapes are validated offline, deterministically.
-- **Structural / architecture sensors** turn a boundary you *hope* holds into
-  one the build enforces - a fitness function (Böckeler; ArchUnit). They are
-  fast and deterministic, so run them alongside the fast sensors.
-
-  This is not hypothetical insurance. On the 2026-08-05 eaves run the agent
-  inverted the layering between the CLI and the new transport package (see
-  `writeScope` below), and BOTH adversarial opus reviewers passed it - despite
-  their own rubric saying "reject a change whose workaround needs a
-  paragraph-long comment to justify it", and the workaround carrying exactly
-  such a comment. A one-line `depguard` rule forbidding the import would have
-  been red, deterministic, and free. Where a boundary matters, do not delegate
-  it to a probabilistic reviewer. Per stack:
-  Go `golangci-lint run` with a `depguard` rule (module-boundary example in
-  `~/authkit/.golangci.yml`), TS `dependency-cruiser`, Python `import-linter`,
-  JVM ArchUnit. Pair with a `hint` naming the rule that was crossed. This is
-  the cure for the "same agent wrote both sides of the contract" drift.
-- **Test-quality sensors (mutation testing)** grade whether the tests actually
-  *catch* bugs, not just whether they pass - the concrete answer to "can I
-  trust agent-written tests?". Run as an EXPENSIVE, post-fast-sensor gate (it
-  re-runs the suite per mutant): Go `gremlins unleash --threshold-efficacy N
-  ./pkg` (bump `--timeout-coefficient` so per-mutant recompiles fit, or every
-  mutant times out), TS StrykerJS, JVM PIT. Real payoff: on authkit this
-  immediately surfaced an untested default-TTL branch in the loop-built bridge
-  (93% -> 100% efficacy after one added case).
-- **Security / drift sensors** are cheap computational gates the article files
-  under "continuous drift" - wire them so an unattended loop physically cannot
-  land a leaked key or a known-vulnerable dep. Run them alongside the fast
-  sensors: `{ "name": "vuln", "cmd": "osv-scanner -r --lockfile ..." }` (or a
-  language lockfile scan) and `{ "name": "secrets", "cmd": "gitleaks dir .
-  --no-banner" }`. Pair each with a `hint` telling the model to bump/remove
-  the offending dep or move the secret to env, not to delete the scanner.
-
-  **Use `gitleaks dir` (filesystem), NOT `gitleaks detect` (git history).**
-  This doc recommended `detect` until 2026-08-09, and it was wrong in two
-  compounding ways. `detect` scans COMMITS - but the loop's ref-guard
-  deliberately undoes any commit the agent makes, so a leaked key lives in
-  the working tree and never reaches history. The guard was structurally
-  blind to the only threat model the loop actually has. It is also a
-  deprecated alias in current gitleaks (the commands are `dir` / `git` /
-  `stdin`), so it logs `0 commits scanned` and exits 0 - green forever.
-  `loop verify-sensors` found this: the sensor reported STUCK because the
-  canary planted a real token and the state did not change.
-
-  Note the scanner has its own vacuity trap: the canonical AWS example key
-  (`AKIAIOSFODNN7EXAMPLE` / `wJalrXUtnFEMI/...`) is allowlisted and will NOT
-  trip it, so a canary built from documentation examples proves nothing. Use
-  a `ghp_`- or `xoxb-`-shaped synthetic token.
-
-### Count the spec's universals before they become sensors
-
-Every quantifier in the task spec - "both", "all", "every", "none", and any
-bare cardinal ("the 14 checks", "all 15 endpoints") - is a claim your sensors
-will inherit and your judge will re-assert. Derive it rather than asserting
-it: one `grep -c` before the run, and a count-deriving sensor wherever the
-number reaches the output. **No sensor authored from the spec can dispute the
-spec.**
-
-This is a loop-specific hazard, not general advice. Outside the loop a false
-premise yields one wrong artifact you might notice while writing it. Inside,
-the same sentence becomes the task, the sensors AND the `judge --spec` - three
-signals with one parent.
-
-Worked instance. An eaves task spec said "all 15 GET endpoints under /api/v0
-plus /healthz, exactly as the roadmap lists them". The roadmap lists 14.
-Nobody counted. The sentence propagated verbatim into the judge spec, and out
-into docs that contradicted each other (`roadmap.md` claiming 15 + /healthz,
-`architecture.md` claiming 14 + /healthz).
-
-The interesting part is what the judge did with it. It did not go quiet - it
-went **red, and blamed the wrong file**:
-
-> `docs/roadmap.md` phase-A note says "15 GET endpoints + /healthz" (i.e. 16);
-> `docs/architecture.md` says "14 GET endpoints + /healthz (15 total)". The
-> roadmap line is wrong.
-
-The roadmap was the only artifact in the chain that was right. The judge
-inherited "15" as a premise, met a contradiction, and resolved it against the
-one place it could look without questioning itself. An agent obeying that
-finding would have "fixed" the roadmap to say 15 and entrenched the error with
-a reviewer's authority behind it. So the failure mode is not silence - it is a
-confident, actionable, wrong defect report. "My judge would catch it" is right
-that it fires and wrong about what it says.
-
-`--trial` does not cover this. The bad count never made a sensor stuck; it
-made the OUTPUT self-contradictory. Trial verdicts the sensors, not the
-premises they were written from.
-
-Where the number reaches the output, make it a sensor that computes N rather
-than one that hard-codes it - eaves' `doctor-count-docs` is the shape:
-
-```json
-{
-  "name": "doctor-count-docs",
-  "cmd": "N=$(EAVES_FIXTURE_DIR=testdata/fixtures go run . doctor | grep -cE '^(OK|WARN|FAIL|SKIP)'); test -z \"$(rg -o --no-filename '[0-9]+ checks?' README.md docs/*.md | grep -oE '^[0-9]+' | sort -u | grep -vx \"$N\")\"",
-  "hint": "A doc states a check count that does not match the binary. Derive the real number and update every doc that claims one."
-}
-```
-
-A pre-flight `grep -c` protects one run. A count-deriving sensor protects
-every future one, including the runs where nobody remembers this rule.
-
-#### Premise sensors: put the spec's factual claim in front of the machinery
-
-The pre-flight count above is discipline, and discipline is the thing that
-fails. A claim about current state IS a sensor, so write it as one:
-
-```json
-{ "name": "premise-shared-primitives", "kind": "premise",
-  "cmd": "grep -q password_hash guides/consolidation.mdx && grep -q password_hash guides/promotion.mdx" }
-```
-
-`kind: "premise"` declares a claim the SPEC rests on. It must be green at
-baseline; red REFUSES the run (exit 2) with a message that says fix the spec,
-not the tree. It is checked once and then dropped from the gating set - a claim
-about the state the spec was written against is not an invariant the work must
-preserve, and it must never reach the model as feedback, because "make this
-true" is the failure being prevented. A premise may not carry `expect` (its
-expectation is fixed by what it is) or a `canary` (planting a fault would prove
-grep works, not that the claim holds); both are manifest errors.
-
-This is the symmetric case to `expect: "fail"`, and the machinery was already
-half-built. That one refuses a spec asking for something already true. This one
-refuses a spec asserting something that was never true. Without it a red sensor
-at baseline reads as "the thing to fix" - which for a premise means the loop's
-cheapest path to green is to invent the state the spec assumed.
-
-Worked instance (2026-08-08, lexicanum). A task said "unify the four primitives
-these two migration guides share". The second guide shared none of them: the
-two directions do not use the same mechanism at all. Every sensor written from
-that sentence inherited the error, so they were all satisfiable only by
-fabricating the agreement they were meant to consolidate. The premise above
-fails in milliseconds. The point is not that `grep` is clever - it is that a
-claim about current state belongs in front of the machinery instead of behind
-it.
-
-What this does NOT cover: whether the goal was right. If "unify the primitives"
-had been a bad design rather than a false premise, every sensor here would be
-green and the output still wrong. That part stays human.
-
-### Greenfield: the empty repo IS the canary
-
-`verify-sensors` reports "unverified, no canary declared" on a manifest for
-work that does not exist yet, and that is fine - when every sensor is red at
-baseline and the spec's "Done When" list is what turned them green, the run
-itself is the discrimination proof. Confirm the baseline is red by hand
-(`for s in ...; do eval "$s" && echo GREEN-BAD || echo red; done`) and go.
-Declare canaries for anything you keep re-running.
-
-A fully-specified, unimplemented project is also the best *measuring*
-instrument you have. Micro-fixture tasks are too small to exercise thinking
-length, context growth or compaction: on a 4-task fixture suite the largest
-single generation was 412 tokens, where one real greenfield bootstrap
-(pylon Phase 0, 2026-09-02) ran 202 requests, 490k generated tokens and
-prompts to 36k. A knob measured on the small suite measures as "no effect"
-whether or not it has one. Run it in a git worktree (`git worktree add
-.worktrees/<slice> -b <slice>-loop`) so a bad run cannot touch the main
-checkout, and so the branch survives when you remove the tree.
-
-### `loop verify-sensors`: prove each sensor can flip, before trusting any of it
-
-**Run this on every new manifest, before the first `loop run`.** It is the
-cheapest step in the whole workflow and it is the one that catches the
-failure class that costs the most.
-
-```bash
-loop verify-sensors                 # mutation-test every sensor with a canary
-loop verify-sensors --only secrets  # one sensor
-loop verify-sensors --strict        # an undeclared canary is a failure
-```
-
-Declare, per sensor, a `canary`: a command that plants the exact fault the
-sensor exists to catch. The tool applies it, asserts the sensor's state
-**flips**, reverts via the git checkpoint, and asserts it comes back.
-
-```json
-{ "name": "no-stubs",
-  "cmd": "test $(rg -o 'panic\\(\"(TODO|not implemented' --glob '*.go' . | wc -l) -le 0",
-  "canary": "printf '\\nfunc c(){ panic(\"not implemented\") }\\n' >> main.go" }
-```
-
-**Why this exists.** The governor is well-tested; the sensors are hand-written
-shell with no harness of their own - and the loop's entire notion of truth
-rests on them. The manifest could already prove ONE endpoint of a sensor's
-range and never the other:
-
-- `expect: "fail"` proves a feature sensor is red at baseline. Nothing proved
-  it could ever go **green** - an *unsatisfiable* sensor looks identical to a
-  healthy one and burns the entire budget (the 2026-08-02 five-iteration burn).
-- A guard is green at baseline by definition. Nothing proved it could ever go
-  **red** - a guard that cannot fire is indistinguishable from a clean repo.
-
-The canary closes both because it asserts a **flip**, not a direction. Same
-mechanism verifies a guard going red and a feature sensor going green.
-
-Verdicts: `flipped` (discriminates), **`STUCK`** (same state with the fault
-planted - gates nothing), **`DIRTY`** (flipped but did not restore - the
-canary altered the tree or the sensor is non-deterministic), **`CANARY`** (the
-canary command itself errored, so nothing was proven), `unverified` (none
-declared - not a failure, but not evidence either), `pending` (an uncanaried
-FEATURE sensor).
-
-`pending` is reported separately from `unverified` on purpose. A feature
-sensor cannot carry a canary before its feature exists - the fault you would
-plant IS the implementation - so filing it beside a guard that merely lacks
-one inflates the gap count in the single report you read right before deciding
-to spend money. On eaves that read "9 unverified" when the real number was 3.
-Feature sensors are verified by a different instrument: the baseline `expect`
-check aborts the run if one already passes on the unchanged tree, and going
-green at the end proves the other end of the range. `--strict` ignores them
-and fails only on uncanaried guards.
-
-Cost: sensors WITHOUT a canary are never executed, so an expensive judge costs
-nothing unless you deliberately give it one. Sensors with a canary run three
-times (baseline / faulted / restored).
-
-Requires a git repo - the revert restores from the checkpoint index, so
-`--allow-dirty` round-trips uncommitted work intact.
-
-**Preset canaries.** Every shipped preset declares a canary per sensor, so
-`loop init && loop verify-sensors` gives a verified base on a new project.
-Four were confirmed end-to-end against throwaway projects on 2026-08-09
-(`go` 3/3, `python` 3/3, `rust` 3/3, `node` 3/3, each `base pass -> canary
-fail -> restored pass`). **`astro` is unverified** - that toolchain is not
-installed here, so treat its two canaries as drafts and let
-`verify-sensors` tell you. That is exactly the failure mode the command
-exists to surface, and it is why a preset canary is a starting point rather
-than a guarantee.
-
-Two gotchas found while verifying them, both of which will bite on real
-projects:
-
-- **`biome check .` lints `.pi/harness.json` too.** The loop's own manifest
-  can turn the lint sensor red (a missing trailing newline is enough), which
-  reads as "the repo is dirty" when it is really "the harness config is
-  unformatted". Format the manifest or scope the lint command.
-- **A syntax error is not a reliable lint canary.** `{a: 1,,}` parses fine
-  under biome's tolerant parser and produced no diagnostic. The preset uses
-  `debugger;` instead, which trips the recommended `noDebugger` rule.
-
-**Writing a canary that proves something:**
-
-- Plant the *real* fault, not a proxy. `echo bad >> file` does not prove a
-  linter works; a genuine lint violation does.
-- **A test you write for the loop needs the same treatment.** After adding
-  process reaping I ran the new regression tests and all three passed - but
-  one of them had passed *before* the fix too, so it was proving nothing.
-  Disabling just the agent-side reap turned it red, which is what earned it.
-  Canary your own assertions or you are writing the vacuous sensors this
-  section warns about, one layer up.
-- Beware allowlisted example values. The canonical AWS docs key will not trip
-  gitleaks, so a canary built from it "passes" while proving nothing.
-- If a sensor reports STUCK, EITHER the check is broken OR the canary plants
-  the wrong thing. Diagnose before editing - the first real STUCK found in
-  this repo was a broken sensor, and the fix was a different scanner mode.
-- **`! rg ...` is STUCK-by-construction over not-yet-existing files.** An
-  absence guard like `! rg 'pattern' a.ts b.ts` silently passes forever when
-  one of the files does not exist at baseline: rg exits 2 (error) for the
-  missing operand, and 2 outranks a match - so even with the fault planted
-  the negated command exits 0. Found by `verify-sensors` on 2026-08-09 on a
-  no-stubs guard spanning files the feature itself would create. Assert on
-  output, not exit code: `test -z "$(rg --no-messages 'pattern' a.ts b.ts)"`.
-- A canary that cannot be expressed is a smell: it usually means the sensor
-  asserts something too vague to fault deliberately.
-
-### Run journal: outcomes across repos over time
-
-Every completed run also appends ONE JSON line to a per-machine, append-only
-cross-repo journal at `~/.local/share/loop/runs.jsonl` (override with
-`$LOOP_JOURNAL`; never committed - same convention as the session-ledger
-DB). The per-repo report answers "what happened in THIS run"; the journal
-answers "how does this model do across a variety of real tasks over time" -
-whoever drove the run, whichever repo it ran in.
-
-```bash
-loop history                 # last 20 runs: when, repo, result, iters, kept, duration, models
-loop history --last 100 --json | jq 'select(.result=="pass") | [.modelUsed[0], .iterations]'
-duckdb -c "select modelUsed[1] m, result, count(*) n, avg(iterations) iters,
-           avg(agentMs)/60000 agent_min from read_json_auto('$HOME/.local/share/loop/runs.jsonl')
-           group by all order by m, n desc"
-```
-
-Each line: `v, ts, startedAt, durationMs, cwd, repo, headSha, models
-(ladder), modelUsed, trial, humanGate, maxIterations, result
-(pass|fail|already-green|trial-stalled|trial-partial), iterations, kept,
-escalations, agentTimeouts, agentMs, sensorsMs, initialFailing,
-finalFailing, finalFailingNames, failureModes, taskSha, taskExcerpt`, plus `iter[]` with
-per-iteration model/kept/progressed/escalated/agentMs/failing-delta.
-
-`failureModes` is the WHY (computed by `classifyRun` in harness.ts, unit-
-tested per tag): `agent-error` (non-zero exit, no timeout - gateway 401,
-GPU-lock 422, sandbox death; the run says "stalled" but the model never
-ran), `agent-timeout`, `agent-silent` (clean exit, zero files changed),
-`thrash` (2+ changed-but-rolled-back iterations - doing work, work is
-wrong), `scope-fighting` (fence reversions), `sensor-timeout` (final
-iteration), `budget-exhausted` (last iteration was STILL progressing -
-wanted more iterations, not a better model), `no-progress` (catch-all).
-Green runs get `[]` or `needed-escalation` (a higher rung did the work -
-a cost signal). Tags compose; `loop history` shows them bracketed.
-
-Deliberately NOT captured: premise/manifest refusals and dry runs
-(harness-authoring events, not model outcomes), and token counts - the
-llm-compose proxy's token counters are shared across clients, so a
-before/after delta mis-attributes. Wall-clock + iterations-to-green is the
-honest perf proxy at this granularity. Scripted-fake-agent runs
-($LOOP_PI_CMD without an explicit $LOOP_JOURNAL) never journal - tests do
-not pollute the store.
-
-### Reading a run: `.pi/harness-run.log` and `loop report`
-
-You do not need to redirect anything. Every run tees its console output to
-`.pi/harness-run.log` (append-only, so history accumulates; `--no-log` opts
-out). `.pi/**` is exempt from the scope guard, so the loop cannot eat its own
-trace. After a run:
-
-```bash
-loop report                      # rendered summary of the last run
-loop report --report path.json   # or an archived one
-loop report --prompt 2           # the EXACT text iteration 2 was given
-```
-
-`loop report` turns the JSON into the thing you actually want after an
-unattended run: the failing-count trend, kept vs ROLLED BACK per iteration
-with the sensors that moved (`broke:` / `fixed:` - on a rollback, `broke:` is
-the cause),
-which rung the ladder was on, ESCALATED / AGENT-TIMEOUT / scope-revert flags,
-sensors that never passed **and the last output of each**, the slowest
-sensors, and the loop's notes.
-
-That per-sensor output is the difference between a verdict and a diagnosis.
-The first real multi-iteration run ended `never passed: judge` - a sensor that
-had spent 147 seconds of a frontier model per iteration writing a detailed
-rejection, none of which was recorded anywhere. The text existed in memory
-(the agent is fed it as the next prompt's feedback) and was dropped on the way
-to the report. Failing sensors now persist a 4,000-char tail; passing ones
-stay silent, because a passing sensor's output is noise.
-
-The loop's own artifacts (`.pi/harness-run.log`, `.pi/harness-report.json`)
-are excluded from the dirty-tree check, the scope fence, the changed-files
-history, the checkpoint index, and the rollback `git clean`. Otherwise:
-
-- the loop refuses to start because of its own output (what happened the first
-  time the run log was added),
-- `git add -A` stages the log, so it enters the diff a judge sensor reviews
-  (one promptly flagged it as out-of-scope noise, correctly) and any commit you
-  make after a run,
-- and once unstaged, an unqualified `git clean -fdq` on rollback deletes the
-  trace at exactly the moment it matters most.
-
-You do not need to gitignore them. A tool that requires every repo to ignore
-its droppings has pushed its own problem downstream.
-
-The report is rewritten after **every** iteration, so `loop report` and
-`--prompt N` are usable on a run still in progress - `result` stays `fail`
-until it finishes, which is the honest reading of an unfinished run. Before
-this it was written only at the end, so for the hours a long run takes, the
-command showed the PREVIOUS run's file while looking current.
-
-**`loop report --prompt N`** dumps the exact text iteration N was handed,
-recorded to `.pi/harness-prompts/iteration-N.txt` before the agent starts (so
-it survives a wedged iteration or a killed run). Everything else in the report
-describes what the loop OBSERVED; this is the only view of what it SAID.
-
-That asymmetry is not cosmetic. Three of the four defects found on the first
-real run came from reading an agent prompt by hand out of `ps` output - the
-loop's own log sitting inside the reviewed diff, a baseline judge verdict
-presented to iteration 1 as "the previous attempt failed", and the sheer size
-of the assembled feedback. None was visible in the report or the trace. The
-observability work made the RUN legible; this makes the thing the run is
-actually made of legible.
-
-The report's `prompt` column carries the size per iteration, which is the
-cheap version of the same question - a prompt that doubles between iterations
-is feedback accumulating faster than the model can use it.
-
-### Never redirect the loop's output INTO the repo
-
-```bash
-loop run                         # best: trace goes to .pi/harness-run.log
-loop run > /tmp/run.log 2>&1     # fine
-loop run > run.log 2>&1          # log truncates the moment work starts
-```
-
-`checkpoint()` is `git add -A`, so a redirect target inside the repo gets
-staged. Every line written after that makes it differ from the index, the
-scope guard treats it as an out-of-scope modification, and reverts it to the
-checkpoint content. The log therefore stops at exactly the point the first
-iteration begins - no iteration headers, no progress lines, no verdict. It
-reads as "the loop went silent", and the run itself is completely fine.
-
-The loop now warns when it detects this (printed *before* the checkpoint, so
-the warning survives the revert it describes), and `.pi/**` is exempt from the
-scope guard so the manifest and report can never be clobbered the same way.
-
-That exemption has a hole when `.pi/harness.json` is TRACKED in the target
-repo: the AGENT can clobber the manifest and the scope guard will not revert
-it. Observed 2026-08-09 (dotfiles run): the repo had an old harness manifest
-committed from a previous task, and the iteration-2 agent - trying to please
-the judge's diff-hygiene complaint - restored `.pi/harness.json` to HEAD
-mid-run. The tell was the between-iterations hot-reload line reporting
-`0 rule(s)`: the reload read HEAD's stale manifest, and every standing rule
-silently dropped out of later prompts. Belt and suspenders: add a rule
-forbidding the agent from touching `.pi/harness*`, and tell the judge in the
-spec that harness files are loop machinery, not part of the change.
-
-Diagnosis note, because this one cost hours: the symptom looks exactly like a
-buffering or file-descriptor bug, and it is neither. It reproduces with `>`,
-with `| tee`, and under a real PTY; a scripted fake agent emitting 5000 lines
-never triggers it; and a minimal repro proved a real `pi` child does not
-disturb the parent's descriptors. The discriminating test is a 3-way A/B:
-writeScope AND log-in-repo truncates, either one alone is fine. When output
-vanishes, suspect something that rewrites the file, not something that fails
-to write it.
-
-### Iteration 1 already sees the baseline failures (and your hints)
-
-Non-obvious and worth internalising: `prev` is seeded with the **baseline**
-sensor run, so the very first agent prompt already contains the full failing
-block - every failing sensor's command, its output, and its `hint`. There is
-no "blind first attempt".
-
-Two consequences:
-
-- **Hints are read on iteration 1**, so a hint that states the answer hands it
-  over immediately. Usually correct (that is the point of a hint), but be
-  deliberate: `hint: "Banner() must return exactly: ops v2 ready"` makes the
-  task trivial, while `"output must match the golden; the diff shows what
-  differs"` makes the model read the evidence.
-- **You cannot force extra iterations by hiding information in a sensor.** A
-  golden-diff sensor prints the expected text in its own output, so the
-  "unknowable" value is in the iteration-1 prompt. Measured 2026-08-04: a task
-  designed to need two iterations converged in one for exactly this reason,
-  which invalidated a steering experiment built on top of it. If you need a
-  multi-iteration run, the task has to be genuinely too large for one pass -
-  difficulty is the only honest lever.
-
-### Sensors that cannot fail (vacuous sensors - the silent killer)
-
-A green loop proves nothing if a sensor passes *vacuously* - the gate reports
-success because the check could never fire, not because the repo is good. Both
-real cases below shipped in a "green" hand-written verification harness
-(2026-07-30, `~/.local/share/harness/HARNESS-NOTES.md` items 19-23):
-
-- **`grep -v` inverts wrong.** `cmd | grep -qv 'error TS'` exits 0 if ANY line
-  does not match - and any real command prints at least one non-error line, so
-  the sensor passes with errors on screen. The correct negative form is
-  `! cmd | grep -q 'error TS'` (fails when the pattern appears; add a separate
-  guard if empty output should also fail).
-- **Suppressed-stderr + `!` wrapper passes for the wrong reason.**
-  `! git -C $REPO ls-files | xargs grep -l <secret> 2>/dev/null | grep -q .`
-  looks like "secret nowhere in tracked files" - but `ls-files` emits
-  repo-relative paths while `xargs grep` resolves them against the *caller's*
-  cwd, so from any other directory every grep errors into the suppressed
-  stderr, stdout stays empty, and the `!` wrapper reports PASS. The sensor
-  cannot distinguish "absent" from "unverifiable". Fix: `cd "$REPO"` inside
-  the check, and add a substrate guard (`test -n "$(git ls-files)"`) so a
-  missing/empty substrate FAILS instead of passing.
-- **Evidence patterns weaker than their description.** A sensor labelled
-  "insert returned id 301" that greps `INSERT 0 1` proves an insert happened,
-  not the id. Match the most distinctive form of the real output (an aligned
-  psql block, a marker string you echoed), never a generic success line - and
-  never a bare value like `0` from `psql -t`, which matches half the terminal.
-- **Existential sensor described as universal.** "all step logs in the time
-  window" implemented as `ls ... | grep -q <window>` passes if ONE log matches.
-  If the claim is universal, loop over every expected item and require each.
-- **A suite that passes because it ran nothing.** *(Bun)* This is the terminal
-  vacuous sensor: `go test ./...` exits 0 over zero tests, and every skip
-  mechanism (`t.Skip`, `test.skip`, `@pytest.mark.skip`, a deleted file, a
-  build tag, a narrowed `-run` pattern) is green by construction. The Bun
-  rewrite's headline stat is "0 tests skipped or deleted", and before merging
-  the author *manually verified the tests were in fact running and not being
-  skipped*. Make that a gate instead of a manual check - a **test-count floor**
-  pinned just under the current count (all three verified in both directions,
-  2026-08-09):
-  - Go: `test $(go test ./... -list '.*' | grep -c '^Test') -ge N`
-  - Bun/Jest: `test "$(bun test 2>&1 | rg -o '([0-9]+) pass' -r '$1' | tail -1)" -ge N`
-  - pytest: `test $(pytest --collect-only -q | grep -c '::') -ge N`
-    (**not** `| wc -l` - `-q` adds a blank line and a "N tests collected"
-    summary, so wc overcounts by 2 and the floor silently loosens)
-  Pair it with a skip-count ceiling if your runner reports one. `writeScope`
-  fencing tests out is necessary but not sufficient: it stops the agent
-  *editing* tests, not the build config or a `-run` filter quietly excluding
-  them.
-- **A build sensor satisfied by stubs.** *(Bun)* "Get it to compile" is
-  trivially achieved with `unimplemented!()` / `panic("TODO")` /
-  `throw new Error("not implemented")`, and that is exactly what happened at
-  scale on the Bun port. The prompt now forbids it, but a prompt is not a
-  gate - add a counter sensor so the fence is computational:
-
-  ```bash
-  test "$(rg -o 'todo!\(|unimplemented!\(|not implemented' src/ | wc -l)" -le 0
-  ```
-
-  Count with `rg -o ... | wc -l`, **not** `rg -c --no-filename ... | paste -sd+ | bc`:
-  on a clean tree ripgrep matches nothing and prints nothing, `bc` then
-  produces empty output, and `test "" -le 0` errors out - so the tidiest
-  possible repo FAILS the sensor while a stubbed one passes the syntax check.
-  A negative sensor that inverts on the happy path is worse than no sensor.
-  (Caught by mutation-testing this very recipe before documenting it.)
-
-- **A sensor greened by a process the LAST run leaked.** *(2026-08-05)* This
-  one is not about the sensor's logic at all - the check was correct and the
-  repo was empty. A previous run's four `eaves serve` processes were still
-  bound to 127.0.0.1:18631-18634, so four feature sensors curl'd a live API
-  that the tree under test did not implement. It is the worst shape of vacuous
-  green: nothing in the sensor is wrong, and re-reading it teaches you nothing.
-
-  The leak is the ordinary way you write a server sensor - `go run . serve &
-  SP=$!` ... `kill $SP` kills the `go run` wrapper, not the compiled binary it
-  exec'd. Two mechanisms that look like they cover it do not: GNU `timeout`
-  creates a process group but only signals it when the deadline fires, and
-  `systemd-run --user --scope` does **not** reap the cgroup on normal exit
-  (verified directly - a backgrounded `sleep` outlived the scope). The loop now
-  SIGKILLs the sensor's and the agent's process group after each completes,
-  which is a fix in the harness rather than advice to sensor authors.
-
-  What caught it was the `expect: "fail"` baseline check reporting the four as
-  non-discriminating. A feature sensor **without** `expect` would have been
-  silently green from iteration 0 - declare it on every feature sensor.
-
-**Mutation-test every negative sensor once, by hand, before trusting it:**
-plant the trigger (commit the secret to a temp repo, inject `error TS` into
-the stream, touch the forbidden file), run the sensor, watch it FAIL, revert.
-If you cannot make it fail it is decoration, and the loop will green over the
-very thing it was meant to gate. For a whole sensor set, keep a canary
-pattern: run the set once against a known-bad fixture (a scratch checkout with
-the trigger planted) and require at least the canary to go red - that is the
-harness-level proof the gates discriminate. (Do not leave a permanently-failing
-canary in `.pi/harness.json` itself; it would keep the loop red forever. The
-canary lives in a selftest script / scratch fixture, not the real manifest.)
-
-## Behaviour harness for web targets
-
-Build/typecheck/unit sensors do not prove a page actually renders and works.
-The browser layer closes that gap, and comes in two flavours:
-
-- **Computational (the gate): `browser-assert.ts`.** Launches system Chromium
-  headless over CDP and runs ORDERED steps: `--wait <sel>`, `--click <sel>`,
-  `--type <sel> <text>`, `--press <key>` (trusted CDP Input events),
-  `--assert <jsExpr>`, `--screenshot <path>` (+ `--viewport WxH`, `--full-page`).
-  So it scripts a real flow (sign-in, form, wizard), not just a static-render
-  check. Exits 0/1. Deterministic and self-bounding (per-command CDP timeout +
-  reject-on-socket-close, so a wedged browser fails instead of hanging the
-  loop). Also doubles as a **UI live-smoke** tool: point `<url>` at a deployed
-  environment. Wrap dev-server start/stop in the sensor cmd:
-
-  ```json
-  { "name": "e2e",
-    "cmd": "bunx --bun astro build && (bunx serve dist -l 4321 & SP=$!; sleep 1; bun ~/.pi/agent/skills/self-correcting-loop/browser-assert.ts http://localhost:4321 --wait '#app' --assert 'document.title.length>0' --assert '!document.querySelector(\".error\")'; RC=$?; kill $SP; exit $RC)" }
-  ```
-
-  Put e2e AFTER the fast sensors (build/typecheck/unit) - it is the expensive,
-  slower-and-flakier tier, so it only runs once the cheap gates are green.
-  Capture is **hardened by default** (device-scale=1, reduced-motion,
-  animations/transitions/caret zeroed, waits on `document.fonts.ready`), so
-  screenshots and visual diffs are deterministic; `--no-stabilize` opts out.
-
-- **Deterministic layout assertions (computational - prefer these over the
-  vision judge where they apply).** A lot of "gross breakage" is exactly
-  checkable with `--assert`, which turns a probabilistic visual guess into a
-  hard gate with no baseline and no model:
-  - horizontal overflow: `--assert 'document.documentElement.scrollWidth <= window.innerWidth'`
-  - element actually rendered a box: `--assert 'document.querySelector("nav").getBoundingClientRect().height > 0'`
-  - no unstyled-content flash / stylesheet actually applied:
-    `--assert 'getComputedStyle(document.querySelector("h1")).fontSize !== "16px"'` (or pin the exact expected value)
-  - two elements do not overlap (stacking correct): compare their
-    `getBoundingClientRect()` boxes in one expression
-  - no raw error banner / framework error overlay:
-    `--assert '!document.querySelector(".error, #vite-error-overlay, astro-dev-overlay")'`
-  Reach for the vision judge (below) only for what genuinely needs eyes
-  (spacing/contrast/"looks off"); everything mechanical should be an `--assert`.
-
-- **Style-ethos gates: computed-style asserts are the pressure, the vision judge is the tiebreaker** (learned the hard way on the docs-ssh landing restyle: the vision judge PASSed the original off-ethos page - it only fails *ugly*, not *off-brief*). When the task is "restyle to ethos X" (dense / flat / sharp / single-accent), encode the ethos as computed-style asserts; they are what create real selection pressure:
-  - density: `--assert 'parseFloat(getComputedStyle(document.querySelector("main")).paddingTop) <= 32'`
-  - sharp corners: `--assert '[...document.querySelectorAll("*")].every(e => parseFloat(getComputedStyle(e).borderTopLeftRadius) <= 6)'`
-  - flat: same `.every()` shape for `getComputedStyle(e).boxShadow === "none"` and `!getComputedStyle(e).backgroundImage.includes("gradient")`
-  - single accent: count distinct saturated text colors outside `<pre>`/code blocks (parse the rgb() triple, flag max-min > 60, dedupe in a Set), assert `<= 1` - working IIFE in `~/docs-ssh/.pi/harness.json` ("dom" sensor)
-  Then keep the vision judge LAST for what computed styles can't express (overlap, clipping, unstyled flash) - as tiebreaker, not primary gate.
-
-- **Inferential (as a debugging aid): a screenshot the model reads.**
-  `browser-assert ... --screenshot /tmp/x.png` captures the post-interaction
-  page; the agent then `read`s the PNG to reason about layout/visual issues the
-  DOM can't express. On its own this is a probabilistic aid, not a gate - but
-  when you *do* want rendered-UI to gate the loop, use `judge.ts` VISUAL mode
-  (next section), which captures the same way and puts a second model's verdict
-  behind it. The bare screenshot-read stays the free-form debugging path.
-
-Visual-regression (diff the `--screenshot` PNG against a baseline) and a11y
-(`axe`) are further sensors you can layer on; they need their own baselines/
-tooling. `--type`/`--click` use trusted CDP Input events, but for complex flows
-(multi-tab, downloads, network mocking) a target's own Playwright suite is still
-the right tool - `browser-assert` is the zero-dep gate.
-
-## Inferential gate: correctness the computational sensors miss (`judge.ts`)
-
-Bockeler splits sensors into **computational** (tests/linters/types -
-deterministic, cheap, every change) and **inferential** (semantic AI review /
-"LLM as judge" - slower, non-deterministic, richer judgment). Everything above
-is computational: it proves the code *passes the checks*, never that it did the
-*right thing*. A misunderstood-but-green change, over-engineering, or an agent
-that weakened its own tests all sail through. `judge.ts` adds the inferential
-column as an actual **gate**:
-
-```json
-{ "name": "judge",
-  "cmd": "bun ~/.pi/agent/skills/self-correcting-loop/judge.ts --spec 'the task, restated as acceptance criteria' --model claude-opus-4-8" }
-```
-
-It collects `git diff HEAD` (plus untracked files), feeds it with the spec to a
-SECOND `pi -p`, and exits on the model's `VERDICT: PASS/FAIL`. Use it well:
-
-- **Put it LAST** (keep quality left): it is the expensive, probabilistic tier -
-  it should only run once the cheap computational gates are green.
-- **`--allow-dirty` + judge = pre-existing dirt in the diff.** The judge
-  collects `git diff HEAD`, which includes uncommitted work that predates the
-  run - and a reviewer will reject a modified tracked binary as "unverifiable
-  scope creep" no matter what the code looks like (two consecutive rejections
-  on 2026-08-09 while the actual change was spec-complete). Either start the
-  run on a clean tree, or put a SCOPE NOTE in the judge spec naming the
-  pre-existing paths to ignore.
-- **Use a DIFFERENT / stronger model** than the one writing the code (`--model`).
-  A judge that is the same model that wrote the diff is a closed loop, same as
-  self-graded tests.
-- **Measured reviewer variance: zero, and `--adversarial` bought nothing.**
-  A/B on a fixed diff with one planted, unambiguous spec violation (`Median`
-  sorting the caller's slice, which the spec explicitly forbids), scored
-  against a clean control. 8 single-reviewer trials per arm per model:
-
-  | judge | caught the flaw | false-rejected clean |
-  |---|---|---|
-  | claude-sonnet-5 | 8/8 | 0/8 |
-  | claude-haiku-4-5 | 8/8 | 0/8 |
-
-  With p = 1.0 and q = 0.0, `1-(1-p)^k` is flat: a second and third reviewer
-  add cost and change no outcome. Be honest about the sample: n=8 with no
-  errors gives an exact 95% one-sided bound of p >= 0.688 and q <= 0.312,
-  so this rules out a *badly* noisy reviewer, not a mildly noisy one. The
-  flaw was also localised and spec-explicit - variance should be expected
-  to appear on ambiguous or diffuse defects. But the load-bearing
-  claim ("one sampled judgment is noisy") did NOT reproduce at this
-  difficulty, on either a strong or a weak judge.
-
-  **The one apparent miss was a bug in this harness, not model variance.**
-  A haiku run came back `unknown` -> fail-closed. The transcript showed it had
-  diagnosed the flaw correctly and written `**VERDICT: FAIL**`; `parseVerdict`
-  required a bare line and discarded it. Fail-closed hid the damage that time,
-  but the symmetric case is worse - a bolded `**VERDICT: PASS**` becomes a
-  FAIL and blocks good work. Fixed to tolerate markdown decoration (bold,
-  headings, list markers, blockquotes, backticks) while still refusing prose
-  mentions. Before assuming a judge is flaky, check that its verdict parses.
-
-  Practical consequence: **leave `--adversarial` at 1 unless you have measured
-  variance on your own diffs.** Harness to measure it:
-  `~/.local/share/loop-validation/judge-variance/`.
-- **Run 2+ reviewers with `--adversarial N`** *(Bun)*. The Bun rewrite's unit
-  of work was `1 implementer -> 2 adversarial reviewers -> 1 fixer`, with the
-  roles kept strictly apart: "The Claude that wrote the code wants the code to
-  get accepted. The Claude that reviews wants to find issues... The implementer
-  doesn't review. The reviewer doesn't implement." `--adversarial N` runs N
-  independent reviewer contexts concurrently and fails if **any** rejects -
-  deliberately not a majority vote, because one reviewer finding a real bug
-  outranks N-1 that missed it. It also blunts the biggest weakness of an
-  inferential gate: one sampled judgment is noisy, unanimity is not. Costs N
-  model calls per iteration, so reserve it for runs that matter.
-- **Reviewer rejection rules worth stealing.** Give `--rubric` the ones that
-  run had to add after watching the failure modes: reject a change whose
-  workaround needs a paragraph-long comment to justify it; reject stubbed or
-  no-op'd functions presented as an implementation; reject behaviour that
-  differs from the stated reference even when the code compiles and passes.
-- **Role separation is only half-implemented here.** `judge.ts` gives you the
-  reviewer half (separate context, separate model, read-only tools). There is
-  no distinct *fixer* role yet - a judge FAIL restarts the implementer with the
-  findings as feedback rather than handing them to an agent that only fixes.
-  Worth knowing when comparing this loop against the article.
-- **Fail-closed by default**: an unparseable / errored verdict counts as FAIL,
-  so the loop keeps trying rather than declaring victory on an unclear answer.
-  `--lenient` flips to fail-open for noisy judges.
-- **Read-only tools** (`--tools read` default) - the judge inspects, never edits.
-- `--rubric "..."` appends task-specific acceptance criteria; `--base <ref>`
-  changes what the diff is taken against (default `HEAD`, the loop's baseline).
-
-Honest caveat: it is inferential, so it is non-deterministic and costs a model
-call per iteration. It raises confidence, it does not replace a specification -
-a vague `--spec` judges vaguely. It is the answer to "green but wrong", not a
-license to skip writing down what "right" means.
-
-**Two things the judge does not review.** Both were found the hard way, on the
-same run.
-
-- **The loop's own artifacts.** `collectDiff` includes untracked files so a
-  brand-new file is visible - which meant `.pi/harness-run.log` was handed to
-  the reviewers as part of the change. Both of them wrote it up as a defect
-  ("committing a harness run log as the sole deliverable is unrequested
-  scope"), correctly by their lights. Unstaging it at checkpoint time was not
-  enough: that only moved it from `git diff <base>` into `git ls-files
-  --others`, which this collector also reads. Filtered in both places now.
-- **An empty diff.** At baseline the tree matches the base ref, so an
-  adversarial CODE judge spends minutes of a frontier model reaching a
-  guaranteed FAIL - and its verbose "the work was not started" reasoning then
-  lands in iteration 1's prompt under the heading *"Automated checks failed on
-  the previous attempt"*, describing an attempt that never happened. Measured
-  at 147s of opus per baseline, doubled by `--adversarial 2`. The judge now
-  short-circuits: no diff, no model call, one-line fail-closed verdict.
-
-### VISUAL mode: UI/UX awareness for a live dev server
-
-DOM asserts (`browser-assert`) prove elements *exist*; they cannot see that the
-page *looks* right. `judge.ts --url` closes that: it screenshots a live dev
-server (reusing `browser-assert` under the hood) and asks a vision-capable
-`pi -p` to judge the render - layout, overflow/clipping, contrast, unstyled
-flash, overlap, raw-markup/error banners - against the spec, gating on the same
-`VERDICT: PASS/FAIL`.
-
-```json
-{ "name": "ux",
-  "cmd": "bun ~/.pi/agent/skills/self-correcting-loop/judge.ts --url http://localhost:4333/guides/x --wait 'main' --full-page --viewport 1280x800 --model claude-opus-4-8 --spec 'the guide page renders: readable prose, code blocks styled (not raw), no horizontal overflow, no error banners'" }
-```
-
-- `--url` captures to a temp PNG (or `--screenshot <path>` to keep it); pass
-  `--screenshot <path>` WITHOUT `--url` to judge a pre-captured PNG instead.
-- `--wait <sel>` / `--viewport WxH` / `--full-page` are forwarded to the
-  capture, so you gate the *hydrated* page at a real size, full-height.
-- The judge opens the PNG with its `read` tool (pi renders images to the model),
-  so `read` is forced into `--tools` automatically.
-- Same discipline as code mode: run it LAST (it is the slowest/most expensive
-  tier), use a strong `--model`, fail-closed by default. A capture failure
-  (server down, wedged browser) is a FAIL unless `--lenient`.
-- Wrap the dev-server lifecycle in the sensor `cmd` if it is not already up,
-  e.g. `(bun dev & SP=$!; sleep 2; bun judge.ts --url ...; RC=$?; kill $SP; exit $RC)`.
-
-Caveat: a vision judgment is coarser than a human's eye and non-deterministic -
-it reliably catches gross breakage (overflow, unstyled content, blank/error
-pages) and is far weaker on pixel-level polish. For exact regressions, use the
-computational baseline diff below.
-
-### Computational visual regression: baseline PNG diff (`pixel-diff.ts`)
-
-The deterministic half of the visual gate: capture the current render and diff
-it against a committed, human-**approved** baseline PNG, failing when too many
-pixels changed. Zero-dep (PNG decode/encode via `node:zlib`), with a YIQ
-perceptual per-pixel threshold so anti-aliasing / sub-pixel noise does not
-false-positive.
-
-```json
-{ "name": "visual-regression",
-  "cmd": "bun ~/.pi/agent/skills/self-correcting-loop/pixel-diff.ts --url http://localhost:4333/guides/x --baseline .pi/baselines/guide-x.png --wait 'main' --full-page --viewport 1280x800 --max-diff-ratio 0.001 --diff-out /tmp/guide-x.diff.png" }
-```
-
-- **Approved-baseline lifecycle:** generate baselines as a SETUP step and COMMIT
-  them (committing = approval). On a missing baseline the sensor writes it and
-  FAILs ("review and commit it") - so a stray baseline can never silently gate.
-  Refresh an intentionally-changed reference with `--update-baseline`.
-- **`--baseline <png>`** is the reference; the current render comes from `--url`
-  (captured via browser-assert, forwarding `--wait`/`--viewport`/`--full-page`)
-  or `--current <png>` (pre-captured).
-- **`--threshold 0..1`** = per-pixel YIQ sensitivity (default 0.1); **`--max-diff-ratio 0..1`** = allowed fraction of changed pixels (default 0). Capture
-  hardening (on by default in browser-assert) makes same-host re-captures
-  bit-identical, so 0 is realistic; bump the ratio for cross-host noise.
-- **`--ignore-region x,y,w,h`** (repeatable) zeroes dynamic areas (timestamps,
-  avatars) before diffing. **`--diff-out <png>`** writes a red-highlight image
-  the agent can `read` to see exactly what moved.
-- Run it LAST with the fast sensors green, same as the other visual gates.
-
-When to use which visual gate: **`pixel-diff`** for "nothing should change"
-(regression-locking a stable page - exact, deterministic); **`judge` VISUAL**
-for "does this new/changed page look right" (no baseline exists yet, or the
-change is intended and you want a judgment not a byte-compare).
-
-### Prose: the writing gate (`prose-lint.ts`)
-
-The deterministic counterpart to `judge` for documentation, the way
-`pixel-diff` is for UI. `judge` can tell you a doc reads like a model wrote it,
-but it costs a frontier model per iteration and its verdict is not
-reproducible. This is countable, instant and free.
-
-```bash
-prose-lint docs/*.md                       # default gate: slop <= 1.0/100w
-prose-lint README.md --explain             # file:line for every violation
-prose-lint doc.md --before HEAD            # also gate on fact retention
-prose-lint docs/*.md --baseline .pi/prose.json   # ratchet, adopt a legacy tree
-rg --files -g '*.md' | xargs -r prose-lint       # the sensor form (presets/docs.json)
-```
-
-**Two numbers, and only one of them gates.** `slop` counts marketing
-adjectives, hedges, filler openers, nominalizations, phrasal verbs and referent
-rotation. `style` counts passive voice and long paragraphs, and is reported
-only. That split came out of measurement: passive was 76 of 81 violations in
-this skill's own SKILL.md, and sampling showed they were real passives in
-correct prose ("the run is refused"). A measure that fires equally on good and
-bad writing is not a discriminator. Measured both ways, with passive in the
-score the generated sample scored 4.08 against our SKILL.md at 0.83; with it
-out, 3.06 against 0.02.
-
-**Counts go in the score; distribution shape goes in the gates.** The gates are
-hard booleans, never score contributors, because a counter you can pay for by
-deleting three more adjectives is not a counter:
-
-| gate | catches | threshold | derived from |
-|---|---|---|---|
-| `mean-sentence-floor` | prose chopped into stubs to beat a length rule | 5 | corpus min 6.6, chopped sample 2.9 |
-| `mean-sentence-ceiling` | sustained run-ons | 25 | corpus max 17.3, generated sample 32.7 |
-| `sentence-variance-floor` | uniform sentence length | 2 | corpus min 3.6, chopped sample 0.6 |
-| `fact-retention` | specifics deleted to shorten the text | 0 facts lost | see below |
-
-Fact retention gates on an ABSOLUTE count, not a ratio. It began as a ratio and
-a real 294-fact reference doc showed why that is the wrong shape: deleting a
-measured latency left retention at 0.997 and sailed through a 0.9 gate. A ratio
-scales tolerance with document size, so the longest and most measurement-dense
-documents - the ones most worth protecting - get the most licence to lose a
-number. `maxFactsLost` defaults to 0; `minFactRetention` survives as a
-secondary, lax bound for anyone who deliberately raises the count.
-
-Thresholds come from a 49-document corpus (this repo's skills, READMEs,
-AGENTS.md) tested against two adversarial samples. Re-derive them for a corpus
-with a different register rather than trusting these. Note what the corpus
-refuted: the variance floor is a CHOPPING detector only. Our tersest CLI
-reference doc sits at stddev 3.6 and the generated sample at 3.3, so no
-threshold separates those two without failing real documents. Run-ons are the
-ceiling's job. One job per gate.
-
-**Em-dashes and semicolons are reported and never scored.** Stated here so it
-reads as a design decision rather than a result: a linter that excludes
-em-dashes from its total cannot then be cited as evidence that banning
-em-dashes fails to reduce slop, because that would be true by construction.
-
-**Block labels and thematic breaks are not sentences.** A command-heavy guide
-is full of `Output:` / `Tunnel Config:` lines introducing fences, and a bare
-`---` rule. Counted as sentences they collapse the mean: one real guide scored
-4.8 words per sentence and failed the chopping gate on prose that was not
-chopped, because 23 of its 63 "sentences" were labels and rules. Both are
-excluded from the length distribution and still scanned for vocabulary.
-
-**What it deliberately does not do.** There is no POS tagger (zero-dep), so
-passive and nominalization are regex heuristics - survivable precisely because
-neither one gates. Referent rotation is curated synonym sets, not coreference;
-a derive-abbreviations-from-the-text detector was built, measured at 286 hits
-and approximately zero true positives on our own SKILL.md (`loop`/`loop-built`,
-`not`/`nothing`), and deleted. Markdown only.
-
-**The circularity to avoid.** As a lint, teaching to the test is the point. As
-evidence it is worthless: if you use this to show that some writing skill
-reduces slop, and that skill's rule list is where these word lists came from,
-you have measured instruction-following. Score that claim with a rubric the
-skill has never seen.
+## Sensor tools
+
+`browser-assert` (DOM flows + screenshots), `judge` (LLM-as-judge on the diff,
+or a vision judge on a live URL), `pixel-diff` (approved-baseline PNG diff) and
+`prose-lint` (slop score + structural gates for docs) are documented in
+docs/sensors.md - read when wiring a web target, an inferential gate or a
+writing gate into a manifest. Rule of thumb: everything mechanical is an
+`--assert` or a counter; the judge is for what genuinely needs judgment, runs
+LAST, and uses a model other than the writer rung.
+
+Sensor authoring - vacuous sensors, `verify-sensors` canaries, counting the
+spec's universals, premise sensors, structural and security gates - is
+docs/lessons.md; read it before trusting a new manifest.
 
 ## Limits (be honest about these)
 
@@ -1532,8 +344,8 @@ skill has never seen.
   The transferable half without parallelism: when one sensor emits many
   independent failures, feed the model one GROUP at a time instead of the
   whole wall of errors.
-- **No separate fixer role.** See the judge section - reviewer/implementer are
-  split, implementer/fixer are not.
+- **No separate fixer role.** See the judge section of docs/sensors.md -
+  reviewer/implementer are split, implementer/fixer are not.
 - **Timeouts bound the loop, not the spend.** A budget stops a hang; it does
   not stop N iterations of expensive-but-productive work. `maxIterations` and
   the model ladder are the cost controls.

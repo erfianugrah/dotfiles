@@ -462,7 +462,7 @@ async function runAllSensors(m: Manifest): Promise<SensorResult[]> {
 //     agent sessions never pollute ~/.pi/agent/sessions or the FTS index.
 //     (A plain rw-bind + ro-bind overrides does NOT work: bwrap cannot
 //     create file-bind mountpoints over absolute symlink chains like
-//     AGENTS.md -> ~/.config/opencode/AGENTS.md, and per-file ro-binds
+//     AGENTS.md -> ~/dotfiles/AGENTS.md, and per-file ro-binds
 //     can't stop symlink REPLACEMENT. Verified empirically 2026-07-25.)
 //   - secret dirs masked with tmpfs (~/.ssh, ~/.gnupg, ~/.aws, ~/.kube,
 //     ~/.config/gh)

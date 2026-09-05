@@ -1,6 +1,6 @@
 ---
 name: epistemics
-description: Use when you are about to state a SPECIFIC you did not read in this session - a version number, CLI flag, API signature, config key, file path, URL/citation, benchmark number, date, quote, or attribution. Fires when you catch yourself writing "I believe", "IIRC", "should be", "typically", "as of my knowledge"; when the user asks "what is the latest X", "does X support Y", "which flag does X"; when the epistemic-guard extension blocks a write or annotates an answer; and when the user pushes back on a claim and you feel the pull to fold. NOT for validating your own code (verification-before-completion) or for proving external runtime behaviour on live infra (validating-empirically).
+description: "Use when you are about to state a SPECIFIC you did not read in this session - a version number, CLI flag, API signature, config key, file path, URL, benchmark number, date, quote, or attribution. Fires on hedges like 'I believe' or 'IIRC', on 'what is the latest X' questions, when the epistemic-guard extension blocks a write, and when the user pushes back and you feel the pull to fold. NOT for your own code (verification-before-completion) or external runtime behaviour (validating-empirically)."
 ---
 
 # Epistemics
@@ -80,7 +80,7 @@ Using it as a lane is how you ship a wrong version pin.
 | Exact model number / SKU / spec-sheet figure | manufacturer's page via `webfetch`, not a review snippet |
 | "X is discontinued / no longer sold" | evidence this session: retailer 404, a discontinued notice, or `archive_lookup` on the old listing - never memory |
 | What a past session did / decided | `session_search`, `ledger_search`, `memledger_search` (older than ~30d or cross-client) |
-| Any non-trivial task start (fix, debug, research, build) | history check FIRST - `memledger_search` / `session_search`, 2-3 terms from the task, before researching. Not a fallback for when you get stuck (the `history-first` extension enforces this on pi) |
+| Any non-trivial task start (fix, debug, research, build) | history check FIRST - `memledger_search` / `session_search`, 2-3 terms from the task, before researching. Not a fallback for when you get stuck (the `history-first` extension nudges this on pi: a non-blocking reminder, at most 3 per session, dropped once any history lookup runs) |
 | Any fact about the USER's own machines | search the stores FIRST; asking them costs a turn on something already recorded |
 | Something in the user's docs corpus | `docs_search` -> `docs_summary` -> `docs_read`, and cite the path |
 | External system's runtime behaviour | -> `validating-empirically` (run it, do not cite docs) |
@@ -91,15 +91,20 @@ source you can open, you are rewording, not verifying.
 
 ## Labels (say which one you mean)
 
+This is the single label table for the three sibling skills;
+`validating-empirically` and `verification-before-completion` point here.
+
 | Label | Means |
 | --- | --- |
 | `verified` | You saw it in a tool result THIS session. Cite where. |
+| `empirically-proven` | You ran it on a real or scratch environment this session and pasted the output (the `validating-empirically` bar for external systems). |
 | `doc-verified` | Read in the authoritative doc, path cited. Not executed. |
-| `doc-cited-not-tested` | Doc-derived, load-bearing, not run. Flag it. |
+| `doc-cited-not-tested` | Doc-derived, load-bearing, not run. Flag it. `epistemic-guard` accepts this phrase next to a claim as a valid hedge. |
 | `recalled` | From training. Verify or label - never state bare. |
 
-Laundering `recalled` into `verified` in a commit message or a customer doc is
-the exact overclaim the guard exists to stop.
+Laundering `recalled` into `verified`, or `doc-verified` into
+`empirically-proven`, in a commit message or a customer doc is the exact
+overclaim the guard exists to stop.
 
 ## Calibrate, do not hedge
 

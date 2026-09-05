@@ -1,6 +1,6 @@
 ---
 name: validating-empirically
-description: Use when research (docs, web, reasoning, a subagent) has produced a load-bearing claim about how an EXTERNAL system actually behaves at runtime, and you are about to assert it as fact, write it into a design note / recommendation, or implement against it. Fires when you catch yourself writing "per the docs, X does Y" about a third-party system, calling a doc-read "verified" or "definitive", labelling a doc-check as "empirically verified", or recommending an implementation whose correctness rests on an untested assumption about someone else's system - especially when the claim is cheaply testable on throwaway/disposable infrastructure. NOT for validating your own code (verification-before-completion) or customer PoV packaging (sa-pov).
+description: "Use when research (docs, web, reasoning, a subagent) produced a load-bearing claim about how an EXTERNAL system behaves at runtime and you are about to assert it, write it into a design note, or implement against it. Fires on 'per the docs, X does Y' about a third-party system, on calling a doc-read 'verified' or 'definitive', and when the claim is cheaply testable on disposable infra. NOT for your own code (verification-before-completion), recalled facts (epistemics), or PoV packaging (sa-pov)."
 ---
 
 # Validating Empirically
@@ -17,9 +17,10 @@ on disposable infrastructure, spin up a scratch environment, run the exact flow,
 evidence, tear it down. A note that says "here is the output" is worth more than one that says
 "per the docs, this should work."
 
-This is the third leg beside `verification-before-completion` (proving your OWN work) and
-`sa-pov` (packaging a live validation as a customer deliverable). This skill is the internal,
-no-deliverable reflex for research findings.
+This is one of three sibling disciplines: `verification-before-completion` proves your
+OWN work, `epistemics` covers recalled FACTS (versions, flags, paths), and this skill covers
+an EXTERNAL system's runtime behaviour. `sa-pov` packages a live validation as a customer
+deliverable; this skill is the internal, no-deliverable reflex for research findings.
 
 ## The Iron Law
 
@@ -48,12 +49,12 @@ are low), that is a legitimate stop: write `doc-cited-not-tested` and name what 
 
 ## Claim labelling (say which one you mean)
 
-| Label | Means |
-| --- | --- |
-| `empirically-proven` | You ran it on a real/scratch environment this session and pasted the output. |
-| `doc-verified` | You read it in the authoritative doc and cite the path/URL. Not run. |
-| `doc-cited-not-tested` | Doc-derived, load-bearing, but you could not or did not run it. Flag it. |
-| `recalled` | From memory, unverified. Verify or mark it. |
+The label table lives in the `epistemics` skill ("Labels"); use those exact words. The bar
+this skill sets is `empirically-proven`: you ran it this session and pasted the output.
+Anything less is `doc-verified` or `doc-cited-not-tested`. The `epistemic-guard` extension
+accepts `doc-cited-not-tested` written next to a claim as a valid hedge label (hedge regex in
+`~/.pi/agent/extensions/lib/epistemic-guard-core.ts`), so the honest label also clears the
+write gate.
 
 Mixing `doc-verified` up as `empirically-proven` in a commit message or a customer doc is the
 exact overclaim this skill exists to stop.
@@ -101,6 +102,8 @@ exact overclaim this skill exists to stop.
 ## When NOT to use
 
 - The claim is about **your own code** -> `verification-before-completion`.
+- The claim is a **recalled fact** (a version, flag, path, citation) rather than runtime
+  behaviour -> `epistemics` (one tool call verifies it; no infra needed).
 - It is a **customer PoV/PoC deliverable** -> load `sa-pov` (this reflex + packaging).
 - A doc genuinely settles it AND it is not load-bearing (a flag name, a documented default you
   can read). Do not spin up infra to confirm trivia - that is the annoying failure mode.
@@ -119,7 +122,8 @@ shipped:
 
 ## Related skills
 
-`verification-before-completion` (own-work claims), `sa-pov` (customer packaging of a live
-validation), `systematic-debugging` (post-reproduction root cause). Pair with the relevant
-product skill (`supabase`, `cloudflare`, `fly`, `terraform`, ...) for the technical depth of
+`verification-before-completion` (own-work claims), `epistemics` (recalled specifics and the
+shared label table), `sa-pov` (customer packaging of a live validation), `systematic-debugging`
+(post-reproduction root cause). Pair with the relevant
+product skill (`supabase`, `cloudflare-ops`, `fly`, `terraform`, ...) for the technical depth of
 the thing under test.

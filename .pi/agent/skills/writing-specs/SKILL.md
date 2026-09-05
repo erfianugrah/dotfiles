@@ -1,6 +1,6 @@
 ---
 name: writing-specs
-description: Use ONLY when the user explicitly asks for a written spec, requirements doc, or design doc before implementation - "spec this out", "write a spec", "spec-driven", "SDD", "requirements doc", "acceptance criteria". Produces docs/specs/YYYY-MM-DD-<feature>.md with EARS acceptance criteria and a design section. Heavy artifact - do not auto-fire on a feature request; small changes and greenfield scaffolding skip it.
+description: "Use ONLY when the user explicitly asks for a written spec, requirements doc, or design doc before implementation - 'spec this out', 'write a spec', 'spec-driven', 'SDD', 'requirements doc', 'acceptance criteria'. Heavy artifact - do not auto-fire on a feature request; small changes and greenfield scaffolding skip it. NOT for the file-by-file implementation plan (writing-plans)."
 ---
 
 # Writing Specs
@@ -27,7 +27,7 @@ Never produce a spec doc uninvited. If the work clearly needs one and the user d
 
 ## This skill is not a gate
 
-A spec is a document, not a process prison. It never blocks or replaces the concrete-tech skills: the moment the design section needs stack decisions, read the relevant skills (software-architecture, frontend-stack, infrastructure-stack, supabase, ...) and let them answer. Do not re-derive stack conventions inside the spec. (Historical note: this clause exists because the old brainstorming skill hard-gated every creative task behind its own question loop and forbade handoff to the stack skills. That failure mode is why this skill is explicit-ask-only.)
+A spec is a document, not a process prison. It never blocks or replaces the concrete-tech skills: the moment the design section needs stack decisions, read the relevant skills (software-architecture, frontend-stack, infrastructure-stack, supabase, ...) and let them answer. Do not re-derive stack conventions inside the spec. This skill is explicit-ask-only.
 
 ## Two spec types
 

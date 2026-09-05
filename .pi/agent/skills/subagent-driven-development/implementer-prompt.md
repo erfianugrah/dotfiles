@@ -3,7 +3,7 @@
 Use this template when dispatching an implementer subagent.
 
 ```
-Task tool (general-purpose):
+Dispatch a subagent:
   description: "Implement Task N: [task name]"
   prompt: |
     You are implementing Task N: [task name]
@@ -30,7 +30,7 @@ Task tool (general-purpose):
 
     Once you're clear on requirements:
     1. Implement exactly what the task specifies
-    2. Write tests (following TDD if task says to)
+    2. Write tests (tests-first if the task is logic or a bugfix; a verify step if it is scaffolding/config - the task says which)
     3. Verify implementation works
     4. Commit your work
     5. Self-review (see below)
@@ -48,7 +48,7 @@ Task tool (general-purpose):
     - Follow the file structure defined in the plan
     - Each file should have one clear responsibility with a well-defined interface
     - If a file you're creating is growing beyond the plan's intent, stop and report
-      it as DONE_WITH_CONCERNS — don't split files on your own without plan guidance
+      it as DONE_WITH_CONCERNS - don't split files on your own without plan guidance
     - If an existing file you're modifying is already large or tangled, work carefully
       and note it as a concern in your report
     - In existing codebases, follow established patterns. Improve code you're touching
@@ -92,7 +92,7 @@ Task tool (general-purpose):
 
     **Testing:**
     - Do tests actually verify behavior (not just mock behavior)?
-    - Did I follow TDD if required?
+    - Did I follow the task's test shape (tests-first for logic/bugfix)?
     - Are tests comprehensive?
 
     If you find issues during self-review, fix them now before reporting.

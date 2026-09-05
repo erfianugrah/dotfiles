@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: Use AFTER an initial fix attempt has failed, or when investigating a recurring/intermittent bug whose root cause is not obvious from the error message. Adds 4-phase root-cause investigation discipline. For straightforward errors, prefer the AGENTS.md batch-diagnostic rule or the git-troubleshooting skill first.
+description: "Use when an initial fix attempt has failed, when a bug recurs or is intermittent, or when the root cause is not obvious from the error message - a test failing for a reason the stack trace does not explain, a fix that moved the symptom, 'I tried X and Y and it still happens', 2+ fixes stacked without understanding. NOT for a git command that errors (git-troubleshooting owns that diagnostic battery) or for an error whose message already names the fix."
 ---
 
 # Systematic Debugging
@@ -23,25 +23,22 @@ If you haven't completed Phase 1, you cannot propose fixes.
 
 ## When to Use
 
-Use for ANY technical issue:
-- Test failures
-- Bugs in production
-- Unexpected behavior
-- Performance problems
-- Build failures
-- Integration issues
+This is the second-line discipline. A first-look error gets the obvious read:
+read the message, check the cheapest mutable state (`ls`, `stat`, `git status`,
+`docker ps`), try the fix the message names, once. Invoke this skill when:
 
-**Use this ESPECIALLY when:**
-- Under time pressure (emergencies make guessing tempting)
-- "Just one quick fix" seems obvious
-- You've already tried multiple fixes
-- Previous fix didn't work
-- You don't fully understand the issue
+- That first fix attempt did not hold, or moved the symptom somewhere else
+- The bug recurs or is intermittent
+- The root cause is not obvious from the error message or stack trace
+- You have already stacked 2+ changes without understanding why
+- You are under time pressure and can feel the pull to guess (emergencies make
+  guessing tempting; systematic is faster than thrashing)
 
-**Don't skip when:**
-- Issue seems simple (simple bugs have root causes too)
-- You're in a hurry (rushing guarantees rework)
-- Manager wants it fixed NOW (systematic is faster than thrashing)
+**Not this skill:**
+- A git command that errors -> `git-troubleshooting` (its diagnostic battery
+  runs first)
+- An external system behaving unlike its docs -> `validating-empirically`
+- Verifying your own fix worked -> `verification-before-completion`
 
 ## The Four Phases
 
@@ -72,10 +69,7 @@ You MUST complete each phase before proceeding to the next.
      `docker ps` / a directory listing answers "is the thing still there,
      and when did it change" in one call. Reading source to explain why a
      record might be missing is the expensive branch, and it is worthless if
-     the record was simply deleted five minutes ago. Observed 2026-09-02: a
-     session spent five calls diffing `List` vs `GetByName` WHERE clauses to
-     explain an absent stack; `ls` on the stacks directory showed it had been
-     removed out-of-band minutes earlier.
+     the record was simply deleted five minutes ago.
    - Rank candidate probes by cost-to-run divided by how much they'd narrow
      the space, and run the cheapest discriminator first. A hypothesis you
      can test in one command outranks one that needs three file reads, even
@@ -188,7 +182,9 @@ You MUST complete each phase before proceeding to the next.
    - Automated test if possible
    - One-off test script if no framework
    - MUST have before fixing
-   - Use TDD (per the global agent rules) for writing proper failing tests
+   - A bug fix is the case the global TDD rule reserves for red-green
+     (`~/dotfiles/.pi/agent/prompts/tool-routing.md`, "TDD where useful"):
+     the red test reproduces the bug, the green test proves the fix
 
 2. **Implement Single Fix**
    - Address the root cause identified
@@ -220,7 +216,7 @@ You MUST complete each phase before proceeding to the next.
    - Are we "sticking with it through sheer inertia"?
    - Should we refactor architecture vs. continue fixing symptoms?
 
-   **Discuss with your human partner before attempting more fixes**
+   **Discuss with the user before attempting more fixes**
 
    This is NOT a failed hypothesis - this is a wrong architecture.
 
@@ -243,7 +239,7 @@ If you catch yourself thinking:
 
 **If 3+ fixes failed:** Question the architecture (see Phase 4.5)
 
-## your human partner's Signals You're Doing It Wrong
+## The user's Signals You're Doing It Wrong
 
 **Watch for these redirections:**
 - "Is that not happening?" - You assumed without verifying
@@ -258,7 +254,7 @@ If you catch yourself thinking:
 
 | Excuse | Reality |
 |--------|---------|
-| "Issue is simple, don't need process" | Simple issues have root causes too. Process is fast for simple bugs. |
+| "The first fix almost worked, one more tweak" | A second guess after a failed fix is the thrash this skill exists to stop. Back to Phase 1. |
 | "Emergency, no time for process" | Systematic debugging is FASTER than guess-and-check thrashing. |
 | "Just try this first, then investigate" | First fix sets the pattern. Do it right from the start. |
 | "I'll write test after confirming fix works" | Untested fixes don't stick. Test first proves it. |
@@ -294,10 +290,16 @@ These techniques are part of systematic debugging and available in this director
 - **`root-cause-tracing.md`** - Trace bugs backward through call stack to find original trigger
 - **`defense-in-depth.md`** - Add validation at multiple layers after finding root cause
 - **`condition-based-waiting.md`** - Replace arbitrary timeouts with condition polling
+  (`condition-based-waiting-example.ts` is the working helper set to adapt)
+- **`find-polluter.sh`** - Bisect which test file creates unwanted files/state.
+  Node-only as written (drives `npm test` per file); run it with no args for usage
 
 **Related skills:**
-- **TDD (global agent rules)** - For creating failing test case (Phase 4, Step 1)
+- **TDD rule** in `~/dotfiles/.pi/agent/prompts/tool-routing.md` - bug fixes are
+  the red-green case (Phase 4, Step 1)
 - **verification-before-completion** - Verify fix worked before claiming success
+- **git-troubleshooting** - the diagnostic battery for git errors; run it before
+  this skill when git is the thing failing
 
 ## Real-World Impact
 
