@@ -1,6 +1,6 @@
 ---
 name: quarto
-description: Use when authoring, rendering, or publishing Quarto documents or projects - .qmd files, _quarto.yml configuration, multi-format output, project types (website/book/blog/manuscript/dashboard), code execution with Python/R/Julia, freeze/cache management, cross-references, callouts, citations, and publishing. Also fires on building or debugging Reveal.js presentations - slide overflow, citations, mermaid theming, self-verifying rendered slides via headless screenshots.
+description: Use when authoring, rendering, or publishing Quarto documents or projects - .qmd files, _quarto.yml, multi-format output, website/book/blog/manuscript/dashboard projects, Python/R/Julia code cells, freeze/cache, cross-references, callouts, citations. Also fires on building or debugging Reveal.js decks - slide overflow, footnote citations, mermaid theming, Graphviz cells. NOT for viewing a rendered deck as an image (deck-screenshot) or diagrams outside a .qmd (mermaid-d2).
 ---
 
 # Quarto
@@ -56,12 +56,12 @@ See @fig-scatter for results.
 
 | Type | `quarto create project` | Key config key |
 |---|---|---|
-| Default (multi-doc) | `default` | — |
+| Default (multi-doc) | `default` | - |
 | Website | `website` | `website:` |
 | Blog | `blog` | `website:` with `listing` |
 | Book | `book` | `book:` (chapters list) |
 | Manuscript | `manuscript` | `manuscript:` |
-| Dashboard (Shiny/Observable) | — | `format: dashboard` |
+| Dashboard (Shiny/Observable) | - | `format: dashboard` |
 
 ## `_quarto.yml` structure
 
@@ -117,14 +117,14 @@ website:
 
 ## Code execution engines
 
-**Python** — uses Jupyter kernel:
+**Python** - uses Jupyter kernel:
 ```yaml
 ---
 jupyter: python3    # or path to venv: .venv/bin/python
 ---
 ```
 
-**R** — uses Knitr:
+**R** - uses Knitr:
 ```yaml
 ---
 knitr:
@@ -133,14 +133,14 @@ knitr:
 ---
 ```
 
-**Julia** — two engines:
+**Julia** - two engines:
 ```yaml
 engine: julia      # preferred (QuartoNotebookRunner, no Python needed)
 # or
 jupyter: julia-1.9 # IJulia kernel
 ```
 
-**Observable JS** — runs in-browser (no server needed):
+**Observable JS** - runs in-browser (no server needed):
 ```{ojs}
 data = FileAttachment("data.csv").csv({ typed: true })
 Plot.plot({ marks: [Plot.dot(data, {x: "x", y: "y"})] })
@@ -159,7 +159,7 @@ Plot.plot({ marks: [Plot.dot(data, {x: "x", y: "y"})] })
 
 ## Freeze & cache
 
-**Freeze** — skip re-execution on project render:
+**Freeze** - skip re-execution on project render:
 ```yaml
 # _quarto.yml (project-wide)
 execute:
@@ -171,11 +171,11 @@ execute:
   freeze: false
 ```
 
-- Results stored in `_freeze/` — **commit this directory** to git so CI can render without re-executing
+- Results stored in `_freeze/` - **commit this directory** to git so CI can render without re-executing
 - Single doc (`quarto render doc.qmd`) always re-executes regardless of freeze
 - Delete `_freeze/` to force full re-execution
 
-**Cache** — per-cell Jupyter/Knitr cache (faster iteration):
+**Cache** - per-cell Jupyter/Knitr cache (faster iteration):
 ```yaml
 execute:
   cache: true    # cache individual cells, not whole doc
@@ -257,7 +257,7 @@ quarto publish netlify
 quarto publish quarto-pub
 ```
 
-Creates `_publish.yml` in project root — commit this file.
+Creates `_publish.yml` in project root - commit this file.
 
 **CI / headless publish (GitHub Actions):**
 ```yaml
@@ -299,26 +299,9 @@ CONNECT_API_KEY=...
 - Set `navigation-mode: vertical` so up/down traverses everything.
 - Per-slide attributes: `## Title {.smaller}` (shrink font), `{.scrollable}` (scrollbar only when content overflows), `{background-color="#1c1c1c"}` (section dividers), `{#my-id}` (hash-navigable at `deck.html#/my-id`).
 
-### Self-verify layout WITHOUT a human (headless render -> screenshot)
+### Self-verify layout WITHOUT a human
 
-Render first: `quarto render deck.qmd --to revealjs --output-dir /tmp/dc`. Chrome path varies - find via `command -v chromium google-chrome-stable`.
-
-Single slide (fast):
-```bash
-chromium --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
-  --force-device-scale-factor=1 --window-size=1280,720 \
-  --virtual-time-budget=8000 --screenshot=/tmp/s.png \
-  "file:///tmp/dc/deck.html#/<slide-id-or-index>"
-```
-
-Whole-deck contact sheet (faithful: waits for reveal + mermaid JS):
-```bash
-bunx decktape reveal --chrome-path "$(command -v chromium)" --size 1280x720 \
-  file:///tmp/dc/deck.html /tmp/deck.pdf
-pdftoppm -png -r 52 /tmp/deck.pdf /tmp/s
-montage /tmp/s-*.png -tile 5x6 -geometry 256x144+3+3 -label '%f' /tmp/contact.png
-```
-Then view the PNG. **Caveat:** raw headless chromium can load web fonts late, so mermaid node text may look clipped in the shot even when the real browser is fine - decktape is more faithful for diagrams.
+Run `deck-shot deck.qmd N` for one slide or `deck-shot deck.qmd` for the whole-deck contact sheet, then read the PNG path it prints (the `deck-screenshot` skill owns the pipeline and its options). One caveat carries over: the fast single-slide path uses raw headless chromium, which can load web fonts late, so mermaid node text may look clipped when the real render is fine - confirm with deck-shot's faithful (decktape) mode or the contact sheet before treating it as a bug.
 
 ### Layout / overflow debugging
 
@@ -337,8 +320,8 @@ Sources: [RLS](https://...) · [Postgres](https://...)
 :::
 ```
 
-Getting them to look identical on EVERY slide has two non-obvious traps. Both
-verified the hard way - measure with `getBoundingClientRect` (below), don't eyeball.
+Getting them to look identical on EVERY slide has two traps. Measure with
+`getBoundingClientRect` (below); do not eyeball.
 
 **1. Size - `em` compounds with `.smaller`, and the vertical-stack descendant trap.**
 `.smaller` sets `section { font-size: 0.7em }`. If `.src` is sized in `em`, it
@@ -399,7 +382,7 @@ direct children are `<section>`s, not `.src`, so it never matches the wrapper.
 
 Quarto renders `{mermaid}` **client-side** (a `<pre class="mermaid">` laid out by mermaid.js in the *viewer's* browser) - so the same file can lay out differently machine-to-machine (font-load timing, viewport, mermaid version), and mermaid's radial `mindmap` has no overlap/crossing control (15+ nodes collide, branch colors interleave). Quarto renders `{dot}` (Graphviz) **at build time** into an inline SVG - byte-identical for every viewer. For any diagram whose exact layout matters, reach for `{dot}`.
 
-- **Radial hub / "mindmap" look → Graphviz `{dot}` with `layout=twopi`**, not mermaid `mindmap`. Needs the `dot` binary on PATH (`sudo pacman -S graphviz`); Quarto shells out to it, honors the in-graph `layout=twopi`, and bakes the SVG inline. Recipe:
+- **Radial hub / "mindmap" look → Graphviz `{dot}` with `layout=twopi`**, not mermaid `mindmap`. Needs the `dot` binary on PATH (already installed on this box - `command -v dot` finds it; elsewhere install the graphviz package); Quarto shells out to it, honors the in-graph `layout=twopi`, and bakes the SVG inline. Recipe:
   ````
   ```{dot}
   graph G {
@@ -414,7 +397,7 @@ Quarto renders `{mermaid}` **client-side** (a `<pre class="mermaid">` laid out b
   Size on the slide via SCSS: wrap the cell in `::: {.myhub}` and `.reveal .myhub svg { max-height: 480px; width: auto; }`. `bgcolor="transparent"` blends with a dark theme. Fonts: graphviz uses *system* fonts at build (NOT the deck's web font) - pick one `fc-list` shows (e.g. DejaVu Sans); label boxes have padding so a font mismatch won't clip.
   - **Make it pretty, not sparse:** plain twopi = thin uniform-grey straight spokes (looks bare). For a mindmap feel, add `splines=curved`, bump `edge [penwidth=3]`, and **colour each edge to its branch** (`sb -- b1 [color="#2f6f4e"]; b1 -- leaf [color="#2f6f4e"]`). Colour-matched curved edges group branches visually and read as intentional.
   - **twopi allocates angular space by leaf count**, so a lopsided tree (one branch with 7 children, another with 1) skews off-centre. There's no clean fix - `overlap=prism` + `sep="+12"` and the per-branch edge colours mask it well enough; if it still bothers, rebalance by merging leaves.
-- **Only if `dot` is genuinely unavailable** (no sudo/pacman): pre-bake the mermaid to a static SVG via mermaid-cli / `render_diagram`, then embed as `<img>`. Two non-obvious gotchas: (1) set `htmlLabels:false` in the init - mermaid's default label `<foreignObject>` does NOT render when an SVG is loaded via `<img>` (secure static mode), so labels vanish; `htmlLabels:false` emits native `<text>`. (2) strip mermaid-cli's injected `style="...background-color: white;"`. This fragments the diagram across qmd + scss + a generated SVG, so commit the `.mmd` source + a `make` target that regenerates it - never hand-patch and commit an orphan SVG with no source of truth.
+- **Only if `dot` is genuinely unavailable** (no package install rights): pre-bake the mermaid to a static SVG via mermaid-cli / `render_diagram`, then embed as `<img>`. Two non-obvious gotchas: (1) set `htmlLabels:false` in the init - mermaid's default label `<foreignObject>` does NOT render when an SVG is loaded via `<img>` (secure static mode), so labels vanish; `htmlLabels:false` emits native `<text>`. (2) strip mermaid-cli's injected `style="...background-color: white;"`. This fragments the diagram across qmd + scss + a generated SVG, so commit the `.mmd` source + a `make` target that regenerates it - never hand-patch and commit an orphan SVG with no source of truth.
 
 ### Deck YAML essentials
 ```yaml
@@ -439,7 +422,7 @@ format:
 | PDF fails with LaTeX errors | `quarto install tinytex` then `tlmgr install <pkg>` |
 | `freeze: auto` not re-rendering after data change | Delete `_freeze/<doc>` or `rm -rf _freeze/` |
 | Cross-ref ID not found | Confirm label starts with correct prefix (`fig-`, `tbl-`, etc.) |
-| `format` key not merging from `_quarto.yml` | Listing `format:` in a doc overrides — must re-list all formats |
+| `format` key not merging from `_quarto.yml` | Listing `format:` in a doc overrides - must re-list all formats |
 | Website missing page | Add to `_quarto.yml` navbar/sidebar OR `render:` list under `project:` |
 | `_publish.yml` not found in CI | Commit `_publish.yml` generated by initial `quarto publish` |
 | Revealjs / HTML collision (same `.html` ext) | Add `output-file: slides.html` to one format |
@@ -456,9 +439,10 @@ format:
 ## Extensions
 
 ```bash
-quarto add <gh-user>/<repo>   # install from GitHub
-quarto install extension <gh-user>/<repo>
+quarto add <gh-org>/<gh-repo>   # install from GitHub (also accepts a zip path or URL)
 quarto list extensions
 ```
+
+`quarto install` is for global dependencies only (`tinytex`, `chromium`); it does not take an extension argument.
 
 Common extensions: `quarto-ext/fontawesome`, `quarto-ext/lightbox`, `quarto-journals/*` (JOSS, PLOS, etc.)

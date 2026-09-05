@@ -1,6 +1,6 @@
 ---
 name: writing-structure
-description: Use when drafting or restructuring long-form written content - design docs, plan docs, READMEs, reports, runbooks, essays - and the question is how to organise it (heading hierarchy, paragraph order, where the thesis goes) or how to cite sources in it (Source lines, APA 7, RFC-style [TAG] references). Fires on "structure this doc", "essay structure", "PEEL/TEEL", "heading levels", "document hierarchy", "how do I cite/reference this", "Simplified Technical English / STE / ASD-STE100". Not for voice/register (that is erfi-voice) or paste mechanics (paste-formatting).
+description: Use when drafting or restructuring long-form written content - design docs, plan docs, READMEs, reports, runbooks, essays - and the question is how to organise it (heading hierarchy, paragraph order, where the thesis goes) or how to cite sources in it (Source lines, APA 7, RFC-style [TAG] references). Fires on "structure this doc", "PEEL", "heading levels", "how do I cite this", "STE / ASD-STE100". NOT for voice/register (erfi-voice) or paste mechanics (paste-formatting).
 ---
 
 # Writing structure
@@ -24,7 +24,7 @@ This is a reference/technique skill. Read it, apply the pattern that fits the su
 - **One H1** - the document title. H2s for major sections, H3/H4 for subsections.
 - **Never skip levels going down** (no H2 -> H4). Skipping *up* when closing a subsection is fine.
 - **Three levels is the working ceiling.** Deeper = the doc wants splitting, not more levels.
-- **Headings are the outline.** Screen readers, search engines, skimmers, and the `docs_summary` tool all navigate on headings alone - the heading list must be a coherent TOC. Never pick a level for visual size; that is CSS's job.
+- **Headings are the outline.** Screen readers, search engines, skimmers, and the docs summary tool (headings-only outline of a mirrored doc) all navigate on headings alone - the heading list must be a coherent TOC. Never pick a level for visual size; that is CSS's job.
 - **Heading style**: sentence case, short, front-loaded keywords, parallel grammar at the same level. Statement or topic headings by default; question headings only when the audience arrives with known questions (a FAQ, a troubleshooting page).
 
 Sources: W3C WAI, WebAIM, MDN, Australian Style Manual, Digital.gov - all convergent.

@@ -1,9 +1,9 @@
 ---
 name: design-utilitarian
-description: Use when laying out a page, picking UI components, writing CSS/Tailwind, choosing a typography/spacing scale, reviewing a design, or pushing back on glassmorphism / hero gradients / skeleton loaders - applies the user's McMaster-Carr-style utilitarian ethos (information density over whitespace, tables over card grids, server-rendered, no animation tax, no marketing prose in product surfaces). Framework-agnostic (Astro / React / Next) - pair with frontend-stack when scaffolding.
+description: Use when laying out a page, picking UI components, writing CSS/Tailwind, choosing a typography/spacing scale, reviewing a design, writing copy that ships inside a product surface, or pushing back on glassmorphism / hero gradients / skeleton loaders. Fires on 'which shadcn components', 'design review', 'make it denser', 'too much whitespace', 'this looks like a template'. NOT for scaffolding a project (frontend-stack) or prose voice in replies and docs (erfi-voice).
 ---
 
-# design-utilitarian — McMaster-Carr ethos for web UI
+# design-utilitarian - McMaster-Carr ethos for web UI
 
 The user's default visual + interaction language is utilitarian, modelled on mcmaster.com. Stack-level opinion, not per-project negotiation. Override only when the user explicitly asks for marketing/landing visuals.
 
@@ -16,21 +16,20 @@ The user's default visual + interaction language is utilitarian, modelled on mcm
 5. **No skeleton-loaders.** Load fast enough they're unnecessary (SSR + tanstack-query cache) or render a final-shape empty state. Skeletons trade visual stability for fake perceived speed.
 6. **Search + navigation visible.** No hamburger on desktop. Categorical nav in header or sidebar. Search field always visible on data routes.
 7. **Inline forms, inline errors.** Validation next to the field. Submit in-place. Modals only for genuinely modal interactions (destructive confirms, image lightbox).
-8. **Pagination over infinite scroll** for data lists — users return to a page, deep-link, share.
+8. **Pagination over infinite scroll** for data lists - users return to a page, deep-link, share.
 9. **Two-color palette + neutrals.** Brand + accent + 5-7 neutrals. shadcn `neutral` base + a single brand color works.
-10. **System font.** Tailwind v4 `font-sans` resolves to the system stack — keep it. Webfont only if brand identity demands; if added, subset + self-host.
+10. **System font.** Keep Tailwind's default sans-serif stack; do not define a custom font family in `@theme`. Webfont only if brand identity demands; if added, subset + self-host.
 11. **Print-friendly.** Tabular layouts print well; card grids don't. Test `Cmd-P` on data views.
 12. **No marketing prose in product surfaces.** "Empower your team to seamlessly..." is for landing pages. Product pages should read like specs: nouns + numbers + states.
 
 ## Kill the AI copy tells (product prose)
 
-Extends #12. Any prose that ships in a product surface - a finding card, an empty state, a tooltip, a generated report, a status line - must not read like default LLM output. The fingerprint is a *cluster* of habits, not one banned word (research: Kobak et al. 2024, *Science Advances*, on the post-ChatGPT vocabulary surge; Wikipedia "Signs of AI writing"). The ones that actually bite in product copy:
+Extends #12. Any prose that ships in a product surface - a finding card, an empty state, a tooltip, a generated report, a status line - must not read like default LLM output. The fingerprint is a *cluster* of habits, not one banned word (research: Kobak et al. 2024, *Science Advances*, on the post-ChatGPT vocabulary surge; Wikipedia "Signs of AI writing"). The two that bite specifically in product copy:
 
-1. **Significance-inflation - the worst offender.** LLMs *tell you something matters* instead of showing the cost. "Left alone they inflate latency and CPU, pushing you toward a bigger, costlier tier" says nothing a number wouldn't say better. Show the mechanism or the cost; cut the "this is important because" scaffolding. **Participial closers** are the same tell wearing a gerund: "...highlighting the importance of X", "...ensuring optimal performance", "...reflecting the need for Y" - delete them, they add the *feeling* of a point without a point.
-2. **Tier-1 vocab -> plain word.** leverage->use, utilize->use, facilitate->let, robust->reliable/solid (or a number), seamless->(cut it), comprehensive->(say what it covers), crucial/pivotal/paramount->key, or just state the thing; streamline->simplify, harness->use, foster->build, elevate->improve, unlock/empower->(cut), delve->dig into, myriad/plethora->many, navigate the complexities of->(cut). "highest-leverage" -> "biggest".
-3. **Filler openers + hedges - cut the whole phrase.** "It's important to note that X" -> "X". Also: "it's worth mentioning", "in order to" -> "to", "plays a crucial role in", "when it comes to", "at the end of the day", "in today's ... world".
-4. **Structural tics.** The triad ("clean, concise, and correct"), the "not just X, but Y" reframe, rhetorical question-then-answer, and metronomic transitions (Moreover / Furthermore / Additionally stacked). One is fine; one-per-paragraph is the machine signature.
-5. **Repetition across surfaces - the strongest smell in a generated report.** The SAME rationale paragraph under every card. If ten finding cards share one "why it matters", it's boilerplate: make it specific to each object, or drop it and let the item's own detail carry.
+1. **Significance-inflation.** LLMs *tell you something matters* instead of showing the cost. "Left alone they inflate latency and CPU, pushing you toward a bigger, costlier tier" says nothing a number wouldn't say better. Show the mechanism or the cost; cut the "this is important because" scaffolding. **Participial closers** are the same tell wearing a gerund: "...highlighting the importance of X", "...ensuring optimal performance" - delete them; they add the *feeling* of a point without a point.
+2. **Repetition across surfaces - the strongest smell in a generated report.** The SAME rationale paragraph under every card. If ten finding cards share one "why it matters", it's boilerplate: make it specific to each object, or drop it and let the item's own detail carry.
+
+Vocabulary and sentence-shape tells (slop watchlist, filler openers, triplets, negative parallelism, rhetorical question-then-answer) are catalogued once in `erfi-voice`, "Structural AI tells" - apply that list here too; the `ai-tell-guard` hook hard-blocks the highest-precision subset in prose files.
 
 **The test:** could this exact line sit under a different finding / product / topic unchanged? If yes, it's generic filler - rewrite it to name the actual object, number, or state (principle #12: nouns + numbers + states). Read it aloud; a phrase you'd never say gets cut.
 
@@ -78,7 +77,7 @@ Two caveats. These are probabilistic *tells, not proof* - the same words appear 
   /* Two-color palette + neutrals */
   --color-brand: oklch(0.55 0.15 240);   /* one accent */
 
-  /* Tight spacing default — override Tailwind's friendly defaults */
+  /* Tight spacing default - override Tailwind's friendly defaults */
   --spacing-1: 4px;
   --spacing-2: 8px;
   --spacing-3: 12px;
@@ -99,14 +98,13 @@ When the user asks "what shadcn components do I need":
 
 | Default in | Skip unless asked |
 |---|---|
-| `button`, `input`, `label`, `form` | `hero-section`, `marquee` |
-| `table`, `data-table` | `card` (only when discovery-driven) |
-| `select`, `checkbox`, `radio-group`, `switch` | fancy `combobox` if a plain `select` suffices |
-| `dialog`, `alert-dialog` (destructive confirms only) | `sheet` (drawer) unless mobile-only flow |
-| `tabs`, `accordion` | `carousel` (almost never appropriate) |
-| `tooltip` (status hints) | animated `command palette` unless real shortcut UX |
-| `toast` (state changes) | `notifications` when a toast suffices |
-| `badge`, `separator` | `progress` for non-determinate work — use a spinner |
+| `button`, `input`, `label`, `form` | `card` (only when discovery-driven) |
+| `table`, `data-table` | fancy `combobox` if a plain `select` suffices |
+| `select`, `checkbox`, `radio-group`, `switch` | `sheet` (drawer) unless mobile-only flow |
+| `dialog`, `alert-dialog` (destructive confirms only) | `carousel` (almost never appropriate) |
+| `tabs`, `accordion` | animated `command` palette unless real shortcut UX |
+| `tooltip` (status hints), `toast` (state changes) | `progress` for non-determinate work - use a spinner |
+| `badge`, `separator` | hero sections, marquees, notification centres and similar blocks from third-party registries |
 
 For every shadcn component added, ask: *would McMaster-Carr ship this?* If no, replace with the table/button/inline equivalent.
 
@@ -129,10 +127,10 @@ If the user explicitly opts in (e.g. marketing landing for the same SaaS), put i
 
 ## References
 
-- **mcmaster.com** — canonical.
-- **Stripe Dashboard** — dense data tables, dense forms.
-- **GitHub** — issue lists, repo file browser.
-- **Linear** — keyboard-driven, fast.
+- **mcmaster.com** - canonical.
+- **Stripe Dashboard** - dense data tables, dense forms.
+- **GitHub** - issue lists, repo file browser.
+- **Linear** - keyboard-driven, fast.
 
 Avoid: Apple marketing pages, Stripe MARKETING (not dashboard), any Y-Combinator-startup-template-of-the-week.
 
@@ -146,5 +144,5 @@ Even when overriding, scope the deviation to that route. The product/app surface
 
 ## Pairs with
 
-- `frontend-stack` — when scaffolding a new project (this skill ships as the default ethos for projects created with that scaffolding skill)
-- `supabase` — backend choices that affect render strategy (RLS-aware, SSR cookies)
+- `frontend-stack` - when scaffolding a new project (this skill ships as the default ethos for projects created with that scaffolding skill)
+- `supabase` - backend choices that affect render strategy (RLS-aware, SSR cookies)

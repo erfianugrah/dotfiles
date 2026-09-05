@@ -1,6 +1,6 @@
 ---
 name: deck-screenshot
-description: Use when you need to SEE a reveal.js / Quarto revealjs deck as an image inside a pi session - screenshotting one slide, generating a whole-deck contact sheet to eyeball layout/overflow, or visually verifying a .qmd presentation after editing. Fires on "screenshot the deck", "show me slide N", "does this slide overflow", "render the pitch and look at it", mermaid-in-slides looking clipped, or any "let me look at how the deck renders" need. Not for rendering a deck to share (that's the quarto skill) - this is for the agent to view it.
+description: Use when the agent needs to SEE a reveal.js / Quarto revealjs deck as an image - one slide or a whole-deck contact sheet - to check layout, overflow, or clipped mermaid after editing a .qmd. Fires on "screenshot the deck", "show me slide N", "does this slide overflow", "render the pitch and look at it", "let me look at how the deck renders". NOT for authoring or publishing the deck (quarto) or standalone diagrams (mermaid-d2).
 ---
 
 # Deck Screenshot
@@ -67,6 +67,8 @@ bunx decktape reveal --chrome-path /usr/sbin/chromium --size 1280x720 \
 pdftoppm -png -r 52 /tmp/deck.pdf /tmp/s
 montage /tmp/s-*.png -tile 5x6 -geometry 256x144+3+3 -label '%f' /tmp/contact.png
 ```
+
+The `-geometry` tile is derived from `-s`: each side is the window size divided by 5 (1280x720 -> 256x144), plus a 3px border. Pass a different `-s` and the tiles scale with it.
 
 ## Deps (all present on this box)
 

@@ -1,6 +1,6 @@
 ---
 name: erfi-voice
-description: Use when drafting a reply, email, Slack message, PR/issue comment, or review response that should sound like Erfi rather than a generic assistant. Fires especially when the LLM has just reviewed a doc, thread, spec, or feedback and the user wants the answer written in his voice with verifiable references. Not for code, commit messages (those follow Conventional Commits), or product UI copy (that is design-utilitarian).
+description: Use when drafting a reply, email, Slack message, PR/issue comment, or review response that should sound like Erfi rather than a generic assistant. Fires especially when the LLM has just reviewed a doc, thread, spec, or feedback and the user wants the answer written in his voice with verifiable references. NOT for code, commit messages (Conventional Commits), product UI copy (design-utilitarian), document skeleton or citation format (writing-structure), or clipboard mechanics (paste-formatting).
 ---
 
 # Erfi voice
@@ -96,6 +96,8 @@ These are the patterns AI-writing guides (Wikipedia's "Signs of AI writing" name
 8. **The aphorism fill-in-the-blank.** "No X, no Y. Just Z.", "It's not about X. It's about Y.", "X isn't the point. Z is." - negative parallelism (tell #1) compressed into a punchy standalone sentence, usually closing a paragraph. The rhythm is the tell: two negations, then a "Just" redemption. It reads as a template with its nouns swapped, because that is what it is. If a sentence survives having its nouns replaced by placeholders, it is not a thought - delete it.
 9. **Decorative bold in short prose.** Corpo tell #6 fires hardest here: a 2-3 sentence casual description does not need ANY bolded phrases. Bold in a short paragraph is emphasis the sentence rhythm was supposed to carry - AI reaches for `**the trick**` / `**one continuous shot**` because it has no other way to signal what matters. In prose under ~4 sentences: no bold at all unless it is a literal identifier (code, a key term being defined).
 
+The `ai-tell-guard` hook (pi extension and Claude Code PreToolUse hook, same core) hard-blocks only the highest-precision subset of this list in prose-file writes and commit messages: the "not just X, but Y" / "isn't about X, it's about Y" / "It's not X. It's Y." forms of #1, the mystery-tease phrases of #7, the "No X, no Y. Just Z." aphorism of #8, importance-announcing ("worth noting", "worth mentioning", "important to note"), and `delve` / `tapestry` / `game-changer` / "stands as a testament" from #6. Everything else here - triplets, participle tails, decorative bold, the softer watchlist words - is judgement, not a gate. Quoted examples (double quotes or backticks) pass the guard in files; in a commit message there is no quoting escape.
+
 Two guards against overcorrection. First, the generic "humanize" prompts go much further -- banning semicolons, dashes, "however / while / although / because", and mandating 10-20-word sentences. Do NOT import those: connectors, subordination, and the `;`-flow ARE the voice (disposition #2, characteristic 12), and a sentence-length metronome reads as more machine-made, not less. Second, the goal is sounding like Erfi, not fooling a detector -- a lone flagged word is not a crime. Kill clusters of tells; never flatten the voice to dodge a wordlist.
 
 ### Importance-announcing - long-form docs are in scope too
@@ -103,7 +105,7 @@ Two guards against overcorrection. First, the generic "humanize" prompts go much
 Corpo tell #7 (rating your own points) fires hardest in long-form technical
 docs, because the register legitimately allows headings, tables and TL;DRs and
 the corpo guard reads as off-duty. It is not off-duty. Struck verbatim from the
-lexicanum corpus (2026-08-03, the Supabase migration guides):
+lexicanum corpus (the Supabase migration guides):
 
 - "The most important thing to understand before starting: **X**" -> state X and move on.
 - "Three of these deserve their own sections because they surprise everyone." -> delete the bridge; the three headings follow it anyway.
@@ -129,7 +131,7 @@ rules hold regardless of which contract is in force.
 
 ### Openers depend on audience: cold for customer-facing, warm-ok for internal peers
 
-The cold-open rule below is the CUSTOMER-FACING rule (relay to an AE, review reply, anything that reaches a customer). It does NOT generalise to an internal peer conversation. When the reader is a colleague on your own team - not a customer - a short warm/rapport opener IS Erfi's voice: "Agreed, we're on the same page for the most part, and no worries, I prefer you be blunt hahah" (verbatim, real internal Slack reply, 2026-07-09). Peer chat gets the rapport line and the `hahah`; the cold-open discipline is reserved for the customer-facing surface. Before applying the strike-outs below, ask: customer-facing, or internal? If internal, keep the warmth.
+The cold-open rule below is the CUSTOMER-FACING rule (relay to an AE, review reply, anything that reaches a customer). It does NOT generalise to an internal peer conversation. When the reader is a colleague on your own team - not a customer - a short warm/rapport opener IS Erfi's voice: "Agreed, we're on the same page for the most part, and no worries, I prefer you be blunt hahah" (verbatim from a real internal Slack reply). Peer chat gets the rapport line and the `hahah`; the cold-open discipline is reserved for the customer-facing surface. Before applying the strike-outs below, ask: customer-facing, or internal? If internal, keep the warmth.
 
 Relatedly, on an ORG / PROCESS / OPINION question in an internal thread, Erfi's move is CANDID + PERSONAL - a lived-experience anecdote and an honest "I don't have an answer / this is a bit of a trap for me" - NOT a manufactured crisp verdict. (Real example: on consolidating on one tool he told the story of a past dev-tool team where the tool rotted once its author left/burnt out, and "always ended up doing things for myself", rather than picking a winner.) Don't invent a decisive recommendation where the true reply is candour.
 
@@ -144,17 +146,17 @@ Open COLD on the first point ("On broadcast_changes vs your hand-rolled send - d
 
 ### American consultant/coach phrasebook - do NOT use
 
-These read as SaaS-CS / management-consultant voice, not Erfi. Verbatim strike-outs from real edits (2026-07): "this is great to read", "quick hits", "I'd drop that suggestion for you", "SOS is the one I'd slow down on" / "where I'd slow down", "you've (already) got the right instinct", "genuinely can't trust", "and the big one" / "this is the big one" / "the big one", "strongest bit" / "your strongest bit", "that's what turns it from best-effort into something you'd stake safety on", "let me just lay out how I'd build it". Also from earlier edits: "strawman" (say "rough shape"/"outline"). The "big one" and "strongest bit" family is corpo tell #7 (rating your own point instead of stating it) in casual costume - it survives into chat/Discord drafts where the corpo guard feels off-duty; do NOT emphasise which item matters most, just order them so the one that matters is first and state each flatly. When Erfi flags a phrase as not-his, drop it globally and never re-suggest a paraphrase of it.
+These read as SaaS-CS / management-consultant voice, not Erfi. Verbatim strike-outs from real edits: "this is great to read", "quick hits", "I'd drop that suggestion for you", "SOS is the one I'd slow down on" / "where I'd slow down", "you've (already) got the right instinct", "genuinely can't trust", "and the big one" / "this is the big one" / "the big one", "strongest bit" / "your strongest bit", "that's what turns it from best-effort into something you'd stake safety on", "let me just lay out how I'd build it". Also from earlier edits: "strawman" (say "rough shape"/"outline"). The "big one" and "strongest bit" family is corpo tell #7 (rating your own point instead of stating it) in casual costume - it survives into chat/Discord drafts where the corpo guard feels off-duty; do NOT emphasise which item matters most, just order them so the one that matters is first and state each flatly. When Erfi flags a phrase as not-his, drop it globally and never re-suggest a paraphrase of it.
 
 ## Ground in real samples first (do not skip)
 
 Real writing samples beat any hand-written style description for texture -- examples carry nuance (sentence rhythm, table density, bold placement) that prose rules can't. So before drafting anything beyond a single quick one-liner -- and a multi-point Slack reply counts: it reads short but is exactly where guessing shows -- pull 2-3 real samples in the matching register and study them. And if a draft comes back rejected ("that's not how I talk"), the next move is ALWAYS to pull samples, NEVER to re-guess or re-word from imagination -- re-guessing after a rejection is the documented failure mode:
 
-- **Prose / email / review register** -> `docs_search` `source=erfi-technical-blog` to find a topical piece, then `docs_read` it. Study the sentence rhythm, the problem-first opener, and the sourcing -- NOT the essay devices (tables, `:::note` callouts, `TL;DR:` / takeaway lines), which are blog-only (bullet 3). (Good exemplars: the caching or docker-servarr-security references, or any k3s guide.)
+- **Prose / email / review register** -> the docs mirror, source `erfi-technical-blog` (`docs_search` then `docs_read` in pi; the `docs` tool with action=search then action=read in Claude Code): find a topical piece, then read it. Study the sentence rhythm, the problem-first opener, and the sourcing -- NOT the essay devices (tables, `:::note` callouts, `TL;DR:` / takeaway lines), which are blog-only (bullet 3). (Good exemplars: the caching or docker-servarr-security references, or any k3s guide.)
 - **Terse / commit / status register** -> `git log --no-merges --pretty=format:'%b' -20` in the relevant repo.
 - **Truest reply register** -> your own sent messages / GitHub issue + PR comments (`gh`), not the blog. The blog is ESSAY register: denser and more formatted (takeaway lines, tables, callouts) than how you write a reply. Borrow its precision and sourcing, NOT its formatting density.
-- **Personal / non-technical essay register (the published personal voice)** -> https://erfianugrah.com. Everything on that site is Erfi's own writing EXCEPT the `/zeitweilig/` collection, which is written by a different persona ("Lena") and must never be sampled as his voice. Reproducible pull (verified 2026-08-28): the site source is the public Astro repo `github.com/erfianugrah/revista-3` - read `src/content/{muses,short_form,long_form}/` and skip `src/content/zeitweilig/`; or enumerate `https://www.erfianugrah.com/sitemap-index.xml` -> `sitemap-0.xml` and keep paths under `/muses/` (~42 photography-led personal essays), `/short_form/` (4 short pieces), `/long_form/` (~11 portrait essays about named people, written BY Erfi) while dropping `/zeitweilig/`, `/authors/`, `/cv/`, and any `/tags/` page. This register is imagery-led and sparse ("Places that I have been to over the years."); sample it for personal/reflective drafts, not for technical-doc format.
-- **Truest UNPERFORMED voice (disposition, not format)** -> the Discord export on `servarr` at `/mnt/user/discord-wipe/export/Messages/c*/messages.json` (~105k real messages, `{ID, Timestamp, Contents}`). Pull a filtered, context-safe sample (do NOT dump all 105k -- it blows the context window and the raw pipe tends to abort): `ssh servarr 'jq -r ".[].Contents" /mnt/user/discord-wipe/export/Messages/c*/messages.json 2>/dev/null | grep -vE "^https?://" | grep -vE "^[[:space:]]*$" | awk "length>30 && length<200" | shuf -n 80'`. This is the ground-truth for the register-independent disposition (Overview) -- how Erfi reasons and phrases with the filter off. Study the disposition; do NOT copy the DM burst *mechanics* into structured surfaces (see the DM-register warning above). It is private content: distil patterns, never quote it into a tracked file.
+- **Personal / non-technical essay register (the published personal voice)** -> the docs mirror, source `erfi-personal-blog` (same docs tool as above). Sample from `muses/` (photography-led personal essays), `short_form/` and `long_form/` (portrait essays about named people, written BY Erfi). The mirror also carries `zeitweilig/` and `authors/`: `zeitweilig/` is written by a different persona ("Lena") and must never be sampled as his voice; skip both. The live site is https://erfianugrah.com (source repo `github.com/erfianugrah/revista-3`) if the mirror is stale. This register is imagery-led and sparse ("Places that I have been to over the years."); sample it for personal/reflective drafts, not for technical-doc format.
+- **Truest UNPERFORMED voice (disposition, not format)** -> the Discord export on `servarr`, under the discord-wipe appdata tree at `/appdata/discord-wipe/export/Messages/c*/messages.json` (~105k real messages, `{ID, Timestamp, Contents}`; the tree moved to the hot tier in the ZFS cutover - `ls` it first if the glob comes back empty). Pull a filtered, context-safe sample (do NOT dump all 105k -- it blows the context window and the raw pipe tends to abort): `ssh servarr 'jq -r ".[].Contents" /appdata/discord-wipe/export/Messages/c*/messages.json 2>/dev/null | grep -vE "^https?://" | grep -vE "^[[:space:]]*$" | awk "length>30 && length<200" | shuf -n 80'`. This is the ground-truth for the register-independent disposition (Overview) -- how Erfi reasons and phrases with the filter off. Study the disposition; do NOT copy the DM burst *mechanics* into structured surfaces (see the DM-register warning above). It is private content: distil patterns, never quote it into a tracked file.
 
 Match what you see, THEN layer the reference-discipline below on top. Texture from samples + citation rigor from this skill is what beats both a samples-only tool (Claude Projects/Custom Styles) and a description-only prompt -- the tools nail texture but never enforce cite-every-claim.
 
@@ -162,7 +164,8 @@ Match what you see, THEN layer the reference-discipline below on top. Texture fr
 
 A QLoRA fine-tune of Erfi's chat + blog corpus is served on-demand at
 `localhost:11434` (model id `erfi-q4km`; load with `llmc switch erfi`, swap back
-with `llmc switch <other>`). It supplies TEXTURE prompting can't fake -- the
+with `llmc switch <other>`; `llmc` is not on PATH - it is
+`~/infra/ai/llm-compose/bin/llmc`). It supplies TEXTURE prompting can't fake -- the
 doc-verified failure mode is that prompting alone defaults to "an average,
 generic tone, readily detectable as AI." This skill supplies the DISCIPLINE the
 model lacks (citations, true-today/gap/roadmap split, corpo-tell removal,
@@ -181,6 +184,9 @@ final      ->  sounds like Erfi AND is reference-backed
 It auto-loads the model (`llmc switch erfi` if needed), strips scaffolding, and
 prints the raw draft to stdout. Take that as the texture layer, then apply
 everything below. Stdin also works: `echo "<prompt>" | bin/erfi-bot draft`.
+There is no erfi-bot checkout on this machine (only its Docker data volume);
+the repo lives on servarr - verify its path before relying on this step, and
+fall back to the raw endpoint (next section) if it is not reachable.
 
 **The model's role is register-dependent** -- it was trained on ~6800 chat pairs
 and ~400 technical-blog pairs, almost nothing composed-professional:
@@ -242,23 +248,18 @@ Erfi writes British English. Use it in every drafted surface:
 - "spoke" not "talked", British idiom over American ("reckon", not "figure"; "straight away" not "right away").
 - Technical identifiers are exempt - keep code/API names verbatim (`broadcast_changes`, `realtime.send`, `authorization`, `color` in CSS).
 
-**Scope: British -ise applies on every surface, including long-form docs.**
-The lexicanum corpus used to exempt itself as American -ize; that divergence
-was retired 2026-08-21 - lexicanum's AGENTS.md now specifies British -ise
-(normalise/organise) too, with product/API terms exempt (Supabase
-"organization", OAuth "authorize"). Legacy docs still carry American
-spellings; normalise when touching a section, never bulk-rewrite for style
-alone.
+**Scope: British -ise applies on every surface, including long-form docs and
+the lexicanum corpus.** Product/API terms are exempt (Supabase "organization",
+OAuth "authorize"). Legacy docs still carry American spellings; normalise when
+touching a section, never bulk-rewrite for style alone.
 
 ## ASCII punctuation (hard rule)
 
-Output ASCII in anything that gets pasted/committed: `--` or `-` for dashes, straight quotes, `...` for ellipsis. A guard hard-blocks smart punctuation in written files; matching it here avoids the block-resubmit loop. (Real em-dashes are fine in throwaway chat, but default to ASCII for anything destined for Slack/email/a file.)
+Output ASCII in anything that gets pasted/committed: `--` or `-` for dashes, straight quotes, `...` for ellipsis. The `ascii-punctuation-guard` (pi extension; `ascii-guard` is the Claude Code hook on the same core) hard-blocks smart punctuation in written files; matching it here avoids the block-resubmit loop. (Real em-dashes are fine in throwaway chat, but default to ASCII for anything destined for Slack/email/a file.)
 
-## Line wrapping (hard rule for paste-destined text)
+## Line wrapping and clipboard mechanics
 
-When a draft is going to be COPY-PASTED (email, Slack, a WYSIWYG box), author it UNWRAPPED - one line per paragraph and one line per bullet, no hard wrap at 80 columns. Hard wraps become literal newlines in the clipboard and land as mid-sentence line breaks in the composer. Let the editor soft-wrap for display; never bake newlines into a paragraph. If the draft lives inside an otherwise hard-wrapped internal doc, wrap only the surrounding prose and keep the copy-out block on single lines (note why, so a later edit does not re-wrap it).
-
-Getting formatted Markdown INTO a rich-text target (Gmail bold/bullets/code, not raw asterisks) is a separate mechanical problem - see **`paste-formatting`** (the `mdclip` tool: Markdown -> HTML -> clipboard).
+Paste-destined drafts are authored UNWRAPPED (one line per paragraph and per bullet) and get into Gmail / Slack / Docs via `mdclip`. Both rules live in **`paste-formatting`**; this skill only owns what the words are.
 
 ## Structure template -- technical review reply
 
