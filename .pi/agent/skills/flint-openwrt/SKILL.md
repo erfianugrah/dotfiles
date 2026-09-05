@@ -1,6 +1,6 @@
 ---
 name: flint-openwrt
-description: Use when operating the user's Flint 2 (GL-MT6000) access point on mainline OpenWrt - SSID/key/channel/bridge changes, deploying or verifying config, the box unreachable, iwinfo showing Tx-Power 0 dBm, hostapd "errors found in configuration file", a reflash or u-boot recovery, or when router/switch config must agree on the wireless (VLAN 100, 10.0.72) and IoT (VLAN 400, 10.0.73) segments. Fires on 'flint', 'FLINT_2', 'FLINT_IOT', 'GL-MT6000', '10.0.72.2', 'deploy.sh'. NOT for the retired GL firmware or the MS-01 router itself.
+description: Use when operating the user's Flint 2 (GL-MT6000) access point on mainline OpenWrt - SSID/key/channel/bridge changes, deploying or verifying config, the box unreachable, iwinfo showing Tx-Power 0 dBm, hostapd "errors found in configuration file", a reflash or u-boot recovery, or when router/switch config must agree on the wireless (VLAN 100) and IoT (VLAN 400) segments. Fires on 'flint', 'FLINT_2', 'FLINT_IOT', 'GL-MT6000', '10.0.72.2', 'deploy.sh'. NOT for the MS-01 router itself (eaves).
 ---
 
 # flint-openwrt - operating the Flint 2 on mainline OpenWrt
@@ -50,9 +50,13 @@ exists in `config/router/` for a future move; untested on hardware.
 - **deploy.sh order matters:** it pushes `authorized_keys` before the
   dropbear config that disables password auth. Losing the key = u-boot
   recovery. Do not "simplify" that order.
-- **Router-side edits go live on the next composer bump commit.**
-  `~/infra/router/configuration.nix` must never hold uncommitted edits;
-  see the router repo notes.
+- **Router config deploys only via `make deploy` in `~/infra/router`**
+  (push -> router fast-forwards its checkout -> flake rebuild+switch ->
+  `eaves doctor` gate; it refuses a dirty tree). Never leave uncommitted
+  edits in `~/infra/router/configuration.nix`: another session doing a
+  composer release commits and deploys that file, taking a half-done VLAN
+  edit live (`docs/cutover-2026-09-04.md`). Edit on a branch or commit
+  immediately.
 
 ## Common mistakes
 

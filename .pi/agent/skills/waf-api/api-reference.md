@@ -3,7 +3,6 @@
 Server: Go stdlib `http.ServeMux` (Go 1.22 method+pattern routes), registered in
 `wafctl/main.go` `runServe()`. ~94 API routes + static-UI catch-all. All JSON.
 Middleware: `newCORSMiddleware(allowedOrigins)(authMiddleware(authToken)(mux))`.
-Verified against source 2026-06 (caddy-compose main).
 
 Conventions (apply to all routes):
 

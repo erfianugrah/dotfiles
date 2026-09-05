@@ -1,104 +1,85 @@
 ---
 name: tailscale-homelab
-description: Use when SSHing into or operating the user's tailscale-routed homelab (servarr Unraid server, site routers, OOB PiKVMs, ARM SBC cluster, edge devices) or debugging tailscale connectivity. Fires on host aliases like 'servarr', '10.0.X.Y / 10.68.X.Y' addresses, magic-DNS vs IP questions, subnet-router or exit-node issues, 'ssh servarr docker exec ...'. Sibling to every other infrastructure skill - they all assume ssh <alias> works.
+description: Use when SSHing into or operating the user's tailscale-routed homelab (servarr NixOS NAS, the MS-01 router, OOB PiKVMs, ARM SBC cluster, edge devices) or debugging tailscale connectivity - subnet-router/exit-node issues, MagicDNS vs knotea resolution, DERP relay fallbacks, probing from WSL. Fires on host aliases like 'servarr' / 'router', '10.0.X.Y / 10.68.X.Y' addresses, 'ssh <alias> fails', 'tailscale status'. NOT for the docker socket gateway on servarr (drawbridge) or router config (eaves).
 ---
 
-# tailscale-homelab — operate the user's homelab over tailscale
+# tailscale-homelab - operate the user's homelab over tailscale
 
 The user's homelab is a multi-site mesh stitched together by **Tailscale**. Canonical access: `ssh <alias>`, where `~/.ssh/config` pins one identity file per host class.
 
-**Source of truth: `~/.ssh/config`** + live `tailscale status`. This skill is the operating convention layer; don't hard-code the live inventory here.
+**Source of truth: `~/.ssh/config`** + live `tailscale status` (run it on the router: `ssh router tailscale status`). This skill is the operating convention layer; do not hard-code the live inventory here - including tailnet IPs. The NixOS node map lives in `~/infra/nixos-fleet/profiles/tailnet.nix` (`fleet.tailnet.nodes`).
 
-## Topology — sites and roles
+## Topology - sites and roles
 
 Two physical sites stitched together by site routers running IPsec/GRE and advertising LAN subnets into the tailnet:
 
 | Role | Notes |
 |---|---|
-| `servarr` (primary host) | Unraid server. Runs the Docker Compose stacks managed by `composer` (GitOps): media stack, Immich, Vaultwarden, Keycloak, MinIO. The host-mode Caddy edge + ACME moved to the MS-01 router (2026-07); Forgejo (git.erfi.io + Actions runner) moved to the MS-01 router 2026-08-23. Authelia is retired. |
-| Site routers (×2) | IPsec/GRE site-to-site, plus tailscale subnet advertisement. One site has the public IP. |
-| OOB management | PiKVMs — recovery when SSH/network is dead. |
+| `router` (MS-01, NixOS) | Edge: Caddy edge-services stack, composer (GitOps deploy for every compose stack), Forgejo, knotea resolver. Config repo `~/infra/router`, deploys via `make deploy` (`eaves` skill for read-only inspection). |
+| `servarr` (NAS, NixOS + ZFS) | Runs the Docker Compose stacks (media stack, Immich, Keycloak, MinIO, ...). Hot app state on `/appdata` (NVMe), bulk on `/tank/appdata` and `/tank/media` (`zfs-storage` skill). Composer on the router manages its containers through `drawbridge` (mTLS docker gateway). Config repo `~/infra/servarr-nixos`. |
+| Site routers (x2) | IPsec/GRE site-to-site, plus tailscale subnet advertisement. One site has the public IP. |
+| OOB management | PiKVMs - recovery when SSH/network is dead. |
 | SBC cluster | ARM compute modules + BMC. |
 | Edge devices | Standalone SBCs, travel routers, Proxmox host + VMs. |
 
-Resolve actual aliases from `~/.ssh/config`; the LLM should `grep Host ~/.ssh/config` to enumerate, not hard-code.
+Resolve actual aliases from `~/.ssh/config`; enumerate with `rg '^Host ' ~/.ssh/config`, do not hard-code.
 
 Subnet conventions:
 
 | Range | Role |
 |---|---|
 | `10.0.X.0/24` (per-site) | Primary LAN view; site-A advertises its `/24` via its router |
-| `10.68.X.0/24` (per-site) | Same LAN as advertised by the *other* peer's IPsec tunnel — backup path |
+| `10.68.X.0/24` (per-site) | Same LAN as advertised by the *other* peer's IPsec tunnel - backup path |
 | `100.64.0.0/10` | Tailscale CGNAT range; raw `100.x` only as a last-resort fallback |
 
 The dual `10.0.X.Y` / `10.68.X.Y` alias on every Host block is intentional: a single SSH alias works whichever path is healthy. If the `10.0.X.Y` address fails but the `10.68.X.Y` does not, the primary IPsec tunnel is down and you're cross-tunneling.
 
-## Identity files — the convention
+## Identity files - the convention
 
-One private key per **host class**, named `~/.ssh/id_<role>` (no shared agent key). The global `Host *` block enforces:
+One private key per **host class**, named `id_<role>` under `~/.ssh/` (no shared agent key). The global `Host *` block enforces:
 
 ```
 IdentitiesOnly yes
 ```
 
-This is **load-bearing** — without it `ssh-agent` shotguns every loaded key at every host and trips MaxAuthTries. Don't `ssh-add` extra keys hoping it'll work; the agent is intentionally muted.
+This is **load-bearing** - without it `ssh-agent` shotguns every loaded key at every host and trips MaxAuthTries. Don't `ssh-add` extra keys hoping it'll work; the agent is intentionally muted.
 
 Naming patterns observed:
 
-- `_2` suffix indicates a key rotation — `id_servarr_2`, `id_vyos_2` — the unsuffixed predecessors are retired.
-- Shared key across a hardware family is fine — one key per SBC cluster, used by the BMC and every compute module behind it.
+- A rotation gets a new name (e.g. `id_new_servarr`); the predecessor's `IdentityFile` line is commented out, not deleted, so the history is visible in the config.
+- Shared key across a hardware family is fine - one key per SBC cluster, used by the BMC and every compute module behind it.
 - Hardware-tagged names (e.g. `id_<device-codename>`) preferred over role-tagged where the device is unique.
 
-## Primary host (`servarr`) — the operator surface
+## Primary hosts - the operator surface
 
-The user almost never logs in interactively. Pattern is `ssh servarr '<one-liner>'`:
+The user almost never logs in interactively. Pattern is `ssh <alias> '<one-liner>'`:
 
 ```bash
-# Container ops
+# Container inspection on the NAS
 ssh servarr 'docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" | head -40'
-ssh servarr 'docker logs <svc> --since 5m 2>&1 | tail -50'
-ssh servarr 'docker restart <svc>'
 ssh servarr 'docker exec <svc> <cmd>'
+# Container logs: composer's API (tail + filter), not raw docker on servarr - composer skill
 
-# File ops on Unraid host (data lives under /mnt/user/data/<svc>/)
-ssh servarr 'mkdir -p /mnt/user/data/<svc>/<dir>'
-ssh servarr 'cat /mnt/user/data/<svc>/<file>'
-
-# Composer-managed restart (decrypts SOPS) — for stacks that have SOPS env
-make -C ~/infra/ergo/<svc>-compose restart                  # NOT restart-<svc>
+# File ops on the NAS - two tiers, never /mnt/*
+ssh servarr 'ls /appdata/<svc>/'           # hot NVMe: databases, configs
+ssh servarr 'ls /tank/appdata/<svc>/'      # bulk HDD: caches, large blobs; media under /tank/media
 ```
 
-The `make restart` vs `restart-<svc>` distinction is critical and lives in the `caddy` and `composer` skills. Don't recreate-via-`docker restart` a container whose `.env` is SOPS-managed unless you know its env is already plaintext in memory.
+Stack lifecycle (restart, up, env changes) goes through composer's API on the router, not `docker restart` on servarr: composer decrypts the SOPS `.env` at deploy time, so a hand restart of a container whose env is SOPS-managed can come back with the wrong env. Edge stacks under `~/infra/ergo/` wrap that API in their Makefiles (`make restart` in caddy-compose, NOT `restart-<svc>` - `caddy` and `composer` skills); other stacks are driven via the API directly (`composer` skill).
 
-### servarr tailscale: Unraid plugin, `tailscale1`, boot race
+### servarr tailscale: systemd, `tailscale0`, fleet profile
 
-- servarr's tailscaled is the Unraid **plugin**, not systemd (no systemctl
-  on Unraid): `/usr/local/sbin/tailscaled -statedir /boot/config/plugins/tailscale/state -tun tailscale1`.
-  The interface is **`tailscale1`, not `tailscale0`** - `ip addr show tailscale0`
-  finding nothing is normal, not a down state. Tailscale SSH runs as its
-  `be-child` process (its argv shows `--remote-ip=<peer tailnet IP>`, useful
-  for seeing which peer a session arrived from).
-- **Boot race**: after a host reboot the plugin brings `tailscale1` up LATER
-  than docker autostart. Any container publishing on the host tailnet IP
-  (100.69.69.7) fails to bind and exits 128; the restart policy does not
-  retry config-level failures. Repair via composer recreate (see the owning
-  stack's AGENTS.md), not `docker start` (verified: can come back "Up" with
-  zero published ports - silent userland-proxy failure).
-- **Tailnet services are reachable from the dev box even with its tailscaled
-  down**: tailnet IPs route via the site-router tailnet hairpin (sessions
-  source-NAT to the router's tailnet IP, observed as 100.69.69.10 in servarr's
-  tailscale-ssh remote-ip; the reachability itself is verified -
-  `nc 100.69.69.7 5433` works with dev-box tailscaled inactive). Corollary:
-  `tailscale ping` failing locally does NOT mean tailnet services are down -
-  test the actual service port before declaring an outage.
+- servarr runs `tailscaled` as a normal NixOS systemd unit (`systemctl status tailscaled`), interface `tailscale0`. Tailscale SSH runs as its `be-child` process (its argv shows `--remote-ip=<peer tailnet IP>`, useful for seeing which peer a session arrived from).
+- The nixos-fleet `tailnet` profile (`~/infra/nixos-fleet/profiles/tailnet.nix`) applies to router, servarr and hearth: `services.tailscale.extraSetFlags = [ "--accept-dns=false" ]`, `networking.nameservers` = knotea (10.0.10.5), and an `/etc/hosts` node map (`fleet.tailnet.nodes`) standing in for MagicDNS. New tailnet devices must be added to that attrset or their names will not resolve on fleet hosts.
+- **Tailnet services can be reachable from the dev box even with its tailscaled down**: the site router hairpins tailnet IPs (sessions arrive source-NATed from the router's tailnet IP). Corollary: `tailscale ping` failing locally does NOT mean tailnet services are down - test the actual service port before declaring an outage.
 
-For other hosts (site routers, PiKVMs, SBCs) the user drops into an interactive shell — these are config-by-CLI devices, not script targets.
+For other hosts (site routers, PiKVMs, SBCs) the user drops into an interactive shell - these are config-by-CLI devices, not script targets.
 
-## Tailscale CLI — the minimum useful set
+## Tailscale CLI - the minimum useful set
 
 ```bash
 tailscale status                  # one line per peer + relay/direct indicator
-tailscale status --peers          # peer-only view
+tailscale status --peers=false    # self only (--peers defaults to true)
 tailscale status --json | jq      # for scripting
 tailscale ip -4                   # self IPv4 in 100.x range
 tailscale ip -4 <peer>            # peer IPv4 in 100.x range (magic-DNS resolved)
@@ -119,21 +100,21 @@ sudo tailscale logout                             # remove node from tailnet
 sudo tailscale up --reset                         # reset unspecified prefs to default
 sudo tailscale up --ssh                           # accept incoming Tailscale SSH
 sudo tailscale up --accept-routes                 # accept advertised subnet routes
-sudo tailscale up --accept-dns=false              # disable MagicDNS (fleet-wide on NixOS hosts)
+sudo tailscale set --accept-dns=false             # what the fleet profile applies on NixOS hosts
 sudo tailscale up --advertise-routes=10.0.X.0/24  # become a subnet router (subject to admin approval)
 sudo tailscale up --advertise-exit-node           # offer this node as exit (subject to admin approval)
 ```
 
 Subnet-router prerequisite on Linux: enable IP forwarding (`net.ipv4.ip_forward=1`, `net.ipv6.conf.all.forwarding=1` in sysctl). Skip this and exit-node / subnet-router silently fail.
 
-## MagicDNS — the quick rules
+## MagicDNS - the quick rules
 
 - The magic resolver is **`100.100.100.100`**. MagicDNS proxies DNS through tailscaled and answers names in the tailnet domain (`*.<your-tailnet>.ts.net`). Find yours with `tailscale status --json | jq -r .MagicDNSSuffix`.
-- `nslookup` on some platforms bypasses the system resolver and queries the system DNS server directly — it returns **incorrect** results for split-DNS / MagicDNS. Use `dig` or `tailscale dns query` for honest diagnostics.
-- On Ubuntu / systemd-resolved, tailscale rewrites `/etc/resolv.conf`. If `/etc/resolv.conf` is being clobbered or pointing only at `127.0.0.53`, that's the intended behaviour — diagnose with `resolvectl status`.
-- Split-DNS lets you point specific suffixes at internal resolvers (e.g. `*.vyos1.lan` → an internal nameserver behind a subnet router). Configure in the admin console DNS tab.
+- `nslookup` on some platforms bypasses the system resolver and queries the system DNS server directly - it returns **incorrect** results for split-DNS / MagicDNS. Use `dig` or `tailscale dns query` for honest diagnostics.
+- On Ubuntu / systemd-resolved, tailscale rewrites `/etc/resolv.conf`. If `/etc/resolv.conf` is being clobbered or pointing only at `127.0.0.53`, that's the intended behaviour - diagnose with `resolvectl status`.
+- Split-DNS lets you point specific suffixes at internal resolvers. Configure in the admin console DNS tab.
 
-## ACLs — exit-node and subnet-router patterns
+## ACLs - exit-node and subnet-router patterns
 
 The user's tailnet uses **Grants** (newer ACL syntax). The relevant ACL idioms:
 
@@ -152,73 +133,67 @@ The user's tailnet uses **Grants** (newer ACL syntax). The relevant ACL idioms:
 - Subnet routes must be **approved in the admin console** after a node advertises them. `tailscale status | grep offers` shows advertised-but-unapproved routes.
 - For SaaS allowlisting where the SaaS wants a specific egress IP: prefer a **subnet router with `--advertise-routes=<saas-ip>/32`** over an exit node. ACLs then control access to that `/32` cleanly; exit-node ACLs are coarse-grained.
 
-## DNS doctrine: knotea resolves, MagicDNS does not (2026-08-30)
+## DNS doctrine: knotea resolves, MagicDNS does not
 
-Fleet-wide on NixOS hosts (router, servarr, hearth), tailscale runs with
-`--accept-dns=false` via the nixos-fleet `tailnet` profile. Rationale:
+Fleet-wide on NixOS hosts (router, servarr, hearth), tailscale runs with `--accept-dns=false` via the nixos-fleet `tailnet` profile. Rationale:
 
-- `accept-dns=true` rewrites `/etc/resolv.conf` to 100.100.100.100, bypassing
-  knotea's 44 split-horizon erfi.io overrides. `*.erfi.io` then resolves to
-  public Cloudflare IPs instead of the edge Caddy (10.0.10.1).
-- The profile writes /etc/hosts entries for every tailnet node (name +
-  FQDN), so MagicDNS names keep resolving without MagicDNS.
-- knotea 1.4.9 adds split-horizon NODATA: AAAA queries for local-A-only
-  names return NODATA instead of leaking the public CDN AAAA (glibc sorts
-  AAAA first, so this was the actual user-visible bug).
+- Upstream's default is `accept-dns=true`, which rewrites `/etc/resolv.conf` to 100.100.100.100 and bypasses knotea's split-horizon erfi.io overrides. `*.erfi.io` then resolves to public Cloudflare IPs instead of the edge Caddy (10.0.10.1).
+- The profile writes /etc/hosts entries for every tailnet node (name + FQDN), so MagicDNS names keep resolving without MagicDNS.
+- knotea 1.4.9 adds split-horizon NODATA: AAAA queries for local-A-only names return NODATA instead of leaking the public CDN AAAA (glibc sorts AAAA first, so this was the actual user-visible bug).
 
-The dev box (erfi1, WSL) has the same pattern manually: /etc/hosts has the
-tailnet node map, and systemd-resolved points at 10.0.10.5.
+The dev box (erfi1, WSL) has the same pattern manually: /etc/hosts has the tailnet node map, and systemd-resolved points at 10.0.10.5.
 
-Docker on servarr pins `daemon.settings.dns = [ "10.0.10.5" ]` because
-Docker's embedded DNS caches the host resolver at daemon start; a post-boot
-resolv.conf change leaves containers forwarding to the stale resolver.
+Docker on servarr pins `daemon.settings.dns = [ "10.0.10.5" ]` because Docker's embedded DNS caches the host resolver at daemon start; a post-boot resolv.conf change leaves containers forwarding to the stale resolver.
 
 ## Failure-mode diagnostic order
 
 **WSL caveat (read first):** the user's primary workstation is **WSL2 on Windows**. Tailscale runs on the **Windows host**, not inside WSL. Consequences:
 
-- `tailscale` CLI is **not installed in WSL** — `which tailscale` returns nothing. Don't conclude "tailscale is down".
-- `ping 100.x.y.z` to tailnet IPs **fails from WSL** — ICMP doesn't traverse the Windows→WSL NAT cleanly. Don't conclude "peer offline".
+- `tailscale` CLI is **not installed in WSL** - `which tailscale` returns nothing. Don't conclude "tailscale is down".
+- `ping 100.x.y.z` to tailnet IPs **fails from WSL** - ICMP doesn't traverse the Windows->WSL NAT cleanly. Don't conclude "peer offline".
 - `ssh <alias>` **works fine** because WSL inherits Windows DNS + routes packets via the Windows TCP stack, which knows the tailnet. **The first probe when something looks down should be `ssh <alias> true`, not ping.**
-- If you genuinely need the tailscale CLI from WSL: `'/mnt/c/Program Files/Tailscale/tailscale.exe' status`. Use sparingly — most diagnostics are easier done by ssh'ing into a real tailnet member and running `tailscale` there.
+- If you genuinely need the tailscale CLI from WSL: `'/mnt/c/Program Files/Tailscale/tailscale.exe' status`. Use sparingly - most diagnostics are easier done by ssh'ing into a real tailnet member (`ssh router tailscale status`) and running `tailscale` there.
 
 When `ssh <alias>` itself fails, work cheapest probes first:
 
-1. **Alias mapped?** `grep -A2 "Host $HOST" ~/.ssh/config`. If absent, use `<host>.<your-tailnet>.ts.net` directly or add a Host block.
-2. **Tailscale up locally?** `tailscale status` — if it says `Tailscale is stopped`, that's the problem. `sudo tailscale up`. (On WSL: check Windows-side via `'/mnt/c/Program Files/Tailscale/tailscale.exe' status` instead.)
-3. **Peer online?** `tailscale status | grep $HOST` — `offline` means the peer is down. `idle` is fine. `-` (no last-seen) = never connected.
-4. **MagicDNS resolving?** `tailscale ip -4 $HOST` should return a `100.x` IP. If not, MagicDNS is off — use the LAN `10.0.x.y` IP directly.
+1. **Alias mapped?** `rg -A2 "Host $HOST" ~/.ssh/config`. If absent, use `<host>.<your-tailnet>.ts.net` directly or add a Host block.
+2. **Tailscale up locally?** `tailscale status` - if it says `Tailscale is stopped`, that's the problem. `sudo tailscale up`. (On WSL: check Windows-side via `'/mnt/c/Program Files/Tailscale/tailscale.exe' status` instead.)
+3. **Peer online?** `tailscale status | grep $HOST` - `offline` means the peer is down. `idle` is fine. `-` (no last-seen) = never connected.
+4. **Name resolving?** `tailscale ip -4 $HOST` should return a `100.x` IP. On fleet NixOS hosts names come from /etc/hosts (MagicDNS is off); if a new device is missing, add it to `profiles/tailnet.nix` or use the LAN `10.0.x.y` IP directly.
 5. **Wrong key offered?** `ssh -v $HOST 2>&1 | grep -E 'Offering|Authentications'`. `IdentitiesOnly yes` means only the pinned key is offered. Fix the `Host` block; don't `ssh-add` more keys.
-6. **Permission denied (publickey) with the right key?** Permissions: `ls -la ~/.ssh/id_<role>` must be `0600`. If just rotated (`_2` suffix), the new pubkey may not be in `authorized_keys` yet — escalate to PiKVM for OOB recovery.
-7. **Primary LAN path dead?** Try the `10.68.x.x` alias listed in the same Host block — that's the cross-site IPsec backup.
-8. **Tailnet partition?** `tailscale ping $HOST` — if it can't establish even a relay path, suspect the control plane (`login.tailscale.com`) or a firewall blocking DERP. `tailscale netcheck` for local diagnosis.
-9. **Servarr-only: ssh works but `docker ps` hangs?** Unraid host is in a bad state — reboot via PiKVM is the standard escalation. Check `~/infra/servarr-compose/AGENTS.md` for the last hang post-mortem before doing anything destructive.
+6. **Permission denied (publickey) with the right key?** Permissions: private keys in `~/.ssh/` must be `0600` (`ls -la ~/.ssh/`). If just rotated, the new pubkey may not be in `authorized_keys` yet - escalate to PiKVM for OOB recovery.
+7. **Primary LAN path dead?** Try the `10.68.x.x` alias listed in the same Host block - that's the cross-site IPsec backup.
+8. **Tailnet partition?** `tailscale ping $HOST` - if it can't establish even a relay path, suspect the control plane (`login.tailscale.com`) or a firewall blocking DERP. `tailscale netcheck` for local diagnosis.
+9. **servarr-only: ssh works but `docker ps` hangs?** Check `systemctl status docker` and `journalctl -u docker -n 50` over ssh, then ZFS pool health (`zpool status`); a reboot via PiKVM is the escalation. Read `~/infra/servarr-nixos/AGENTS.md` before doing anything destructive.
 
 Order matters: 1-2 are local, 3-4 are tailnet API, 5-6 require touching the remote host, 7-8 escalate to network plumbing, 9 is hardware. Don't skip ahead.
 
 ## Tailscale-specific gotchas
 
-1. **MagicDNS off → magic FQDNs don't resolve**, but tailscale IPs still work. `--accept-dns=true` is the default; verify with `tailscale dns status`.
+1. **MagicDNS off -> magic FQDNs don't resolve**, but tailscale IPs still work. Upstream default is `--accept-dns=true`; this fleet forces `false` on NixOS hosts (nixos-fleet `profiles/tailnet.nix`) and resolves names via /etc/hosts. Verify with `tailscale dns status`.
 2. **`/etc/resolv.conf` overwriting on Ubuntu/Debian** is intended. If something else expected to own resolv.conf (e.g. NetworkManager) is fighting tailscale, you get DNS flapping. Use `resolvectl status` to see who's winning.
 3. **Subnet router needs IP forwarding** at the kernel level *and* admin-console approval. Both. Either one missing = silent failure.
-4. **`tailscale up` without flags resets unspecified prefs to default** — pass every flag you want preserved each time, or rely on `--reset` only when you mean it.
-5. **`ssh -o ProxyCommand='tailscale nc %h %p'`** is the userspace-tailscale workaround — useful in CI runners and ephemeral containers where you can't install the full client. Slower than direct.
-6. **DERP-relay use is a red flag for direct-connection failure**. `tailscale ping` reports `via DERP` instead of `via 100.x.y.z:port`. Diagnose with `tailscale netcheck` — usually a strict-NAT or firewall issue at one end.
-7. **Quarantined nodes (shared from other tailnets, including Mullvad exit nodes) cannot establish inbound connections.** Use `autogroup:danger-all` cautiously — it includes them.
-8. **Pre-auth keys (`tskey-auth-*`) are scoped + expiring** — generate per-fleet in the admin console with appropriate tags. Don't bake long-lived keys into images.
-9. **WSL `ping` / `tailscale` CLI both fail → not a tailnet outage**. WSL has no tailscaled and ICMP-to-100.x doesn't survive the Windows NAT. The authoritative liveness probe from WSL is `ssh <alias> true`; if that succeeds the tailnet is fine even though `ping` and the (non-existent) local `tailscale` CLI both fail.
+4. **`tailscale up` without flags resets unspecified prefs to default** - pass every flag you want preserved each time, or rely on `--reset` only when you mean it. On NixOS hosts prefer `extraSetFlags` in the profile so the setting converges on every rebuild.
+5. **`ssh -o ProxyCommand='tailscale nc %h %p'`** is the userspace-tailscale workaround - useful in CI runners and ephemeral containers where you can't install the full client. Slower than direct.
+6. **DERP-relay use is a red flag for direct-connection failure**. `tailscale ping` reports `via DERP` instead of `via 100.x.y.z:port`. Diagnose with `tailscale netcheck` - usually a strict-NAT or firewall issue at one end.
+7. **Quarantined nodes (shared from other tailnets, including Mullvad exit nodes) cannot establish inbound connections.** Grants that include shared nodes need to account for that.
+8. **Pre-auth keys (`tskey-auth-*`) are scoped + expiring** - generate per-fleet in the admin console with appropriate tags. Don't bake long-lived keys into images; handling per the `secret-handling` skill.
+9. **WSL `ping` / `tailscale` CLI both fail -> not a tailnet outage**. WSL has no tailscaled and ICMP-to-100.x doesn't survive the Windows NAT. The authoritative liveness probe from WSL is `ssh <alias> true`; if that succeeds the tailnet is fine even though `ping` and the (non-existent) local `tailscale` CLI both fail.
 
 ## Cross-references
 
-- **`caddy` skill** — every `ssh servarr 'docker ...'` recipe assumes this works.
-- **`composer` skill** — same; the deployment platform lives on `servarr`.
-- **`knot-dns` skill** — Knot runs on Fly, not on the homelab, but the homelab Caddy is the cert-consuming downstream.
-- **`gloryhole` skill** — home profile runs on the homelab; uses VyOS as upstream resolver.
-- **`infrastructure-stack` skill** — bridge subnet conventions, compose patterns on `servarr`.
+- **`caddy` skill** - every `ssh router 'docker ...'` recipe assumes this works.
+- **`composer` skill** - the deployment platform runs on the router and reaches servarr's docker through `drawbridge`; also the logs endpoint for servarr containers.
+- **`drawbridge` skill** - the mTLS docker gateway on servarr (listens on LAN + tailnet).
+- **`eaves` skill** - read-only router inspection; `nixos` skill for rebuilding router or servarr.
+- **`knot-dns` skill** - Knot runs on Fly, not on the homelab, but the homelab Caddy is the cert-consuming downstream.
+- **`gloryhole` skill** - the filtering resolver; its `config.yml` holds the local zones and upstreams.
+- **`infrastructure-stack` skill** - bridge subnet conventions, compose patterns on `servarr`.
 
 ## See also
 
-- `~/.ssh/config` — host inventory + identity-file mapping (authoritative)
-- `tailscale status` / `tailscale status --json | jq` — live tailnet state
-- `~/infra/servarr-compose/AGENTS.md` — Unraid host conventions
+- `~/.ssh/config` - host inventory + identity-file mapping (authoritative)
+- `ssh router tailscale status` / `tailscale status --json | jq` - live tailnet state
+- `~/infra/nixos-fleet/profiles/tailnet.nix` - DNS doctrine + tailnet node map
+- `~/infra/servarr-nixos/AGENTS.md` - NAS host conventions
 - Tailscale docs (kb): troubleshooting guide, subnet routers, MagicDNS, route filtering with `via`, ACL grants

@@ -1,7 +1,6 @@
 # wafctl internals reference
 
 Package `main`, stdlib-only, Go 1.26+, under `~/infra/ergo/caddy-compose/wafctl/`.
-Verified against source 2026-06.
 
 ## Data pipeline - access log ingestion
 
@@ -264,7 +263,7 @@ HasRateLimit; response has uncovered_pct.
 | `WAF_DATA_DIR` | /data | Auto-generated HMAC key dir |
 | `WAF_DIR` | /data/waf | jail.json, cf proxies, jti-denylist |
 | `WAF_CADDYFILE_PATH` | /data/Caddyfile | Service discovery, reload |
-| `WAF_CADDY_ADMIN_URL` | http://caddy:2020 | Caddy admin API |
+| `WAF_CADDY_ADMIN_URL` | set in compose.yaml (`$WAF_CADDY_ADMIN_URL`) | Caddy admin API |
 | `WAF_EVENT_MAX_AGE` | 2160h | Security event retention (90d) |
 | `WAF_GENERAL_LOG_MAX_AGE` | 168h | General log retention (7d) |
 | `WAF_TAIL_INTERVAL` | 5s | Tail/eviction interval |

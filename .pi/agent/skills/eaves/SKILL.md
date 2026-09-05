@@ -1,6 +1,6 @@
 ---
 name: eaves
-description: Use when answering operational questions about the user's NixOS edge router via the read-only eaves CLI - DHCP leases/pools, NAT translations, conntrack, nftables ruleset, interfaces/routes/neighbors, vnstat bandwidth, kea journal - running the doctor health/regression suite, checking config drift after a router.nix rebuild, working offline from committed fixtures (EAVES_FIXTURE_DIR), re-capturing/sanitizing fixtures, or extending the CLI. Fires on 'eaves', 'show dhcp leases', 'who is 10.0.x.x', 'router health', 'edge router status', 'is NAT working'. NOT for config changes - config is router.nix + nixos-rebuild.
+description: Use when answering operational questions about the user's NixOS edge router via the read-only eaves CLI - DHCP leases/pools, NAT translations, conntrack, nftables ruleset, interfaces/routes, vnstat bandwidth, kea journal - running the doctor gate, checking drift after a `make deploy` of ~/infra/router, or working offline from fixtures (EAVES_FIXTURE_DIR). Fires on 'eaves', 'show dhcp leases', 'who is 10.0.x.x', 'router health', 'is NAT working'. NOT for changing router config (nixos).
 ---
 
 # eaves - read-only operational CLI for the edge router
@@ -12,11 +12,10 @@ capability - no `configure` mode exists by design. `-h` / `--help` (any
 position) or `help <path>` prints that sub-tree's commands instead of
 erroring.
 
-**Config control plane (since 2026-08-01): `~/infra/router`** - private
-GitHub `erfianugrah/router`, flake-based, SINGLE configuration.nix (the
-old configuration.nix/router.nix manual-mirror workflow is dead).
-`/etc/nixos` on the router is a read-only checkout; NEVER edit files
-on the router. All changes: edit in `~/infra/router`, commit, `make deploy`
+**Config control plane: `~/infra/router`** - private GitHub
+`erfianugrah/router`, flake-based, a SINGLE `configuration.nix` (there is
+no `router.nix`). `/etc/nixos` on the router is a read-only checkout;
+NEVER edit files on the router. All changes: edit in `~/infra/router`, commit, `make deploy`
 (push -> router fast-forwards -> `nixos-rebuild switch --flake
 .#router` -> `eaves doctor` gate). `make diff` = dry-build. nixpkgs
 and eaves are pinned in flake.lock; bump deliberately (eaves: the
@@ -37,12 +36,11 @@ Implementation plan + fixture contract: `~/infra/eaves/docs/plans/2026-07-24-eav
 | Change firewall/DHCP/VLAN config | `~/infra/router` + `make deploy` - NEVER eaves (it can't), NEVER edit /etc/nixos on the router |
 | Raw packet forensics eaves doesn't cover | `ssh router` + tcpdump/conntrack by hand (`tailscale-homelab` skill) |
 
-## Binary availability (ADOPTED 2026-08-01)
+## Binary availability
 
 eaves IS on the router's PATH (`/run/current-system/sw/bin/eaves`),
 installed via the `~/infra/router` flake input (`eaves.nixosModules.default`
-= systemPackages). The old rsync + /tmp/nix-build pattern is RETIRED.
-Run: `ssh router 'sudo -n eaves doctor'`. Rolling out a NEW eaves rev:
+= systemPackages). Run: `ssh router 'sudo -n eaves doctor'`. Rolling out a NEW eaves rev:
 `nix flake update eaves` in `~/infra/router` (or the router /tmp-clone flow
 from its README when the dev box has no nix), commit flake.lock,
 `make deploy` - the lock pin means a broken eaves main never reaches the
@@ -130,8 +128,10 @@ Repo `~/infra/eaves`, stdlib-only Go (go.mod zero requires - keep it that way;
 `internal/show/show.go`; parsers pure in `internal/parse/`; new data
 sources go through the runner allowlist (`internal/runner/runner.go`) -
 add the binary + a fixture capture line + parser + golden test. Build via
-the self-correcting loop (`.pi/harness.json` is ready: 10 sensors incl.
-LLM judge) - see the `self-correcting-loop` skill. NOTE: loop agents run
+the self-correcting loop (`self-correcting-loop` skill). `.pi/harness.json`
+is RETARGETED PER TASK: its `task` and feature sensors describe whatever
+was last built (18 sensors incl. an LLM judge at the time of writing) -
+rewrite `task` + the feature sensors before reusing it. NOTE: loop agents run
 in a bwrap jail (ro filesystem, ~/.ssh masked) - they CANNOT ssh to the
 router, so fixture re-capture must happen OUTSIDE the loop (run
 `scripts/capture-fixtures.sh` yourself, commit, then start the loop).

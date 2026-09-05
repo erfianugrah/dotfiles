@@ -1,6 +1,6 @@
 ---
 name: waf-api
-description: Use when working with the wafctl WAF management API or waf-dashboard UI in ~/infra/ergo/caddy-compose - querying or adding HTTP endpoints, exporting events, debugging rule/config changes that don't take effect (store-vs-deploy split), adding an event type / rule type / condition field / summary counter end-to-end, editing dashboard pages or the src/lib/api mapping layer, or checking wafctl env vars, auth, ports, stores, or the deploy pipeline.
+description: Use when working with the wafctl WAF management API or waf-dashboard UI in ~/infra/ergo/caddy-compose - querying or adding HTTP endpoints, exporting events, debugging rule/config changes that don't take effect (store-vs-deploy split), adding an event type / rule type / condition field / summary counter end-to-end, editing dashboard pages or the src/lib/api mapping layer, or checking wafctl env vars, auth, ports and stores. NOT for Caddyfile, image build, SOPS or stack deploy (caddy).
 ---
 
 # waf-api - wafctl API + waf-dashboard reference
@@ -10,7 +10,7 @@ description: Use when working with the wafctl WAF management API or waf-dashboar
 wafctl (`~/infra/ergo/caddy-compose/wafctl/`, Go stdlib-only, single `package main`) is the
 management plane for the custom Caddy WAF. It tails the Caddy access log, stores
 events/rules/config in JSON files, and serves ~94 JSON API routes on `:8080` plus the
-waf-dashboard static build (Astro 6 MPA + React 19 islands in
+waf-dashboard static build (Astro 7 MPA + React 19 islands in
 `~/infra/ergo/caddy-compose/waf-dashboard/`). The policy-engine Caddy plugin is the data
 plane; wafctl never touches traffic directly.
 
@@ -56,12 +56,15 @@ by `deployMu`. `POST /api/config/generate` is preview-only. None reload Caddy.
 - **Response `total:-1`** = partial results (timeout or export stream), not a bug.
 - **Rule mutations return success without deploying** - the dashboard calls
   `POST /api/deploy` explicitly; API/CLI callers must too (`wafctl deploy`).
-- **Doc figures corrected 2026-06** (previously stale in caddy-compose/AGENTS.md):
-  "155 mux routes" -> actually 94 API routes + UI catch-all; `validWAFModes` was
-  removed from the code (config is thresholds + `detection_only`;
-  `inbound_threshold: 0` = blocking disabled); blocklist.go comments used to claim
-  "reload Caddy" but it calls `deployAll` (no reload). If an old doc/memory
-  disagrees with the skill, the skill (verified against source) wins.
+- **Route count**: ~94 API routes plus the UI catch-all (`rg -c 'mux.Handle' wafctl/main.go`
+  is the ground truth); older docs quoting "155 mux routes" are stale.
+- **No WAF modes**: `validWAFModes` no longer exists - config is thresholds + `detection_only`;
+  `inbound_threshold: 0` = blocking disabled.
+- **`POST /api/blocklist/refresh` does not reload Caddy** - it calls `deployAll` (regenerates
+  `policy-rules.json` only), whatever older comments in blocklist.go claimed.
+- **Direction (2026-08-09)**: the CRS/WAF/challenge surface is slated for removal and wafctl
+  becomes `edgectl` (ddos/jail/events stay). Fix bugs in those routes; do not extend them.
+  See `PLAN.md` "Direction Change" in the repo and the `caddy` skill.
 
 ## Adding things end-to-end
 
@@ -93,12 +96,12 @@ Load these on demand - they are the complete ground truth:
 | Task | Start here |
 |---|---|
 | Call the API / build curl | `api-reference.md` (domain table) + auth gotchas above |
-| "Change didn't take effect" | Invariant 1 above; `internals.md` §Deploy pipeline |
+| "Change didn't take effect" | Invariant 1 above; `internals.md` section Deploy pipeline |
 | Add endpoint to wafctl | `main.go` route block + `handlers_*.go`; mirror in `frontend.md` API module |
-| Add dashboard page | `frontend.md` §Pages + conventions |
-| Event classification wrong | `internals.md` §Data pipeline (source -> eventType table) |
-| Env var / file path / port | `internals.md` §Environment variables |
-| wafctl CLI usage | `internals.md` §CLI |
+| Add dashboard page | `frontend.md` section Pages + conventions |
+| Event classification wrong | `internals.md` section Data pipeline (source -> eventType table) |
+| Env var / file path / port | `internals.md` section Environment variables |
+| wafctl CLI usage | `internals.md` section CLI |
 
 ## Common mistakes
 
