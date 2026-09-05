@@ -58,6 +58,8 @@ example.com {
 
 Internal admin proxy on a high port IP-restricts to the wafctl bridge subnet and reverse-proxies to `localhost:2019`. **wafctl talks to that proxy port, never `:2019` directly.**
 
+**Vhost naming**: default is plain `<name>.erfi.io`. The `.edge.` infix exists only where the plain name already serves something else - `knotea.edge.erfi.io` (LAN twin of the Fly-hosted `knotea.erfi.io` DoH/DoT) plus the historical `composer.edge` / `waf.edge` (LAN twins of their public same-name vhosts). New LAN-only services get the plain name (e.g. ntopng -> `ntop.erfi.io`), never `.edge.` by default.
+
 ## TSIG + rfc2136 - secret chain to Knot
 
 ```caddyfile
