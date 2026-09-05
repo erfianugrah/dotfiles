@@ -1,13 +1,12 @@
 ---
 name: gh-search
-description: Search public GitHub code, issues, PRs, repos, users, commits via the gh CLI. Use this instead of web search when looking for real-world code examples, API usage patterns across many repositories, or specific GitHub artifacts. Equivalent to grep.app for code search but works via gh's authenticated API (5000 req/hr rate limit). For code search, prefer this over Read/Glob/Grep on your local filesystem when you need cross-repository patterns.
+description: "Use when you need real-world code examples or API usage across many public repos, or a GitHub issue/PR/repo/commit whose location you do not know - 'how do others call X', 'find repos using Y', 'is anyone else hitting this error'. NOT for PRs/issues/runs on a repo you own (gh) or CI YAML (ci-workflows)."
 ---
 
 # GitHub Search via gh CLI
 
-Replaces the grep.app remote MCP. Uses the GitHub Search API via the `gh` CLI
-(authenticated, 5000 req/hr). Works for code, issues, PRs, repos, users, and
-commits across public GitHub.
+Uses the GitHub Search API via the `gh` CLI (authenticated, 5000 req/hr). Works
+for code, issues, PRs, repos, users, and commits across public GitHub.
 
 ## Setup
 
@@ -78,7 +77,7 @@ gh search code 'from "@anthropic-ai/sdk" import' --language=typescript --limit 3
 ### "Who else is patching this CVE?"
 
 ```bash
-gh search code 'CVE-2024-12345' --filename='*.md' --limit 50
+gh search code 'CVE-2024-12345' --filename='*.md' --limit 50   # placeholder id
 ```
 
 ### "Find a working example of a config file"
@@ -105,25 +104,26 @@ Useful fields: `textMatches[]` (fragment, matches[]), `repository` (nameWithOwne
 | `--repo OWNER/NAME` | Restrict to one repo |
 | `--owner USER` | Restrict to repos owned by user/org |
 | `--filename PATTERN` | Match path pattern (e.g. `*.tsx`, `Dockerfile`) |
-| `--limit N` | Max results (default 30, max 100) |
-| `--sort` | `indexed`/`best-match` for code; varies by command |
+| `--limit N` | Max results to fetch (default 30) |
+| `--sort` / `--order` | issues, prs and repos only (`updated`, `stars`, `comments`, ...); `gh search code` has no `--sort` - results are relevance-ranked |
 | `--state` | `open`/`closed`/`merged` (issues + PRs) |
 | `--label` | Issue/PR labels |
 | `--author`/`--assignee` | User filters |
 
 ## Tips
 
-- **Code search is approximate**: GitHub's index covers default branches only, files ≤ 384 KB, and `cb2dee...` SHA-tagged content. Edge cases get missed. If you don't find what you're looking for, try varying the query.
+- **Code search is approximate**: GitHub's index covers default branches only and files up to 384 KB. Edge cases get missed. If you don't find what you're looking for, vary the query.
 - **Quotes matter**: `'"exact phrase"'` (note shell quoting) for exact match. Bare query is OR-ed term-by-term.
-- **Path filters before language filters**: `--filename` is the most powerful filter — use it early.
+- **Path filters before language filters**: `--filename` is the most powerful filter - use it early.
 - **Auth**: needs `gh auth login` (read scope). Without auth you'll hit a much lower unauthenticated rate limit.
-- **No private repos** by default — code search returns public only unless you've explicitly granted org access via SSO.
+- **No private repos** by default - code search returns public only unless you've explicitly granted org access via SSO.
 
-## Alternatives (for completeness)
+## When NOT to use
 
-- **`rg` locally**: when you have the code cloned, `rg` is faster + more flexible than this skill.
-- **grep.app**: web UI for cross-repo search; MCP-wrapped as `gh_grep` (a remote MCP server - pi-mcp-bridge is stdio-only, so pi never bridged it). This skill covers the same ground via the `gh` CLI with auth and higher rate limits.
-- **codeberg.org search**: federated alternative for non-GitHub code.
+- The repo is already cloned: `rg` is faster and more flexible than any remote search.
+- You own the repo and want to act on a PR, issue, release or run: `gh` skill.
+- You want a library's current docs rather than examples of its use: the docs mirror (pi `docs_*` tools / erfi-toolkit `docs` in Claude Code) or context7.
+- Non-GitHub code: codeberg.org search or the forge's own UI.
 
 ## Related
 

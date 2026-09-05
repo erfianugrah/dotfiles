@@ -1,11 +1,11 @@
 ---
 name: git-troubleshooting
-description: Use when a git command fails or behaves oddly - git mv, git add, git rm, or git checkout errors; messages like not under version control, pathspec did not match, or refusing to lose untracked file; files mysteriously absent from git status; gitignore-trap confusion; dirty-tree commit failures; or detached-HEAD recovery. Run this diagnostic battery BEFORE guessing at a fix.
+description: "Use when a git command fails or behaves oddly - git mv, git add, git rm, or git checkout errors; messages like not under version control, pathspec did not match, or refusing to lose untracked file; files mysteriously absent from git status; gitignore-trap confusion; dirty-tree commit failures; or detached-HEAD recovery. Run this diagnostic battery BEFORE guessing at a fix. NOT for GitHub-side operations (gh) or for keeping files safe from a concurrent loop (git-worktrees)."
 ---
 
 # git-troubleshooting
 
-Use this when a git command fails on a file that visibly exists, or when `git status` shows clean but operations behave as if a file is missing. The most common cause is **gitignore** — and the second-most-common is **wrong cwd**. Almost everything else is downstream of one of those two.
+Use this when a git command fails on a file that visibly exists, or when `git status` shows clean but operations behave as if a file is missing. The most common cause is **gitignore** - and the second-most-common is **wrong cwd**. Almost everything else is downstream of one of those two.
 
 ## The diagnostic battery
 
@@ -31,18 +31,19 @@ That's the full battery. You almost never need more.
 | `error: pathspec 'X' did not match` | X is gitignored, untracked, or wrong cwd | full battery above |
 | File visible on disk but absent from `git status` | gitignored | `git check-ignore -v X` |
 | File visible on disk, absent from `git ls-files`, NOT in `git status` either | ignored | `git check-ignore -v X` |
-| File in `git status` as untracked but `git add` does nothing | gitignored AND status `-uall` somehow showed it (unusual — verify) | `git check-ignore -v X; git config --get core.excludesfile` |
+| Untracked dir `X/` shows in `git status` but its files never get added | X is itself a git repo (nested `.git`); git records it as a gitlink, not files | `ls -la X/.git; git submodule status` |
+| Untracked file vanished while a loop ran in the repo | the loop's scope revert deleted it; it was never in a checkpoint, so it is not recoverable | see the `git-worktrees` skill |
 | `fatal: refusing to lose untracked file at 'X'` | destination is untracked | `ls -la X; git status -uall` |
 | `fatal: not a git repository` | wrong cwd | `pwd; git rev-parse --show-toplevel` |
 | `fatal: X: not a valid object name` | branch/tag/commit name typo | `git branch -a; git tag --list; git log --oneline -5` |
 | `git commit` says "nothing to commit, working tree clean" but you just edited a file | edits are in an ignored file OR a different worktree | `git check-ignore -v X; git worktree list` |
-| Detached HEAD after `git checkout <sha>` | not a bug — that's what checkout-by-sha does | `git switch -c rescue-branch` to attach |
+| Detached HEAD after `git checkout <sha>` | not a bug - that's what checkout-by-sha does | `git switch -c rescue-branch` to attach |
 | `git pull` says "Already up to date" but you expected changes | wrong remote/branch tracking | `git remote -v; git branch -vv; git fetch --all` |
 
 ## The gitignore trap (most common, deserves its own section)
 
 ```bash
-# Symptom — you created plan.md, can't git mv / git add it:
+# Symptom - you created plan.md, can't git mv / git add it:
 $ git mv plan.md docs/plan.md
 fatal: not under version control, source=plan.md, destination=docs/plan.md
 
@@ -52,7 +53,7 @@ $ git check-ignore -v plan.md
 #  ^^^^^^^^^^ ^^^^  ^^^^^^^
 #  rule file  rule  matched path
 
-# Three fixes — pick one:
+# Three fixes - pick one:
 
 # 1. Edit the rule (best if the rule is actually wrong)
 sd '^\*\.md$' '' .gitignore                   # delete blanket rule
@@ -70,7 +71,7 @@ echo '!**/README.md' >> .gitignore
 
 ## Renames and moves
 
-`git mv` requires the source to be **tracked**. For untracked files, plain `mv` is correct — git only learns about renames at commit time anyway, via similarity detection.
+`git mv` requires the source to be **tracked**. For untracked files, plain `mv` is correct - git only learns about renames at commit time anyway, via similarity detection.
 
 ```bash
 # Tracked file → preserves rename detection
@@ -80,7 +81,7 @@ git mv src.md dst.md
 mv src.md dst.md
 git add dst.md
 
-# Bulk move with mixed tracking — handle each branch
+# Bulk move with mixed tracking - handle each branch
 for f in *.md; do
   if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
     git mv "$f" "newdir/$f"
@@ -103,7 +104,7 @@ git rev-parse --show-toplevel               # where does git think the repo is?
 echo $OLDPWD                                # was I somewhere else recently?
 ```
 
-Fix: `cd` to the right place. Don't `git -C` your way out of it — that just hides the bug for the next command.
+Fix: `cd` to the right place. Don't `git -C` your way out of it - that just hides the bug for the next command.
 
 ## Dirty tree blocking an operation
 
@@ -111,12 +112,12 @@ Fix: `cd` to the right place. Don't `git -C` your way out of it — that just hi
 # `git checkout <branch>` / `git pull` fails with "Your local changes would be overwritten":
 git status --short                          # see what's dirty
 git stash push -u -m "wip before checkout"  # -u includes untracked
-# … do the operation …
+# ... do the operation ...
 git stash pop                               # bring changes back
 
 # Or commit the WIP first:
 git add -A && git commit -m "wip"
-# … do the operation …
+# ... do the operation ...
 git reset HEAD~1                            # uncommit but keep changes staged
 ```
 
@@ -158,13 +159,14 @@ If `.git/index` itself is corrupt: `rm .git/index && git reset` rebuilds it from
 
 ## Don't reach for these unless you know why
 
-- `git filter-branch` / `git filter-repo` — history rewrite. Slow, dangerous, ruins clones.
-- `git update-ref` — manual ref manipulation. Bypasses safety checks.
-- `git gc --aggressive --prune=now` — almost never the answer to anything.
-- `git push --force` without `--force-with-lease` — clobbers others' work.
+- `git filter-branch` / `git filter-repo` - history rewrite. Slow, dangerous, ruins clones.
+- `git update-ref` - manual ref manipulation. Bypasses safety checks.
+- `git gc --aggressive --prune=now` - almost never the answer to anything.
+- `git push --force` without `--force-with-lease` - clobbers others' work.
 
 ## See also
 
-- `gh` skill — GitHub-specific (PRs, issues, releases)
-- `gh-search` skill — cross-repo code/issue search
+- `gh` skill - GitHub-specific (PRs, issues, releases)
+- `gh-search` skill - cross-repo code/issue search
+- `git-worktrees` skill - isolating agent work from a concurrent loop or session
 - `systematic-debugging` skill - general debugging methodology (this skill is the git-specific specialization)

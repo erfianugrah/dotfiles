@@ -1,20 +1,24 @@
 ---
 name: sops-encrypt
-description: Use when a file holding secrets, customer identifiers, credentials, or any sensitive prose needs to be committed to a git repo with a remote - encrypting before commit so plaintext never reaches the remote. Fires on "encrypt this", "encrypt them before committing", "encrypt the file", "sops", "age encrypt", "this has secrets/keys/customer names, commit it". NOT for app-level secret storage in a deployed service (that is the target repo's own pattern) or for the confidential-write classification decision (the AGENTS.md rule and confidential_terms tool own that).
+description: "Use when a file holding secrets, customer identifiers or other sensitive prose needs to be committed to a git repo with a remote, or when one key inside an already-encrypted file must change - 'encrypt this before committing', 'sops', 'age encrypt', 'this .env has keys, commit it', 'rotate one value in the sops file'. NOT for comparing, verifying or handing a credential to a program (secret-handling) or for the confidential-term classification (the AGENTS.md rule)."
 ---
 
 # sops-encrypt - encrypt files with sops+age before commit
 
 ## Overview
 
-The dotfiles ship zsh helpers in `functions.d/crypto.zsh` that encrypt files in-place with
-`sops` + `age`. Use those. Do NOT hand-roll `age -o file.age file` or `openssl enc` - the
-established path encrypts **in place** (same filename, sops metadata embedded), which is what
-the repo's pre-commit hook and the rest of the tooling expect.
+The dotfiles ship zsh helpers in `~/dotfiles/functions.d/crypto.zsh` that encrypt files
+in-place with `sops` + `age`. Use those. Do NOT hand-roll `age -o file.age file` or
+`openssl enc` - the established path encrypts **in place** (same filename, sops metadata
+embedded), which is what the repo's pre-commit hook and the rest of the tooling expect.
 
-**Core principle: encrypt in place with `encrypt <file>`, never produce a separate `.age`/`.enc`
-sidecar, and never commit the plaintext.** A sidecar file leaves the plaintext next to it and
-breaks the convention every other repo follows.
+**Core principle: encrypt in place with `encrypt <file>`, never produce a separate
+`.age`/`.enc` sidecar, and never commit the plaintext.** A sidecar file leaves the plaintext
+next to it and breaks the convention every other repo follows.
+
+Where secrets live (SOPS-encrypted `.env` in git as the canonical store, the secretctl
+registry, the age-key escrow status) is stated once, in the `secret-handling` skill. This
+skill is the mechanics of getting a file encrypted and registered.
 
 ## The command
 
@@ -35,21 +39,39 @@ config to pick it up.
 
 **Never print the key material.** Do not `cat`/`echo`/`printenv` `SOPS_AGE_KEYS` or the keys file
 to "check" it - that puts the private key into the session transcript and any synced store. To
-confirm it is set without revealing it: `env | grep ^SOPS_AGE_KEYS | sed 's/=.*/=<set>/'`. The
-public half is safe to derive and show (`age-keygen -y <keys-file>`); the `AGE-SECRET-KEY-...`
-line is not.
+confirm it is set without revealing it:
+
+```bash
+[ -n "${SOPS_AGE_KEYS+x}" ] && echo set || echo unset
+```
+
+The public half is safe to derive and show (`age-keygen -y <keys-file>`); the
+`AGE-SECRET-KEY-...` line is not.
 
 ## Workflow (sensitive file into a repo with a remote)
 
 1. Write/edit the file with its real contents (customer names, keys, whatever it legitimately holds).
 2. `encrypt path/to/file` - same path, now sops-encrypted.
-3. `git add` + commit the encrypted file. The pre-commit hook blocks unencrypted secrets, so an
+3. Register the store. Add a `sops:<path>#*` line (globs and `**` allowed) to
+   `~/dotfiles/.config/secretctl/sources` (stowed to `~/.config/secretctl/sources`), then run
+   `secretctl coverage` - it lists secret-looking files the registry does not cover and exits 1
+   while any remain. An unregistered store is invisible to the secret-output-guard: nothing masks
+   its values if they reach a tool result.
+4. `git add` + commit the encrypted file. The pre-commit hook blocks unencrypted secrets, so an
    encrypted file passes and plaintext would fail.
-4. To read or edit later: `decrypt path/to/file`, edit, `encrypt` again before committing.
+5. To read or edit later: `decrypt path/to/file`, edit, `encrypt` again before committing.
 
 `.allow-unencrypted` at a repo root skips the hook's checks entirely;
 `.allow-unencrypted-paths` (one glob per line) skips specific paths. Use for files that look
 sensitive to the scanner but are not.
+
+## Changing one key without plaintext on disk
+
+`secretctl set 'sops:PATH#KEY' --from <src>` writes a new value straight into the encrypted
+file, re-encrypting to the file's own age recipients, and prints before/after digests so the
+change is provable. Nothing is decrypted to disk or stdout. Sources: `prompt:` (hidden terminal
+read), `env:NAME`, or another `sops:`/`dotenv:` entry. Prefer this over decrypt-edit-encrypt
+whenever the change is a single value; the full round trip is for structural edits.
 
 ## Common mistakes
 
@@ -60,5 +82,7 @@ sensitive to the scanner but are not.
   no separate plaintext to remove at all.
 - **Committing before encrypting.** The remote keeps history; encrypting after a plaintext push
   does not scrub it. Encrypt first, then commit.
+- **Encrypting but not registering.** The guard covers registered stores only. Step 3 is part
+  of the job, not a follow-up.
 - **Assuming a file is encrypted without checking.** Look for the sops metadata block
   (`sops:` / `sops_age__list_`) rather than trusting the filename.

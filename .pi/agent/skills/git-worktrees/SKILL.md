@@ -1,6 +1,6 @@
 ---
 name: git-worktrees
-description: Use when about to do agent work in a repo that ANOTHER session, loop, or human might touch at the same time - starting a self-correcting loop, a long multi-file refactor, or writing new untracked files while a background agent runs there. Also fires on 'another session is working in that repo', 'run a loop', 'parallel work', or after any incident where an agent's files vanished.
+description: "Use when about to do agent work in a repo that ANOTHER session, loop, or human might touch at the same time - starting a self-correcting loop, a long multi-file refactor, or writing new untracked files while a background agent runs there. Also fires on 'another session is working in that repo', 'run a loop', 'parallel work', or after any incident where an agent's files vanished. NOT for diagnosing a failing git command on a single tree (git-troubleshooting)."
 ---
 
 # Git worktrees as the default for parallel agent work
@@ -21,10 +21,10 @@ out-of-scope writes. Both halves of that hurt a concurrent session:
 | Scope revert | An untracked file outside `writeScope` is "reverted" by deleting it - the other session's new file is simply gone |
 | Rollback to checkpoint | Restores agent-touched paths from the checkpoint index; files created after that checkpoint are not in it |
 
-Measured 2026-08-10: a loop scoped to one doc deleted two newly written,
-uncommitted docs from the same repo. `git fsck --unreachable` found no blobs -
-they were never in any checkpoint, so there was nothing to recover. Both had to
-be rewritten from the authoring session's context.
+An untracked file outside the loop's `writeScope` is deleted on scope revert and
+was never in any checkpoint, so it is unrecoverable: `git fsck --unreachable`
+finds no blob because none was ever written. The only copy is the authoring
+session's context.
 
 ## Decide in one line
 
@@ -45,21 +45,28 @@ git status --short                              # foreign staged files = someone
 
 ```bash
 cd <repo>
-git worktree add .worktrees/<task> --detach HEAD
+git worktree add .worktrees/<task> -b wt/<task>
 cd .worktrees/<task>
 ```
+
+Use a branch, not `--detach`. Commits on a detached HEAD are reachable only
+from that worktree's HEAD; remove the worktree with `--force` before merging
+and they become unreachable. A `wt/<task>` branch keeps them reachable until
+you delete the branch yourself.
 
 Then the four things that are always missing:
 
 1. **Dependencies.** Symlink rather than reinstall:
    `ln -sfn <repo>/node_modules node_modules` (repeat for nested ones, e.g.
    `web/node_modules`).
-2. **Ignore the symlink.** A `.gitignore` entry with a trailing slash
-   (`node_modules/`) does NOT match a symlink, and in a worktree `.git` is a
-   FILE, so the per-worktree `info/exclude` is not the file git consults. Append
-   to the SHARED exclude:
-   `printf 'node_modules\n' >> "$(git rev-parse --git-common-dir)/info/exclude"`.
-   Verify with `git status --short` - a dirty tree makes a loop refuse to start.
+2. **Ignore the symlink and the worktree dir.** A `.gitignore` entry with a
+   trailing slash (`node_modules/`) does NOT match a symlink, and in a worktree
+   `.git` is a FILE, so the per-worktree `info/exclude` is not the file git
+   consults. `.worktrees/` itself shows as untracked in the main tree. Append
+   both to the SHARED exclude:
+   `printf 'node_modules\n.worktrees/\n' >> "$(git rev-parse --git-common-dir)/info/exclude"`.
+   Verify with `git status --short` in both trees - a dirty tree makes a loop
+   refuse to start.
 3. **Gitignored config.** Harness manifests, judge specs, profiles and `.env`
    files are typically untracked, so the worktree does not have them. Copy them
    in, and rewrite any ABSOLUTE paths inside them to point at the worktree.
@@ -75,7 +82,7 @@ Then the four things that are always missing:
 - Keep the main tree clean of your work. If you already wrote into it, copy the
   file out (`/tmp`), unstage it (`git restore --staged <path>`), and delete it
   from the main tree so the other session's checkpoint does not swallow it.
-- A worktree shares the object store and refs. That is what makes cherry-pick
+- A worktree shares the object store and refs. That is what makes the merge
   free later, and it is also why `git worktree` is better than a second clone.
 
 ## Finish flow
@@ -84,8 +91,9 @@ Then the four things that are always missing:
 cd .worktrees/<task>
 git add -A && git commit -m "..."            # or several commits
 cd <repo root>
-git cherry-pick <sha>                        # or: git merge --ff-only <detached-sha>
-git worktree remove .worktrees/<task>        # --force if the symlink dirties it
+git merge --ff-only wt/<task>                # or: git cherry-pick <sha> for a subset
+git worktree remove .worktrees/<task>        # --force only if the symlink dirties it
+git branch -d wt/<task>                      # -d refuses while anything is unmerged
 ```
 
 Never `rm -rf` a worktree directory: it leaves a stale entry in

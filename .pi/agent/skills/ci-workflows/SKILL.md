@@ -1,451 +1,71 @@
 ---
 name: ci-workflows
-description: Use when adding or reviewing CI/CD workflow YAML for GitHub Actions or Forgejo Actions (self-hosted), pinning action versions, migrating workflows between GitHub and Forgejo, building/pushing Docker images in CI, setting up language toolchains (node/python/go/java/bun/deno), deploying Pages, or cutting GitHub Releases in CI.
+description: "Use when adding or reviewing CI/CD workflow YAML for GitHub Actions or Forgejo Actions (self-hosted), pinning action versions, migrating workflows between GitHub and Forgejo, building/pushing Docker images in CI, setting up language toolchains (node/python/go/java/bun/deno), deploying Pages, or cutting GitHub Releases in CI. NOT for inspecting, re-running or cancelling runs (gh)."
 ---
 
 # CI workflows - GitHub Actions + Forgejo Actions
 
 The Forgejo Actions runtime is a deliberate compatibility layer over GitHub Actions YAML. Workflows mostly copy across, but several fields are silently ignored and the runner image model differs. This skill encodes both platforms with verified-current action versions and the Forgejo-specific gotchas.
 
-> **2026-08-23:** the user's self-hosted forge moved from Gitea (servarr)
-> to Forgejo 16.0.3 (MS-01 router, `git.erfi.io`). See
-> `~/infra/forgejo-compose/AGENTS.md`. The runner is Forgejo Runner
-> v13 with labels `ubuntu-latest`/`ubuntu-22.04` ->
-> `ghcr.io/catthehacker/ubuntu:act-22.04`, capacity 2.
-
-All versions below were queried from `api.github.com/repos/<owner>/<action>/releases/latest` on 2026-08-05, and every floating major tag was separately confirmed to resolve via `git/matching-refs/tags/<major>`. Re-verify before pinning in a new project if it's been >3 months.
+The user's self-hosted forge is Forgejo 16.x at `git.erfi.io` (MS-01 router) with Forgejo Runner v13; the labels `ubuntu-latest`/`ubuntu-22.04` map to `ghcr.io/catthehacker/ubuntu:act-22.04`. Setup details: `~/infra/forgejo-compose/AGENTS.md`.
 
 ## When to use what
 
 - `.github/workflows/*.yml` for repos hosted on github.com
 - `.forgejo/workflows/*.yml` for repos on a self-hosted Forgejo instance
 - Both directories can co-exist; pick whichever runner is registered
-- Filenames: `ci.yml`, `release.yml`, `deploy.yml` — concise, one workflow per concern
+- Filenames: `ci.yml`, `release.yml`, `deploy.yml` - concise, one workflow per concern
 
-## Verified-current action versions (2026-08-05)
+## Pinning action versions
 
-Pin to the **major version tag** (e.g. `@v7`) unless you have a specific reason to lock to a SHA. Major-tag pinning lets dependabot patch-bump automatically.
-
-**Not every publisher ships a floating major tag.** `actions/*` and `docker/*` do; `astral-sh/setup-uv` and `denoland/setup-deno` do NOT. Pinning `@vN` on those fails at "Set up job" with `unable to resolve action`. Confirm before pinning a major you have not used before:
+Pin to the floating major tag (`@v7`) unless you have a specific reason to lock to a SHA; major-tag pinning lets dependabot patch-bump automatically. The current major is usually several ahead of training-data defaults, and this skill's own table has been a major behind within three months, so run both checks before every `uses:` line you write:
 
 ```bash
+gh api repos/<owner>/<action>/releases/latest --jq .tag_name        # latest release
 gh api repos/<owner>/<action>/git/matching-refs/tags/v7 \
-  --jq '[.[]|select(.ref=="refs/tags/v7")]|length'
-# 1 = floating tag exists; 0 = pin the exact point release instead
+  --jq '[.[]|select(.ref=="refs/tags/v7")]|length'                  # 1 = floating v7 exists; 0 = pin the exact release
 ```
 
-### Core actions (`actions/*`)
-
-| Action | Version | Notes |
-|---|---|---|
-| `actions/checkout` | `v7` | v7.0.1 (re-verified 2026-08-05, floating `v7` tag exists); Node 24 runtime |
-| `actions/setup-node` | `v7` | v7.0.0 (major bump from v6 since the 2026-05 pass) |
-| `actions/setup-python` | `v7` | v7.0.0 (major bump from v6) |
-| `actions/setup-go` | `v7` | v7.0.0 (major bump from v6) |
-| `actions/setup-java` | `v5` | v5.7.0 |
-| `actions/cache` | `v6` | v6.1.0 (major bump from v5) |
-| `actions/upload-artifact` | `v7` | v7.0.1 |
-| `actions/download-artifact` | `v8` | v8.0.1 — note: v8 is one major **ahead** of upload |
-| `actions/configure-pages` | `v6` | v6.0.0 |
-| `actions/deploy-pages` | `v5` | v5.0.0 |
-| `actions/upload-pages-artifact` | `v5` | v5.0.0; the pages example in this skill previously pinned v3, two majors behind |
-
-### Language / package managers
-
-| Action | Version | Notes |
-|---|---|---|
-| `oven-sh/setup-bun` | `v2` | v2.2.0 |
-| `denoland/setup-deno` | `v2.0.5` | **Exact tag required.** Verified 2026-08-05: denoland ships no floating major tag at all, `v1`/`v2`/`v3` each resolve to zero refs and only point releases like `v2.0.5` exist. This table previously said `@v2`, which does not resolve. |
-| `pnpm/action-setup` | `v6` | v6.0.10 |
-| `astral-sh/setup-uv` | `v9.0.0` | **Exact tag required.** Re-verified 2026-08-05: latest is v9.0.0, but astral-sh stopped publishing floating major tags after v7, so `@v8` and `@v9` do NOT resolve and fail the job at "Set up job" with `unable to resolve action`. v9.0.0 also flipped `prune-cache` to `false` by default. |
-
-### Docker
-
-| Action | Version | Notes |
-|---|---|---|
-| `docker/setup-buildx-action` | `v4` | v4.2.0; Node 24 runtime (requires Runner ≥ 2.327.1) |
-| `docker/build-push-action` | `v7` | v7.3.0 |
-| `docker/login-action` | `v4` | v4.6.0 |
-| `docker/metadata-action` | `v6` | v6.2.0 |
-
-### Release & misc
-
-| Action | Version | Notes |
-|---|---|---|
-| `softprops/action-gh-release` | `v3` | v3.0.2; Node 24 — stay on v2.6.2 if Node 20 needed |
-
-### Verification protocol — DON'T trust this table forever
-
-Before pinning a version in a new project:
-
-```bash
-webfetch https://api.github.com/repos/actions/checkout/releases/latest | jq .tag_name
-```
-
-Replace `actions/checkout` with the action's `owner/repo`. The github API endpoint is the authoritative source — release notes don't live in docs.erfi.io.
-
-If a major version is in active beta (e.g. `v7-beta`), stay on the previous stable major.
-
-## Workflow templates — GitHub Actions
-
-### Node + Bun + Biome + tests
-
-```yaml
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - run: bun install --frozen-lockfile
-      - run: bunx biome check .
-      - run: bun test
-```
-
-### Astro / Vite SPA → GitHub Pages
-
-```yaml
-name: Deploy to Pages
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run build
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: ./dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5
-```
-
-### Docker build + push to GHCR
-
-```yaml
-name: Build and Push
-
-on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-
-permissions:
-  contents: read
-  packages: write
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
-
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-```
-
-### GitHub Release on tag
-
-```yaml
-name: Release
-
-on:
-  push:
-    tags: ["v*"]
-
-permissions:
-  contents: write
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: softprops/action-gh-release@v3
-        with:
-          generate_release_notes: true
-          files: dist/*
-```
-
-## Forgejo Actions - what's different
-
-Forgejo Actions is **mostly drop-in compatible** with GitHub Actions YAML, but the following fields are **silently ignored**:
-
-| Field | Status |
-|---|---|
-| `jobs.<id>.timeout-minutes` | **IGNORED** (set timeout at runner level instead) |
-| `jobs.<id>.continue-on-error` | **IGNORED** |
-| `jobs.<id>.environment` | **IGNORED** (no environment protection rules) |
-| `concurrency:` (groups) | **IGNORED** |
-| `permissions:` | Different model - Forgejo scopes (`code`, `releases`, `wiki`, `projects`); GitHub-only scopes (`statuses`, `checks`, `deployments`, `id-token`, `security-events`, `pages`) not supported [unverified] |
-| Problem Matchers | IGNORED |
-| Error annotations | IGNORED |
-| Expressions | Only `always()` supported (no `failure()`, `success()`, etc.) |
-| `runs-on: [label_a, label_b]` | Required act_runner ≥ v0.2.11 |
-| `id-token` (OIDC to cloud) | Not supported |
-
-### Runner labels & images
-
-Default labels in `act_runner` map to docker images:
-
-| Label | Image | Notes |
-|---|---|---|
-| `ubuntu-latest` | `catthehacker/ubuntu:act-22.04` | "default" — most tools, recommended |
-| `ubuntu-24.04` | `catthehacker/ubuntu:act-22.04` | |
-| `ubuntu-22.04` | `catthehacker/ubuntu:act-22.04` | |
-| `ubuntu-latest-slim` | `node:20-bookworm-slim` | "slim" — Node only, ~200MB |
-| `ubuntu-latest-full` | `catthehacker/ubuntu:full-24.04` | "full" — all GH tools, ~70GB, **amd64 only** |
-
-Use the `full` image only when you need GitHub-runner-parity (rare). Default `catthehacker/ubuntu:act-22.04` covers ~95% of workflows.
-
-### Action source
-
-Forgejo downloads non-fully-qualified actions from **github.com** by default (). So `uses: actions/checkout@v7` resolves to `https://github.com/actions/checkout.git`. To pin to a Forgejo-hosted action, use the absolute URL:
-
-```yaml
-- uses: https://code.forgejo.org/actions/checkout@v4
-- uses: https://your-forgejo.example.com/owner/action@v1
-```
-
-To restrict to self-only (air-gapped instance), set `[actions].DEFAULT_ACTIONS_URL = self` in `app.ini`. Then absolute URLs are still required for external actions.
-
-### Context - github vs forgejo
-
-`${{ github.* }}` and `${{ forgejo.* }}` both work. Prefer `github.*` for new workflows (platform-neutral). For shared workflows running on both platforms, stick with `github.*`.
-
-### GITEA_TOKEN limitations
-
-- **Package registry auth**: GITEA_TOKEN cannot publish to the repo's package registry. Workaround: use a Personal Access Token with `write:package` scope stored as a secret.
-- **Cross-repo**: GITEA_TOKEN is clamped to the running repo. For cross-repo access use PATs.
-- **Fork PRs**: GITEA_TOKEN is read-only for fork PRs (same as GitHub).
-
-## Workflow templates — Forgejo Actions
-
-Same YAML as GitHub but in `.forgejo/workflows/` and avoiding the ignored fields.
-
-### Node + Bun + Biome + tests (Forgejo)
-
-```yaml
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-
-jobs:
-  test:
-    runs-on: ubuntu-latest    # → catthehacker/ubuntu:act-22.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      - run: bunx biome check .
-      - run: bun test
-```
-
-### Docker build + push to Forgejo container registry
-
-```yaml
-name: Build and Push
-
-on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      - uses: docker/login-action@v4
-        with:
-          registry: ${{ vars.REGISTRY }}        # e.g. git.erfi.io
-          username: ${{ github.*} [unverified: forgejo.* context]
-          password: ${{ secrets.PACKAGE_TOKEN }}  # PAT, not GITEA_TOKEN
-            # GITEA_TOKEN can't push packages (see Forgejo quirks above)
-
-      - id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ vars.REGISTRY }}/${{ github.*} [unverified: forgejo.* context]
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=sha
-
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-```
-
-Note the explicit `vars.REGISTRY` — Forgejo has no equivalent of GitHub's `ghcr.io/${{ github.repository_owner }}` shortcut. Set `REGISTRY` as a repo or org variable.
-
-## Cross-platform workflow (works on both)
-
-Stick to GitHub-compatible syntax, avoid ignored Forgejo fields:
-
-```yaml
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun test
-```
-
-Copy this same file to both `.github/workflows/ci.yml` and `.forgejo/workflows/ci.yml`.
-
-## Common pitfalls
-
-### Stale action versions
-
-The single biggest LLM failure on CI YAML: pinning to `@v3` or `@v4` from training-data defaults when the current major is several ahead. **ALWAYS check the action's latest release** via `webfetch https://api.github.com/repos/<owner>/<repo>/releases/latest | jq .tag_name` before writing the YAML. Don't trust memory - and don't trust this table either; two of its rows were a major behind within three months.
-
-### gitleaks-action is now license-gated - use the bare binary
-
-gitleaks-action (v2+) requires a `GITLEAKS_LICENSE` secret (free key via the gitleaks.io form; 1 free license covers 1 repo). It validates by querying the **GitHub API** for the repo owner, so on non-GitHub runners (Forgejo) the owner comes back as `unexpected type [undefined]` and the action hard-fails with "missing gitleaks license". The gitleaks **core stays MIT** with binaries on the releases page; the action is the only licensed part. Pattern, verified on a self-hosted Forgejo runner (2026-08-30):
-
-```yaml
-- name: gitleaks
-  run: |
-    set -euo pipefail
-    ver=8.30.1
-    curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz" -o /tmp/gl.tgz
-    tar -xzf /tmp/gl.tgz -C /tmp
-    /tmp/gitleaks git --no-banner
-```
-
-`gitleaks git` scans full history, redacts findings by default, and exits 1 on leaks. Verify the asset name and tarball layout against the release API before pinning - the naming changed to `gitleaks_<ver>_<os>_<arch>.tar.gz` with the binary at the tarball top level. On GitHub the action is a trap too: `@v2` (Node 20) stops working on GitHub-hosted runners after 2026-09-16, and `@v3` needs runner >= 2.327.1.
-
-### A latest release does NOT imply a floating major tag
-
-Checking `releases/latest` tells you the release, not what you can write in `uses:`. Some orgs publish a moving `v9` alongside `v9.0.0`; astral-sh stopped doing that after v7. Pinning `@v9` from a verified `tag_name: v9.0.0` fails the job before any step runs:
+A release does not imply a floating tag. `actions/*` and `docker/*` publish moving majors; `astral-sh/setup-uv` (after v7) and `denoland/setup-deno` do not, and `@vN` on those fails before any step runs:
 
     ##[error]Unable to resolve action `astral-sh/setup-uv@v9`, unable to find version `v9`
 
-So verify the TAG you are about to write actually exists, not just the release:
+If a major is in beta (`v7-beta`), stay on the previous stable major. `action-versions.md` holds the last verified snapshot - read it when pinning, after the checks above.
 
-```bash
-gh api repos/astral-sh/setup-uv/tags --jq '.[].name' | head
-```
+## Forgejo Actions - what's different
 
-If the floating major isn't in that list, pin the exact version.
+Forgejo's own docs say it aims for *familiarity, not compatibility* (`forgejo` docs source, `user/actions/github-actions.md`). Most YAML copies across; the table below is what the Forgejo reference (`user/actions/reference.md`) actually documents as of 2026-09-05:
+
+| Field | Status on Forgejo |
+|---|---|
+| `jobs.<id>.timeout-minutes` | **Supported** per the 2026-09 reference (cancels the job after N minutes); step-level `timeout-minutes` also works. Third-party guides from early 2026 still say job-level is ignored, so on an older runner put the timeout on steps |
+| `jobs.<id>.continue-on-error` | **IGNORED at job level** (listed in the known-differences page). Step-level `continue-on-error` works: `outcome` = failure, `conclusion` = success |
+| `permissions:` | **IGNORED at job level**. The token scope is whatever the instance grants; there is no per-workflow scope narrowing |
+| `id-token` / OIDC | Not via `permissions: id-token: write`. Forgejo uses a top-level `enable-openid-connect` workflow key instead (`user/actions/security-openid-connect`) |
+| `concurrency:` | **Supported**, best-effort: `group` + `cancel-in-progress`. Without the key, Forgejo auto-cancels older runs of the same workflow on new `push` / `pull_request` events, which GitHub does not do |
+| `jobs.<id>.environment` | Not in the Forgejo reference; treat as unsupported (no environment protection rules) |
+| Expressions | `success()`, `failure()`, `always()` documented (`user/actions/basic-concepts.md`) |
+| `github.*` context | Works, but "some keys are missing" per the differences page; `forgejo.*` is the native context |
+| `runs-on:` | Must match a label the runner registered with; an unmatched job waits forever |
+| Problem matchers, `::error::` / `::warning::` annotations | **Not implemented.** `::add-matcher` has no runner or API path: open feature request forgejo/forgejo#3801 ("add support for Workflow Commands"); upstream go-gitea/gitea#29777 shipped only log-viewer styling for `::group::` and `##[error]` lines and left add-matcher undesigned. Nothing surfaces as an annotation; the text just lands in the log |
+
+## Common pitfalls
 
 ### `actions/upload-artifact` v3 deprecation
 
-GitHub deprecated v3 in 2024 and **breaks running workflows** when artifacts are involved. Migrate to v4+ (current: v7). Same applies to download-artifact (current: v8 — yes, ahead of upload).
+GitHub deprecated v3 in 2024 and **breaks running workflows** when artifacts are involved. Migrate to v4+ (current: v7). Same applies to download-artifact (current: v8 - yes, ahead of upload).
 
-### v6 actions need Node 24
+### Current majors need Node 24
 
-`actions/checkout@v7`, `actions/setup-node@v7`, `docker/*@v4+`, `softprops/action-gh-release@v3` all use the Node 24 actions runtime. Self-hosted runners must be **Actions Runner ≥ 2.327.1**. Older self-hosted runners hang or fail on these. Either upgrade the runner or pin to the previous major (v5/v3/v2.6.2 respectively).
+`actions/checkout@v7`, `actions/setup-node@v7`, `docker/*@v4+`, `softprops/action-gh-release@v3` all use the Node 24 actions runtime. Self-hosted runners must be **Actions Runner >= 2.327.1**. Older self-hosted runners hang or fail on these. Either upgrade the runner or pin to the previous major (v5/v3/v2.6.2 respectively).
 
-### Forgejo runner: stuck workers, and where run results live
+### Forgejo `concurrency:` is best-effort, and the default differs from GitHub
 
-A runner worker can hang after picking up a task: the log shows `task N repo is ...` and then nothing for minutes, no job container in `docker ps`. Fix: kill PID 1 inside the runner container (`docker compose exec -T runner sh -c 'kill 1'`); with `restart: unless-stopped` docker recreates it. Already-assigned orphaned tasks are NOT re-dispatched by Forgejo after the worker dies - retrigger with a fresh push. Job output does NOT appear in the runner's logs (it streams to the UI only). Read results from the Forgejo DB instead:
+`concurrency.group` + `cancel-in-progress` are supported. With `cancel-in-progress: false` runs in the same group queue behind each other, ordering not strictly guaranteed. Omitting `concurrency` entirely is NOT the GitHub behaviour: Forgejo auto-cancels older `push` / `pull_request` runs of the same workflow when a new event arrives. For a release or deploy workflow that must finish, set `concurrency: { group: deploy, cancel-in-progress: false }` explicitly.
 
-```bash
-docker exec <forgejo-db> psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-  -c "select id, status, updated from action_run order by id desc limit 5"
-# per-job: same query on action_task (has log_filename)
-```
+### Forgejo OIDC uses `enable-openid-connect`, not `permissions: id-token`
 
-Status codes: **1 = success, 2 = failure** (verify the mapping against a run whose outcome you know before trusting the numbers).
-
-### Forgejo `concurrency:` doesn't queue
-
-If your repo relies on `concurrency:` groups to serialize deploys, Forgejo will run them in parallel. Workaround: use a self-hosted runner with capacity 1, or implement file-locking in the workflow itself.
-
-### Forgejo `id-token` for cloud auth
-
-OIDC trust to AWS/GCP/Azure is not supported. Fall back to long-lived access keys stored as secrets (rotate manually) or use a self-hosted runner with native cloud-instance credentials.
-
-### Caching across runners
-
-Forgejo Actions has its own cache backend (`actions/cache` works), but cache scope is per-runner-group, not org-wide like GitHub. Cross-job cache hits work; cross-repo cache hits don't.
-
-### Runner job containers can't reach Forgejo (per-workflow bridge isolation)
-
-act (the runner's job executor) creates a per-workflow bridge network on a random subnet. Docker's inter-bridge isolation blocks traffic between this network and the Forgejo bridge, so `git fetch` against `http://forgejo:3000` times out. Fix: set `container.network: <forgejo-bridge>` in the runner's `config.yml` (joins job containers to the forgejo network directly) and optionally add `--add-host forgejo:<ip>` to `container.options`. See `~/infra/forgejo-compose/AGENTS.md` for the user's setup.
+`permissions:` is ignored at job level, so `id-token: write` does nothing. Forgejo issues OIDC ID tokens through the top-level `enable-openid-connect` workflow key (`forgejo` docs: `user/actions/security-openid-connect`). Whether AWS/GCP/Azure accept the instance as an identity provider is trust-policy work on the cloud side; if that is not set up, fall back to long-lived keys stored as secrets or a runner with native cloud-instance credentials.
 
 ### `runs-on:` on Forgejo must match a registered label
 
@@ -453,7 +73,7 @@ If your workflow says `runs-on: ubuntu-24.04` but the registered runner only has
 
 ### Matrix strategies
 
-Both platforms support `strategy.matrix`.  Use it for multi-Node-version / multi-OS tests:
+Both platforms support `strategy.matrix`. Use it for multi-Node-version / multi-OS tests:
 
 ```yaml
 strategy:
@@ -466,14 +86,21 @@ steps:
       node-version: ${{ matrix.node }}
 ```
 
+## Reference files (read when you get there)
+
+- `action-versions.md` - the per-action version table (2026-09-05 snapshot). Read when pinning, after running the checks above.
+- `templates.md` - copy-paste workflows for GitHub and Forgejo (tests, Pages, Docker push, Release). Read when writing a workflow file.
+- `forgejo.md` - runner labels, DEFAULT_ACTIONS_URL resolution, contexts, FORGEJO_TOKEN limits, stuck-worker and job-network fixes, gitleaks bare binary, gha cache caveat. Read when a Forgejo job misbehaves.
+
 ## When NOT to use this skill
 
-- Setting up Drone / CircleCI / Jenkins / Woodpecker — different syntax, different ecosystem. Use the appropriate vendor docs.
-- Migrating Bitbucket Pipelines / GitLab CI to GitHub — bigger migration than this skill covers; use GitHub's official migration docs.
-- Anything involving GitHub Apps / fine-grained PATs / OIDC trust policies — those are *configuration of GitHub itself*, not workflow YAML.
+- Setting up Drone / CircleCI / Jenkins / Woodpecker - different syntax, different ecosystem. Use the appropriate vendor docs.
+- Migrating Bitbucket Pipelines / GitLab CI to GitHub - bigger migration than this skill covers; use GitHub's official migration docs.
+- Anything involving GitHub Apps / fine-grained PATs / OIDC trust policies - those are *configuration of GitHub itself*, not workflow YAML.
+- Inspecting, re-running, cancelling or downloading artifacts from a run - `gh` skill.
 
 ## Related
 
-- **Docs sources**: `github` (GitHub product docs incl. Actions YAML reference), `gitea` (self-hosted instance docs), `gitea-api`. Forgejo docs are not on docs.erfi.io yet -- use `https://forgejo.org/docs/latest/` directly.
-- `frontend-stack` — when scaffolding a project that needs CI on day one
-- the pi `oci_tags` tool — query for current versions of container images you build/push
+- **Docs sources**: `github` (GitHub product docs incl. Actions YAML reference), `forgejo` (Forgejo docs mirror: `user/actions/reference.md` is the workflow YAML reference, `user/actions/github-actions.md` the known-differences list), `gitea` / `gitea-api` (legacy, pre-fork).
+- `frontend-stack` - when scaffolding a project that needs CI on day one
+- the `oci_tags` tool (pi tool; erfi-toolkit MCP in Claude Code) - current tags of container images you build from or push

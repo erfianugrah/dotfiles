@@ -1,11 +1,9 @@
 ---
 name: gh
-description: Use when the task touches a real PR, issue, release, or GitHub Actions run on a repo you own - creating, viewing, merging, or reviewing a PR; filing or triaging an issue; cutting a release with assets; inspecting or re-running an Actions workflow or its cache; repo and auth ops. Fires the moment you are about to hand-roll a raw git or gh command for any of those. Sibling to gh-search (cross-repo code/issue search); this is the write/lifecycle side.
+description: "Use when the task touches a real PR, issue, release, or GitHub Actions run on a repo you own - creating, viewing, merging, or reviewing a PR; filing or triaging an issue; cutting a release with assets; inspecting or re-running an Actions workflow or its cache; repo webhooks; auth scopes. Fires the moment you are about to hand-roll a raw git or gh command for any of those. NOT for cross-repo code/issue search (gh-search) or CI YAML authoring (ci-workflows)."
 ---
 
-# gh — full GitHub CLI workflow
-
-`gh-search` covers search. This covers everything else. Both are sibling skills — `gh-search` for grep-the-world, `gh` for operate-on-your-stuff.
+# gh - full GitHub CLI workflow
 
 ## Auth (do this first if anything fails)
 
@@ -14,7 +12,7 @@ gh auth status                                # check current scopes
 gh auth refresh -s write:packages             # add a scope (e.g. for ghcr push)
 gh auth refresh -s repo,workflow,gist         # multi-scope refresh
 gh auth login --web                           # interactive browser flow
-gh auth token | wl-copy                       # print + copy for ad-hoc use
+gh auth token                                 # print for ad-hoc use (never paste into a tracked file)
 ```
 
 Common scope gotchas:
@@ -27,7 +25,7 @@ Common scope gotchas:
 
 ```bash
 # create
-gh pr create --title "..." --body "$(cat /tmp/pr-body.md)" --draft
+gh pr create --title "..." --body-file /tmp/pr-body.md --draft
 gh pr create --fill                                # use commit msgs as title/body
 gh pr create --reviewer user1,user2 --label bug    # assign + label upfront
 
@@ -35,7 +33,7 @@ gh pr create --reviewer user1,user2 --label bug    # assign + label upfront
 gh pr list --json number,title,state,headRefName --jq '.[] | "#\(.number) \(.state) \(.title)"'
 gh pr view 123 --json title,body,state,files --jq '.'
 gh pr diff 123 --name-only                         # cheap: files changed
-gh pr diff 123 -- path/to/specific.go              # drill: one file's diff
+gh pr diff 123 --exclude '*.lock' --exclude 'generated/*'   # trim noise; there is no per-file pathspec
 gh pr checks 123 --watch                           # live tail of CI
 gh pr status                                       # PRs assigned to me
 
@@ -43,9 +41,9 @@ gh pr status                                       # PRs assigned to me
 gh pr edit 123 --add-label bug --remove-label triage --add-reviewer alice
 gh pr comment 123 --body "LGTM after the typo fix"
 gh pr review 123 --approve  # or --request-changes / --comment
-gh pr review 123 --request-changes --body "..." --file review.md
+gh pr review 123 --request-changes --body-file review.md
 
-# merge (your default is GPG-signed; gh respects commit.gpgsign)
+# merge (gh respects commit.gpgsign)
 gh pr merge 123 --squash --delete-branch           # squash + auto-cleanup
 gh pr merge 123 --rebase --delete-branch           # rebase merge
 gh pr merge 123 --auto --squash                    # merge once checks pass
@@ -77,7 +75,7 @@ gh issue reopen 42
 gh issue lock 42 --reason resolved                            # disable new comments
 ```
 
-Search → action handoff (cross-skill with gh-search):
+Search -> action handoff (cross-skill with gh-search):
 
 ```bash
 # Find issues, then bulk-label them
@@ -105,7 +103,7 @@ gh release create v1.2.3-rc1 --draft --prerelease
 # upload assets to existing release
 gh release upload v1.2.3 dist/<binary>-windows-amd64.exe
 
-# delete (be careful — also deletes tag if --cleanup-tag)
+# delete (be careful - also deletes tag if --cleanup-tag)
 gh release delete v1.2.3 --cleanup-tag
 ```
 
@@ -133,10 +131,10 @@ gh run cancel <id>
 # download artifacts
 gh run download <id> --name release-binaries -D /tmp/artifacts/
 
-# Actions cache management (the one you actually hit)
+# Actions cache management
 gh cache list --json id,key,sizeInBytes --jq '.[] | "\(.id)\t\(.sizeInBytes)\t\(.key)"'
 gh cache delete <id>
-gh cache delete --all --repo <org>/<repo-name>   # nuke everything (you've done this)
+gh cache delete --all --repo <org>/<repo-name>   # nuke everything
 ```
 
 ## Repo ops
@@ -144,7 +142,7 @@ gh cache delete --all --repo <org>/<repo-name>   # nuke everything (you've done 
 ```bash
 gh repo view <org>/<repo> --json description,topics,visibility,defaultBranchRef
 gh repo edit --add-topic go --add-topic websocket --description "..."
-gh repo clone <org>/<repo>                     # gh respects ssh by default
+gh repo clone <org>/<repo>                     # protocol follows `gh config get git_protocol`
 gh repo fork upstream/repo --clone                     # fork + clone
 gh repo create new-thing --private --source=. --remote=origin --push
 gh repo archive old-thing                             # archive (read-only)
@@ -169,46 +167,30 @@ gh api -X POST  repos/<org>/<repo>/hooks/<id>/pings        # re-trigger to test 
 gh api repos/<org>/<repo>/hooks/<id>/deliveries/<did> --jq '.request,.response'  # debug a 403
 ```
 
-- `last_response.code` is the receiver's HTTP status; `403` with `status:"missing"`/`"-"` = blocked/dangling (see composer skill's WAF note). `"unused"` = never fired yet.
+- `last_response.code` is the receiver's HTTP status; `403` with `status:"missing"`/`"-"` = blocked/dangling (see the composer skill's WAF note). `"unused"` = never fired yet.
 - Ping and push payloads both embed the full `repository` object; a WAF that inspects bodies sees the same shape either way.
 - **Archived repos reject new hooks** (`403 "Repository was archived so is read-only"`) - unarchive or migrate first.
 - Scope: repo-hook admin comes with `repo`. A `422`/`404` on a malformed body can misleadingly surface a `needs admin:repo_hook` hint - fix the JSON body first before refreshing scopes.
 
-## Aliases (you have these — `gh push` / `gh pull`)
+## Aliases
 
-Set / list:
+The one alias configured on this box is `co` (`gh co 123` = `gh pr checkout 123`). Check before assuming others:
 
 ```bash
 gh alias list
-gh alias set co 'pr checkout'                        # gh co 123
-gh alias set --shell push '!git push && gh pr view --web || true'
+gh alias set co 'pr checkout'
+gh alias set --shell push '!git push && gh pr view --web || true'   # --shell allows pipes / chains
 ```
-
-The shell variant (`--shell`) lets you pipe / chain — useful for "push and open the PR" combos.
-
-## Extensions
-
-```bash
-gh extension list
-gh extension install <owner>/gh-<name>
-gh extension upgrade --all
-gh extension create gh-my-thing                       # scaffold your own (Go/script)
-```
-
-Notable extensions worth knowing:
-- `gh-dash` — TUI dashboard for PRs/issues/notifications
-- `gh-copilot` — Copilot suggest/explain in shell
-- `gh-eco` — discover extensions
 
 ## Foot-guns (real ones)
 
-- **GPG signing**: you require `-S`. `gh pr merge --squash` honours `commit.gpgsign=true` from global config. If it fails with `gpg failed to sign the data` (cold agent cache, no TTY): warm the cache with `zsh -ic 'gpg_unlock'` (seeds from Vaultwarden, no TTY needed) and retry - NEVER bypass with `--no-gpg-sign`.
+- **GPG signing**: commits require `-S`. `gh pr merge --squash` honours `commit.gpgsign=true` from global config. If it fails with `gpg failed to sign the data` (cold agent cache, no TTY): warm the cache with `zsh -ic 'gpg_unlock'` (no TTY needed) and retry the same command - NEVER bypass with `--no-gpg-sign`.
 - **Scope drift**: `gh auth status` will look green but a specific operation 403s. Look at the operation's required scope (visible in API error) and `gh auth refresh -s <scope>`.
 - **Default branch confusion**: `gh pr create` without `--base` assumes `main`. If you renamed to `master` / `develop`, pass explicitly.
 - **Cache delete needs --repo when not in a checkout**: `gh cache delete --all` alone fails confusingly. Always pair with `--repo owner/name` when running outside the repo dir.
 - **PR template not picked up**: `gh pr create --fill` ignores `.github/pull_request_template.md`. Use `--body-file .github/pull_request_template.md` explicitly.
-- **`gh repo clone` defaults to SSH**: this is what you want; some CI envs need `gh repo clone --http`.
-- **`gh release create` with file paths that don't exist** fails silently per file — use `ls dist/*` first to confirm.
+- **`gh repo clone` has no protocol flag**: it follows `gh config get git_protocol` (ssh here). For an https clone in CI either `gh config set git_protocol https` or pass the full `https://github.com/<o>/<r>` URL.
+- **`gh release create` with file paths that don't exist** fails per file - use `ls dist/*` first to confirm.
 
 ## When to use which (gh vs gh-search vs raw API)
 
@@ -220,9 +202,4 @@ Notable extensions worth knowing:
 | GitHub Apps / OAuth flows / advanced auth | `gh api` + direct API docs |
 | Issue / PR templates rendering | `gh issue create --body-file <template>` |
 
-## TUIs to know exist (skip in agent context)
-
-- `gh dash` — human-friendly dashboard
-- `lazygit` — broad git TUI with gh integration via custom commands
-
-For agent calls, prefer the `--json` + `--jq` pattern above. For human review of a complex PR queue, `gh dash` is faster than scrolling list output.
+For agent calls, prefer the `--json` + `--jq` pattern above over default prose output.

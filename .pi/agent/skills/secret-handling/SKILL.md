@@ -1,6 +1,6 @@
 ---
 name: secret-handling
-description: Use when a task needs to compare, verify, rotate, or hand a credential to a program - "is the key in the repo the one the container is running", "did the rotation propagate", "check these match", "set this secret", or any point where you are about to read a credential's VALUE to answer a question about it. Fires when you catch yourself writing `sops -d | grep | cut`, `docker inspect --format '{{json .Config.Env}}'`, `md5sum | cut -c1-16` on a secret, `echo $TOKEN`, or `cat .env`. NOT for encrypting a file at rest (sops-encrypt) or classifying whether a term is confidential (the AGENTS.md rule + confidential_terms tool).
+description: "Use when a task needs to compare, verify, rotate, or hand a credential to a program, or asks where a secret is stored - 'is the key in the repo the one the container runs', 'did the rotation propagate', 'set this secret', or whenever you are about to read a credential's VALUE. Fires on `sops -d | grep | cut`, `docker inspect` of Config.Env, `md5sum` on a secret, `echo $TOKEN`, `cat .env`. NOT for encrypting a file at rest (sops-encrypt) or confidential-term classification (the AGENTS.md rule)."
 ---
 
 # Secret handling - answer the question without reading the value
@@ -32,6 +32,29 @@ secretctl cmp 'sops:.env#POSTGRES_PASSWORD' 'docker:servarr/memledger-backup#PGP
 
 Assert on `$?`. Never parse the table.
 
+## Where secrets live (the one statement other skills point at)
+
+- **Canonical store: the SOPS-encrypted `.env` committed in each stack's git repo.**
+  Composer decrypts at deploy. As of the 2026-09-04 fleet conversion the deliberate
+  plaintext exceptions are memledger's env file and llm-compose's `.env`. No
+  password-manager item is canonical for anything; `bw:` sources exist in secretctl
+  for leftovers only.
+- **Registry:** `~/.config/secretctl/sources` (stowed from
+  `~/dotfiles/.config/secretctl/sources`) lists every store. A store that is not
+  listed is not guarded at all. Register a store when you create it;
+  `secretctl coverage` finds the gaps.
+- **Trust root: the age private keys, never in git.** The shared infra key is
+  `~/.config/sops/age/keys.txt` on this workstation and on the MS-01 composer
+  host. The drawbridge-only identity is `~/.config/sops/age/drawbridge.txt` on
+  this workstation only.
+- **Escrow status: OPEN.** Verified: both key files exist here, and the
+  drawbridge key's off-box backup is still an unchecked item in
+  `~/infra/drawbridge/TODO.md`. Not verified from this machine: that any copy
+  of `keys.txt` exists beyond the composer host (older notes name a
+  password-manager item; no restore drill from it is recorded). Until a drill is
+  recorded, treat losing this workstation and the router together as losing
+  every encrypted `.env`.
+
 ## Witness levels - pick the weakest that answers the question
 
 From `arrangeactassert.com/posts/log-the-fingerprint-not-the-secret/`:
@@ -56,9 +79,10 @@ correlation handle. It prints length alongside every digest for free.
 
 <!-- good -->
 ```bash
-secretctl fp --salt-file ~/.secretctl-salt 'docker:router/caddy#TOKEN' > before.txt
+# <salt-file> is e.g. a mode-600 file under ~/.config/secretctl/
+secretctl fp --salt-file <salt-file> 'docker:router/caddy#TOKEN' > before.txt
 # ... rotate + deploy ...
-secretctl fp --salt-file ~/.secretctl-salt 'docker:router/caddy#TOKEN' > after.txt
+secretctl fp --salt-file <salt-file> 'docker:router/caddy#TOKEN' > after.txt
 diff before.txt after.txt
 ```
 
@@ -67,9 +91,8 @@ value of the loop: "I deployed it" is a claim, a changed digest is evidence.
 `secretctl set` prints before/after automatically and says so when they match.
 
 `set` destinations: `dotenv:`, `keyfile:`, `sops:` (re-encrypts to the file's
-OWN age recipients, never a .sops.yaml rule), and `bw:` (updates the custom
-field when one exists, else upserts a notes `FIELD=value` line; syncs the
-daemon's read cache after the PUT so the verify step sees the write).
+OWN age recipients, never a .sops.yaml rule); `bw:` remains for the legacy
+password-manager leftovers only.
 
 `--salt-file` is required here and only here - comparing across time needs a
 stable key. The cost is that those digests become linkable, so treat the salt
@@ -105,11 +128,11 @@ printenv NAME
 docker inspect C --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^VAR=//p'
 ```
 
-The guard's contract, pinned by `skill-guard-coupling.test.ts` (dotfiles): every
-fenced block in this file is annotated `<!-- good -->` or `<!-- bad -->` and fed
-through the guard's rules, so the documented escape hatches cannot drift from
-what the guard actually enforces (that drift bit live 2026-08-30 - the old
-`env | grep ^NAME` escape was blocked by the guard itself).
+The guard's contract, pinned by `.pi/agent/tests/skill-guard-coupling.test.ts`:
+every fenced bash block in this file is annotated `<!-- good -->` or
+`<!-- bad -->` and fed through the guard's rules, so a documented escape hatch
+cannot drift from what the guard actually enforces. Any new fence here needs
+the annotation or the suite fails.
 
 <!-- bad -->
 ```bash
@@ -124,7 +147,8 @@ grep -ohE '"password":"[^"]+"' /tmp/dump.json | sed -E 's/:.*/:REDACTED/'
 ```
 
 - **`env`, `printenv`, bare `set`, `export -p`** - dumps every credential in the
-  process. `tool-guard` hard-blocks these. To check one variable WITHOUT its
+  process. `secret-output-guard` blocks these (pi: `.pi/agent/extensions/secret-output-guard.ts`;
+  Claude Code: `.claude/hooks/secret-output-guard.ts`). To check one variable WITHOUT its
   value: `[ -n "${NAME+x}" ] && echo set || echo unset` (a bare `env | grep`
   is blocked by the guard itself - the chain starts with the dump form).
 - **`docker inspect --format '{{json .Config.Env}}'`** - transports the whole
@@ -149,11 +173,10 @@ grep -ohE '"password":"[^"]+"' /tmp/dump.json | sed -E 's/:.*/:REDACTED/'
 
 ## The registry: known values, not patterns
 
-Pattern rules cannot tell a token from a commit hash. The 2026-09-04 leak was a
-bare 48-hex token in `~/.config/memledger/env`, printed by the pi `grep` tool
-in the same turn the user had said "don't print it"; no format rule, no env
-value and none of gitleaks / trufflehog / noseyparker matched that line. What
-IS knowable is where the stores are. `~/.config/secretctl/sources` lists them
+Pattern rules cannot tell a token from a commit hash: a bare 48-hex token in an
+env file matched no format rule and none of gitleaks / trufflehog /
+noseyparker, and it was printed. What IS knowable is where the stores are.
+`~/.config/secretctl/sources` lists them
 (globs and `**` allowed; `dotenv:`/`sops:` patterns are content-sniffed so one
 glob written with both schemes puts each file in exactly one resolver):
 
@@ -161,11 +184,11 @@ glob written with both schemes puts each file in exactly one resolver):
 ```bash
 secretctl sources                          # what the registry expands to (labels only)
 secretctl digests                          # keyed digest per registered value
-secretctl classify ~/infra/x/compose.yaml  # 0 = holds registered material, 1 = clean, 2 = unresolved
+secretctl classify ~/infra/<stack>/compose.yaml  # 0 = holds registered material, 1 = clean, 2 = unresolved
 secretctl coverage                         # secret-looking files the registry does NOT cover (nightly timer too)
 ```
 
-The pi guard consumes `secretctl digests --json` (full-width HMACs + the
+The guard (pi extension and Claude Code hook alike) consumes `secretctl digests --json` (full-width HMACs + the
 session salt, held in memory, never printed) and then: a `read`/`grep`/`cat`
 aimed at a registered store is blocked; a file whose content holds a registered
 value - a compose file with a pasted secret, a dump - is blocked as a COPY; any
@@ -173,10 +196,8 @@ registered value that still reaches a tool result is masked, whatever file or
 command it came from. A new store is covered the moment it is registered; an
 unregistered store is not covered at all, so when you create one, add it.
 
-The registry file is stowed from `dotfiles/.config/secretctl/sources`.
-
-Two more layers ride on the same digest set (added 2026-09-04 after the model
-retyped a credential it had seen into its own message, twice in one day):
+Two more layers ride on the same digest set, because a model that has seen a
+value will retype it:
 
 - **Your own text is masked before it is saved.** `message_end` runs the same
   tokenise-and-HMAC pass over the finalized assistant (and user) message, so a
@@ -201,80 +222,41 @@ and `uci:HOST/config#*` (hashed on the far host, digests only, no fragments).
 Registry `exclude` lines keep configuration keys (TZ, LANG, EMAIL...) out of
 the digest set so ordinary output is not masked.
 
-## Failure catalogue (each one happened)
+## Failure catalogue - the rule each incident left behind
 
-**Redact-on-display instead of count.** A stray 681KB json dump on a shared
-host's /tmp held real `"password"` values. Deciding whether to delete it needed
-only "is a secret-shaped field populated" - and a `grep -c` had already
-answered yes. A second command ran `grep -o` for the field and masked the
-result with `sed`, which worked, but carried the plaintext through a pipeline
-where one non-matching quote style would have printed it. It also fired no
-guard rule: every rule was source-oriented (sops / docker / vault / ssh) and
-none knew about grepping an arbitrary file. *Stop at the count; fingerprint the
-file with `secretctl fp 'keyfile:PATH'` if you need more. The
-SECRET_FIELD_EXTRACT rule now blocks the `-o`-plus-pipe shape.*
+- **Stop at the count.** "Does this file hold a live secret" is answered by
+  `grep -c`. A `grep -o` followed by a `sed` mask carries the plaintext through
+  a pipeline one regex miss from the transcript. Fingerprint the file
+  (`secretctl fp 'keyfile:PATH'`) if you need more; the SECRET_FIELD_EXTRACT
+  rule blocks the `-o`-plus-pipe shape.
+- **Extract on the far host; ship only a digest.** A whole container env piped
+  into a local filter keyed on the string `SECRET` sailed past
+  `MINIO_ROOT_PASSWORD`.
+- **Keyed HMAC, random per-run salt.** An unkeyed truncated md5 is fine for a
+  64-char key and useless for the 4-char one in the same fleet.
+- **One canonicalisation rule, applied in one place, printed in the output.**
+  Comparison legs that disagreed on stripping a trailing newline reported
+  MISMATCH on identical credentials.
+- **Distinguish MISMATCH (1) from UNRESOLVED (2).** A typo'd container name
+  must not read as drift; an empty resolve is UNRESOLVED, because two empty
+  values digest identically - the most dangerous false MATCH there is.
+- **A length delta of hundreds of bytes is framing, not a rotation.** A
+  SOPS-encrypted value (`ENC[AES256_GCM,...]`, ~171B) digested against its 48B
+  plaintext is MISMATCH by construction; `sshenv:` fails closed on `ENC[`
+  values. Compare ciphertext with ciphertext (`dotenv:` vs `sshenv:`) or fetch
+  the file and use `sops:` locally.
+- **Framing is the codec's job.** `sshenv:` applies the same dotenv codec as
+  `dotenv:`/`sops:` on the far side (trims whitespace and a trailing CR, strips
+  one matched pair of quotes). Residual: a double-quoted value with backslash
+  escapes is not unescaped remotely; `secretctl set` writes single-quoted,
+  which is exact.
+- **Classify a line with `grep -q`, `case`, or a pattern that consumes the
+  whole line (`s/...$/tag/p`).** A `sed` substitution that replaces only the
+  matched prefix keeps the tail, and the tail is the value.
 
-**Whole-env transport.** `docker inspect --format '{{json .Config.Env}}'` piped
-into a local interpreter to pull one variable. A redaction filter keyed on the
-string `SECRET` did not match `MINIO_ROOT_PASSWORD`, and the full value landed
-in a transcript that syncs to a searchable store. *Extract on the far host; ship
-only a digest.*
-
-**Unkeyed truncated digest.** `md5sum | cut -c1-16` used as the witness. Fine
-for a 64-char key, useless for the 4-char one in the same fleet. *Keyed HMAC,
-random per-run salt.*
-
-**Inconsistent canonicalisation.** Some comparison legs ran `tr -d '\n'`, others
-did not. Different digest, reported as MISMATCH, on identical credentials. *One
-canonicalisation rule, applied in one place, printed in the output so a mismatch
-can never be quietly blamed on framing.*
-
-**Writer and reader disagreeing.** A `set` path escaped `"` as `\"`; the `fp`
-path returned the backslash. A credential that had not changed reported
-MISMATCH. *Define the codec's two halves together and round-trip-test them.*
-
-**Cross-implementation key mismatch.** Go keyed an HMAC on a salt's decoded
-bytes while the remote `openssl dgst -hmac <hex>` keyed on the hex characters -
-so a local and a remote digest of the same credential could never agree. 245
-Go-only tests passed, because both sides of every assertion used the same wrong
-key. *Test across the boundary, against the real other implementation.*
-
-**Error strings as a leak path.** A parse error quoted its input verbatim; if a
-remote host echoed the value instead of a digest, the error printed the
-credential. `encoding/hex`'s wrapped error names the offending byte - one
-character of the payload. *Error messages are a printed surface; report shapes
-and lengths, not contents.*
-
-**Unresolved read as drift.** A typo'd container name reported as MISMATCH
-rather than "could not read", which points at rotating a working secret.
-*Distinguish MISMATCH (1) from UNRESOLVED (2). An empty resolve is UNRESOLVED -
-two empty values digest identically, the most dangerous false MATCH there is.*
-
-**Encrypted framing read as drift.** The router's composer checkout of a
-stack's `.env` holds SOPS-ENCRYPTED values (`ENC[AES256_GCM,...]`, ~171B)
-while the container runs the decrypted one (48B). Digesting the blob against
-plaintext reported MISMATCH on identical credentials. A length delta of
-*hundreds* of bytes is framing, not a rotation - check the file's format
-before acting. `secretctl`'s `sshenv:` now fails closed on `ENC[` values
-with the cause named; the supported path is ciphertext-vs-ciphertext
-(`dotenv:` vs `sshenv:`) or fetch-and-`sops:` locally.
-
-**Quote/CRLF framing (fixed 2026-09-02).** `sshenv:` now applies the same
-dotenv codec as `dotenv:`/`sops:` on the far side: it trims surrounding
-whitespace (a trailing CR from a CRLF file) and strips ONE matched pair of
-surrounding quotes. Before this, `KEY="abc"` or a CRLF-edited file reported a
-false MISMATCH against an identical plaintext source and cost a needless
-rotation. Residual: a double-quoted value with backslash escapes is not
-unescaped remotely (rare; `secretctl set` writes single-quoted, which is
-exact).
-
-**A boolean probe that prints the line.** `sed -n 's/^KEY=[^E]*/plain/p'`
-was meant to classify a line without reading it, but `s///` replaces only
-the matched prefix and keeps the rest of the line - the full value went
-into the transcript. It was ciphertext (the age key is the boundary, and it
-never appeared), but the shape was wrong. *Classify with `grep -q`, `case`,
-or a pattern that consumes the whole line (`s/...$/tag/p`), never one that
-preserves the tail.*
+Implementation-side lessons (the cross-implementation HMAC key mismatch, the
+writer/reader codec round-trip, error strings as a leak path) live with the
+code in `~/infra/secretctl/AGENTS.md`.
 
 ## Interpreting a comparison
 
