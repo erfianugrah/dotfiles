@@ -56,3 +56,4 @@ exclude *_LISTEN *_HEALTH_LISTEN
 exclude theme THEME *_THEME
 exclude *_EMAIL GMAIL
 sops:~/discord-wipe-go/.env
+sops:~/infra/dns-tf/secrets.enc.tfvars
