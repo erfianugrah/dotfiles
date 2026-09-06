@@ -168,7 +168,7 @@ Distilled from `~/infra/knotea/authority/AGENTS.md`, which has the numbered cano
 19. `dig +short @<tld-ns> NS <zone>` returns nothing; read AUTHORITY + ADDITIONAL.
 20. Post-migration, `dns cloudflare` site blocks under the migrated zone break at the next renewal.
 21. CF's AXFR-out flattens CNAMEs; compare by resolved content when verifying sync.
-22. `knotc zone-set` / `zone-unset` accept the absolute owner with trailing dot (what `zone-read` prints) or a single relative label; a dotless multi-label owner such as `gloryhole.erfi.io` is read as relative and fails with the misleading `error: (no such node in zone found)`. `zone-begin` does not validate names - the error surfaces on the first `zone-set` inside the transaction; `knotc zone-abort <zone>` before retrying.
+22. `knotc zone-set` / `zone-unset` accept the absolute owner with trailing dot (what `zone-read` prints) or a single relative label; a dotless multi-label owner such as `www.erfi.io` is read as relative and fails with the misleading `error: (no such node in zone found)`. `zone-begin` does not validate names - the error surfaces on the first `zone-set` inside the transaction; `knotc zone-abort <zone>` before retrying.
 
 ## Cost
 
