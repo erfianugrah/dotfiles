@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.85.1",
-  "defaultProvider": "openrouter",
-  "defaultModel": "deepseek/deepseek-v4-pro",
+  "defaultProvider": "llama-server",
+  "defaultModel": "qwen38",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
   "externalEditor": "nvim",
@@ -22,8 +22,6 @@
     }
   },
   "hideThinkingBlock": true,
-  "packages": [
-    "git:github.com/erfianugrah/pi-mcp-bridge"
-  ],
+  "packages": ["git:github.com/erfianugrah/pi-mcp-bridge"],
   "quietStartup": false
 }
