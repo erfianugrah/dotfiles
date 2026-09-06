@@ -68,7 +68,7 @@ Filtering (`pkg/blocklist`, `pkg/policy`, `pkg/pattern`) runs inside the handler
 | `pkg/pattern/` | Exact / wildcard / regex matcher, Pi-hole compatible (`/^regex$/`) |
 | `pkg/localrecords/` | Authoritative local answers, CNAME chain resolution, split-horizon NODATA |
 | `pkg/cache/` | Sharded LRU + TTL, blocked-TTL override |
-| `pkg/storage/` | SQLite, WAL, async buffered writes, retention sweeper, migrations |
+| `pkg/storage/` | SQLite, WAL, async buffered writes, retention sweeper, hourly pre-aggregates (`hourly_stats`, `query_hourly`, `client_hourly`) for fast stats reads, migrations |
 | `pkg/config/` | YAML load + validate, fsnotify watcher, hot-reload diff helpers |
 | `pkg/telemetry/` | OpenTelemetry meter + Prometheus exporter, basic-auth wrapper for `/metrics` |
 | `pkg/resolver/` | `net.Resolver` over configured upstreams; HTTP clients for blocklist downloader, ACME |
