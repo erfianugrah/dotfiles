@@ -169,10 +169,11 @@ Distilled from `~/infra/knotea/authority/AGENTS.md`, which has the numbered cano
 20. Post-migration, `dns cloudflare` site blocks under the migrated zone break at the next renewal.
 21. CF's AXFR-out flattens CNAMEs; compare by resolved content when verifying sync.
 22. `knotc zone-set` / `zone-unset` accept the absolute owner with trailing dot (what `zone-read` prints) or a single relative label; a dotless multi-label owner such as `www.erfi.io` is read as relative and fails with the misleading `error: (no such node in zone found)`. `zone-begin` does not validate names - the error surfaces on the first `zone-set` inside the transaction; `knotc zone-abort <zone>` before retrying.
+23. knotd refuses to start when `<storage>/run/knot.pid` names a live PID (`server PID found, already running`), and the rundir is on the persistent Fly volume - after a machine restart the recorded PID can have been recycled by an unrelated process (hit on the 2026-09-06 v1.4.15 deploy reboot). Symptom chain is nasty: glory-hole logs `knotd failed to start (continuing without authoritative serving)`, HTTP health checks still pass so Fly shows healthy, no knot routing is installed, and the resolver's client ACL REFUSES everyone - all served zones go dark globally while the dashboard keeps working. Fixed in v1.4.16 (supervisor deletes knot.pid + knot.sock before start, so any restart self-heals); on older builds, ssh in, `rm /var/lib/glory-hole/knot/run/knot.pid`, restart the machine.
 
 ## Cost
 
-`shared-cpu-1x` / 256 MB / 1 GB volume / 1 region is a few dollars a month on Fly; the first v4 + v6 anycast IPs per app are free and DNS egress is negligible. A second region doubles VM cost and needs its own volume (volumes are regional). AXFR over Fly's `.internal` mesh is free.
+`shared-cpu-1x` / 512 MB / 2 GB volume / 1 region (sin) is about $4.40/mo on Fly (sin carries a 1.27x markup over the iad base; the first v4 + v6 anycast IPs per app are free and DNS egress is negligible). A second region roughly doubles VM cost and needs its own volume (volumes are regional). AXFR over Fly's `.internal` mesh is free.
 
 ## Docs sources
 
