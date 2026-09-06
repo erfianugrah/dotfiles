@@ -1,9 +1,9 @@
 ---
-name: gloryhole
-description: "Use when working on the user's self-built DNS resolver glory-hole (the resolver half of knotea) - forwarder, policy or blocklist features, SERVFAIL or NODATA debugging, the bundled Unbound, query-log sizing, the LAN resolver on the router, or the Fly.io public DoT/DoH deploy. Fires on 'glory-hole', 'gloryhole', 'the resolver', 'expr policy', 'blocklist', 'upstream health', 'SERVFAIL', 'DoH/DoT', '10.0.10.5'. NOT for authoritative DNS (knot-dns) or live record edits (knotctl)."
+name: knotea
+description: "Use when working on the user's self-built DNS server knotea (the resolver half, binary/Fly-app name glory-hole) - forwarder, policy or blocklist features, SERVFAIL or NODATA debugging, the bundled Unbound, query-log sizing, the LAN resolver on the router, or the Fly.io public DoT/DoH deploy. Fires on 'knotea', 'glory-hole', 'gloryhole', 'the resolver', 'expr policy', 'blocklist', 'upstream health', 'SERVFAIL', 'DoH/DoT', '10.0.10.5'. NOT for authoritative DNS (knot-dns) or live record edits (knotctl)."
 ---
 
-# gloryhole - self-built DNS resolver
+# knotea - self-built DNS server (resolver half)
 
 Live topology: glory-hole is the resolver half of the `knotea` binary (monorepo `~/infra/knotea`, resolver source `~/infra/knotea/resolver/`, authority source `~/infra/knotea/authority/`). Two deployments run it: the fleet LAN resolver on the MS-01 NixOS router at `10.0.10.5:53`, and the public Fly app `glory-hole` (region `sin`, anycast v4 `137.66.1.170`) which also embeds knotd as the authoritative server for `erfi.io` + `lab.erfi.io` (the `knot-dns` skill). Module path and binary / image / Fly app name stay `glory-hole` (Fly cannot rename in place); the binary is knotea. Do not conflate the two names.
 

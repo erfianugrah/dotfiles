@@ -187,7 +187,7 @@ Order matters: 1-2 are local, 3-4 are tailnet API, 5-6 require touching the remo
 - **`drawbridge` skill** - the mTLS docker gateway on servarr (listens on LAN + tailnet).
 - **`eaves` skill** - read-only router inspection; `nixos` skill for rebuilding router or servarr.
 - **`knot-dns` skill** - Knot runs on Fly, not on the homelab, but the homelab Caddy is the cert-consuming downstream.
-- **`gloryhole` skill** - the filtering resolver; its `config.yml` holds the local zones and upstreams.
+- **`knotea` skill** - the filtering resolver; its `config.yml` holds the local zones and upstreams.
 - **`infrastructure-stack` skill** - bridge subnet conventions, compose patterns on `servarr`.
 
 ## See also

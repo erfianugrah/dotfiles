@@ -1,11 +1,11 @@
 ---
 name: knot-dns
-description: "Use when working on the user's self-hosted authoritative DNS for erfi.io + lab.erfi.io (Knot DNS embedded in knotea on Fly anycast) - knotc confdb operations, TSIG keys and ACLs, RFC 2136 ACME from Caddy, AXFR/IXFR, DNSSEC/KASP and DS at the registrar, glue and NS delegation, or migrating another zone off Cloudflare. Fires on 'knotc', 'authoritative DNS', 'nameserver', 'AXFR/IXFR', 'glue records', 'zone migration', 'NOTAUTH'. NOT for record edits (knotctl) or the resolver (gloryhole)."
+description: "Use when working on the user's self-hosted authoritative DNS for erfi.io + lab.erfi.io (Knot DNS embedded in knotea on Fly anycast) - knotc confdb operations, TSIG keys and ACLs, RFC 2136 ACME from Caddy, AXFR/IXFR, DNSSEC/KASP and DS at the registrar, glue and NS delegation, or migrating another zone off Cloudflare. Fires on 'knotc', 'authoritative DNS', 'nameserver', 'AXFR/IXFR', 'glue records', 'zone migration', 'NOTAUTH'. NOT for record edits (knotctl) or the resolver (knotea)."
 ---
 
 # knot-dns - authoritative DNS
 
-Live topology: the authority for `erfi.io` + `lab.erfi.io` is the knotea binary on the Fly app `glory-hole` (region `sin`, anycast v4 `137.66.1.170`; `ns1`/`ns2.erfi.io` glue point there). knotd runs loopback-only on `127.0.0.1:5354`; knotea owns the public sockets and proxies RFC 2136 UPDATE + AXFR inward. Source: `~/infra/knotea/authority/` in the `~/infra/knotea` monorepo; the image is the root `~/infra/knotea/Dockerfile`, which builds Knot from source (`ARG KNOT_VERSION`). The predecessor Fly app `knot-fly-mvp` is destroyed. Canonical gotcha list and live state: `~/infra/knotea/authority/AGENTS.md`. The resolver half is the `gloryhole` skill; record edits are the `knotctl` skill.
+Live topology: the authority for `erfi.io` + `lab.erfi.io` is the knotea binary on the Fly app `glory-hole` (region `sin`, anycast v4 `137.66.1.170`; `ns1`/`ns2.erfi.io` glue point there). knotd runs loopback-only on `127.0.0.1:5354`; knotea owns the public sockets and proxies RFC 2136 UPDATE + AXFR inward. Source: `~/infra/knotea/authority/` in the `~/infra/knotea` monorepo; the image is the root `~/infra/knotea/Dockerfile`, which builds Knot from source (`ARG KNOT_VERSION`). The predecessor Fly app `knot-fly-mvp` is destroyed. Canonical gotcha list and live state: `~/infra/knotea/authority/AGENTS.md`. The resolver half is the `knotea` skill; record edits are the `knotctl` skill.
 
 `~/infra/knotea/authority/deploy/knot-only/` is the historical bare-knotd Fly deploy (the `knot-fly` name comes from it). Its fly.toml, knot.conf template and entrypoint still document the TSIG / ACL / confdb pattern the live confdb inherited. Copy-paste versions of those files plus the Cloudflare -> Knot AXFR migration playbook are in reference.md - read when standing up a new zone, bootstrapping a bare knotd, or migrating a zone off Cloudflare.
 
@@ -184,6 +184,6 @@ Docs sources (erfi-toolkit docs tool): `knot-dns`, `nsd`, `powerdns`, `miekg-dns
 - `cloudflare-ops` skill - CF Secondary DNS API endpoints used by `cf-axfr-setup.sh`.
 - `caddy` skill - the edge Caddy that consumes the TSIG path; force-renewal and TSIG rotation recipes.
 - `knotctl` skill - record edits, key roles, zones-as-code in `~/infra/knotea/authority/zones/`.
-- `gloryhole` skill - the resolver half of knotea and the shared Fly deploy.
+- `knotea` skill - the resolver half of knotea and the shared Fly deploy.
 - `~/infra/knotea/authority/docs/runbooks/cf-to-knot-migration.md` - full operator playbook with rollback.
 - `~/infra/knotea/authority/docs/api.md` - the CF-shape REST API (host `knotea.erfi.io`, Fly port 2096, path `/client/v4`) for terraform / dnscontrol / octodns style tooling.

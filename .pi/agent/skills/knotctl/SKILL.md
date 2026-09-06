@@ -1,6 +1,6 @@
 ---
 name: knotctl
-description: "Use when making live DNS edits against the user's Knot authoritative server (erfi.io + lab.erfi.io, TSIG-keyed RFC 2136 over TCP) - add/rm/set/ls records, declarative YAML zone apply from authority/zones/, TSIG key roles and NOTAUTH, or the live smoke test. Fires on 'knotctl', 'add/change a DNS record', 'RFC 2136', 'TSIG key', 'zone apply', 'zones-plan', '_acme-challenge TXT'. NOT for resolver work (gloryhole) or server-side config, ACLs and DNSSEC (knot-dns)."
+description: "Use when making live DNS edits against the user's Knot authoritative server (erfi.io + lab.erfi.io, TSIG-keyed RFC 2136 over TCP) - add/rm/set/ls records, declarative YAML zone apply from authority/zones/, TSIG key roles and NOTAUTH, or the live smoke test. Fires on 'knotctl', 'add/change a DNS record', 'RFC 2136', 'TSIG key', 'zone apply', 'zones-plan', '_acme-challenge TXT'. NOT for resolver work (knotea) or server-side config, ACLs and DNSSEC (knot-dns)."
 ---
 
 # knotctl - TSIG-keyed DNS editor
