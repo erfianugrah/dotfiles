@@ -183,7 +183,7 @@
       }
     },
     "external": {
-      "baseUrl": "http://127.0.0.1:8001/v1",
+      "baseUrl": "http://127.0.0.1:11434/v1",
       "api": "openai-completions",
       "apiKey": "external",
       "compat": {
@@ -194,7 +194,7 @@
         {
           "id": "qwen3.8-27b-nvfp4",
           "reasoning": true,
-          "name": "NInfer Qwen3.8-27B NVFP4 (spike soak: 262K, vision, MTP3)",
+          "name": "NInfer Qwen3.8-27B NVFP4 via the llmc proxy (swaps the engine on demand)",
           "contextWindow": 262144,
           "input": [
             "text",
