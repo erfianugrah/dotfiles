@@ -181,6 +181,33 @@
           }
         }
       }
+    },
+    "external": {
+      "baseUrl": "http://127.0.0.1:8001/v1",
+      "api": "openai-completions",
+      "apiKey": "external",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        {
+          "id": "qwen3.8-27b-nvfp4",
+          "reasoning": true,
+          "name": "NInfer Qwen3.8-27B NVFP4 (spike soak: 262K, vision, MTP3)",
+          "contextWindow": 262144,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
     }
   }
 }
