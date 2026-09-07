@@ -188,7 +188,7 @@
       "apiKey": "external",
       "compat": {
         "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
+        "supportsReasoningEffort": true
       },
       "models": [
         {
@@ -205,7 +205,8 @@
             "output": 0,
             "cacheRead": 0,
             "cacheWrite": 0
-          }
+          },
+          "maxTokens": 65536
         }
       ]
     }

@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.85.1",
-  "defaultProvider": "llama-server",
-  "defaultModel": "qwen38",
+  "defaultProvider": "openrouter",
+  "defaultModel": "deepseek/deepseek-v4-pro",
   "theme": "opencode-dark",
   "defaultThinkingLevel": "high",
   "externalEditor": "nvim",
