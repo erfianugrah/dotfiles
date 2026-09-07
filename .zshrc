@@ -90,7 +90,13 @@ zinit snippet OMZP::gh                # kept: completion for gh (1253 uses)
 zinit snippet OMZ::lib/compfix.zsh    # insecure-dir guard before compinit
 zinit snippet OMZ::lib/completion.zsh # core completion setup + bashcompinit
 zinit snippet OMZ::lib/key-bindings.zsh # Home/End/Ctrl-arrow (keystrokes, invisible to history)
-zinit snippet OMZ::lib/misc.zsh       # multios, interactivecomments, long_list_jobs
+# env_default is from the commented-out lib/functions.zsh; misc.zsh calls it
+# for PAGER/LESS. Ported (4 lines) instead of un-commenting 284 lines.
+function env_default() {
+  [[ ${parameters[$1]} = *-export* ]] && return 0
+  export "$1=$2" && return 3
+}
+zinit snippet OMZ::lib/misc.zsh       # multios, interactivecomments, long_list_jobs (needs env_default above)
 # zinit snippet OMZ::lib/git.zsh      # prompt helpers (git_prompt_info) - p10k bypasses; git-auto-fetch is self-contained
 # zinit snippet OMZ::lib/history.zsh  # dup of rc setopts; history-alias unused (8 hits, atuin covers)
 # zinit snippet OMZ::lib/directories.zsh # l/ll/lsa/md/rd/d: 0-4 hits in 2.5y; autocd + zoxide win
