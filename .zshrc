@@ -46,52 +46,68 @@ zinit light zdharma-continuum/fast-syntax-highlighting
 # ---------------------------------------------------------------------------
 # Oh-My-Zsh (tmux plugin loaded via OMZ, everything else via zinit snippets)
 # OMZ snippets via zinit (tmux plugin needs extra conf files created on clone)
+#
+# TRIM 2026-09-07: most of the 39 original snippets were verified dead weight
+# against 2.5y/111k rows of atuin history (queried the sqlite DB directly -
+# `atuin search --search-mode prefix` returns empty on this box) + a dep scan
+# of .zshrc/.p10k.zsh/functions.d (zero references to OMZ helpers). Commented
+# (not deleted) so a regression is a one-line revert. If nothing breaks by
+# ~2026-10-07, delete the commented block and this note.
+#
+# Evidence (2.5yr atuin counts): git=5585 full cmd vs gd=6 as the ONLY OMZ git
+# alias ever run; k=570/t=562/tf=40 are OUR rc aliases not OMZP ones; l/ll/
+# lsa/md/rd/d = 0-4 hits; clipcopy/clippaste = 0; omz = 2; history = 8 (atuin
+# covers it); z=7822 (zoxide). correction.zsh was inert anyway (ENABLE_CORRECTION
+# unset). key-bindings.zsh KEPT: its Home/End/Ctrl-arrow bindings are keystrokes,
+# invisible to history, and ~3ms. tmux plugin kept (atclone creates the conf).
 # ---------------------------------------------------------------------------
 zinit ice atclone'
   print "set -g default-terminal tmux-256color\nsource-file ~/.tmux.conf" > tmux.extra.conf
   print "set -g default-terminal tmux-256color" > tmux.only.conf
 ' atpull'%atclone' nocompile
 zinit snippet OMZP::tmux
+# git plugin kept ONLY for gd (6 uses); lib/git.zsh not needed by anything else
 zinit snippet OMZP::git
 zinit snippet OMZP::git-auto-fetch
-zinit snippet OMZP::git-prompt
+# zinit snippet OMZP::git-prompt      # dead: OMZ-theme prompt fn, p10k uses gitstatus
 (( $+commands[brew] )) && zinit snippet OMZP::brew
-zinit snippet OMZP::ansible
+# zinit snippet OMZP::ansible         # 0 uses; functions.d/misc.zsh has own wrappers
 zinit snippet OMZP::sudo
-zinit snippet OMZP::vscode
-zinit snippet OMZP::github
+# zinit snippet OMZP::vscode          # 0 uses; EDITOR=nvim
+# zinit snippet OMZP::github          # 0 uses (gh CLI = 1253 full cmds)
 zinit snippet OMZP::kubectl
-zinit snippet OMZP::kubectx
-zinit snippet OMZP::command-not-found
-zinit snippet OMZP::terraform
-zinit snippet OMZP::opentofu
-zinit snippet OMZP::npm
-zinit snippet OMZP::python
-zinit snippet OMZP::gh
+# zinit snippet OMZP::kubectx         # 0 uses of kctx/kubens forms
+# zinit snippet OMZP::command-not-found  # handler for missing cmds; commented to test
+# zinit snippet OMZP::terraform       # our rc alias t/tf wins (562/40 uses)
+# zinit snippet OMZP::opentofu        # same
+# zinit snippet OMZP::npm             # 0 OMZ-form uses
+# zinit snippet OMZP::python          # 0
+zinit snippet OMZP::gh                # kept: completion for gh (1253 uses)
 [[ -f /etc/debian_version ]] && zinit snippet OMZP::debian
-zinit snippet OMZP::rust
-zinit snippet OMZP::colored-man-pages
-zinit snippet OMZ::lib/async_prompt.zsh
-zinit snippet OMZ::lib/bzr.zsh
-zinit snippet OMZ::lib/cli.zsh
-zinit snippet OMZ::lib/clipboard.zsh
-zinit snippet OMZ::lib/compfix.zsh
-zinit snippet OMZ::lib/completion.zsh
-zinit snippet OMZ::lib/correction.zsh
-zinit snippet OMZ::lib/diagnostics.zsh
-zinit snippet OMZ::lib/directories.zsh
-zinit snippet OMZ::lib/functions.zsh
-zinit snippet OMZ::lib/git.zsh
-zinit snippet OMZ::lib/grep.zsh
-zinit snippet OMZ::lib/history.zsh
-zinit snippet OMZ::lib/key-bindings.zsh
-zinit snippet OMZ::lib/misc.zsh
-zinit snippet OMZ::lib/nvm.zsh
-zinit snippet OMZ::lib/prompt_info_functions.zsh
-zinit snippet OMZ::lib/spectrum.zsh
-zinit snippet OMZ::lib/termsupport.zsh
-zinit snippet OMZ::lib/theme-and-appearance.zsh
-zinit snippet OMZ::lib/vcs_info.zsh
+# zinit snippet OMZP::rust            # 0 uses of rcg-style aliases
+# zinit snippet OMZP::colored-man-pages # commented to test; re-add if man looks plain
+# --- OMZ libs: only what kept plugins/our own rc actually use ---
+zinit snippet OMZ::lib/compfix.zsh    # insecure-dir guard before compinit
+zinit snippet OMZ::lib/completion.zsh # core completion setup + bashcompinit
+zinit snippet OMZ::lib/key-bindings.zsh # Home/End/Ctrl-arrow (keystrokes, invisible to history)
+zinit snippet OMZ::lib/misc.zsh       # multios, interactivecomments, long_list_jobs
+# zinit snippet OMZ::lib/git.zsh      # prompt helpers (git_prompt_info) - p10k bypasses; git-auto-fetch is self-contained
+# zinit snippet OMZ::lib/history.zsh  # dup of rc setopts; history-alias unused (8 hits, atuin covers)
+# zinit snippet OMZ::lib/directories.zsh # l/ll/lsa/md/rd/d: 0-4 hits in 2.5y; autocd + zoxide win
+# zinit snippet OMZ::lib/grep.zsh     # only real effect was grep --exclude-dir alias -> ported to rc
+# zinit snippet OMZ::lib/correction.zsh  # inert: ENABLE_CORRECTION never set
+# zinit snippet OMZ::lib/clipboard.zsh   # clipcopy/clippaste: 0 hits
+# zinit snippet OMZ::lib/nvm.zsh      # nvm_prompt_info for OMZ themes only
+# zinit snippet OMZ::lib/async_prompt.zsh        # OMZ-theme async git plumbing
+# zinit snippet OMZ::lib/bzr.zsh               # no bzr
+# zinit snippet OMZ::lib/cli.zsh               # omz CLI: 2 uses in 2.5y
+# zinit snippet OMZ::lib/diagnostics.zsh       # OMZ debug dump fns
+# zinit snippet OMZ::lib/functions.zsh         # omz/take/mkcd: 0 hits
+# zinit snippet OMZ::lib/prompt_info_functions.zsh  # OMZ-theme only
+# zinit snippet OMZ::lib/spectrum.zsh          # OMZ-theme color arrays
+# zinit snippet OMZ::lib/termsupport.zsh       # OMZ-theme title support
+# zinit snippet OMZ::lib/theme-and-appearance.zsh  # OMZ-theme only
+# zinit snippet OMZ::lib/vcs_info.zsh          # OMZ-theme only
 
 # Cache the completion dump: compinit re-scans every fpath dir (~500ms/shell)
 # even when the dump is consistent; -C skips the scan (~10ms). Re-verify once
@@ -162,6 +178,11 @@ alias p=python3
 alias v=nvim
 if (( $+commands[eza] )); then alias ls=eza; else _missing_tools+=("eza"); fi
 if (( $+commands[bat] )); then alias cat=bat; else _missing_tools+=("bat"); fi
+# Ported from OMZ::lib/grep.zsh (removed 2026-09-07): keeps raw grep -r out of
+# VCS dirs. --color=auto from that lib was redundant (terminal default).
+alias grep='grep --exclude-dir={.bzr,CVS,.git,.hg,.svn,.idea,.tox,.venv,venv}'
+# gd kept after OMZP::git was kept for it; if OMZP::git gets deleted, port here:
+# alias gd='git diff'
 alias bw='NODE_OPTIONS="--no-deprecation" bw'
 alias c=cargo
 alias zja="zj a --index"
