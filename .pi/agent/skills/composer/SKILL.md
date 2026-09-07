@@ -271,6 +271,10 @@ Other: `POST /validate`, `POST /exec` (run `docker compose <cmd>`), `POST /conve
 
 Name pattern: `^[A-Za-z0-9_-]+$`. Status enum on `StackSummary.Status`. Per-stack locks prevent concurrent lifecycle ops.
 
+**Bulk deploy is PARALLEL and unordered - never use it for a full bring-up.** The UI's select-all-then-deploy fans out one request per stack (`runBulk`, `Promise.allSettled`); per-stack locks prevent concurrent ops on the SAME stack but impose no order BETWEEN stacks. Any stack that declares another stack's network `external: true` fails with `network <name> declared as external, but could not be found` if it wins the race, and the UI reports only `Failed to deploy N stacks`. On 2026-09-07, after servarr's docker network store was lost, that was 18 stacks in one click. For a full bring-up use the `bring-up-all` pipeline (`compose_up` step per stack, `depends_on` between steps), or `POST /api/v1/stacks/deploy-batch` once the dependency feature is released, which sorts into waves and marks downstream stacks `skipped` rather than failing them. Read per-stack outcomes from the composer container log (`ssh router 'docker logs composer --since 30m'`) - its timestamps are **UTC**, so subtract 8h from local when correlating.
+
+**Status is a 15s snapshot, not a live read.** `GET /stacks` serves the `StatusRefresher` cache, so a stack mid-deploy reads `unknown` or stale. Do not conclude a stack is down from one poll; re-read, or check the daemon.
+
 ## Pipelines - footguns
 
 Schedules use 5-field cron only. **Macros (`@daily`, `@hourly`, `@every 5m`) silently never fire.** Use `0 0 * * *` etc.
