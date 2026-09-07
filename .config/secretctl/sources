@@ -16,7 +16,7 @@ exclude *_HOST *_HOSTNAME HOSTNAME *_PORT *_USER *_USERNAME PGUSER PGHOST PGPORT
 # token), so a glob here would punch a real hole in the guard. Named because
 # these two collide with ~/infra/ai/llm-compose/AGENTS.md and made the whole
 # file unreadable to agents (2026-09-07).
-exclude LLM_TEXT_API_URL LLM_VISION_API_URL
+exclude LLM_TEXT_API_URL LLM_VISION_API_URL LLM_URL
 # runtime mode flags and public key material are not credentials
 exclude NODE_ENV BONKLED_ENV *_PUBLIC_KEYS *_PUBKEY SOPS_AGE_PUBLICKEY
 # an access key ID is an identifier; the paired SECRET_ACCESS_KEY is the credential
@@ -58,6 +58,22 @@ exclude *_IP *_IPV4 *_IPV6 *_CIDR
 # its SOPS .env. Role names sit next to *_USER, which was already excluded.
 exclude *_LISTEN_ADDRESS *_LISTEN *_BIND_ADDRESS
 exclude *_ROLE *_ANON_ROLE
+# 2026-09-07: runtime flags, initdb args and the in-cluster ML service URL are
+# configuration too - they were flagging ~/infra/immich-compose/docker-compose.yml
+# (NODE_OPTIONS, IMMICH_MACHINE_LEARNING_URL, POSTGRES_INITDB_ARGS). Kept narrow
+# on purpose: NOT a blanket *_URL, because a connection URL can legitimately
+# carry credentials (postgres://user:pass@host). Note the pattern behind both of
+# today's additions: `docker:servarr/*#*` registers EVERY env var of every
+# container, so any compose file that sets a plain config value collides. The
+# exclude list is where that gets carved back, so expect to extend it.
+exclude NODE_OPTIONS *_OPTIONS
+exclude *_INITDB_ARGS
+exclude IMMICH_MACHINE_LEARNING_URL *_MACHINE_LEARNING_URL *_ML_URL
+# In-cluster service URLs (http://<container>:<port>) reached over a shared
+# docker network - configuration. Listed by name rather than as `*_URL` on
+# purpose: a URL-shaped key CAN carry credentials (DATABASE_URL, REDIS_URL,
+# *_DSN), and a blanket exclude would stop checking those too.
+exclude WEBUI_URL CRAWLER_URL OSINT_URL SEARXNG_URL
 # 2026-09-05: object-store endpoints and backup filter regexps are configuration (seen in compose-backups skill)
 exclude *_ENDPOINT *_SERVER_URL *_EXCLUDE_REGEXP *_HEALTHCHECK_URL
 exclude JELLYFIN_PublishedServerUrl *PublishedServerUrl
