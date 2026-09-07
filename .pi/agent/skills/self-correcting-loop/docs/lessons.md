@@ -31,6 +31,20 @@ Two adjacent operator traps, both observed on a real run:
   deleted the preset name from the expected set. The judge caught it, but the
   run was unfixable: restoring the file was outside `writeScope`.) Fix the
   baseline honestly, or commit the file, before running.
+- **Killing the loop by process name orphans the agent.** `pkill -f 'loop
+  run'` ends `loop.ts` and leaves its `timeout` + `bwrap` descendants alive:
+  `--die-with-parent` does not fire because the surviving `timeout` IS the
+  parent, and the agent keeps editing the repo with no checkpoint, no scope
+  fence and no rollback accounting - precisely the failure `--unshare-pid`
+  exists to prevent, reintroduced from outside the jail. Observed
+  2026-09-07: it produced 1,614 unsupervised lines, and the engine log was
+  the only reason it was noticed at all. Launch with `setsid`, record the
+  process group, and reap the group: `kill -TERM -$PGID`. Then check
+  `pgrep -af 'bwrap|pi -p'` before trusting that the run is over.
+- **Do not send ad-hoc requests to a single-lane local engine mid-run.** A
+  `--max-concurrency 1` server admits one request; an operator probe queues
+  behind the agent's generation and either times out or takes the lane the
+  iteration needed. Read the engine's log instead of asking it questions.
 - **A killed run leaves the checkpoint's `git add -A` staged.** The next
   `git commit` you make sweeps the agent's staged work into YOUR commit.
   After killing a loop mid-iteration, `git status` and unstage/restore
@@ -66,6 +80,37 @@ Practical consequences:
 - Worth considering for the loop itself: surface a zero-write iteration as
   its own verdict line, and copy the iteration's session file out of the
   overlay before teardown so the jail does not cost you the diagnosis.
+
+### A sensor a non-functioning implementation can satisfy is not a gate
+
+Observed 2026-09-07, lockstep v1 client milestone. The feature sensor was:
+
+```
+test -f client/src/infrastructure/ws.ts && test -f client/src/infrastructure/jellyfin.ts \
+  && test -f client/src/infrastructure/video.ts && test -n "$(ls client/src/ui 2>/dev/null)"
+```
+
+File existence, plus a test-count floor and a README shape check. All of it
+went green on the first iteration while the client did not work at all:
+`onMessage` was undefined by default, so every server frame was silently
+discarded; the video tick was never driven; the drift controller's parameter
+computation was dead code reachable only from tests. Every mechanical gate
+passed on a client that could not sync anything.
+
+The frontier judge caught it, naming each dead path. But the sensor was
+structurally incapable of catching it, and a judge is one model's opinion
+where a counter is evidence. Write the counter so the broken version fails:
+assert the wiring, not the file - route a specific message tag through the
+real app module against a fake socket and assert the specific effect. If you
+cannot express that as an exit code, say so in the manifest rather than
+letting `test -f` stand in for it.
+
+The converse also bit, same day, opposite direction: a judge asked point
+blank whether "the broadcast reaches every participant except the
+originator" passed code whose broadcast helper had **zero callers**. The
+mechanical reachability gate (`clippy --all-targets -D warnings`) is what
+caught that. Neither gate type subsumes the other; a serious harness needs
+both.
 
 ### Feature sensors must be red at baseline
 

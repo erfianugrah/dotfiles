@@ -74,6 +74,36 @@ Contents:
   evicts the worker's model mid-iteration; and keep the judge on a hosted
   frontier model - the local rung writes, the frontier judges, so the only
   cost is a per-iteration review call.
+- **The "local rung stalls on multi-file work" ceiling was a CONFIG BUG
+  (re-measured 2026-09-07).** On a NInfer/NVFP4 Qwen3.8-27B rung the same
+  model both (a) read for 6.6 minutes and wrote nothing, twice, on a broad
+  manifest, and (b) later delivered four TypeScript modules, a UI layer, 53
+  new tests and a 190-line README in ONE iteration - and drove a whole
+  four-milestone Rust+TS build-out to all-sensors-green without the
+  escalation rung ever being reached. Two provider settings, not model
+  capability, explain the difference:
+  - **Effort inherited as `xhigh`.** With `compat.supportsReasoningEffort:
+    false` pi sends no effort field, so the artifact's chat template applies
+    its own default. One tool call cost **35,747 output tokens**. Pin the
+    rung as `provider/model:medium`. (Watch the value space: that template
+    exposes `low|medium|xhigh` and REJECTS pi's default `high` with
+    `reasoning_effort_not_supported`, which is why the field gets suppressed
+    and the binge goes unnoticed.)
+  - **No `maxTokens` on the model entry**, so pi's 16,384 default truncated
+    the model mid-thought. A truncated response carries no tool call and no
+    text, so the harness books it as a clean exit with zero changes - a
+    silent no-op that burns a full agent budget and still reports
+    `progressed` because the failing count did not regress.
+  Before believing any local rung "cannot do multi-file work", check the
+  effort it actually ran at and the output cap it actually had. Read the
+  engine log, not the harness report: per-request `output` equal to the cap
+  with zero tool calls is the truncation signature.
+- **Name judge and rung models provider-qualified.** A bare
+  `claude-opus-5` in a judge `cmd` is ambiguous when several providers are
+  authenticated (`anthropic/`, `cloudflare-ai-gateway/`, `github-copilot/`,
+  `opencode/`); the judge fails closed with "no parseable verdict" and the
+  loop hands the model a review failure that looks like a code defect. Use
+  `anthropic/claude-opus-5`.
 - **Local-rung ceiling + the working-window rules.** The local rung one-shots
   scoped tasks
   (single-file, ~3-hunk semantic changes with a contract probe) but stalls
