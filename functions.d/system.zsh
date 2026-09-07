@@ -11,14 +11,24 @@ _sys_detect() {
   case "$(uname -s)" in
     Linux)
       _SYS_OS="linux"
-      if command -v apt &>/dev/null; then
-        _SYS_PKG="apt"
-      elif command -v dnf &>/dev/null; then
-        _SYS_PKG="dnf"
-      elif command -v pacman &>/dev/null; then
-        _SYS_PKG="pacman"
-      elif command -v zypper &>/dev/null; then
-        _SYS_PKG="zypper"
+      # Read the distro id directly; probing `command -v apt|dnf|...` walks the
+      # full PATH per miss and costs ~80ms under WSL (DrvFs /mnt/c entries).
+      local distro_id
+      distro_id="$(. /etc/os-release 2>/dev/null && echo "${ID:-}")"
+      case "$distro_id" in
+        debian|ubuntu|linuxmint|pop)  _SYS_PKG="apt"    ;;
+        fedora|rhel|centos|rocky|alma) _SYS_PKG="dnf"   ;;
+        arch|manjaro|endeavouros)     _SYS_PKG="pacman" ;;
+        opensuse*|sles)               _SYS_PKG="zypper" ;;
+      esac
+      # Fallback for distros not in the map (and odd environments without
+      # /etc/os-release): one cheap probe per candidate, only if still unknown.
+      if [[ "$_SYS_PKG" == "unknown" ]]; then
+        if   command -v apt    &>/dev/null; then _SYS_PKG="apt"
+        elif command -v dnf    &>/dev/null; then _SYS_PKG="dnf"
+        elif command -v pacman &>/dev/null; then _SYS_PKG="pacman"
+        elif command -v zypper &>/dev/null; then _SYS_PKG="zypper"
+        fi
       fi
       ;;
     Darwin)
