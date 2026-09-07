@@ -51,6 +51,13 @@ dotenv:~/infra/flint-openwrt/flint-secrets.env
 exclude AI_PROVIDER *_PROVIDER
 exclude provider PROVIDER
 exclude *_IP *_IPV4 *_IPV6 *_CIDR
+# 2026-09-07: a listen address and a database ROLE NAME are configuration, not
+# credentials. Both were flagging ~/infra/memledger/compose.yml as a credential
+# copy (PG_EXPORTER_WEB_LISTEN_ADDRESS, PGRST_DB_ANON_ROLE), which blocked
+# reading a compose file that holds no actual secret - the real ones live in
+# its SOPS .env. Role names sit next to *_USER, which was already excluded.
+exclude *_LISTEN_ADDRESS *_LISTEN *_BIND_ADDRESS
+exclude *_ROLE *_ANON_ROLE
 # 2026-09-05: object-store endpoints and backup filter regexps are configuration (seen in compose-backups skill)
 exclude *_ENDPOINT *_SERVER_URL *_EXCLUDE_REGEXP *_HEALTHCHECK_URL
 exclude JELLYFIN_PublishedServerUrl *PublishedServerUrl
