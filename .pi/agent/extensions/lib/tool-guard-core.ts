@@ -341,7 +341,7 @@ export const BASH_RULES: BlockRule[] = [
     id: "unsigned_git_commit",
     pattern: /^\s*git\s+(-c\s+commit\.gpg[sS]ign=false\b|.*--no-gpg-sign\b)/,
     reason:
-      "This user REQUIRES GPG-signed commits (commit.gpgsign=true is set globally, key B9D283E8AE4E56B4). NEVER bypass signing. If the commit failed with 'gpg failed to sign the data', the agent cache is cold - warm it with `zsh -ic 'gpg_unlock'` (bw-seeded, no TTY needed) and retry the SAME command.",
+      "This user REQUIRES GPG-signed commits (commit.gpgsign=true is set globally). NEVER bypass signing. If the commit failed with 'gpg failed to sign the data', the agent cache is cold - warm it with `zsh -ic 'gpg_unlock'` (bw-seeded, no TTY needed) and retry the SAME command.",
     segment: true,
   },
   {

@@ -511,8 +511,10 @@ sops_rotate_age() {
     (( files_failed > 0 )) && return 1
     return 0
 }
-# GPG git-signing cache (key B9D283E8AE4E56B4)
+# GPG git-signing cache
 # ---------------------------------------------------------------------------
+# Key fingerprint derived from `git config --global user.signingkey`.
+# Keygrip derived from gpg at shell init (gpg-preset-passphrase needs it).
 # gpg-agent caches the passphrase (7d sliding / 30d hard, see
 # ~/.gnupg/gpg-agent.conf). Headless shells - tmux loops, pi -p subagents -
 # have no TTY for pinentry, so a cold cache kills `git commit` with
@@ -520,12 +522,25 @@ sops_rotate_age() {
 # when bw serve is unlocked (item GPG_KEY_PASSPHRASE, passphrase in notes);
 # otherwise it prompts once via pinentry.
 
-_GPG_SIGNING_KEY="B9D283E8AE4E56B4"
-# Keygrip is a public identifier (like the key fingerprint), NOT key material.
-_GPG_SIGNING_KEYGRIP="17BB7DE98DD50550DE2641A694060FE9311D2BB4" # gitleaks:allow
+_GPG_SIGNING_KEY=""
+_GPG_SIGNING_KEYGRIP=""
+
+# _gpg_init - derive signing key from git config at shell init (once)
+_gpg_init() {
+    local key
+    key=$(git config --global user.signingkey 2>/dev/null) || return 1
+    [[ -n "$key" ]] || return 1
+    _GPG_SIGNING_KEY="$key"
+    # Keygrip is a public identifier (like the key fingerprint), NOT key material.
+    _GPG_SIGNING_KEYGRIP=$(gpg --with-keygrip --list-secret-keys "$key" 2>/dev/null \
+        | awk '/Keygrip =/{print $3; exit}')  # gitleaks:allow
+    [[ -n "$_GPG_SIGNING_KEYGRIP" ]]
+}
+_gpg_init || print -u2 "[gpg] no signing key from git config - gpg_unlock is inactive"
 
 # _gpg_cache_warm - returns 0 if the agent can sign with no passphrase prompt
 _gpg_cache_warm() {
+    [[ -n "$_GPG_SIGNING_KEY" ]] || return 1
     echo cache-probe | gpg --batch --no-tty --pinentry-mode error \
         --clearsign -u "$_GPG_SIGNING_KEY" >/dev/null 2>&1
 }
@@ -537,6 +552,7 @@ _gpg_cache_warm() {
 gpg_seed_bw() {
     emulate -L zsh
     _gpg_cache_warm && return 0
+    [[ -n "$_GPG_SIGNING_KEYGRIP" ]] || return 1
     (( $+functions[_bw_serve_ok] )) && _bw_serve_ok || return 1
     local pw
     pw=$(_bw_api_get_note GPG_KEY_PASSPHRASE 2>/dev/null) || return 1
@@ -553,6 +569,11 @@ gpg_seed_bw() {
 #     (headless-safe); (3) one pinentry prompt (interactive fallback).
 gpg_unlock() {
     emulate -L zsh
+
+    if [[ -z "$_GPG_SIGNING_KEY" ]]; then
+        print -u2 "[gpg] no signing key configured - set user.signingkey in git config"
+        return 1
+    fi
 
     if _gpg_cache_warm; then
         echo "[gpg] cache already warm for $_GPG_SIGNING_KEY"

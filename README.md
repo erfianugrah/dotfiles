@@ -294,7 +294,7 @@ curl -fsSL https://deno.land/install.sh | sh
 
 ### GPG signing
 
-Git commits are signed with GPG key `B9D283E8AE4E56B4`. Import your key and
+Git commits are signed with GPG key `0B43F4E8B97B67F7`. Import your key and
 ensure `gpg-agent` is running:
 
 ```sh
@@ -465,7 +465,7 @@ session age. If served secrets ever look stale, the fix is `bw_serve_start`
 
 ### Git (`.gitconfig`)
 
-- **Signing:** GPG commit signing enabled (key `B9D283E8AE4E56B4`)
+- **Signing:** GPG commit signing enabled (key `0B43F4E8B97B67F7`)
 - **Pager:** [delta](https://github.com/dandavison/delta) with navigation
 - **Merge:** `diff3` conflict style
 - **Pull:** rebase by default
