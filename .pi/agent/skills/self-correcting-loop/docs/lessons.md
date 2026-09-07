@@ -37,6 +37,36 @@ Two adjacent operator traps, both observed on a real run:
   deliberately before committing anything; check `git show --stat HEAD`
   for surprise passengers.
 
+### A zero-write iteration is nearly undiagnosable under the sandbox
+
+Observed 2026-09-07, lockstep v1 build-out, rung 0 = a local llama-server
+class model (`external/qwen3.8-27b-nvfp4` on NInfer). Trial iteration 1 ran
+396s, exited 0, and reported `changedFiles: []`, `scopeViolations: []`,
+`kept: true`. The engine log independently showed ~35 requests at 47K ctx
+with all four tools in schema and one tool call per request, so the agent
+was demonstrably working - it read for six and a half minutes and never
+wrote.
+
+The report cannot tell you why, because the bwrap jail puts `~/.pi/agent` on
+a `--tmp-overlay`: the iteration's pi session file lands in the invisible
+tmpfs and is discarded at exit. So "explored instead of acting" and "writes
+were attempted and failed silently" look identical from the outside. The
+repo itself is `--bind` (rw), which rules out the sandbox eating repo
+writes, but that is inference, not evidence.
+
+Practical consequences:
+
+- **`agentExit: 0` with `changedFiles: []` is a distinct failure mode**, not
+  a quiet no-op. It burns a full agent budget and shows up as `progressed`
+  in the report because the failing count did not regress. `--trial` catches
+  it only if you read `changedFiles`, not just the sensor counts.
+- **First move on a zero-write iteration is `LOOP_SANDBOX=off` for one
+  iteration**, so the transcript survives and the tool sequence is readable.
+  Diagnose, then put the jail back.
+- Worth considering for the loop itself: surface a zero-write iteration as
+  its own verdict line, and copy the iteration's session file out of the
+  overlay before teardown so the jail does not cost you the diagnosis.
+
 ### Feature sensors must be red at baseline
 
 On an ADDITIVE-feature task every sensor passes
