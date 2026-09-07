@@ -98,23 +98,18 @@ Contents:
   effort it actually ran at and the output cap it actually had. Read the
   engine log, not the harness report: per-request `output` equal to the cap
   with zero tool calls is the truncation signature.
-- **For the NInfer rung, use `external/qwen3.8-27b-nvfp4:medium`, NOT
-  `llama-server/qwen38-ninfer`** (measured 2026-09-08, both live). They reach
-  the same engine through the same proxy, but pi sends a different output cap:
-
-  | rung string | engine logs |
-  |---|---|
-  | `external/qwen3.8-27b-nvfp4:medium` | `max output 65,536` |
-  | `llama-server/qwen38-ninfer` | `max output 16,384` |
-
-  16,384 is the ceiling that truncated a 35,747-token response mid-thought and
-  produced two iterations that exited 0 having changed nothing. The
-  llama-server figure is pinned in `llama-server-dynamic.ts`, which registers
-  that provider from the proxy's live model list and hardcodes
-  `maxTokens: 16384` because the proxy exposes no per-preset max-output field.
-  Correct when written; wrong for a rung that thinks. Until
-  `~/infra/ai/llm-compose/docs/plans/2026-09-08-provider-consolidation.md`
-  step 1 lands, the `llama-server/` form of this model is a truncation trap.
+- **The NInfer output-cap divergence is RESOLVED (2026-09-08).**
+  `llama-server/qwen38-ninfer` used to be a truncation trap: both rung forms
+  reached the same engine through the same proxy, but pi sent a different
+  output cap - `external/qwen3.8-27b-nvfp4:medium` -> `max output 65,536`,
+  `llama-server/qwen38-ninfer` -> `max output 16,384`, pinned in
+  `llama-server-dynamic.ts` because the proxy exposed no per-preset
+  max-output field. Step 1 of the provider-consolidation plan landed: the
+  preset carries `runtime.max_output_tokens = 65536`, the proxy publishes it
+  as `meta.max_output` in `/v1/models`, and the extension registers
+  `maxTokens: meta.max_output ?? 16384`. Both forms now log 65,536. Keep
+  reading the engine log, not the harness report: per-request `output` equal
+  to the cap with zero tool calls is the truncation signature.
 
 - **Name judge and rung models provider-qualified.** A bare
   `claude-opus-5` in a judge `cmd` is ambiguous when several providers are

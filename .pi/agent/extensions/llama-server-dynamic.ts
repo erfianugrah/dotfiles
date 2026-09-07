@@ -36,6 +36,7 @@ type ProxyModel = {
     name?: string;
     context?: number;
     reasoning?: boolean;
+    max_output?: number;
     capabilities?: { vision?: boolean };
   };
 };
@@ -68,12 +69,14 @@ export default async function (pi: ExtensionAPI) {
         reasoning: meta.reasoning === true,
         input: vision ? ["text", "image"] : ["text"],
         contextWindow: meta.context ?? 128000,
-        // The proxy does not expose a per-preset max-output-tokens field
-        // (llama-server defaults n_predict=-1). pi's own default is 16384;
-        // the static list relied on it, but registerProvider does NOT apply
-        // the default (omitting maxTokens makes `pi --list-models` crash in
-        // formatTokenCount). Pin it to pi's default to match old behavior.
-        maxTokens: 16384,
+        // Per-preset max-output cap, published by the proxy as meta.max_output
+        // (runtime.max_output_tokens in the preset TOML). Set where an engine
+        // or client path imposes a real ceiling; llama.cpp presets leave it
+        // absent (n_predict=-1 is unlimited). Fallback keeps pi's own default
+        // for presets without one - registerProvider does NOT apply the
+        // default (omitting maxTokens crashes `pi --list-models` in
+        // formatTokenCount), so an explicit value is required.
+        maxTokens: meta.max_output ?? 16384,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       };
     });
