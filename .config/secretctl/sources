@@ -10,6 +10,13 @@
 exclude TZ LANG LANGUAGE LC_* EMAIL PUID PGID UMASK
 exclude POSTGRES_DB PGDATABASE DB_NAME *_DB_NAME DATABASE_NAME
 exclude *_HOST *_HOSTNAME HOSTNAME *_PORT *_USER *_USERNAME PGUSER PGHOST PGPORT
+# Bare service endpoints for self-hosted inference: configuration, not
+# credentials. Listed by exact key rather than *_URL or *_API_URL on purpose -
+# plenty of URLs DO carry secrets (a DSN with a password, a webhook with a
+# token), so a glob here would punch a real hole in the guard. Named because
+# these two collide with ~/infra/ai/llm-compose/AGENTS.md and made the whole
+# file unreadable to agents (2026-09-07).
+exclude LLM_TEXT_API_URL LLM_VISION_API_URL
 # runtime mode flags and public key material are not credentials
 exclude NODE_ENV BONKLED_ENV *_PUBLIC_KEYS *_PUBKEY SOPS_AGE_PUBLICKEY
 # an access key ID is an identifier; the paired SECRET_ACCESS_KEY is the credential
