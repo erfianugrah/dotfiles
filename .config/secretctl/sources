@@ -73,7 +73,7 @@ exclude IMMICH_MACHINE_LEARNING_URL *_MACHINE_LEARNING_URL *_ML_URL
 # docker network - configuration. Listed by name rather than as `*_URL` on
 # purpose: a URL-shaped key CAN carry credentials (DATABASE_URL, REDIS_URL,
 # *_DSN), and a blanket exclude would stop checking those too.
-exclude WEBUI_URL CRAWLER_URL OSINT_URL SEARXNG_URL
+exclude WEBUI_URL CRAWLER_URL OSINT_URL SEARXNG_URL GF_SERVER_ROOT_URL
 # 2026-09-05: object-store endpoints and backup filter regexps are configuration (seen in compose-backups skill)
 exclude *_ENDPOINT *_SERVER_URL *_EXCLUDE_REGEXP *_HEALTHCHECK_URL
 exclude JELLYFIN_PublishedServerUrl *PublishedServerUrl
@@ -86,6 +86,12 @@ exclude *_LISTEN *_HEALTH_LISTEN
 exclude theme THEME *_THEME
 exclude *_EMAIL GMAIL
 sops:~/discord-wipe-go/.env
-sops:~/infra/dns-tf/secrets.enc.tfvars
+# The file is sops-encrypted but NOT named *.enc.*, so the ~/infra/**/*.enc.*
+# glob above does not reach it and it needs naming explicitly. Registered as
+# secrets.enc.tfvars until 2026-09-07, which silently resolved to nothing:
+# `secretctl digests` skipped the store and `classify` then called files
+# holding these values CLEAN. A registry entry for a path that does not exist
+# is worse than no entry, because it reads as coverage.
+sops:~/infra/dns-tf/secrets.tfvars
 # 2026-09-06: apt frontend env flag is configuration, not a credential (blocked ninfer Dockerfile read)
 exclude DEBIAN_FRONTEND
