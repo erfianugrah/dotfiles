@@ -90,15 +90,21 @@ export default function (pi: ExtensionAPI) {
 			`${provider} ${s.n} req`,
 			`p50 ${s.decP50.toFixed(1)} tok/s`,
 			`cache ${s.cacheP50.toFixed(1)}%`,
-			`ttft ${Math.round(s.ttftMin)}-${Math.round(s.ttftMax)}ms`,
 		];
+		// TTFT only shown for the local provider: cloud gateways buffer, so the
+		// first message_update arrives near-instantly and the number is noise.
+		if (provider === LOCAL_PROVIDER) {
+			parts.push(`ttft ${Math.round(s.ttftMin)}-${Math.round(s.ttftMax)}ms`);
+		}
 		if (provider === LOCAL_PROVIDER && engine && !Number.isNaN(engine.mtpPctMedian)) {
 			parts.push(`mtp ~${engine.mtpPctMedian.toFixed(0)}%`);
 		}
 		if (provider === LOCAL_PROVIDER && engine && engine.errors > 0) {
 			parts.push(theme.fg("error", `errors ${engine.errors}`));
 		}
-		ctx.ui.setWidget(WIDGET_SLOT, [theme.fg("dim", parts.join(" | "))]);
+		ctx.ui.setWidget(WIDGET_SLOT, [theme.fg("dim", parts.join(" | "))], {
+			placement: "belowEditor",
+		});
 	}
 
 	function formatTable(reqList: ReqStat[], label: string, withEngine: boolean): string {
@@ -109,9 +115,9 @@ export default function (pi: ExtensionAPI) {
 			`decode p5 / p50 / p95   ${s.decP5.toFixed(1)} / ${s.decP50.toFixed(1)} / ${s.decP95.toFixed(1)} tok/s`,
 			`prompt context          p50 ${fmtK(s.ctxP50)}, max ${fmtNum(s.ctxMax)} tokens`,
 			`prefix-cache hit        p50 ${s.cacheP50.toFixed(1)}%`,
-			`TTFT                    ${Math.round(s.ttftMin)}-${Math.round(s.ttftMax)} ms`,
-			`below 100 tok/s         ${s.below100} of ${s.n} (${((100 * s.below100) / s.n).toFixed(1)}%)`,
 		];
+		if (withEngine) lines.push(`TTFT                    ${Math.round(s.ttftMin)}-${Math.round(s.ttftMax)} ms`);
+		lines.push(`below 100 tok/s         ${s.below100} of ${s.n} (${((100 * s.below100) / s.n).toFixed(1)}%)`);
 		if (withEngine) {
 			if (engine) {
 				lines.push(
