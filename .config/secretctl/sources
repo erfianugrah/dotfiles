@@ -15,7 +15,7 @@ exclude NODE_ENV BONKLED_ENV *_PUBLIC_KEYS *_PUBKEY SOPS_AGE_PUBLICKEY
 # an access key ID is an identifier; the paired SECRET_ACCESS_KEY is the credential
 exclude *_ACCESS_KEY_ID
 # labels, names, tags, versions and image refs are identifiers
-exclude EXEC_LABEL *_LABEL *_NAME *_TAG *_VERSION *_MODEL *_IMAGE
+exclude EXEC_LABEL *_LABEL *_NAME *_TAG *_VERSION *_MODEL *_IMAGE GF_PLUGINS_PREINSTALL_SYNC GF_PLUGINS_*
 # 2026-09-04: guard false positives seen in session output - db engine names, from-addresses, domains, fan-out lists are configuration
 exclude *_DB_TYPE GITEA__database__DB_TYPE SMTP_FROM *_FROM GITEA_DOMAIN *_DOMAIN BONKLED_FANOUT *_FANOUT
 
@@ -45,7 +45,7 @@ exclude AI_PROVIDER *_PROVIDER
 exclude provider PROVIDER
 exclude *_IP *_IPV4 *_IPV6 *_CIDR
 # 2026-09-05: object-store endpoints and backup filter regexps are configuration (seen in compose-backups skill)
-exclude *_ENDPOINT *_SERVER_URL *_EXCLUDE_REGEXP
+exclude *_ENDPOINT *_SERVER_URL *_EXCLUDE_REGEXP *_HEALTHCHECK_URL
 exclude JELLYFIN_PublishedServerUrl *PublishedServerUrl
 exclude WAF_CADDY_ADMIN_URL *_ADMIN_URL
 exclude DEFAULT_MODELS *_MODELS PGRST_OPENAPI_SERVER_PROXY_URI *_PROXY_URI GUMSHOE_URL
@@ -57,3 +57,5 @@ exclude theme THEME *_THEME
 exclude *_EMAIL GMAIL
 sops:~/discord-wipe-go/.env
 sops:~/infra/dns-tf/secrets.enc.tfvars
+# 2026-09-06: apt frontend env flag is configuration, not a credential (blocked ninfer Dockerfile read)
+exclude DEBIAN_FRONTEND
