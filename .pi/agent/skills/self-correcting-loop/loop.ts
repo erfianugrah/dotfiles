@@ -1171,7 +1171,7 @@ async function headSha(): Promise<string | null> {
  * over time, across every repo and driving session. Query with jq/duckdb or
  * `loop history`. Deliberately NOT journaled: premise/manifest refusals and
  * dry runs (harness-authoring events, not model outcomes), and token counts
- * (the llm-compose proxy counters are shared across clients - a delta would
+ * (the llmc proxy counters are shared across clients - a delta would
  * be mis-attribution; wall-clock + iterations is the honest perf proxy).
  * Best-effort: journaling must never crash or fail a run.
  */

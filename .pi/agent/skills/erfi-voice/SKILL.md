@@ -165,7 +165,7 @@ Match what you see, THEN layer the reference-discipline below on top. Texture fr
 A QLoRA fine-tune of Erfi's chat + blog corpus is served on-demand at
 `localhost:11434` (model id `erfi-q4km`; load with `llmc switch erfi`, swap back
 with `llmc switch <other>`; `llmc` is not on PATH - it is
-`~/infra/ai/llm-compose/bin/llmc`). It supplies TEXTURE prompting can't fake -- the
+`~/infra/ai/llmc/bin/llmc`). It supplies TEXTURE prompting can't fake -- the
 doc-verified failure mode is that prompting alone defaults to "an average,
 generic tone, readily detectable as AI." This skill supplies the DISCIPLINE the
 model lacks (citations, true-today/gap/roadmap split, corpo-tell removal,

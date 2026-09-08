@@ -1,7 +1,7 @@
 /**
  * local-model-rules - model-aware system prompt injection for local models.
  *
- * When the active model is from the llm-compose proxy (gemma, qwen families
+ * When the active model is from the llmc proxy (gemma, qwen families
  * via llama-server provider), prepend the local-model-specific rules from
  * `~/.pi/agent/prompts/local-model-rules.md`. These rules correct for common
  * local-model quirks:

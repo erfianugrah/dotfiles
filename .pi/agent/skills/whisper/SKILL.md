@@ -1,12 +1,12 @@
 ---
 name: whisper
-description: "Use when transcribing audio or video via the local whisper-transcribe service - YouTube videos or playlists, local audio files, or OBS recordings on the /media mount - with translation, diarization, language hints, hotwords or voice prints, or when reviewing a recorded call with the video_* tools. Fires on 'transcribe', 'whisper', 'YouTube transcript', 'diarize this call', 'subtitles', 'video_extract'. NOT for LLM inference (llm-compose) or image generation (comfyui)."
+description: "Use when transcribing audio or video via the local whisper-transcribe service - YouTube videos or playlists, local audio files, or OBS recordings on the /media mount - with translation, diarization, language hints, hotwords or voice prints, or when reviewing a recorded call with the video_* tools. Fires on 'transcribe', 'whisper', 'YouTube transcript', 'diarize this call', 'subtitles', 'video_extract'. NOT for LLM inference (llmc) or image generation (comfyui)."
 ---
 
 # Whisper Transcription
 
 WhisperX-backed transcription service. The MCP wrapper
-(`~/infra/ai/llm-compose/mcp/whisper-server.py`, registered as `whisper` in
+(`~/infra/ai/llmc/mcp/whisper-server.py`, registered as `whisper` in
 `~/.pi/agent/mcp-servers.json`) is the tool surface; this skill documents the
 HTTP API for curl and scripts. The call-review tools (`video_extract`,
 `video_doc`, voice prints) are in `video-review.md` - read it when the task is
@@ -17,10 +17,10 @@ reviewing a recorded call rather than getting a transcript.
 - **Base URL**: `http://localhost:7860` (env: `WHISPER_URL`)
 - **Runs on**: the `whisper-transcribe` compose stack on this dev box
   (`~/infra/ai/whisper-transcribe/compose.yaml`: whisper, whisper-live, bot,
-  valkey, crawl4ai, flaresolverr), sharing the RTX 5090 with llm-compose.
+  valkey, crawl4ai, flaresolverr), sharing the RTX 5090 with llmc.
 - **GPU sharing**: a transcription job swaps llama-server out; a 503 "model
   lock active" means an unattended loop has pinned the LLM preset. The rule
-  and the etiquette live in the llm-compose skill ("One GPU job at a time") -
+  and the etiquette live in the llmc skill ("One GPU job at a time") -
   do not `llmc unlock` without asking.
 - **Model default**: turbo (override with `model` param)
 - **Extras**: VLM frame description (`/api/describe`) + OCR (`/api/image`) via
@@ -242,5 +242,5 @@ JOB=$(curl -sX POST http://localhost:7860/api/jobs \
 
 - `video-review.md` - the video_* tools, call-review workflow, voice prints. Read when reviewing a call.
 - Service repo + compose stack: `~/infra/ai/whisper-transcribe` (its AGENTS.md has the Makefile targets; `make` is canonical)
-- MCP wrapper (Python): `~/infra/ai/llm-compose/mcp/whisper-server.py`
+- MCP wrapper (Python): `~/infra/ai/llmc/mcp/whisper-server.py`
 - Extension source: `~/dotfiles/.pi/agent/extensions/video-review.ts`

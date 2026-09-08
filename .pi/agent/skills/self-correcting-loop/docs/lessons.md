@@ -485,7 +485,7 @@ a cost signal). Tags compose; `loop history` shows them bracketed.
 
 Deliberately NOT captured: premise/manifest refusals and dry runs
 (harness-authoring events, not model outcomes), and token counts - the
-llm-compose proxy's token counters are shared across clients, so a
+llmc proxy's token counters are shared across clients, so a
 before/after delta mis-attributes. Wall-clock + iterations-to-green is the
 honest perf proxy at this granularity. Scripted-fake-agent runs
 ($LOOP_PI_CMD without an explicit $LOOP_JOURNAL) never journal - tests do

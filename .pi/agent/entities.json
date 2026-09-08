@@ -83,9 +83,9 @@
       "provides": ["hostname-match", "skill:memledger"]
     },
     {
-      "names": ["llm-compose", "llmc"],
+      "names": ["llmc"],
       "kind": "stack",
-      "provides": ["hostname-match", "alias-match", "skill:llm-compose"]
+      "provides": ["hostname-match", "alias-match", "skill:llmc"]
     },
     {
       "names": ["jellyfin", "seerr", "jellyseerr", "navidrome"],
@@ -110,7 +110,7 @@
     {
       "names": ["llama-server"],
       "kind": "service",
-      "provides": ["hostname-match", "skill:llm-compose"]
+      "provides": ["hostname-match", "skill:llmc"]
     },
     {
       "names": ["comfyui"],

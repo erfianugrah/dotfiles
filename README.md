@@ -843,7 +843,7 @@ requirement IDs that flow into plan tasks and loop sensors.
 | Skill | Purpose |
 |---|---|
 | `research` | Multi-engine search + Playwright crawler + OSINT (SearXNG :8888, crawler :8889, OSINT :8890) - includes the platform access walls (Reddit bypass order: PullPush -> redlib -> crawler), the API-driven locator pattern (near-empty render = grep raw HTML for wp-json//api//.json), and the SearXNG silent-empty -> Exa escalation |
-| `comfyui` | SDXL / Illustrious / Flux image generation via llm-compose proxy |
+| `comfyui` | SDXL / Illustrious / Flux image generation via llmc proxy |
 | `lora-train` | LoRA fine-tuning for SDXL / Flux via kohya sd-scripts |
 | `whisper` | WhisperX audio/video transcription (YouTube, local files) |
 | `gocurl` | `gocurl` CLI - HTTP performance measurement: httptrace phase breakdown (DNS / TCP / TLS / TTFB / transfer), load testing, streaming analysis |

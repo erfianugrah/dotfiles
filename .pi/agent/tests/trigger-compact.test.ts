@@ -6,7 +6,7 @@
  * branch sat inside the kept tail. pi's prepareCompaction() returns undefined
  * in that case and compact() throws "Nothing to compact (session too small)" -
  * the user saw "compaction started" followed by three stacked failures. The
- * llm-compose `erfi` preset (context_size 8192) hits this every time.
+ * llmc `erfi` preset (context_size 8192) hits this every time.
  */
 import { expect, test } from "bun:test";
 import { canCompact } from "../extensions/trigger-compact.ts";
@@ -15,7 +15,7 @@ const FRACTION = 0.85;
 const at = (ctx: number) => Math.floor(ctx * FRACTION);
 const KEEP = 20000; // pi's default compaction.keepRecentTokens
 
-test("8192-token window (llm-compose erfi preset) is refused - the observed failure", () => {
+test("8192-token window (llmc erfi preset) is refused - the observed failure", () => {
   // threshold 6963 is BELOW keepRecentTokens: nothing is summarisable.
   expect(canCompact(at(8192), KEEP)).toBe(false);
 });

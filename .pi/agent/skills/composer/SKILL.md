@@ -10,7 +10,7 @@ Self-hosted compose-mgmt platform. Go + Astro. REST API only - no end-user CLI. 
 ## When this skill does NOT apply
 
 Composer (on the **MS-01 NixOS router**, ssh alias `router`, public URL `https://composer.erfi.io`) manages stacks across TWO docker daemons: the MS-01 local socket AND servarr's daemon via the drawbridge mTLS proxy (see the multi-host section). It does NOT see:
-- Local dev compose stacks (`~/infra/ai/llm-compose/`, `~/infra/composer/deploy/`, `~/infra/knotea/`, any compose file the user is editing on the dev box).
+- Local dev compose stacks (`~/infra/ai/llmc/`, `~/infra/composer/deploy/`, `~/infra/knotea/`, any compose file the user is editing on the dev box).
 - Stacks on other servers not registered in the docker-hosts registry.
 - Anything reached via plain `docker ...` on the dev machine.
 - drawbridge itself - deliberately NOT composer-managed (composer reaches servarr's docker THROUGH drawbridge; composer managing it would be a self-dependency loop). See the drawbridge skill.

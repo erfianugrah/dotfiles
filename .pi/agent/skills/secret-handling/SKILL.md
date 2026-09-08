@@ -36,7 +36,7 @@ Assert on `$?`. Never parse the table.
 
 - **Canonical store: the SOPS-encrypted `.env` committed in each stack's git repo.**
   Composer decrypts at deploy. As of the 2026-09-04 fleet conversion the deliberate
-  plaintext exceptions are memledger's env file and llm-compose's `.env`. No
+  plaintext exceptions are memledger's env file and llmc's `.env`. No
   password-manager item is canonical for anything; `bw:` sources exist in secretctl
   for leftovers only.
 - **Registry:** `~/.config/secretctl/sources` (stowed from

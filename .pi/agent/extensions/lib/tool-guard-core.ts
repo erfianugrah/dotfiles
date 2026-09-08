@@ -321,7 +321,7 @@ export const BASH_RULES: BlockRule[] = [
       /^\s*ssh\s+[\s\S]*?\bservarr\b[\s\S]*?\bdocker\s+logs\b/.test(seg) &&
       !/#\s*raw-stderr\b/.test(full),
     reason:
-      "For containers on servarr (composer-managed), prefer the composer API for logs - `curl $COMPOSER/api/v1/services/<id>/logs?tail=...` gives tail + filter + structured response. Local-host docker (this dev box, ~/llm-compose, etc.) is not in composer - bare `docker logs` there is correct. If you specifically need raw stderr that composer has not captured (or the composer logs endpoint is erroring), append `# raw-stderr` to the command to assert that exception.",
+      "For containers on servarr (composer-managed), prefer the composer API for logs - `curl $COMPOSER/api/v1/services/<id>/logs?tail=...` gives tail + filter + structured response. Local-host docker (this dev box, ~/llmc, etc.) is not in composer - bare `docker logs` there is correct. If you specifically need raw stderr that composer has not captured (or the composer logs endpoint is erroring), append `# raw-stderr` to the command to assert that exception.",
     segment: true,
   },
   {

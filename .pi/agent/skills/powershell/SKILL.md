@@ -39,7 +39,7 @@ powershell({ script: "...", timeoutSec: 300 })        # default 120, max 600
 ## The Windows host: ERFI1 (this WSL2 instance lives on it)
 
 pi runs in WSL2 (`*-microsoft-standard-WSL2` kernel) on the user's 5090 dev
-desktop - hostname **ERFI1** (this is the llm-compose box). Last recorded
+desktop - hostname **ERFI1** (this is the llmc box). Last recorded
 inventory, unverified since: Windows 10 Pro build 19045, AMD Ryzen 7 7800X3D,
 64 GB RAM, RTX 5090, ASUS custom build - re-read it with `Get-CimInstance
 Win32_OperatingSystem` / `Win32_Processor` / `Win32_VideoController` before

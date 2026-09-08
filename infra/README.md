@@ -53,7 +53,7 @@ migration state).
 
 | Repo | What |
 |---|---|
-| `ai/llm-compose/` | llama.cpp + ComfyUI + lora-train stack, GPU mode-switching proxy (`llmc`). PUBLIC |
+| `ai/llmc/` | llama.cpp + ComfyUI + lora-train stack, GPU mode-switching proxy (`llmc`). PUBLIC |
 | `ai/whisper-transcribe/` | WhisperX transcription service + bot + video-review pipeline |
 | `ai/pi-mcp-bridge/` | Bridge that runs local stdio MCP servers for pi |
 | `chat/` | SUPERSEDED by `gumshoe` - the open-webui container on servarr now runs under the gumshoe compose project (verified 2026-09-01); chat's own AGENTS.md is stale |
@@ -115,7 +115,7 @@ NOT here: `~/dotfiles` (pi/shell config), `~/cf-stuff/erfianugrah-cf-tf`
 Sibling pi skills pointing into this tree: `eaves`, `xikectl`, `knotctl`,
 `knot-dns`, `gloryhole`, `caddy`, `composer`, `arr-stack`,
 `tailscale-homelab`, `waf-api`, `souin`, `drawbridge`, `nixos`, `memledger`,
-`llm-compose`, `whisper`, `comfyui`, `lora-train`, `compose-backups`.
+`llmc`, `whisper`, `comfyui`, `lora-train`, `compose-backups`.
 
 Plan + verification harness that produced the original layout:
 `~/infra/servarr-compose/docs/plans/2026-08-08-infra-repo-reorg.md`

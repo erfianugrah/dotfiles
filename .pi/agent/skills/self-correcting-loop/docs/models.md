@@ -58,7 +58,7 @@ Contents:
   opencode-zen's K3 path reasoned in a 163k single-shot probe on 2026-08-23
   but is untested in long sessions - cross-tab it before trusting it as a
   judge.
-- **$0 local rung (llama-server provider, llm-compose proxy on the 5090).**
+- **$0 local rung (llama-server provider, llmc proxy on the 5090).**
   `llama-server/loop` (Qwen3.8 27B Dense, agentic-tuned preset - migrated
   from Gemma 4 26B-A4B MoE on 2026-08-27) is a real worker rung for judged
   loops, not just a toy. Gemma-era A/B on the same scoped task (proxy
@@ -187,7 +187,7 @@ Contents:
   bg_task tmux sessions do NOT inherit the caller's env - a probe that
   reads secrets from the environment silently falls back to placeholders
   and 401s unless wrapped in `bash -lc`.
-- **Concurrent loops (llm-compose).** The proxy lock is a SHARED lock with
+- **Concurrent loops (llmc).** The proxy lock is a SHARED lock with
   named owners: each loop `llmc lock loop --owner <session-id>`, unlock
   releases only that owner. Concurrent loops must share ONE preset (the
   `loop` preset runs `parallel_slots = 1`, 262144 ctx); loops on DIFFERENT
@@ -197,7 +197,7 @@ Contents:
   pre-2026-08-17 hijack killed a loop mid-iteration). Same-repo loops need
   a separate git worktree each; and loop sensors must never rebuild/restart
   the stack that serves them (a proxy restart kills the other loop's
-  in-flight request). Since 2026-08-12 (llm-compose a566af5) the lock is
+  in-flight request). Since 2026-08-12 (llmc a566af5) the lock is
   persisted via the proxy state file and SURVIVES a proxy restart - so a
   loop that exits without unlocking leaves the pinned model resident,
   holding VRAM indefinitely (observed 2026-08-13: Gemma 26B squatting

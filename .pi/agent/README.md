@@ -179,7 +179,7 @@ Three layers, by how they fire:
 | `caddy` | Custom xcaddy build + WAF management stack (Caddyfile snippet idiom, TSIG/rfc2136 secret chain, wafctl, Authelia, the `make restart` vs `make restart-caddy` SOPS footgun). Sibling to `knot-dns`. |
 | `ci-workflows` | GitHub / Gitea Actions workflows, action pinning, CI patterns. |
 | `cloudflare` | Cloudflare API + `wrangler` CLI (Workers / Pages / R2 / D1 / KV / Tunnels) + bulk Python automation + `cf-terraforming` import workflow. Pairs with `terraform`. |
-| `comfyui` | ComfyUI image-gen via llm-compose proxy on `localhost:11434`. |
+| `comfyui` | ComfyUI image-gen via llmc proxy on `localhost:11434`. |
 | `compose-backups` | Automated backup sidecars for docker-compose stacks (offen/docker-volume-backup), restore drills, retention pruning to R2/MinIO. |
 | `composer` | Self-hosted Docker Compose management platform (your deployed instance). |
 | `deck-screenshot` | Screenshot a reveal.js / Quarto revealjs deck (one slide or a whole-deck contact sheet) so the agent can SEE layout/overflow. Raw headless chromium + decktape. |

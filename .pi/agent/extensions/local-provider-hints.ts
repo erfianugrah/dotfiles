@@ -2,7 +2,7 @@
  * local-provider-hints - name the culprit when a LOCAL provider refuses the
  * connection, instead of leaving the user with bare "Connection error."
  *
- * Observed 2026-08-26: the llm-compose proxy (model_proxy_go) had been dead
+ * Observed 2026-08-26: the llmc proxy (model_proxy_go) had been dead
  * for ~12h after a container-init failure (exit 127, stale Docker Desktop
  * bind-mount on /volumes.toml). A prompt against the llama-server provider
  * rendered:

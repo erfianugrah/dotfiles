@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Local Model Loader — wait for llm-compose proxy models to load into VRAM
+# Local Model Loader — wait for llmc proxy models to load into VRAM
 # ---------------------------------------------------------------------------
 
 wait_for_model() {

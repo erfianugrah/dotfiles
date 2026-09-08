@@ -6,7 +6,7 @@
  * connection as the bare string "Connection error.", retries it 3x, then
  * "Retry failed after 3 attempts: Connection error." Nothing in that output
  * names the provider, the URL, or the fact that a LOCAL service is simply
- * not running. The llm-compose proxy had been dead for ~12h (container init
+ * not running. The llmc proxy had been dead for ~12h (container init
  * failure, exit 127) and the only signal the user got was that string.
  *
  * Mechanism note: a refused TCP connection produces NO HTTP response, so
@@ -49,7 +49,7 @@ export function isConnectionError(text: string): boolean {
 export function isLocalProvider(info: ProviderInfo): boolean {
   if (info.baseUrl && LOCAL_HOST_RE.test(info.baseUrl)) return true;
   // Fall back to the provider id when baseUrl isn't exposed by the harness.
-  return /^llama-server$|^local|llm-compose/i.test(info.provider);
+  return /^llama-server$|^local|llmc/i.test(info.provider);
 }
 
 /**
@@ -65,10 +65,10 @@ interface LocalStack {
 
 const STACKS: LocalStack[] = [
   {
-    match: (i) => /llama-server|llm-compose/i.test(i.provider) || /:11434/.test(i.baseUrl ?? ""),
-    name: "llm-compose (model_proxy_go on :11434)",
+    match: (i) => /llama-server|llmc/i.test(i.provider) || /:11434/.test(i.baseUrl ?? ""),
+    name: "llmc (model_proxy_go on :11434)",
     commands: [
-      "cd ~/infra/ai/llm-compose && make up   # verifies + self-heals a dead proxy",
+      "cd ~/infra/ai/llmc && make up   # verifies + self-heals a dead proxy",
       "make logs-proxy-go                     # why it died",
       "llmc volumes refresh                   # stale Docker Desktop bind-mount fix",
     ],

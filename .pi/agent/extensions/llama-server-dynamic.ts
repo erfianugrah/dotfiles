@@ -1,6 +1,6 @@
 /**
  * llama-server-dynamic - keep pi's local-model list in sync with the live
- * llm-compose proxy, instead of the hand-maintained static list in
+ * llmc proxy, instead of the hand-maintained static list in
  * `models.json`.
  *
  * Problem (2026-08-27): the static `providers["llama-server"].models` array
@@ -9,7 +9,7 @@
  * and 6 missing presets. Hand-editing that list is a recurring chore.
  *
  * Fix: pi supports dynamic model discovery via an async extension factory
- * (see docs/custom-provider.md). The llm-compose proxy already serves
+ * (see docs/custom-provider.md). The llmc proxy already serves
  * `GET /v1/models` with per-preset metadata: `meta.preset` (the human key),
  * `meta.name`, `meta.context`, `meta.reasoning`, `meta.capabilities.vision`.
  * This extension fetches that on startup and registers the provider with the

@@ -8,7 +8,7 @@ check first).
 ## Layout rules
 
 - One repo per domain; each maps to a private GitHub repo under `erfianugrah/`.
-  Exceptions: `ai/llm-compose` is PUBLIC; `bombe/`, `lockstep/`, `mnemosyne/`
+  Exceptions: `ai/llmc` is PUBLIC; `bombe/`, `lockstep/`, `mnemosyne/`
   are local-only (no remote yet); `openwrt/` tracks upstream
   `openwrt/openwrt` as origin (erfianugrah fork as `fork` remote,
   plus `ecsv` remote at ecsv/openwrt).
@@ -54,8 +54,8 @@ check first).
     gates the deploy.
 - **MCP tool paths**: pi-mcp-bridge reads `~/.pi/agent/mcp-servers.json`
   (a stow symlink into `~/dotfiles`), which hardcodes
-  `/home/erfi/infra/ai/llm-compose/mcp/*.py` (whisper/comfyui/train servers).
-  If `ai/llm-compose` moves again, update that file or those tools break.
+  `/home/erfi/infra/ai/llmc/mcp/*.py` (whisper/comfyui/train servers).
+  If `ai/llmc` moves again, update that file or those tools break.
   (The old `~/.config/opencode/opencode.json` path is gone - opencode was
   retired 2026-08-15.)
 - **Skill references**: pi skills that point into this tree live in
@@ -68,7 +68,7 @@ check first).
 ## History
 
 2026-08-08 consolidation: 16 repos moved from `$HOME` into `~/infra`
-(incl. ergo workspace whole, llm-compose+whisper-transcribe under `ai/`,
+(incl. ergo workspace whole, llmc+whisper-transcribe under `ai/`,
 all *-compose stacks, k3s, cf-tf, composer). Path references updated in
 dotfiles skills/extensions, opencode.json, ssh config. k3s retired in favour
 of bombe (Talos-vs-NixOS decision pending, see bombe/docs/research/).

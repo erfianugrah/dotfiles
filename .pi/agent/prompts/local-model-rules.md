@@ -1,6 +1,6 @@
 # Local model rules
 
-These rules apply when running through the llm-compose proxy (gemma, qwen
+These rules apply when running through the llmc proxy (gemma, qwen
 families) — they correct for common local-model quirks like LaTeX emission,
 under-batching of tool calls, and reasoning loops.
 

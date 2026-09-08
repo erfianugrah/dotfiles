@@ -17,9 +17,9 @@ test("loopback provider detected", () => {
 test("remote provider is ignored", () => {
   expect(isLocalProvider({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1" })).toBe(false);
 });
-test("llm-compose hint names the stack and the recovery command", () => {
+test("llmc hint names the stack and the recovery command", () => {
   const h = buildHint("Connection error.", { provider: "llama-server", baseUrl: "http://localhost:11434/v1" });
-  expect(h).toContain("llm-compose");
+  expect(h).toContain("llmc");
   expect(h).toContain("make up");
   expect(h).toContain("retrying will not fix it");
 });

@@ -19,7 +19,7 @@
  *     (default 20000): prepareCompaction() returns undefined and compact()
  *     throws "Nothing to compact (session too small)". Firing at 0.85 of a
  *     window smaller than ~keepRecent/0.85 is therefore guaranteed to fail -
- *     e.g. the llm-compose `erfi` preset runs context_size 8192, so the
+ *     e.g. the llmc `erfi` preset runs context_size 8192, so the
  *     threshold lands at 6963 tokens while keepRecent wants 20000, and every
  *     trigger produced a failed-compaction error (observed 2026-08-26:
  *     "compaction started" immediately followed by three stacked

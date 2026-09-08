@@ -5,15 +5,15 @@ description: "Use when fine-tuning an SDXL or Flux checkpoint into a LoRA via th
 
 # LoRA Training
 
-kohya sd-scripts wrapped in an HTTP API. Routes through the llm-compose proxy,
+kohya sd-scripts wrapped in an HTTP API. Routes through the llmc proxy,
 which also handles the GPU mode swap (stops llama-server / ComfyUI, starts
 the trainer). A 503 "model lock active" means an unattended loop has pinned
-the LLM preset - the rule and the etiquette live in the llm-compose skill
+the LLM preset - the rule and the etiquette live in the llmc skill
 ("One GPU job at a time"); do not `llmc unlock` without asking.
 
 **Prefer the CLI over raw curl**: `llmc train status|logs|cancel|list|cleanup|deploy`
 and `llmc dataset audit|filter|focus|caption|caption-status|caption-logs|caption-cancel`
-(`~/infra/ai/llm-compose/bin/llmc`, `llmc train --help`) wrap the endpoints
+(`~/infra/ai/llmc/bin/llmc`, `llmc train --help`) wrap the endpoints
 below with the right proxy URL and JSON shaping. The curl forms are for
 scripts and for anything the CLI does not expose (starting a training job).
 
@@ -167,6 +167,6 @@ enable_bucket = true
 
 ## Related
 
-- Service repo: `~/infra/ai/llm-compose` (trainer in `train/`, image `lora-train.Dockerfile`)
-- MCP wrapper: `~/infra/ai/llm-compose/mcp/train-server.py`
+- Service repo: `~/infra/ai/llmc` (trainer in `train/`, image `lora-train.Dockerfile`)
+- MCP wrapper: `~/infra/ai/llmc/mcp/train-server.py`
 - Training data: `~/docker-volumes/training-data/`

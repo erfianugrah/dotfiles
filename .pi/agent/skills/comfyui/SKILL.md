@@ -5,19 +5,19 @@ description: "Use when generating images with Stable Diffusion (SDXL/Illustrious
 
 # ComfyUI Image Generation
 
-ComfyUI workflows routed through the llm-compose proxy. The proxy handles GPU
+ComfyUI workflows routed through the llmc proxy. The proxy handles GPU
 swapping between llama-server and ComfyUI automatically.
 
 ## Service
 
-- **Base URL**: `http://localhost:11434` (llm-compose proxy; env: `COMFYUI_PROXY_URL`)
+- **Base URL**: `http://localhost:11434` (llmc proxy; env: `COMFYUI_PROXY_URL`)
 - **Routes**: `/comfyui/*` -> ComfyUI HTTP API
 - **Output dir**: `~/docker-volumes/comfyui/output/` (env: `COMFYUI_OUTPUT_DIR`)
 - **GPU swap**: triggered automatically; expect 20-60s startup if llama-server
   was active. A 503 "model lock active" means an unattended loop has pinned
-  the LLM preset - the rule and the etiquette live in the llm-compose skill
+  the LLM preset - the rule and the etiquette live in the llmc skill
   ("One GPU job at a time"); do not `llmc unlock` without asking.
-- **Local overrides**: `comfyui.local.env` in the llm-compose repo root (or
+- **Local overrides**: `comfyui.local.env` in the llmc repo root (or
   the cwd) is optional and gitignored - it does not exist by default. The MCP
   server reads it if present (checkpoint, prompts, sampler defaults);
   otherwise the built-in defaults below apply.
@@ -115,10 +115,10 @@ curl -s http://localhost:11434/comfyui/history | jq -r '
   LoRA into `models/loras/` - `lora-train` skill (`llmc train ...`).
 - Describing frames of a video or OCR on an image - the whisper service's
   `/api/describe` and `/api/image` (whisper skill), not ComfyUI.
-- Pinning or unlocking the LLM preset - llm-compose skill.
+- Pinning or unlocking the LLM preset - llmc skill.
 
 ## Related
 
-- Service repo: `~/infra/ai/llm-compose` (ComfyUI service: see `comfyui.Dockerfile`)
-- MCP wrapper: `~/infra/ai/llm-compose/mcp/comfyui-server.py` (registered as `comfyui` in `~/.pi/agent/mcp-servers.json`)
+- Service repo: `~/infra/ai/llmc` (ComfyUI service: see `comfyui.Dockerfile`)
+- MCP wrapper: `~/infra/ai/llmc/mcp/comfyui-server.py` (registered as `comfyui` in `~/.pi/agent/mcp-servers.json`)
 - Models: `~/docker-volumes/comfyui/models/`

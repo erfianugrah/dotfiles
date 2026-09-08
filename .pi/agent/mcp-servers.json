@@ -2,20 +2,20 @@
   "$comment": "Tracked no-secrets MCP registry for pi (via pi-mcp-bridge). Secrets-bearing or pi-private servers go in the untracked ~/.pi/agent/mcp-bridge.json instead. Remote (HTTP) servers are NOT bridged - pi covers those with native extensions (context7, gh-search). Migrated from .config/opencode/opencode.json on 2026-08-15 when opencode was retired.",
   "mcpServers": {
     "whisper": {
-      "command": ["python3", "/home/erfi/infra/ai/llm-compose/mcp/whisper-server.py"],
+      "command": ["python3", "/home/erfi/infra/ai/llmc/mcp/whisper-server.py"],
       "env": {
         "WHISPER_URL": "http://localhost:7860"
       }
     },
     "comfyui": {
-      "command": ["python3", "/home/erfi/infra/ai/llm-compose/mcp/comfyui-server.py"],
+      "command": ["python3", "/home/erfi/infra/ai/llmc/mcp/comfyui-server.py"],
       "env": {
         "COMFYUI_PROXY_URL": "http://localhost:11434",
         "COMFYUI_OUTPUT_DIR": "/home/erfi/docker-volumes/comfyui/output"
       }
     },
     "lora-train": {
-      "command": ["python3", "/home/erfi/infra/ai/llm-compose/mcp/train-server.py"],
+      "command": ["python3", "/home/erfi/infra/ai/llmc/mcp/train-server.py"],
       "env": {
         "TRAIN_PROXY_URL": "http://localhost:11434",
         "TRAIN_OUTPUT_DIR": "/home/erfi/docker-volumes/training-data/output",
