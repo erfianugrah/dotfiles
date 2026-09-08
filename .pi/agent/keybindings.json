@@ -1,5 +1,6 @@
 {
   "app.interrupt": ["escape"],
   "app.clear": ["ctrl+c"],
-  "app.clipboard.pasteImage": ["ctrl+v"]
+  "app.clipboard.pasteImage": ["ctrl+v"],
+  "app.message.dequeue": ["up"]
 }
