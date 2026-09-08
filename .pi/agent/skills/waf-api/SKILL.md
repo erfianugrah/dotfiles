@@ -21,10 +21,10 @@ plane; wafctl never touches traffic directly.
    `/api/sessions/config`) only writes wafctl's JSON stores. Nothing reaches the WAF
    until a deploy endpoint regenerates `/data/waf/policy-rules.json`. "I changed X but
    traffic behavior didn't change" = missing deploy, 95% of the time.
-2. **Two reload paths, don't confuse them.** (a) Plugin-facing: write
-   `policy-rules.json` -> plugin hot-reloads on mtime (~5s). NO Caddy reload.
-   (b) Caddyfile-facing (CF trusted proxies only): `reloadCaddy()` POSTs to admin
-   `/load` with `Cache-Control: must-revalidate` to defeat Caddy's bytes.Equal no-op.
+2. **One reload path now.** Write `policy-rules.json` -> the plugin hot-reloads
+   on mtime (~5s). NO Caddy reload. The old second path (`reloadCaddy()` POST to
+   admin `/load`, CF trusted proxies only) was removed 2026-09-07 with the cfproxy
+   store - wafctl no longer talks to the Caddy admin API at all.
 3. **One log, three tailers.** `AccessLogStore` (security events),
    `GeneralLogStore` (all requests, 2xx sampled at 10%), `SpikeDetector` (EPS) each
    tail `/var/log/combined-access.log` with independent offsets.
@@ -35,8 +35,9 @@ Only these write `policy-rules.json`: `POST /api/deploy`, `POST /api/config/depl
 (same handler), `POST /api/csp/deploy`, `POST /api/security-headers/deploy`,
 `POST /api/blocklist/refresh` (indirect, via onDeploy callback). Background: boot
 (`generateOnBoot`), 60s expired-rule cleanup, session auto-escalation. All serialized
-by `deployMu`. `POST /api/config/generate` is preview-only. None reload Caddy.
-`POST /api/cfproxy/refresh` is the ONLY endpoint that reloads Caddy (trusted proxies).
+by `deployMu`. `POST /api/config/generate` is preview-only. No endpoint reloads Caddy
+any more - the cfproxy refresh (the only one that did) was removed 2026-09-07 in
+caddy-compose 53b6b9a; deploys rely on the policy engine's mtime hot-reload.
 
 ## Top gotchas
 

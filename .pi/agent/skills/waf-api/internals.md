@@ -141,10 +141,10 @@ Priority bands (`policyTypePriority`): allow 50, block 100, challenge 150, skip
 only included when RL rules exist. Challenge generation defaults: difficulty 4,
 algorithm fast, TTL 3600s, BindIP/BindJA4 true.
 
-`reloadCaddy()` (only used by cfproxy refresh + CSP paths that need it): reads
-Caddyfile, prepends SHA-256 fingerprint comment, POSTs to `{admin}/load` with
-`Content-Type: text/caddyfile` and **`Cache-Control: must-revalidate`** (sets
-forceReload, bypasses bytes.Equal no-op). 120s timeout.
+`reloadCaddy()` was deleted 2026-09-07 (caddy-compose 53b6b9a) together with
+`WAF_CADDY_ADMIN_URL`: wafctl no longer calls Caddy's admin API at all. Config
+delivery is file-based (policy-rules.json mtime hot-reload). The old admin path
+was the vector for the 2026-09-07 stale-bind-mount config clobber.
 
 HMAC key: `CHALLENGE_HMAC_KEY` env, else `loadOrGenerateChallengeKey(WAF_DATA_DIR)`
 -> /data/challenge-hmac.key (32-byte crypto/rand hex, 0600; regenerated if
@@ -261,9 +261,8 @@ HasRateLimit; response has uncovered_pct.
 | `WAF_CRS_METADATA_FILE` | /etc/caddy/waf/crs-metadata.json | CRS taxonomy (**fatal if missing**) |
 | `CHALLENGE_HMAC_KEY` | (auto-generate) | Challenge cookie HMAC key |
 | `WAF_DATA_DIR` | /data | Auto-generated HMAC key dir |
-| `WAF_DIR` | /data/waf | jail.json, cf proxies, jti-denylist |
-| `WAF_CADDYFILE_PATH` | /data/Caddyfile | Service discovery, reload |
-| `WAF_CADDY_ADMIN_URL` | set in compose.yaml (`$WAF_CADDY_ADMIN_URL`) | Caddy admin API |
+| `WAF_DIR` | /data/waf | jail.json, jti-denylist |
+| `WAF_CADDYFILE_PATH` | /data/Caddyfile | Service discovery (deploy previews) |
 | `WAF_EVENT_MAX_AGE` | 2160h | Security event retention (90d) |
 | `WAF_GENERAL_LOG_MAX_AGE` | 168h | General log retention (7d) |
 | `WAF_TAIL_INTERVAL` | 5s | Tail/eviction interval |

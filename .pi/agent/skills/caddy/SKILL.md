@@ -56,7 +56,7 @@ example.com {
 }
 ```
 
-Internal admin proxy on a high port IP-restricts to the wafctl bridge subnet and reverse-proxies to `localhost:2019`. **wafctl talks to that proxy port, never `:2019` directly.**
+An internal admin proxy on a high port (IP-restricted to the wafctl bridge subnet, reverse-proxying to `localhost:2019`) still exists in the Caddyfile, but **nothing consumes it** since 2026-09-07 - wafctl no longer calls the Caddy admin API (CFProxyStore + `reloadCaddy` deleted in 53b6b9a after the stale-bind-mount `/load` clobber). The block + the wafctl `extra_hosts` alias were removed with it; the `:2020` Caddyfile block is parked for the control-plane rework.
 
 **Vhost naming**: default is plain `<name>.erfi.io`. The `.edge.` infix exists only where the plain name already serves something else - `knotea.edge.erfi.io` (LAN twin of the Fly-hosted `knotea.erfi.io` DoH/DoT) plus the historical `composer.edge` / `waf.edge` (LAN twins of their public same-name vhosts). New LAN-only services get the plain name (e.g. ntopng -> `ntop.erfi.io`), never `.edge.` by default.
 
@@ -100,9 +100,9 @@ Rotation order (full procedure in the `knot-dns` skill): rotate on Knot first, t
 Zero-dep Go (stdlib only). Default invocation runs the HTTP API; subcommands are thin clients. Two control surfaces:
 
 - **Inbound from Caddy** - tails the combined access log (read-only mount); `jail.json` bidirectional sync with the ddos-mitigator plugin under flock.
-- **Outbound to Caddy** - writes `policy-rules.json` atomically (the plugin mtime-polls); pokes Caddy admin via the IP-restricted proxy port using `extra_hosts: caddy:<gateway-ip>` because Docker inter-network isolation blocks docker0.
+- **Outbound to Caddy** - writes `policy-rules.json` atomically (the plugin mtime-polls). wafctl no longer calls the Caddy admin API (the `/load` path was the 2026-09-07 stale-bind-mount clobber vector; removed in 53b6b9a).
 
-**The reload trick**: Caddy's `/load` short-circuits with `"config is unchanged"` when only `import`-ed files differ. wafctl injects a SHA-256 fingerprint comment into the Caddyfile body it POSTs to force reprovision (the on-disk Caddyfile is never modified).
+~~The reload trick~~ (historical): wafctl used to inject a SHA-256 fingerprint comment into the Caddyfile body it POSTed to `/load` to defeat Caddy's bytes.Equal no-op. Deleted with `reloadCaddy` - config delivery is now file-based only (plugin mtime hot-reload).
 
 Routes, env vars, stores, CLI and dashboard internals: the `waf-api` skill.
 

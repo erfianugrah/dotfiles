@@ -172,10 +172,9 @@ to stay in band).
 
 ## Cloudflare trusted proxies
 
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/api/cfproxy/stats` | `{cidr_count, last_updated, source, file_path}`. |
-| POST | `/api/cfproxy/refresh` | Rewrites `cf_trusted_proxies.caddy` + **reloads Caddy** (only endpoint that does). Aborts if <5 CIDRs fetched. Weekly scheduled refresh (Mondays at blocklist refresh hour). |
+Removed 2026-09-07 (caddy-compose 53b6b9a): the store, both `/api/cfproxy/*`
+routes, and the weekly reload are gone. Trusted proxies are per-site Caddyfile
+config (`trusted_proxies static ...` / `private_ranges`).
 
 ## Managed lists
 
