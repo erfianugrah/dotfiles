@@ -143,7 +143,7 @@ export default function (pi: ExtensionAPI) {
     defineTool({
       name: "search_memories",
       label: "memledger memories",
-      description: "Search persistent agent memories.",
+      description: "Search persistent agent memories (pi and Claude Code per-project memories).",
       parameters: Type.Object({
         q: Type.String({ description: "Search query" }),
         limit: Type.Optional(Type.Number({ description: "Max rows (default 10, max 50)" })),
