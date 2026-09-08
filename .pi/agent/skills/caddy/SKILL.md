@@ -7,7 +7,7 @@ description: Use when working on the user's custom Caddy edge reverse-proxy stac
 
 Repo: `~/infra/ergo/caddy-compose/`. Deployed to the MS-01 NixOS router (ssh alias `router`) as the composer stack `edge-services`. The deployed file is `deploy/edge/Caddyfile`; the repo-root `Caddyfile` is a legacy config - never edit it for prod changes. Checkout on the router at `/var/lib/composer/stacks/edge-services`, data at `/var/lib/caddy/{data,config,log,waf}` (certs under `data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<host>/`). Caddy runs `network_mode: host`; wafctl on its own bridge.
 
-Deploy loop: push, then `make edge-sync` (composer API sync of the stack checkout) or `make restart` (sync + up via composer, SOPS-decrypting `.env`), then `make edge-restart` for Caddyfile changes. Never assume a push alone deployed anything - sync explicitly. `docker restart caddy` (which `edge-restart` does) rather than `caddy reload` for Caddyfile changes: the single-file bind mount goes stale-inode on git sync, so `reload` would adapt the OLD inode.
+Deploy loop: push, then `make edge-sync` (composer API sync of the stack checkout) or `make restart` (sync + up via composer, SOPS-decrypting `.env`), then `make restart-edge` for Caddyfile changes. Never assume a push alone deployed anything - sync explicitly. `make restart-edge` restarts the caddy container (single-file bind mount goes stale-inode on git sync) AND polls for healthy - the old `caddy reload` would adapt the OLD inode, and a plain `docker restart caddy` with no health check shipped a crash-looping config (2026-08-29).
 
 **Project-truth: `~/infra/ergo/caddy-compose/AGENTS.md`** - read first for current versions, counts and the full gotcha list. This skill is the pattern layer.
 
@@ -129,6 +129,7 @@ No forward-auth IdP remains in the stack. Current shapes:
 | `make deploy` / `deploy-*` / `deploy-all` | build -> scan -> push -> sync -> restart |
 | `make edge-sync` | composer API sync of the edge-services checkout on the router |
 | `make edge-restart` | edge-sync + `docker restart caddy` + live `caddy validate`; runs NO cache verify |
+| `make restart-edge` | Full deploy (sync+up) + `docker restart caddy` + 60s health poll. Prefer this over `edge-restart` for Caddyfile changes - it catches adapt errors at restart (2026-08-29) |
 | `make caddy-reload` | sync git + redeploy WAF/CSP/headers via wafctl + reload (no container restart) |
 | `make caddy-quick-reload` | sync git + reload only |
 
