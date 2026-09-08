@@ -77,3 +77,12 @@ Since then (as of 2026-09-01): `knotea` moved INTO `~/infra`;
 `erfianugrah-cf-tf` now lives at `~/cf-stuff/erfianugrah-cf-tf`;
 `gitea-compose` replaced by `forgejo-compose`; ~30 new repos added
 (see README.md for the full inventory).
+
+2026-09-08: `ai/llm-compose` renamed to `ai/llmc` (GitHub repo too -
+erfianugrah/llm-compose now 301-redirects to erfianugrah/llmc, both PUBLIC).
+The Go module path is `github.com/erfianugrah/llmc/proxy-go`. The skill dir
+is `~/.pi/agent/skills/llmc/`. The Docker network stays `llmc` (unchanged -
+it was never the repo name). References updated across dotfiles (MCP config,
+models.json, skills, extensions, systemd unit), and the cross-repo consumers
+(whisper-transcribe, memledger, mnemosyne, servarr-nixos, servarr-gpu-router,
+lockstep, ergo/vigil).
