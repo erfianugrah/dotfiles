@@ -181,34 +181,6 @@
           }
         }
       }
-    },
-    "external": {
-      "baseUrl": "http://127.0.0.1:11434/v1",
-      "api": "openai-completions",
-      "apiKey": "external",
-      "compat": {
-        "supportsDeveloperRole": false,
-        "supportsReasoningEffort": true
-      },
-      "models": [
-        {
-          "id": "qwen3.8-27b-nvfp4",
-          "reasoning": true,
-          "name": "NInfer Qwen3.8-27B NVFP4 via the llmc proxy (swaps the engine on demand)",
-          "contextWindow": 262144,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "maxTokens": 65536
-        }
-      ]
     }
   }
 }
