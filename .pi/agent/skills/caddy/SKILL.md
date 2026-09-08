@@ -145,8 +145,7 @@ For a **stuck cert state** (deleted on disk but Caddy still serves cached), use 
 
 1. `xcaddy build` with the `--with` modules.
 2. `golang:*-alpine` builds `crs-converter`, clones CRS at the pinned version, emits `default-rules.json` + `crs-metadata.json` (folding in `waf/custom-rules.json`).
-3. `alpine` fetches Cloudflare IP ranges, builds `cf_trusted_proxies.caddy` with `trusted_proxies static <cidrs>`.
-4. Runtime `caddy:*-alpine` copies built binary + assets + entrypoint. Adds `nftables`. Entrypoint seeds the CF-IP file if missing then `exec caddy run`.
+3. Runtime `caddy:*-alpine` copies built binary + assets + entrypoint. Adds `nftables`. Entrypoint ensures `/data/waf` then `exec caddy run`. (The CF-IP fetch stage + seed block were removed 2026-09-07 with the cfproxy subsystem.)
 
 **Version-tag sync** - Makefile / compose.yaml / `.github/workflows/build.yml` / README must agree. `CADDY_TAG` (published image) is distinct from `CADDY_VERSION` (upstream base they trail).
 

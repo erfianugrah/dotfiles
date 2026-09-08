@@ -293,8 +293,8 @@ Health/version: `var version = "dev"` in main.go, overridden via
 1. atomicWriteFile everywhere (temp + fsync + chmod + rename) - never partial JSON.
 2. Rollback-on-error in every store mutation.
 3. Deep copies from getters.
-4. Dual reload model: plugin = file write + mtime; Caddyfile = reloadCaddy with
-   must-revalidate.
+4. Single reload model: plugin = file write + mtime hot-reload. (The old dual
+   model with reloadCaddy POSTing to admin /load was deleted 2026-09-07.)
 5. Filter `"None"` placeholders before interpreting any log_append policy_* field.
 6. HTTP/2 lowercases headers - use headerValueCI for header fallbacks.
 7. Event caps evict to 80%; JSONL compaction only on >10K or >5% evictions.
