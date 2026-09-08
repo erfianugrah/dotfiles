@@ -17,7 +17,7 @@
  * ENGINE producing it changes.
  *
  * Configurable via env:
- *   PI_COMPACT_PROVIDER   default "llama-server"
+ *   PI_COMPACT_PROVIDER   default "llmc" (alias: llama-server, pre-2026-09-08 name)
  *   PI_COMPACT_MODEL      default "qwen38"
  *   PI_COMPACT_MAX_TOKENS default 16384 (headroom for local thinking models:
  *                         reasoning eats the budget before text is emitted)
@@ -45,7 +45,7 @@ import {
 
 // ── tunables ──────────────────────────────────────────────────────────────
 
-const PROVIDER = process.env.PI_COMPACT_PROVIDER ?? "llama-server";
+const PROVIDER = process.env.PI_COMPACT_PROVIDER ?? "llmc";
 const MODEL_ID = process.env.PI_COMPACT_MODEL ?? "qwen38";
 const MAX_TOKENS = Math.max(
   1024,

@@ -108,9 +108,9 @@
       "provides": ["hostname-match", "skill:composer"]
     },
     {
-      "names": ["llama-server"],
+      "names": ["llama-server", "llmc"],
       "kind": "service",
-      "provides": ["hostname-match", "skill:llmc"]
+      "provides": ["hostname-match", "alias-match", "skill:llmc"]
     },
     {
       "names": ["comfyui"],

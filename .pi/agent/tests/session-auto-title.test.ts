@@ -49,8 +49,9 @@ describe("pickTitleCandidates", () => {
     ({ model, modelRegistry: { getAvailable: async () => available } }) as never;
 
   test("returns custom-provider models (the getModel-undefined bug)", async () => {
+    // alias: llama-server (pre-2026-09-08 name) - both ids work
     const got = await pickTitleCandidates(
-      fakeCtx([{ id: "qwen38", provider: "llama-server" }]),
+      fakeCtx([{ id: "qwen38", provider: "llmc" }]),
     );
     expect(got.length).toBeGreaterThan(0);
     expect(got[0].model.id).toBe("qwen38");
@@ -78,13 +79,21 @@ describe("pickTitleCandidates", () => {
   });
 
   test("local models outrank cloud in the fallback ordering", async () => {
-    const got = await pickTitleCandidates(
+    // alias: llama-server (pre-2026-09-08 name) - both ids rank as local
+    const got1 = await pickTitleCandidates(
       fakeCtx([
         { id: "anthropic.claude-opus-5", provider: "amazon-bedrock" },
         { id: "summarizer", provider: "llama-server" },
       ]),
     );
-    expect(got[0].model.id).toBe("summarizer");
+    expect(got1[0].model.id).toBe("summarizer");
+    const got2 = await pickTitleCandidates(
+      fakeCtx([
+        { id: "anthropic.claude-opus-5", provider: "amazon-bedrock" },
+        { id: "summarizer", provider: "llmc" },
+      ]),
+    );
+    expect(got2[0].model.id).toBe("summarizer");
   });
 
   test("survives a getAvailable that throws", async () => {

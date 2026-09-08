@@ -1,7 +1,7 @@
 {
-  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open \u2014 no restart needed. Source of truth for llmc model list: ~/infra/ai/llmc/models/*.toml. NOTES: llama-server = llmc proxy on localhost:11434; apiKey ignored by proxy but Pi requires the field. compat block for llama-server: llama.cpp's OpenAI server has no developer role or reasoning_effort, both disabled at provider level. $comment keys inside samplingParams / openRouterRouting are NOT allowed - pi forwards those objects VERBATIM into the request body / provider field, and OpenRouter 400s with 'Unrecognized key' (seen 2026-08-19). Notes live at file root and modelOverride roots only.",
+  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open \u2014 no restart needed. Source of truth for llmc model list: ~/infra/ai/llmc/models/*.toml. NOTES: llmc = the llmc proxy on localhost:11434 (formerly 'llama-server'); apiKey ignored by proxy but Pi requires the field. compat block for llama-server: llama.cpp's OpenAI server has no developer role or reasoning_effort, both disabled at provider level. $comment keys inside samplingParams / openRouterRouting are NOT allowed - pi forwards those objects VERBATIM into the request body / provider field, and OpenRouter 400s with 'Unrecognized key' (seen 2026-08-19). Notes live at file root and modelOverride roots only.",
   "providers": {
-    "llama-server": {
+    "llmc": {
       "baseUrl": "http://localhost:11434/v1",
       "api": "openai-completions",
       "apiKey": "llmc",

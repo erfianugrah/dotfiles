@@ -31,7 +31,8 @@ import {
 
 const WIDGET_SLOT = "llm-metrics";
 const ENGINE_CONTAINER = "ninfer_server";
-const LOCAL_PROVIDER = "llama-server";
+// alias: llama-server (pre-2026-09-08 name)
+const LOCAL_PROVIDER = "llmc";
 const ENGINE_REFRESH_MS = 60_000;
 /** Cap so a month-long session does not grow the array without bound. */
 const MAX_REQS = 2000;

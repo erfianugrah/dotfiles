@@ -48,8 +48,9 @@ export function isConnectionError(text: string): boolean {
 /** True when the provider points at a loopback address. */
 export function isLocalProvider(info: ProviderInfo): boolean {
   if (info.baseUrl && LOCAL_HOST_RE.test(info.baseUrl)) return true;
+  // alias: llama-server (pre-2026-09-08 name)
   // Fall back to the provider id when baseUrl isn't exposed by the harness.
-  return /^llama-server$|^local|llmc/i.test(info.provider);
+  return /^(llmc|llama-server)$|^local/i.test(info.provider);
 }
 
 /**
@@ -65,7 +66,8 @@ interface LocalStack {
 
 const STACKS: LocalStack[] = [
   {
-    match: (i) => /llama-server|llmc/i.test(i.provider) || /:11434/.test(i.baseUrl ?? ""),
+    // alias: llama-server (pre-2026-09-08 name)
+    match: (i) => /^(llmc|llama-server)/i.test(i.provider) || /:11434/.test(i.baseUrl ?? ""),
     name: "llmc (model_proxy_go on :11434)",
     commands: [
       "cd ~/infra/ai/llmc && make up   # verifies + self-heals a dead proxy",

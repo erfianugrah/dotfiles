@@ -54,7 +54,8 @@ function loadRules(): string | null {
 
 function shouldApply(provider: string, modelId: string): boolean {
   if (process.env.PI_LOCAL_MODEL_RULES_FORCE === "1") return true;
-  if (provider === "llama-server") return true;
+  // alias: llama-server (pre-2026-09-08 name)
+  if (provider === "llmc" || provider === "llama-server") return true;
   if (/gemma|qwen/i.test(modelId)) return true;
   return false;
 }

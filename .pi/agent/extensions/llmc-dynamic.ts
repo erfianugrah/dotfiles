@@ -86,7 +86,8 @@ export default async function (pi: ExtensionAPI) {
   // Registering with `models` REPLACES the static list in models.json.
   // The provider-level settings (baseUrl/api/apiKey/compat) must be
   // re-declared here since registerProvider is a full replace.
-  pi.registerProvider("llama-server", {
+  // alias: llama-server (pre-2026-09-08 name)
+  pi.registerProvider("llmc", {
     baseUrl: BASE_URL,
     api: "openai-completions",
     apiKey: "llmc",

@@ -104,7 +104,7 @@ export function describeStatus(
   // certainly won't recover by itself — push the user toward /model rather
   // than another /continue.
   const switchHint = consecutive >= 2
-    ? " — RETRY ALREADY FAILED, use /model to switch providers (Anthropic / OpenAI / local llama-server) before /continue"
+    ? " — RETRY ALREADY FAILED, use /model to switch providers (Anthropic / OpenAI / local llmc) before /continue"
     : "";
 
   switch (status) {

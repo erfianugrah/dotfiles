@@ -165,8 +165,9 @@ function getMarkerState(ctx: ExtensionContext): TitleState {
 // needed - and auth is already proven by getAvailable()'s own filtering.
 export async function pickTitleCandidates(ctx: ExtensionContext) {
   // Pattern -> priority weight (lower = better)
+  // alias: llama-server (pre-2026-09-08 name)
   const PROVIDER_WEIGHTS: Array<[RegExp, number]> = [
-    [/llama-server|ollama|lmstudio|vllm/i, 0],   // local & free
+    [/llmc|llama-server|ollama|lmstudio|vllm/i, 0],   // local & free
     [/anthropic/i, 30],
     [/openai/i, 30],
     [/google/i, 30],
