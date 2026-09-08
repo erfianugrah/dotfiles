@@ -20,8 +20,10 @@ upstream layout and conventions, and `vigil/` has its own AGENTS.md.
 > **Direction change (2026-08-09)**: the CRS/WAF side (caddy-policy-engine, CRS
 > converter, challenge/PoW) is slated for removal - see caddy-compose/PLAN.md
 > "Direction Change". wafctl survives and will be renamed **edgectl**, becoming
-> the edge control plane (ddos/jail/events now, host-config management via the
-> Caddy admin API next).
+> the edge control plane (ddos/jail/events now). 2026-09-07 update: the Caddy
+> admin API integration was REMOVED (CFProxyStore deletion) after it clobbered
+> the live config via a stale bind mount; edgectl is going native on the router
+> (router repo: docs/plans/2026-09-06-caddy-native-migration.md).
 
 ## Build & Test Commands
 
