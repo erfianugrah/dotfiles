@@ -1,15 +1,21 @@
 ---
 name: caddy
-description: Use when working on the user's custom Caddy edge reverse-proxy stack at ~/infra/ergo/caddy-compose/ - adding or editing a site block, debugging ACME issuance (Cloudflare or rfc2136/TSIG to Knot), bumping xcaddy plugin pins, deploying or restarting the edge-services stack, or re-enabling the dormant edge HTTP cache (souin). Fires on 'caddy', 'Caddyfile', 'the edge proxy', 'ACME failure', 'make restart', 'edge-services', 'souin'. NOT for wafctl API routes or dashboard internals (waf-api).
+description: Use when working on the user's custom Caddy edge reverse-proxy stack (now NATIVE on the MS-01 NixOS router; source/build repo is ~/infra/ergo/caddy-compose/) - adding or editing a site block in the router repo's edge/Caddyfile, debugging ACME issuance (Cloudflare or rfc2136/TSIG to Knot), bumping plugin pins (pkgs/caddy-edge.nix), or re-enabling the dormant edge HTTP cache (souin). Fires on 'caddy', 'Caddyfile', 'the edge proxy', 'ACME failure', 'souin'. NOT for wafctl/edgectl API routes or dashboard internals (waf-api).
 ---
 
-# caddy - custom build + edge stack
+# caddy - custom build + edge stack (NATIVE since 2026-09-08)
 
-Repo: `~/infra/ergo/caddy-compose/`. Deployed to the MS-01 NixOS router (ssh alias `router`) as the composer stack `edge-services`. The deployed file is `deploy/edge/Caddyfile`; the repo-root `Caddyfile` is a legacy config - never edit it for prod changes. Checkout on the router at `/var/lib/composer/stacks/edge-services`, data at `/var/lib/caddy/{data,config,log,waf}` (certs under `data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<host>/`). Caddy runs `network_mode: host`; wafctl on its own bridge.
+**The edge Caddy + edgectl run as native NixOS systemd services on the router** (no Docker). Source of truth is the router repo `~/infra/router/`:
 
-Deploy loop: push, then `make edge-sync` (composer API sync of the stack checkout) or `make restart` (sync + up via composer, SOPS-decrypting `.env`), then `make restart-edge` for Caddyfile changes. Never assume a push alone deployed anything - sync explicitly. `make restart-edge` restarts the caddy container (single-file bind mount goes stale-inode on git sync) AND polls for healthy - the old `caddy reload` would adapt the OLD inode, and a plain `docker restart caddy` with no health check shipped a crash-looping config (2026-08-29).
+- **Live config**: `~/infra/router/edge/Caddyfile` (48 site blocks). Edit HERE, not the caddy-compose `deploy/edge/Caddyfile` (that is the archived container-era copy).
+- **Binary**: `~/infra/router/pkgs/caddy-edge.nix` - caddy 2.11.4 + the 9 plugins (directory-replaced private sources from flake inputs; CVE `--replace` mirrors the Dockerfile).
+- **Service wiring**: `~/infra/router/modules/edge.nix` (`services.caddy` + `systemd.services.edgectl`, tmpfiles-owned state, `caddy`/`wafctl` users).
+- **Deploy**: router repo `make deploy` (git push -> router `/etc/nixos` resets to origin/main -> `nixos-rebuild switch` -> `eaves doctor` gate). Never `make restart`/composer for the edge - that path is gone.
+- **Certs/state**: caddy resolves storage to `$HOME/.local/share/caddy` (unit sets `HOME=/var/lib/caddy`); certs live at `/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<host>/`. edgectl state at `/var/lib/wafctl/`.
 
-**Project-truth: `~/infra/ergo/caddy-compose/AGENTS.md`** - read first for current versions, counts and the full gotcha list. This skill is the pattern layer.
+**Source/build repo (unchanged)**: `~/infra/ergo/caddy-compose/` holds the `Dockerfile` (plugin manifest of record - the 9 plugins + CVE replaces that pkgs/caddy-edge.nix mirrors), the `wafctl/` + `waf-dashboard/` code (edgectl), and CI that builds + Trivy-scans + signs the images (vuln gate + container fallback). The compose stack is retained for the e2e/CRS test harness and as a fallback runtime - it is no longer how the edge runs.
+
+**Project-truth**: `~/infra/router/docs/plans/2026-09-06-caddy-native-migration.md` (progress log + the cutover gotchas) and `~/infra/ergo/caddy-compose/AGENTS.md` (wafctl/dashboard dev). This skill is the pattern layer.
 
 ## Direction change (2026-08-09) - read before adding features
 
@@ -18,12 +24,12 @@ The CRS/WAF/challenge stack is slated for removal and wafctl is being renamed `e
 ## What's in the repo - three things at once
 
 1. **Custom Caddy build** - Dockerfile uses `caddy:${VERSION}-builder` + `xcaddy build`. Compiled-in `--with` plugins (read the Dockerfile for the current list and pins): `caddy-dns/cloudflare`, `caddy-dns/rfc2136`, `caddy-dynamicdns` (pinned by commit), `caddy-l4`, first-party `caddy-body-matcher` / `caddy-policy-engine` / `caddy-ddos-mitigator`, and the dormant edge HTTP cache pair `caddyserver/cache-handler` + `darkweak/storages/nuts`. Every module is pinned. Two non-plugin build lines: the Souin cache core is the user's fork (`--with github.com/darkweak/souin=github.com/erfianugrah/souin@<tag>`) and `--replace` lines bump transitive deps with known vulns.
-2. **Compose stack** - `caddy` (host network), `wafctl` on its own bridge. No IdP in the stack (Authelia is retired; `deploy/edge/authelia/` is historical). Each container `read_only` where possible, `cap_drop ALL`, run-as `1000:1000`.
+2. **Native services (post-2026-09-08)** - both caddy and edgectl are systemd units on the router (router repo `modules/edge.nix`). No containers, no IdP (Authelia retired; `deploy/edge/authelia/` in caddy-compose is historical). The compose stack remains only as the e2e/CRS test harness + fallback runtime.
 3. **WAF management plane** - `wafctl/` (Go HTTP API + CLI, stdlib only) + `waf-dashboard/` (Astro + React + shadcn), bundled into the wafctl image and proxied at a dedicated subdomain. CRS rules converted from upstream `coreruleset` `.conf` to JSON at build time by `tools/crs-converter/`. Marked for removal (see above).
 
 ## Caddyfile patterns - the snippet idiom
 
-All snippets are defined inline in the same Caddyfile (`(name) { ... }` blocks expand at parse time). The adapter resolves snippets TOP-DOWN: importing a snippet defined LATER in the file crash-loops Caddy (`File to import not found`). Most snippets sit at the top, but `(lan_only)` / `(research_auth)` / `(memledger_auth)` are defined mid-file - site blocks importing them MUST go below their definition. `rg -n '^\(' deploy/edge/Caddyfile` lists every snippet with its line.
+All snippets are defined inline in the same Caddyfile (`(name) { ... }` blocks expand at parse time). The adapter resolves snippets TOP-DOWN: importing a snippet defined LATER in the file crash-loops Caddy (`File to import not found`). Most snippets sit at the top, but `(lan_only)` / `(research_auth)` / `(memledger_auth)` are defined mid-file - site blocks importing them MUST go below their definition. `rg -n '^\(' ~/infra/router/edge/Caddyfile` lists every snippet with its line.
 
 | Snippet | Purpose |
 |---|---|
@@ -79,18 +85,14 @@ An internal admin proxy on a high port (IP-restricted to the wafctl bridge subne
 }
 ```
 
-**Three-edit rule** - adding/changing a TSIG-using env var needs three simultaneous edits or Caddy crash-loops:
+**TSIG env vars** - native caddy reads secrets from `/var/lib/secrets/edge.env` (the unit's `EnvironmentFile`, 0600 root on the router, outside git). Adding/changing a TSIG var needs two edits: the value in `/var/lib/secrets/edge.env` on the router + the `{$VAR}` reference in the Caddyfile. (The container-era SOPS/.env/compose-passthrough three-edit rule is gone with the stack.)
 
-1. `.env` - `TSIG_CADDY_ACME=<base64>` (SOPS-encrypted; age recipients per the `secret-handling` skill)
-2. `compose.yaml` - `- TSIG_CADDY_ACME=${TSIG_CADDY_ACME}` passthrough on the `caddy` service
-3. `Caddyfile` - `key {$TSIG_CADDY_ACME}` reference inside the rfc2136 block
-
-**Secret flow**: SOPS in git -> composer decrypts at deploy time -> plaintext into container env -> Caddy reads at startup -> caddy-dns/rfc2136 sends a signed UPDATE to Knot.
+**Secret flow**: `/var/lib/secrets/edge.env` -> systemd `EnvironmentFile` -> caddy process env -> caddy-dns/rfc2136 sends a signed UPDATE to Knot. (sops-nix adoption for this file is a parked follow-up.)
 
 Verify post-restart that the plaintext loaded (not the ciphertext) - check for the variable NAME only, never print the value:
 
 ```bash
-ssh router 'docker inspect caddy --format "{{range .Config.Env}}{{println .}}{{end}}" | cut -d= -f1 | grep TSIG_'
+ssh router 'sudo -n grep -o "^[A-Z_]*" /var/lib/secrets/edge.env | grep TSIG_'
 ```
 
 Rotation order (full procedure in the `knot-dns` skill): rotate on Knot first, then here, else any ACME renewal in the gap returns `BADSIG`.
@@ -116,45 +118,27 @@ No forward-auth IdP remains in the stack. Current shapes:
 | B - bearer-or-LAN | `import research_auth` + `reverse_proxy` - private API surfaces: LAN + tailnet pass open, WAN needs `Authorization: Bearer $RESEARCH_TOKEN` |
 | C - mixed public/API | `route { @public path /api/* /webhooks/*; reverse_proxy @public ...; ... }` - first match wins |
 
-`RESEARCH_TOKEN` must be in the caddy container's `environment:` in `deploy/edge/compose.yaml`, not just `.env` - else the matcher compares against an empty string and nothing authenticates.
+`RESEARCH_TOKEN` must reach the native caddy process env - read from `/var/lib/secrets/edge.env` (the caddy unit's `EnvironmentFile`), not a compose file. Else the matcher compares against an empty string and nothing authenticates.
 
-## Build / release - make targets
+## Build / deploy - native (post-2026-09-08)
 
-| Target | What |
-|---|---|
-| `make build` / `build-caddy` / `build-wafctl` | local docker build; `NO_CACHE=1` to force plugin re-pull |
-| `make push` / `push-caddy` / `push-wafctl` | to the user's Docker Hub namespace |
-| `make scan` | Trivy CRITICAL+HIGH gate |
-| `make sign` / `sbom` | cosign keyless + syft attestations |
-| `make deploy` / `deploy-*` / `deploy-all` | build -> scan -> push -> sync -> restart |
-| `make edge-sync` | composer API sync of the edge-services checkout on the router |
-| `make edge-restart` | edge-sync + `docker restart caddy` + live `caddy validate`; runs NO cache verify |
-| `make restart-edge` | Full deploy (sync+up) + `docker restart caddy` + 60s health poll. Prefer this over `edge-restart` for Caddyfile changes - it catches adapt errors at restart (2026-08-29) |
-| `make caddy-reload` | sync git + redeploy WAF/CSP/headers via wafctl + reload (no container restart) |
-| `make caddy-quick-reload` | sync git + reload only |
+The edge runs native. The container make-targets (`edge-sync`, `restart-edge`, `restart-caddy`, the SOPS footgun) are gone with the stack - do not use them for the live edge.
 
-### `make restart` vs `make restart-caddy` - the single biggest footgun
+- **Change the Caddyfile**: edit `~/infra/router/edge/Caddyfile`, then `cd ~/infra/router && make deploy` (push -> router resets /etc/nixos to origin/main -> `nixos-rebuild switch` -> `eaves doctor` gate). The `services.caddy` module validates the config and reloads caddy on change.
+- **Bump a plugin / the caddy base / a CVE replace**: edit `~/infra/router/pkgs/caddy-edge.nix` AND mirror the version in `~/infra/ergo/caddy-compose/Dockerfile` (the manifest of record CI scans), then `make deploy`. The router rebuilds the binary from source.
+- **edgectl code change**: edit `~/infra/ergo/caddy-compose/wafctl/`, bump the `caddyCompose` flake-input pin + `pkgs/wafctl.nix` version in the router repo, `make deploy`.
+- **Validate the Caddyfile without deploying**: `ssh router 'sudo -n <caddy-edge-store-path>/bin/caddy validate --config /etc/nixos/edge/Caddyfile --adapter caddyfile'` (real ACME auth needs the secrets in `/var/lib/secrets/edge.env`; dummy vars only catch directive/syntax errors).
+- **Stuck cert state** (deleted on disk but caddy still serves cached): `ssh router 'sudo -n systemctl restart caddy'` - empties the in-memory cert cache. `caddy reload` will NOT (it short-circuits on "config is unchanged").
 
-- **`make restart`** - `prep-composer-tree` then composer API `sync` + `up`. Composer decrypts the SOPS `.env` first. **Only safe path for changes touching `.env` or env-var passthrough.**
-- **`make restart-caddy` / `restart-wafctl`** - plain `compose up --force-recreate` on the router, bypassing SOPS: ciphertext env, crash loop.
+The caddy-compose `make build/push/scan/sign` targets now build ONLY the CI/fallback image (Trivy vuln gate + container fallback runtime) - they do not deploy the live edge.
 
-`prep-composer-tree` runs `docker exec -u composer composer git ... reset --hard HEAD` to wipe the dirty tree left by SOPS re-encrypt. The `-u composer` flag is mandatory - root-owned files break the next decrypt.
-
-For a **stuck cert state** (deleted on disk but Caddy still serves cached), use `docker restart caddy` (preserves resolved env, empties in-memory cert cache) - NOT `make restart-caddy`.
-
-## Docker image build flow - four stages
-
-1. `xcaddy build` with the `--with` modules.
-2. `golang:*-alpine` builds `crs-converter`, clones CRS at the pinned version, emits `default-rules.json` + `crs-metadata.json` (folding in `waf/custom-rules.json`).
-3. Runtime `caddy:*-alpine` copies built binary + assets + entrypoint. Adds `nftables`. Entrypoint ensures `/data/waf` then `exec caddy run`. (The CF-IP fetch stage + seed block were removed 2026-09-07 with the cfproxy subsystem.)
-
-**Version-tag sync** - Makefile / compose.yaml / `.github/workflows/build.yml` / README must agree. `CADDY_TAG` (published image) is distinct from `CADDY_VERSION` (upstream base they trail).
+**Version-tag sync** - caddy-compose Makefile / compose.yaml / `.github/workflows/build.yml` / README (the CI image pin) AND router `pkgs/wafctl.nix` version + the `caddyCompose` flake pin must agree. `CADDY_TAG` (published image) is distinct from `CADDY_VERSION` (upstream base they trail).
 
 ## Dormant edge cache (souin / cache-handler)
 
-The edge HTTP cache is REMOVED from the live `deploy/edge/Caddyfile` (header comment there says so); the souin fork + nuts modules are still compiled into the image. Re-enable ONLY via `docs/edge-cache-removal.md` (exact blocks that were removed, why, and the `cachectl verify` bug that prompted it) plus `test/cache/README.md` (the verified Souin quirk catalogue with source references - read it before asserting any souin behaviour). What still exists:
+The edge HTTP cache is REMOVED from the live `~/infra/router/edge/Caddyfile` (header comment there says so); the souin fork + nuts modules are still compiled into the binary. Re-enable ONLY via `docs/edge-cache-removal.md` (exact blocks that were removed, why, and the `cachectl verify` bug that prompted it) plus `test/cache/README.md` (the verified Souin quirk catalogue with source references - read it before asserting any souin behaviour). What still exists:
 
-- `tools/cachectl` - Go ops CLI: `cd tools/cachectl && go run . status|verify|probe <url>|purge <site|all>`. `purge` (rm the site's nuts dir + `docker restart caddy`) is the only working purge; the souin admin API permanently returns `[]` and admin PURGE is a no-op. `make build-cachectl` builds it; `make edge-verify-cache` runs `verify` - only meaningful while the cache is enabled, and `make edge-restart` does NOT run it.
+- `tools/cachectl` - Go ops CLI: `cd tools/cachectl && go run . status|verify|probe <url>|purge <site|all>`. `purge` (rm the site's nuts dir + `systemctl restart caddy`) is the only working purge; the souin admin API permanently returns `[]` and admin PURGE is a no-op. `make build-cachectl` builds it; `make edge-verify-cache` runs `verify` - only meaningful while the cache is enabled, and `make edge-restart` does NOT run it.
 - `test/cache/` harness (`make test-cache`, extracts the binary from `CADDY_IMAGE`). Mirror any storage/handler-shape change into `test/cache/Caddyfile.test` or a green run proves nothing.
 - Version pins live in the Dockerfile (`cache-handler`, `storages/nuts/caddy`, the souin fork replace). Fork repo: `~/infra/ergo/souin`.
 
@@ -162,20 +146,16 @@ Config rules if it comes back (each violation is a silent failure, evidence in t
 
 ## Gotchas - the durable list
 
-1. **`make restart-*` bypasses SOPS** -> ciphertext env -> crash loop. Use `make restart`.
-2. **Three-edit rule** for new env vars - `.env` + `compose.yaml` passthrough + consumer config. Partial deploys crash.
-3. **Composer SOPS re-encrypt leaves a dirty tree** -> next sync refuses -> next deploy uses stale code. `prep-composer-tree` resets it; must run as `-u composer`.
-4. **The composer instance's WAF blocks default `curl` UA on PUT/POST** (not GET). Send a browser-style `User-Agent` plus `Origin` and `Referer` matching the page. 403 with a reference-ID = this rule.
-5. **`caddy reload` is sticky** - `"config is unchanged"` short-circuits and does NOT re-evaluate cert state, even if cert files were deleted. Force re-issue: `docker restart caddy`.
-6. **TSIG rotation order**: Knot first, then here. ACME renewals in the gap return `BADSIG`.
-7. **Zone migration**: when a zone moves CF DNS -> Knot, every site block under it MUST swap `import tls_config_cf` -> `import tls_config_rfc2136`. Otherwise Caddy writes ACME TXT to CF while validators ask Knot -> silent failure once recursive caches expire.
-8. **Pin every xcaddy module.** Unpinned modules float on `--no-cache` rebuilds; new `caddy-l4` releases have raised the `caddy/v2` minimum and broken older bases. When bumping any module OR the Caddy base, bump them all to latest known-good and verify with `docker run --rm <image> /usr/bin/caddy list-modules`. For a non-plugin transitive dep bump, use xcaddy `--replace module=module@version` (go.mod replace, no blank import), not `--with`.
-9. **Edge HTTP cache is dormant** - see the section above; do not "fix" cache behaviour in a Caddyfile that has no `cache` handler.
-10. **Version-tag drift** - see above.
-11. **wafctl <-> Caddy admin routing**: `extra_hosts: caddy:<bridge-gateway>` required (Docker inter-network isolation blocks docker0). Talk to the proxy port, not `:2019`.
-12. **Snippet import order** - top-down resolution, forward reference = crash loop. `(lan_only)` / `(research_auth)` / `(memledger_auth)` are mid-file, not at the top.
-13. **Pre-commit hook** blocks unencrypted `.env` / `.tfvars` / `.tfstate` (looks for `ENC[AES256_GCM,` or `sops_*` markers). Override per-path via `.allow-unencrypted-paths`.
-14. **wafctl event-store retention** - bounded by `WAF_EVENT_MAX_AGE` / `WAF_GENERAL_LOG_MAX_AGE`. Size on disk scales with traffic; check AGENTS.md for current envelopes before sizing a new deploy.
+1. **The composer instance's WAF blocks default `curl` UA on PUT/POST** (not GET). Send a browser-style `User-Agent` plus `Origin` and `Referer` matching the page. 403 with a reference-ID = this rule.
+2. **`caddy reload` is sticky** - `"config is unchanged"` short-circuits and does NOT re-evaluate cert state, even if cert files were deleted. Force re-issue: `ssh router 'sudo -n systemctl restart caddy'`.
+3. **TSIG rotation order**: Knot first, then here. ACME renewals in the gap return `BADSIG`.
+4. **Zone migration**: when a zone moves CF DNS -> Knot, every site block under it MUST swap `import tls_config_cf` -> `import tls_config_rfc2136`. Otherwise Caddy writes ACME TXT to CF while validators ask Knot -> silent failure once recursive caches expire.
+5. **Pin every xcaddy module.** Unpinned modules float on `--no-cache` rebuilds; new `caddy-l4` releases have raised the `caddy/v2` minimum and broken older bases. When bumping any module OR the Caddy base, bump them all to latest known-good and verify with `docker run --rm <image> /usr/bin/caddy list-modules`. For a non-plugin transitive dep bump, use xcaddy `--replace module=module@version` (go.mod replace, no blank import), not `--with`.
+6. **Edge HTTP cache is dormant** - see the section above; do not "fix" cache behaviour in a Caddyfile that has no `cache` handler.
+7. **Version-tag drift** - see above.
+8. **Snippet import order** - top-down resolution, forward reference = crash loop. `(lan_only)` / `(research_auth)` / `(memledger_auth)` are mid-file, not at the top.
+9. **Pre-commit hook** blocks unencrypted `.env` / `.tfvars` / `.tfstate` (looks for `ENC[AES256_GCM,` or `sops_*` markers). Override per-path via `.allow-unencrypted-paths`.
+10. **wafctl event-store retention** - bounded by `WAF_EVENT_MAX_AGE` / `WAF_GENERAL_LOG_MAX_AGE`. Size on disk scales with traffic; check AGENTS.md for current envelopes before sizing a new deploy.
 
 ## Subdirectory map
 
@@ -213,20 +193,20 @@ Check status checkboxes in each PLAN before claiming anything beyond "in design"
 ```bash
 # Inspect a live cert (substitute your hostname)
 HOST=caddy.example.com
-CERT_DIR=/var/lib/caddy/data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/$HOST
+CERT_DIR=/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/$HOST
 ssh router "openssl x509 -in $CERT_DIR/$HOST.crt -noout -dates -issuer"
 
 # Force-renew a single site (delete + restart, NOT reload)
-ssh router "rm $CERT_DIR/$HOST.{crt,key,json}"
-ssh router "docker restart caddy"
-ssh router "docker logs --since 1m caddy 2>&1 | grep -iE '$HOST|acme'"
+ssh router "sudo -n rm $CERT_DIR/$HOST.{crt,key,json}"
+ssh router 'sudo -n systemctl restart caddy'
+ssh router "sudo -n journalctl -u caddy --since 1m | grep -iE '$HOST|acme'"
 
 # Watch ACME activity live
-ssh router 'docker logs -f caddy 2>&1 | grep -E "tls.obtain|authorization|finalize|obtained|BADSIG|BADKEY"'
+ssh router 'sudo -n journalctl -u caddy -f | grep -E "tls.obtain|authorization|finalize|obtained|BADSIG|BADKEY"'
 
 # Verify the TSIG variable is present (names only)
-ssh router 'docker inspect caddy --format "{{range .Config.Env}}{{println .}}{{end}}" | cut -d= -f1 | grep TSIG_'
+ssh router 'sudo -n systemctl show caddy -p EnvironmentFiles; sudo -n grep -o "^[A-Z_]*" /var/lib/secrets/edge.env | grep TSIG_'
 
-# wafctl health (replace with current bridge IP from compose.yaml)
-ssh router 'curl -sf http://<wafctl-bridge-ip>:8080/api/v1/health | jq'
+# edgectl (wafctl) health - native, on loopback
+ssh router 'curl -sf http://127.0.0.1:8080/api/health | head -c 200'
 ```

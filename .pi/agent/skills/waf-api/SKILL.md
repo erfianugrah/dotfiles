@@ -14,6 +14,12 @@ waf-dashboard static build (Astro 7 MPA + React 19 islands in
 `~/infra/ergo/caddy-compose/waf-dashboard/`). The policy-engine Caddy plugin is the data
 plane; wafctl never touches traffic directly.
 
+**Runtime (2026-09-08): native on the router** as `systemd.services.edgectl` (user
+`wafctl`, source via the router `caddyCompose` flake input -> `pkgs/wafctl.nix`). No
+container. State at `/var/lib/wafctl/`, reads `/var/log/combined-access.log`, writes
+`/var/lib/caddy/waf/policy-rules.json` (group `caddy`). Deploy: bump the flake pin +
+pkgs version in the router repo, `make deploy`.
+
 **Mental model - three invariants that explain most bugs:**
 
 1. **Store mutation != deploy.** Every CRUD endpoint (`/api/rules`, `/api/config`,
