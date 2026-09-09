@@ -43,7 +43,7 @@ All snippets are defined inline in the same Caddyfile (`(name) { ... }` blocks e
 | `(memledger_auth)` | same shape for the memledger API surface |
 | `(proxy_headers)` | `trusted_proxies private_ranges` + `X-Forwarded-For {client_ip}` - used inside reverse_proxy |
 | `(error_pages)` | `handle_errors` -> template at `/etc/caddy/errors/error.html` |
-| `(site_log)` | combined JSON log to `/var/log/combined-access.log`; `log_append` lines pull `policy_*`, `ddos_*`, `challenge_*` fields lazily. Single source of truth tailed by wafctl. |
+| `(site_log)` | combined JSON log to `/var/log/caddy/combined-access.log` (under the caddy-owned dir so rotation renames work; moved 2026-09-09 from `/var/log/` root which caddy couldn't write). `log_append` lines pull `policy_*`, `ddos_*`, `challenge_*` fields lazily. Single source of truth tailed by wafctl. |
 
 Global block uses explicit handler ordering: `order log_append first` -> `order ddos_mitigator after log_append` -> `order policy_engine after ddos_mitigator` so `log_append` captures action fields even when later handlers short-circuit.
 
