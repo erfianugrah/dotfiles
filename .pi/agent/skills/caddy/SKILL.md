@@ -64,7 +64,7 @@ example.com {
 
 An internal admin proxy on a high port (IP-restricted to the wafctl bridge subnet, reverse-proxying to `localhost:2019`) still exists in the Caddyfile, but **nothing consumes it** since 2026-09-07 - wafctl no longer calls the Caddy admin API (CFProxyStore + `reloadCaddy` deleted in 53b6b9a after the stale-bind-mount `/load` clobber). The block + the wafctl `extra_hosts` alias were removed with it; the `:2020` Caddyfile block is parked for the control-plane rework.
 
-**Vhost naming**: default is plain `<name>.erfi.io`. The `.edge.` infix exists only where the plain name already serves something else - `knotea.edge.erfi.io` (LAN twin of the Fly-hosted `knotea.erfi.io` DoH/DoT) plus the historical `composer.edge` / `waf.edge` (LAN twins of their public same-name vhosts). New LAN-only services get the plain name (e.g. ntopng -> `ntop.erfi.io`), never `.edge.` by default.
+**Vhost naming**: default is plain `<name>.erfi.io`. The `.edge.` infix is reserved for knotea alone (`knotea.edge.erfi.io`, LAN twin of the Fly-hosted `knotea.erfi.io` DoH/DoT) - the historical `composer.edge` / `waf.edge` twins were removed 2026-09-09. The wafctl/edgectl dashboard is `edge.erfi.io` (plus legacy `waf.erfi.io`); composer is `composer.erfi.io` only. New LAN-only services get the plain name (e.g. ntopng -> `ntop.erfi.io`), never `.edge.` by default.
 
 ## TSIG + rfc2136 - secret chain to Knot
 
@@ -207,6 +207,14 @@ ssh router 'sudo -n journalctl -u caddy -f | grep -E "tls.obtain|authorization|f
 # Verify the TSIG variable is present (names only)
 ssh router 'sudo -n systemctl show caddy -p EnvironmentFiles; sudo -n grep -o "^[A-Z_]*" /var/lib/secrets/edge.env | grep TSIG_'
 
-# edgectl (wafctl) health - native, on loopback
-ssh router 'curl -sf http://127.0.0.1:8080/api/health | head -c 200'
+# edgectl (wafctl) health - native, on :8082 (8080 belongs to the composer container)
+ssh router 'curl -sf http://127.0.0.1:8082/api/health | head -c 200'
+
+# TSIG drift check (native caddy's first NEW cert after cutover failed
+# "dns: bad authentication" 2026-09-09: edge.env held a stale
+# TSIG_CADDY_ACME; cert store preservation meant no issuance had exercised
+# rfc2136 until then). Compare against the container-era sops source:
+# secretctl cmp 'sops:~/infra/ergo/caddy-compose/deploy/edge/.env#TSIG_CADDY_ACME' \
+#   'keyfile:~/.config/knotctl/keys/caddy-acme.key'   # keyfile leg digests the whole file; expect MISMATCH-by-framing
+# ground truth = a live probe: knotctl --key acme add _acme-challenge.<host> TXT '"probe"'
 ```

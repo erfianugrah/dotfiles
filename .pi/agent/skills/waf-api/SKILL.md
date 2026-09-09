@@ -9,7 +9,9 @@ description: Use when working with the wafctl WAF management API or waf-dashboar
 
 wafctl (`~/infra/ergo/caddy-compose/wafctl/`, Go stdlib-only, single `package main`) is the
 management plane for the custom Caddy WAF. It tails the Caddy access log, stores
-events/rules/config in JSON files, and serves ~94 JSON API routes on `:8080` plus the
+events/rules/config in JSON files, and serves ~94 JSON API routes on `:8082`
+(`WAFCTL_PORT`; the code default is 8080 but the composer container owns host :8080
+on the router - the 2026-09-09 bind-race incident) plus the
 waf-dashboard static build (Astro 7 MPA + React 19 islands in
 `~/infra/ergo/caddy-compose/waf-dashboard/`). The policy-engine Caddy plugin is the data
 plane; wafctl never touches traffic directly.

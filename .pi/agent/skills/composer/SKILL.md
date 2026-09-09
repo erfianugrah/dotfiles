@@ -112,7 +112,9 @@ Composer originally ran on servarr; that instance, `composer.servarr.erfi.io`, i
 
 The image tag lives in `~/infra/router/configuration.nix` (the flake control plane since 2026-08-01 - the old two-copy router.nix dance is dead). **Before touching it run `git -C ~/infra/router status --short`: if configuration.nix (or anything) is already modified, STOP and ask - someone else's half-done edit is in that tree** (a bump commit once swept 70 unrelated uncommitted lines into itself and `make deploy` shipped them live). Commit the bump with ONLY the tag hunk (`git add -p` or a fresh branch), message `chore: bump composer to vX.Y.Z`, then `make deploy` (push -> router fast-forwards -> rebuild -> eaves doctor). NEVER edit /etc/nixos on the box - the next deploy silently reverts to the repo-pinned tag, which has downgraded a live instance and dropped its `/certs` mount before. Also `sed -i` with no match is a silent no-op - grep-verify after every sed. Self-upgrade via the `_system` stack does NOT apply here (oci-containers unit races the helper; rebuilds revert to the pinned tag).
 
-**Router-local access**: API also at `localhost:8080` on the router:
+**Router-local access**: API also at `localhost:8080` on the router. Port ownership:
+composerd owns host `:8080` (host-network container); the native edgectl/wafctl is
+`:8082` - never point wafctl at 8080 or vice versa (2026-09-09 bind race).
 
 ```bash
 ssh router "curl -s -H \"X-API-Key: $COMPOSER_API_KEY\" localhost:8080/api/v1/stacks" | jq -r '.stacks[].name'

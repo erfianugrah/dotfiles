@@ -253,6 +253,18 @@ the digest set so ordinary output is not masked.
 - **Classify a line with `grep -q`, `case`, or a pattern that consumes the
   whole line (`s/...$/tag/p`).** A `sed` substitution that replaces only the
   matched prefix keeps the tail, and the tail is the value.
+- **`sshenv:` cannot read root-only files and cannot write.** A root-0600
+  remote env resolves EMPTY (UNRESOLVED, exit 2) under the ssh user; stage a
+  user-readable temp copy (`sudo install -m 0400 -o $user file /tmp/x`),
+  digest-compare, then `rm` it. And `sshenv` is not in the writable scheme
+  set - `secretctl set` refuses it. To write one remote key, pipe the value
+  over ssh stdin into a remote `sudo bash` script that runs `sed -i
+  's|^K=.*|K=...,|'`; never put the value in argv (process table) or a local
+  temp file in a shared dir.
+- **`keyfile:` digests the whole file, framing included.** A BIND TSIG
+  keyfile (109B) never MATCHes the raw 44B secret leg of a dotenv store -
+  that MISMATCH is framing, not rotation. Prove liveness with a functional
+  probe instead (e.g. `knotctl --key acme add` a throwaway TXT).
 
 Implementation-side lessons (the cross-implementation HMAC key mismatch, the
 writer/reader codec round-trip, error strings as a leak path) live with the
