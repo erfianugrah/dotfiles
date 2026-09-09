@@ -1209,3 +1209,60 @@ describe("classifyRun (failure-mode taxonomy)", () => {
 		expect(modes).toEqual(["agent-error", "agent-silent"]);
 	});
 });
+
+describe("classifyRun: runs the loop itself ended", () => {
+	const it = {
+		agentExit: 0,
+		agentTimedOut: false,
+		kept: false,
+		progressed: false,
+		escalated: false,
+		changed: 0,
+		scopeViolations: 0,
+		sensorTimedOut: false,
+	};
+	test("interrupted is tagged, and is not mistaken for no-progress", () => {
+		const modes = classifyRun("interrupted", []);
+		expect(modes).toContain("interrupted");
+		expect(modes).not.toContain("no-progress");
+	});
+	test("crashed is tagged", () => {
+		expect(classifyRun("crashed", [it])).toContain("crashed");
+	});
+	test("completed iterations before the interrupt still contribute their tags", () => {
+		const modes = classifyRun("interrupted", [{ ...it, agentExit: 1 }]);
+		expect(modes).toEqual(expect.arrayContaining(["interrupted", "agent-error"]));
+	});
+});
+
+describe("formatReport: the iteration in flight", () => {
+	test("a live run names the iteration the agent is on", () => {
+		const out = formatReport({
+			result: "running",
+			iterations: [],
+			inFlight: { iteration: 3, model: "weak", startedAt: "2026-09-09T08:23:42.816Z" },
+		});
+		expect(out).toContain("result: running");
+		expect(out).toContain("in flight: iteration 3 (weak), agent started 2026-09-09T08:23:42.816Z");
+	});
+	test("an interrupted run says which iteration died and what killed it", () => {
+		const out = formatReport({
+			result: "interrupted",
+			iterations: [],
+			inFlight: { iteration: 1, abortedBy: "SIGINT" },
+		});
+		expect(out).toContain("aborted by SIGINT during: iteration 1");
+	});
+	test("a crashed run surfaces the error's first line", () => {
+		const out = formatReport({
+			result: "crashed",
+			iterations: [],
+			error: "ENOSPC: no space left on device\n    at writeSync",
+		});
+		expect(out).toContain("error:  ENOSPC: no space left on device");
+		expect(out).not.toContain("at writeSync");
+	});
+	test("no in-flight line on a normally finished run", () => {
+		expect(formatReport({ result: "pass", iterations: [] })).not.toContain("in flight");
+	});
+});

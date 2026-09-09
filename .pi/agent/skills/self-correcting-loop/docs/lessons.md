@@ -31,16 +31,27 @@ Two adjacent operator traps, both observed on a real run:
   deleted the preset name from the expected set. The judge caught it, but the
   run was unfixable: restoring the file was outside `writeScope`.) Fix the
   baseline honestly, or commit the file, before running.
-- **Killing the loop by process name orphans the agent.** `pkill -f 'loop
-  run'` ends `loop.ts` and leaves its `timeout` + `bwrap` descendants alive:
-  `--die-with-parent` does not fire because the surviving `timeout` IS the
-  parent, and the agent keeps editing the repo with no checkpoint, no scope
-  fence and no rollback accounting - precisely the failure `--unshare-pid`
-  exists to prevent, reintroduced from outside the jail. Observed
-  2026-09-07: it produced 1,614 unsupervised lines, and the engine log was
-  the only reason it was noticed at all. Launch with `setsid`, record the
-  process group, and reap the group: `kill -TERM -$PGID`. Then check
-  `pgrep -af 'bwrap|pi -p'` before trusting that the run is over.
+- **The loop takes its agent down with it (since 2026-09-09).** Before that,
+  ending `loop run` by any means - Ctrl-C, `pkill -f 'loop run'`, a closed
+  terminal, a WSL session restart - left the agent running: GNU `timeout`
+  was the agent's outer wrapper and had made itself leader of a NEW process
+  group, so the signal that ended the loop never reached it, and bwrap's
+  `--die-with-parent` watched `timeout` (alive) rather than the loop. The
+  agent kept editing the repo with no checkpoint, no scope fence and no
+  rollback accounting (2026-09-07: 1,614 unsupervised lines, noticed only
+  via the engine log). Worse, the report on disk still showed the PREVIOUS
+  run's verdict, because an iteration was only recorded after its sensors
+  ran - so a loop that died in iteration 1 read as "pass" (2026-09-09; the
+  "vanished agent" was diagnosed from `ps`). Now: SIGINT/SIGTERM/SIGHUP and
+  loop exceptions kill every live child and write the report as
+  `interrupted`/`crashed` with the `inFlight` iteration; bwrap is the loop's
+  direct child so a SIGKILLed loop still takes the jail down; and the report
+  says `running` + `inFlight` from the moment the agent is spawned, with
+  `loop report` telling you whether that loop pid is still alive. Remaining
+  gap: an UNSANDBOXED agent survives a SIGKILL/OOM of the loop - only the
+  jail has a kernel-side deadman. After any abnormal end still check
+  `pgrep -af 'bwrap|pi -p'` and `git diff` (the unverified edits are in the
+  worktree against the checkpoint index).
 - **Do not send ad-hoc requests to a single-lane local engine mid-run.** A
   `--max-concurrency 1` server admits one request; an operator probe queues
   behind the agent's generation and either times out or takes the lane the
@@ -467,7 +478,8 @@ duckdb -c "select modelUsed[1] m, result, count(*) n, avg(iterations) iters,
 
 Each line: `v, ts, startedAt, durationMs, cwd, repo, headSha, models
 (ladder), modelUsed, trial, humanGate, maxIterations, result
-(pass|fail|already-green|trial-stalled|trial-partial), iterations, kept,
+(pass|fail|already-green|trial-stalled|trial-partial|interrupted|crashed),
+iterations, kept,
 escalations, agentTimeouts, agentMs, sensorsMs, initialFailing,
 finalFailing, finalFailingNames, failureModes, taskSha, taskExcerpt`, plus `iter[]` with
 per-iteration model/kept/progressed/escalated/agentMs/failing-delta.
@@ -479,7 +491,9 @@ ran), `agent-timeout`, `agent-silent` (clean exit, zero files changed),
 `thrash` (2+ changed-but-rolled-back iterations - doing work, work is
 wrong), `scope-fighting` (fence reversions), `sensor-timeout` (final
 iteration), `budget-exhausted` (last iteration was STILL progressing -
-wanted more iterations, not a better model), `no-progress` (catch-all).
+wanted more iterations, not a better model), `interrupted` / `crashed`
+(the LOOP ended the run - signal or governor exception; the iteration in
+flight is in the report's `inFlight`), `no-progress` (catch-all).
 Green runs get `[]` or `needed-escalation` (a higher rung did the work -
 a cost signal). Tags compose; `loop history` shows them bracketed.
 

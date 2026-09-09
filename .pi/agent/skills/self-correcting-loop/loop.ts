@@ -111,6 +111,106 @@ const promptPath = (i: number) => join(PROMPT_DIR, `iteration-${i}.txt`);
 const REPORT_OUTPUT_CAP = 4000;
 const PI_CMD = process.env.LOOP_PI_CMD ?? "pi";
 
+// --- child lifetime -----------------------------------------------------------
+// Every process the loop spawns is registered here while it runs, so the loop
+// can take its children down with it. Without this the governor was the one
+// process in the tree that could die WITHOUT ending the agent: GNU `timeout`
+// puts the agent in its own process group, so a Ctrl-C or terminal hangup
+// ended `loop run` and left `pi -p` editing the repo with no checkpoint, scope
+// fence or rollback (2026-09-07: 1,614 unsupervised lines; 2026-09-09: an
+// agent that "vanished" while the report on disk still showed the PREVIOUS
+// run's verdict, because nothing had recorded the iteration it died in).
+
+type KillSignal = "SIGTERM" | "SIGKILL";
+/** Live children by pid; `group` = the child leads its own process group. */
+const liveChildren = new Map<number, { group: boolean }>();
+/** The report of the run in progress, so an abort can finalize it. */
+let activeReport: RunReport | null = null;
+/** Set once an abort has begun: spawns refuse, the main flow parks. */
+let aborting = false;
+
+function killLiveChildren(signal: KillSignal): void {
+	for (const [pid, { group }] of liveChildren) {
+		if (group) {
+			try {
+				process.kill(-pid, signal);
+			} catch {
+				/* group already empty */
+			}
+		}
+		try {
+			process.kill(pid, signal);
+		} catch {
+			/* already gone */
+		}
+	}
+}
+
+/** The main flow calls this after every await that may span an abort. */
+function parkIfAborting(): Promise<void> {
+	return aborting ? new Promise<never>(() => {}) : Promise.resolve();
+}
+
+const ABORT_GRACE_MS = 1500;
+/** Shell convention: 128 + signal number. */
+const ABORT_EXIT: Record<string, number> = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
+
+/**
+ * End the run early and honestly: kill every live child (TERM, then KILL after
+ * a short grace), then write the report with the in-flight iteration and a
+ * `result` that says what happened. `finishedAt` is set, so the run journals
+ * like any other and `loop history` counts it.
+ *
+ * The worktree is left as the agent left it: the checkpoint is still the
+ * index, so `git diff` shows exactly the unverified edits.
+ */
+async function abortRun(why: string, err?: unknown): Promise<void> {
+	aborting = true;
+	const crashed = why === "crash";
+	console.error(
+		`\n! ${crashed ? "loop crashed" : `received ${why}`}: stopping the agent, recording the run as ${crashed ? "crashed" : "interrupted"}`,
+	);
+	if (crashed && err !== undefined) {
+		console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
+	}
+	if (liveChildren.size) {
+		killLiveChildren("SIGTERM");
+		await Bun.sleep(ABORT_GRACE_MS);
+		killLiveChildren("SIGKILL");
+	}
+	const report = activeReport;
+	if (report) {
+		report.result = crashed ? "crashed" : "interrupted";
+		report.finishedAt = new Date().toISOString();
+		if (report.inFlight) report.inFlight.abortedBy = why;
+		if (crashed) report.error = err instanceof Error ? err.message : String(err);
+		await writeReport(report);
+	}
+}
+
+/**
+ * Make `abortRun` happen on SIGINT (Ctrl-C), SIGTERM (`kill`, service stop),
+ * SIGHUP (terminal or WSL session gone) and on an unhandled exception or
+ * rejection in the loop itself. First trigger wins; later ones are ignored
+ * while the abort runs. SIGKILL and OOM cannot be handled - for those the
+ * sandboxed agent's life is bound to the loop's by `--die-with-parent`
+ * (see runAgent); the bare-agent path has no equivalent.
+ */
+function installRunGuards(): void {
+	let triggered = false;
+	const trigger = (why: string, err?: unknown) => {
+		if (triggered) return;
+		triggered = true;
+		const code = why === "crash" ? 1 : (ABORT_EXIT[why] ?? 1);
+		abortRun(why, err).finally(() => process.exit(code));
+	};
+	for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+		process.on(sig, () => trigger(sig));
+	}
+	process.on("uncaughtException", (e: unknown) => trigger("crash", e));
+	process.on("unhandledRejection", (e: unknown) => trigger("crash", e));
+}
+
 // --- arg parsing ------------------------------------------------------------
 
 function parseArgs(argv: string[]): {
@@ -186,6 +286,7 @@ async function sh(
 	opts: { reap?: boolean } = {},
 ): Promise<{ code: number; out: string; timedOut: boolean; durationMs: number }> {
 	const started = Date.now();
+	if (aborting) return { code: -1, out: "not run: the loop is shutting down", timedOut: false, durationMs: 0 };
 	const prefix = timeoutPrefix(timeoutMs);
 	// Only signal a process group we KNOW we created, or the kill lands on the
 	// loop's own group (Bun.spawn does not detach: a plain child inherits our
@@ -199,11 +300,13 @@ async function sh(
 			? { timeout: timeoutMs + BACKSTOP_MARGIN_MS, killSignal: "SIGKILL" as const }
 			: {}),
 	});
+	liveChildren.set(proc.pid, { group: ownsGroup });
 	const [stdout, stderr, code] = await Promise.all([
 		new Response(proc.stdout).text(),
 		new Response(proc.stderr).text(),
 		proc.exited,
 	]);
+	liveChildren.delete(proc.pid);
 	// After the drain, never before: a reaper that raced the read would eat the
 	// diagnosis. (A survivor holding our stdout pipe open stalls the read until
 	// the native backstop fires - that is the timeout's job, not the reaper's.)
@@ -552,27 +655,44 @@ async function runAgent(
 	tools: string[],
 	sandboxed: boolean,
 	timeoutMs: number,
+	onSpawn?: (pid: number) => void,
 ): Promise<{ code: number; timedOut: boolean; durationMs: number }> {
 	const args = ["-p", prompt, "--tools", tools.join(","), "-a"];
 	if (model) args.push("--model", model);
-	const cmd = sandboxed ? [bwrap()!, ...sandboxArgs(process.cwd())] : [];
 	const started = Date.now();
-	// GNU timeout first so the whole agent process GROUP is reaped: `pi -p`
-	// spawns tool subprocesses (bash, servers), and orphaning those leaves the
-	// loop's inherited stdout pipe open plus ports bound.
-	const proc = Bun.spawn([...timeoutPrefix(timeoutMs), ...cmd, PI_CMD, ...args], {
+	// Who wraps whom decides who dies with whom:
+	//   sandboxed:  loop -> bwrap -> timeout -> pi
+	//   bare:       loop -> timeout -> pi
+	// bwrap is the loop's DIRECT child so `--die-with-parent` binds the jail's
+	// life to the loop's: if the governor dies - even by SIGKILL, where no
+	// handler runs - the kernel kills bwrap, and bwrap is PID 1 of the jail's
+	// PID namespace, so everything inside dies with it. GNU timeout sits inside
+	// the jail and still bounds the agent's process group (`pi -p` spawns
+	// bash, servers...; orphaning those leaves ports bound); its 124/137 exit
+	// status passes through bwrap unchanged (verified 2026-09-09).
+	// Before this timeout was the OUTER wrapper: it made itself leader of a new
+	// process group, so a Ctrl-C/SIGHUP that ended the loop never reached it,
+	// and --die-with-parent watched timeout (alive) rather than the loop.
+	const inner = [...timeoutPrefix(timeoutMs), PI_CMD, ...args];
+	const cmd = sandboxed ? [bwrap()!, ...sandboxArgs(process.cwd()), ...inner] : inner;
+	// The child leads its own group in both arrangements (bwrap via
+	// --new-session, timeout via setpgid); only then is `kill -pid` safe.
+	const leadsGroup = sandboxed || timeoutPrefix(timeoutMs).length > 0;
+	const proc = Bun.spawn(cmd, {
 		stdout: "inherit",
 		stderr: "inherit",
 		stdin: "inherit",
 		timeout: timeoutMs + BACKSTOP_MARGIN_MS,
 		killSignal: "SIGKILL",
 	});
+	liveChildren.set(proc.pid, { group: leadsGroup });
+	onSpawn?.(proc.pid);
 	const code = await proc.exited;
+	liveChildren.delete(proc.pid);
 	// Same reaping as sensors, and likelier to matter here: an agent that starts
 	// a dev server to try something by hand leaves it bound, and the next run's
-	// feature sensor finds the port already answering. Safe only because the
-	// timeout prefix above made this child a group leader.
-	if (timeoutPrefix(timeoutMs).length > 0) reapGroup(proc.pid);
+	// feature sensor finds the port already answering.
+	if (leadsGroup) reapGroup(proc.pid);
 	const durationMs = Date.now() - started;
 	return {
 		code,
@@ -617,11 +737,35 @@ interface IterationRecord {
 
 interface RunReport {
 	startedAt: string;
+	/** empty while the run is in progress; set on every terminal write. */
 	finishedAt: string;
 	task: string;
 	models: string[];
-	result: "pass" | "fail" | "already-green" | "trial-stalled" | "trial-partial";
+	/** `running` until the run ends; `interrupted`/`crashed` when the loop
+	 * itself ended early (signal, or an exception in the loop). */
+	result:
+		| "running"
+		| "pass"
+		| "fail"
+		| "already-green"
+		| "trial-stalled"
+		| "trial-partial"
+		| "interrupted"
+		| "crashed";
 	iterations: IterationRecord[];
+	/** The iteration whose agent is running now (written BEFORE the spawn, so a
+	 * loop that dies mid-iteration still leaves a record of which one), cleared
+	 * once its record lands in `iterations`. Survives on an aborted run. */
+	inFlight?: {
+		iteration: number;
+		model: string;
+		startedAt: string;
+		loopPid: number;
+		agentPid?: number;
+		abortedBy?: string;
+	};
+	/** first line of the exception, when result is `crashed`. */
+	error?: string;
 }
 
 /**
@@ -655,6 +799,7 @@ async function reloadOperatorFields(
 
 async function cmdRun(flags: Record<string, string | boolean>): Promise<number> {
 	const stopRunLog = flags["no-log"] === true ? () => {} : startRunLog();
+	installRunGuards();
 	try {
 		return await cmdRunInner(flags);
 	} finally {
@@ -858,9 +1003,14 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 		finishedAt: "",
 		task: m.task,
 		models: m.models,
-		result: "fail",
+		result: "running",
 		iterations: [],
 	};
+	// Replace the previous run's report NOW. Until the first iteration lands,
+	// `loop report` would otherwise render a stale verdict as if it were this
+	// run's - which is how a loop that died in iteration 1 read as "pass".
+	activeReport = report;
+	await writeReport(report);
 
 	for (let i = 1; i <= m.maxIterations; i++) {
 		const model = modelAt(m.models, ladder.rung);
@@ -899,7 +1049,22 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 		} catch {
 			// A read-only or missing .pi is not worth failing a run over.
 		}
-		const agent = await runAgent(prompt, model, m.tools, sandboxed, m.agentTimeoutMs);
+		// Record the iteration BEFORE the agent runs, for the same reason as the
+		// prompt above: if the loop dies mid-iteration this is the only record
+		// of which iteration was in flight and since when.
+		report.inFlight = {
+			iteration: i,
+			model,
+			startedAt: new Date().toISOString(),
+			loopPid: process.pid,
+		};
+		await writeReport(report);
+		const agent = await runAgent(prompt, model, m.tools, sandboxed, m.agentTimeoutMs, (pid) => {
+			if (report.inFlight) report.inFlight.agentPid = pid;
+		});
+		// An abort kills the agent, which resolves the await above; the abort
+		// owns the process from here (report, exit), so do not touch git state.
+		await parkIfAborting();
 		if (agent.timedOut) {
 			notes.push(
 				`Your previous iteration was KILLED after ${Math.round(m.agentTimeoutMs / 1000)}s without finishing. Work in smaller steps: make one concrete edit toward the failing check rather than a broad exploration.`,
@@ -979,6 +1144,7 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 
 		console.log("  sensors:");
 		const cur = applyFreeze(await runAllSensors(m), frozen);
+		await parkIfAborting();
 		const curFailing = countFailing(cur);
 		const curFp = fingerprint(cur);
 		const d = decide(prevFailing, prevFp, curFailing, curFp);
@@ -1004,6 +1170,7 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 		}
 		ladder = adv.state;
 
+		delete report.inFlight;
 		report.iterations.push({
 			iteration: i,
 			model,
@@ -1045,9 +1212,8 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 
 		// Flush after EVERY iteration, not just at the end. A 14-iteration run is
 		// hours long, and `loop report` reading the previous run's file the whole
-		// time is worse than useless - it looks current. `result` stays "fail"
-		// until the run actually finishes, which is the honest reading of a run
-		// still in progress.
+		// time is worse than useless - it looks current. `result` stays
+		// "running" until the run actually finishes.
 		await writeReport(report);
 
 		if (d.keep) {
@@ -1118,6 +1284,7 @@ async function cmdRunInner(flags: Record<string, string | boolean>): Promise<num
 		);
 		return 1;
 	}
+	report.result = "fail";
 	await writeReport(report);
 	console.error(`\nFAIL: sensors still red after ${m.maxIterations} iterations.`);
 	return 1;
@@ -1386,8 +1553,30 @@ async function cmdReport(flags: Record<string, string | boolean>): Promise<numbe
 		return 2;
 	}
 	console.log(`\n${formatReport(parsed as Parameters<typeof formatReport>[0])}`);
+	// A report that says `running` is either a live run or a loop that died
+	// without a handler (SIGKILL, OOM). The pid tells which, and the second
+	// case is the one that used to be invisible: the agent's edits are in the
+	// worktree with no sensor verdict behind them.
+	const view = parsed as { result?: string; inFlight?: { loopPid?: number; iteration?: number } };
+	if (view.result === "running" && view.inFlight?.loopPid) {
+		const { loopPid, iteration } = view.inFlight;
+		console.log(
+			pidAlive(loopPid)
+				? `\nrun in progress: loop pid ${loopPid} is alive; iteration ${iteration} is with the agent.`
+				: `\nrun NOT finished and loop pid ${loopPid} is gone: the loop died during iteration ${iteration} without recording it (SIGKILL/OOM, or a build predating the abort handlers). The worktree may hold that iteration's UNVERIFIED edits - \`git diff\` shows them against the checkpoint; run the sensors before trusting them.`,
+		);
+	}
 	if (existsSync(RUN_LOG_PATH)) console.log(`\nfull trace: ${RUN_LOG_PATH}`);
 	return 0;
+}
+
+function pidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 async function cmdVerify(flags: Record<string, string | boolean>): Promise<number> {

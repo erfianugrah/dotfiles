@@ -75,6 +75,21 @@ The governor around the bare loop (all deterministic, no extra model calls):
   because the governor's checkpoint/rollback accounting no longer covers it
   and the survivor works from stale sensor feedback. `--proc` was already
   present and is only correct inside a new PID namespace anyway.
+- **child lifetime: the agent dies with the loop** - every spawned process is
+  tracked while it runs; SIGINT/SIGTERM/SIGHUP to the loop, or an exception
+  inside it, kill the live children (TERM, KILL after 1.5s), write the report
+  with `result: "interrupted"|"crashed"` and the `inFlight` iteration, and
+  exit 128+signal. The sandboxed agent is spawned as `loop -> bwrap ->
+  timeout -> pi` (bwrap the loop's DIRECT child) so `--die-with-parent`
+  binds the jail's life to the loop's even on SIGKILL/OOM, where no handler
+  runs; GNU timeout inside the jail still bounds the agent's group and its
+  124/137 status passes through bwrap. Before this, `timeout` was the outer
+  wrapper in its own process group: a Ctrl-C or hangup ended the loop and
+  left `pi -p` editing the repo ungoverned (2026-09-07, 2026-09-09). The
+  report also says `running` with `inFlight` from the moment the agent is
+  spawned, so `loop report` never renders a previous run's verdict over a
+  live or dead one. Pinned in `loop-interrupt.integration.test.ts` and
+  `loop-deadman.integration.test.ts`.
 - **resource limits** *(Bun)* - optional `limits` (`memoryMax` / `cpuQuota` /
   `tasksMax`) wraps each sensor in a transient `systemd-run --user --scope`
   cgroup. Sensors run OUTSIDE the bwrap jail, so nothing else bounds them; the

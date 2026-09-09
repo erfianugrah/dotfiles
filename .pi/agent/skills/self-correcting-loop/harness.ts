@@ -835,6 +835,17 @@ export interface ReportView {
 	result?: string;
 	startedAt?: string;
 	finishedAt?: string;
+	/** the iteration whose agent was running when the report was written. */
+	inFlight?: {
+		iteration?: number;
+		model?: string;
+		startedAt?: string;
+		agentPid?: number;
+		loopPid?: number;
+		abortedBy?: string;
+	};
+	/** set when result is `crashed`. */
+	error?: string;
 	iterations?: {
 		/** field is `iteration` in the report; `n` accepted for convenience. */
 		iteration?: number;
@@ -907,6 +918,18 @@ export function formatReport(r: ReportView): string {
 			: "?";
 	out.push(`result: ${r.result ?? "unknown"}   iterations: ${its.length}   wall: ${dur}`);
 	if (r.task) out.push(`task:   ${r.task.split("\n")[0].slice(0, 88)}`);
+	// The iteration the loop was inside when the report was written: for a
+	// live run that is the current one; for an interrupted/crashed run it is
+	// the one that never got a record, whose edits may still be in the tree.
+	if (r.inFlight) {
+		const f = r.inFlight;
+		const state =
+			r.result === "running" ? "in flight" : `aborted${f.abortedBy ? ` by ${f.abortedBy}` : ""} during`;
+		out.push(
+			`${state}: iteration ${f.iteration ?? "?"}${f.model ? ` (${f.model})` : ""}${f.startedAt ? `, agent started ${f.startedAt}` : ""}`,
+		);
+	}
+	if (r.error) out.push(`error:  ${r.error.split("\n")[0].slice(0, 120)}`);
 	if (its.length === 0) return `${out.join("\n")}\n\n(no iterations recorded)`;
 
 	// Only show the prompt column when something recorded one - old reports and
@@ -1344,12 +1367,20 @@ export interface IterationSignals {
  * - budget-exhausted: the LAST iteration was still making progress when the
  *   iteration budget ran out - the answer was more iterations, not a better
  *   model. Distinct from every stall mode.
+ * - interrupted / crashed: the LOOP ended the run - a signal to the governor
+ *   (Ctrl-C, terminal hangup, kill) or an exception inside it. Says nothing
+ *   about the model; the iteration in flight is in the report's `inFlight`.
  */
 export function classifyRun(result: string, iters: IterationSignals[]): string[] {
 	if (result === "pass" || result === "already-green") {
 		return iters.some((i) => i.escalated) ? ["needed-escalation"] : [];
 	}
 	const modes: string[] = [];
+	// The loop itself ended the run: a signal (Ctrl-C, hangup, kill) or an
+	// exception in the governor. Neither says anything about the model, and
+	// without the tag an interrupted run reads as "no-progress".
+	if (result === "interrupted") modes.push("interrupted");
+	if (result === "crashed") modes.push("crashed");
 	if (iters.some((i) => i.agentExit !== 0 && !i.agentTimedOut)) modes.push("agent-error");
 	if (iters.some((i) => i.agentTimedOut)) modes.push("agent-timeout");
 	if (iters.some((i) => i.agentExit === 0 && !i.agentTimedOut && i.changed === 0))
