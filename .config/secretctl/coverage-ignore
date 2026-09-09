@@ -4,3 +4,6 @@
 radarr-src/
 openwrt/
 souin/plugins/
+# pg-analyser: tracked, public example configs with placeholder credentials
+*.example.json
+**/pg-analyser.databases.example.json

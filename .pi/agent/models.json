@@ -135,6 +135,18 @@
             "cacheRead": 0,
             "cacheWrite": 0
           }
+        },
+        {
+          "id": "qwen38-ninfer",
+          "name": "Qwen3.8 27B NVFP4 on NInfer (2.2x decode, flat to 262K)",
+          "reasoning": true,
+          "contextWindow": 252928
+        },
+        {
+          "id": "qwen38-ninfer-xhigh",
+          "name": "Qwen3.8 27B NVFP4 on NInfer - xhigh effort (quality ceiling)",
+          "reasoning": true,
+          "contextWindow": 252928
         }
       ]
     },

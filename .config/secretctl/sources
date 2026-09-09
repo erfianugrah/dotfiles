@@ -76,7 +76,7 @@ exclude IMMICH_MACHINE_LEARNING_URL *_MACHINE_LEARNING_URL *_ML_URL
 exclude WEBUI_URL CRAWLER_URL OSINT_URL SEARXNG_URL GF_SERVER_ROOT_URL
 # 2026-09-05: object-store endpoints and backup filter regexps are configuration (seen in compose-backups skill)
 exclude *_ENDPOINT *_SERVER_URL *_EXCLUDE_REGEXP *_HEALTHCHECK_URL
-exclude JELLYFIN_PublishedServerUrl *PublishedServerUrl
+exclude JELLYFIN_PublishedServerUrl *PublishedServerUrl JELLYFIN_FFmpeg__analyzeduration
 exclude WAF_CADDY_ADMIN_URL *_ADMIN_URL
 exclude DEFAULT_MODELS *_MODELS PGRST_OPENAPI_SERVER_PROXY_URI *_PROXY_URI GUMSHOE_URL
 exclude MEMLEDGER_URL *_BASE_URL
@@ -95,3 +95,23 @@ sops:~/discord-wipe-go/.env
 sops:~/infra/dns-tf/secrets.tfvars
 # 2026-09-06: apt frontend env flag is configuration, not a credential (blocked ninfer Dockerfile read)
 exclude DEBIAN_FRONTEND
+# 2026-09-09: Supabase CLI/Management PATs. Whole-file stores (44-byte sbp_ tokens),
+# so keyfile: rather than dotenv:. The green one is the STAGING control plane
+# (api.supabase.green) and is a separate auth realm from prod - two distinct
+# credentials, both registered so the guard covers either being echoed.
+keyfile:~/.supabase/access-token
+keyfile:~/.supabase/green-access-token
+
+# 2026-09-09: pg-analyser customer-audit stores (all gitignored in the repo). The
+# JSON profiles hold a Grafana session cookie + a superuser connstring; there is
+# no json: scheme, so keyfile: registers the PATH (blocks Read/Bash of the file)
+# even though a partial dump would not match the whole-file digest. .env holds
+# the SBPERF_DB_URL connstring; scraper/prometheus.yml holds the scraper JWT.
+# Globs only, so a not-yet-created file does not warn on every classify. The
+# tracked *.example.json files are deliberately NOT matched.
+dotenv:~/work/pg-analyser/.env
+keyfile:~/work/pg-analyser/sbperf*.profile.json
+keyfile:~/work/pg-analyser/sbperf.databases*.json
+keyfile:~/work/pg-analyser/sbperf.grafana*.json
+keyfile:~/work/pg-analyser/pg-analyser*.profile.json
+keyfile:~/work/pg-analyser/scraper/prometheus.yml
