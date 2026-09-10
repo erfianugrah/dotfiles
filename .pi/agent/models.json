@@ -1,5 +1,5 @@
 {
-  "$comment": "Pi custom providers. Edit this file to add/remove local models. Pi reloads on /model open \u2014 no restart needed. Source of truth for llmc model list: ~/infra/ai/llmc/models/*.toml. NOTES: llmc = the llmc proxy on localhost:11434 (formerly 'llama-server'); apiKey ignored by proxy but Pi requires the field. compat block for llama-server: llama.cpp's OpenAI server has no developer role or reasoning_effort, both disabled at provider level. $comment keys inside samplingParams / openRouterRouting are NOT allowed - pi forwards those objects VERBATIM into the request body / provider field, and OpenRouter 400s with 'Unrecognized key' (seen 2026-08-19). Notes live at file root and modelOverride roots only.",
+  "$comment": "Pi custom providers. This llmc provider block is a FALLBACK ONLY: the llmc-dynamic.ts extension (~/dotfiles/.pi/agent/extensions/llmc-dynamic.ts) fetches GET /v1/models from the live llmc proxy on startup and calls registerProvider, which REPLACES this models array wholesale with live preset data (id/name/reasoning/input/context/maxTokens all derived from the proxy's per-preset meta, not this file) - so in normal operation (proxy reachable) this list is inert. It only stands if the proxy is down/unreachable at pi startup, so the status bar isn't left blank. Keep it in sync with ~/infra/ai/llmc/models/*.toml anyway for that degraded path (verified 2026-09-10: two ninfer effort variants - qwen38-ninfer-low, qwen38-ninfer-d1 - were missing entirely, and the two present ninfer entries were missing input/cost). Pi reloads on /model open - no restart needed. NOTES: llmc = the llmc proxy on localhost:11434 (formerly 'llama-server'); apiKey ignored by proxy but Pi requires the field. compat block for llama-server: llama.cpp's OpenAI server has no developer role or reasoning_effort, both disabled at provider level. $comment keys inside samplingParams / openRouterRouting are NOT allowed - pi forwards those objects VERBATIM into the request body / provider field, and OpenRouter 400s with 'Unrecognized key' (seen 2026-08-19). Notes live at file root and modelOverride roots only.",
   "providers": {
     "llmc": {
       "baseUrl": "http://localhost:11434/v1",
@@ -140,13 +140,65 @@
           "id": "qwen38-ninfer",
           "name": "Qwen3.8 27B NVFP4 on NInfer (2.2x decode, flat to 262K)",
           "reasoning": true,
-          "contextWindow": 252928
+          "contextWindow": 252928,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
         },
         {
           "id": "qwen38-ninfer-xhigh",
           "name": "Qwen3.8 27B NVFP4 on NInfer - xhigh effort (quality ceiling)",
           "reasoning": true,
-          "contextWindow": 252928
+          "contextWindow": 252928,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        {
+          "id": "qwen38-ninfer-low",
+          "name": "Qwen3.8 27B NVFP4 on NInfer - low effort (fast, least thinking)",
+          "reasoning": true,
+          "contextWindow": 252928,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        {
+          "id": "qwen38-ninfer-d1",
+          "name": "Qwen3.8 27B NVFP4 on NInfer - draft=1 no-lm-head (262K ceiling probe)",
+          "reasoning": true,
+          "contextWindow": 252928,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
         }
       ]
     },
