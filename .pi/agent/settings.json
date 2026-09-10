@@ -10,14 +10,14 @@
     "enabled": true
   },
   "enabledModels": [],
-  "httpIdleTimeoutMs": 60000,
+  "httpIdleTimeoutMs": 900000,
   "retry": {
     "enabled": true,
     "maxRetries": 3,
     "baseDelayMs": 2000,
     "provider": {
       "timeoutMs": 600000,
-      "maxRetries": 2,
+      "maxRetries": 0,
       "maxRetryDelayMs": 60000
     }
   },
