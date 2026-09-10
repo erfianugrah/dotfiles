@@ -1,6 +1,6 @@
 ---
 name: memledger
-description: Use when searching past agent sessions across pi + Claude Code (+ legacy opencode logs), or anything older than the 30-day local retention where memledger is the only copy, or working on memledger itself (ingester, prune, schema, edge Caddy gate). Fires on 'memledger', 'search all my sessions', 'session history across clients', 'prune old sessions', 'session store'. NOT for pi's built-in session_search (recent pi-only) or the work ledger alone (ledger_search). Repo ~/infra/memledger.
+description: Use when searching past agent sessions (pi + Claude Code + legacy opencode), or anything older than the 30-day local retention where memledger is the only copy, or working on memledger itself (ingester, prune, schema, stack-side auth gate). Fires on 'memledger', 'search all my sessions', 'session history across clients', 'prune old sessions', 'session store'. NOT for pi's built-in session_search (recent pi-only) or the work ledger alone (ledger_search). Repo ~/infra/memledger.
 ---
 
 # memledger - central agent session memory
@@ -39,7 +39,7 @@ curl -s "https://memledger.erfi.io/rpc/search_sessions?q=X&lim=10" | jq         
 curl -s "https://memledger.erfi.io/sessions?project=eq.<p>&order=started_at.desc" | jq  # attributed only: startup-cwd basename
 ```
 
-Writes need `Authorization: Bearer $MEMLEDGER_TOKEN` - on the dev box it is in `~/.config/memledger/env` (auto-loaded by the CLI); the canonical copy is the edge stack env (caddy-compose `deploy/edge/.env`).
+Writes need `X-Memledger-Token` (or `Authorization: Bearer` on the embedder `/mcp` + `/semantic/*` surfaces) - enforced INSIDE the stack (PostgREST `db-pre-request` `check_gate`, migration 011 + embedder `GateAuthMiddleware`), NOT in Caddy. The edge's only job is marking trusted client networks with `X-Trusted-Net: 1` (router `edge/Caddyfile`, `(memledger_gate)` snippet), which opens READS for LAN/tailnet. The token is stored in Postgres `auth.gate_token` (survives pg_dump), seeded from the repo SOPS `.env` by `migrations/roles.sql` on every up - the SOPS `.env` is the canonical copy. On the dev box it is in `~/.config/memledger/env` (auto-loaded by the CLI). The edge-side copy (router `/var/lib/secrets/edge.env` + caddy-compose SOPS) is RETIRED (2026-09-10). Rotate = new value in the repo SOPS `.env` + `make deploy` (no router restart), then sync the dev-box env file.
 
 ## The bugs this system already taught us (don't reintroduce)
 
@@ -57,6 +57,6 @@ Writes need `Authorization: Bearer $MEMLEDGER_TOKEN` - on the dev box it is in `
 
 - Deploy: `make deploy` in the repo (push + composer sync -> build -> up - `up` does NOT build, the stack has a built `ui` image). Stack changes: the network is memledger_backend (internal) + servarr_lan macvlan on servarr; the router's dockerBridges no longer lists it.
 - Timers: `systemctl --user list-timers 'memledger*'`; logs `journalctl --user -u memledger-sync.service`.
-- Secrets: SOPS-encrypted `.env` in the repo (POSTGRES_PASSWORD, POSTGREST_PASSWORD, Silo scoped service account `memledger` - root no longer in consumer envs); MEMLEDGER_TOKEN lives in the edge stack env (caddy-compose `deploy/edge/.env`), not in this repo; dev-box ingester env at `~/.config/memledger/env` (plaintext by design - the CLI reads it directly; registered with secretctl so the guard masks it).
+- Secrets: SOPS-encrypted `.env` in the repo (POSTGRES_PASSWORD, POSTGREST_PASSWORD, MEMLEDGER_TOKEN, Silo scoped service account `memledger` - root no longer in consumer envs). MEMLEDGER_TOKEN = the stack gate token (seeded into Postgres `auth.gate_token` by `roles.sql` on every up; edge-side copies retired 2026-09-10); dev-box ingester env at `~/.config/memledger/env` (plaintext by design - the CLI reads it directly; registered with secretctl so the guard masks it).
 - Verification: `make test` + `make test-e2e` (throwaway PG+PostgREST in docker); web: `cd web && bunx biome check src && bun test src && bun run check && bun run build`. The repo's `.pi/harness.json` self-correcting-loop manifest covers all of it - 12 sensors, canary-verified.
 - PostgREST caches the schema: new views/RPCs in a migration need `docker restart memledger-postgrest` (or NOTIFY pgrst) or they 404.
