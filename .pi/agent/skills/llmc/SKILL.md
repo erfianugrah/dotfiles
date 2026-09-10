@@ -186,5 +186,19 @@ rollback lane (swap published ports in compose.yaml to revert). Commands:
 - Eval image: bfcl-eval needs `--no-deps` + relaxed faiss-cpu, lives in its
   own venv (/opt/venv-bfcl) with a sitecustomize shim registering local model
   ids. BFCL has no working subset flag; the category is `non_live`.
+- **`/v1/messages` (Anthropic route) could not reach ninfer at all until
+  2026-09-10** - it hardcoded `Services["llm"]` (llama.cpp) instead of
+  resolving the active engine dynamically like the OpenAI-compatible route
+  does. Fixed; if debugging an old session's notes about ninfer + Claude
+  Code not working together, this was why.
+- **ninfer's `--max-concurrency 1` slot has an OPEN, unconfirmed wedge
+  risk** (upstream Neroued/ninfer#184): a client disconnect during context
+  materialization can allegedly stick the slot forever, recoverable only
+  by a full stack restart. 6 live reproduction attempts on 2026-09-10
+  (varying size/streaming/concurrency) did not trigger it - see
+  `docs/plans/2026-09-10-ninfer-wedge-mitigation.md` for what was tried and
+  what's still untried. A disabled-by-default `WedgeWatchdog`
+  (`LLMC_NINFER_WEDGE_WATCHDOG=1`) exists but is unverified against a real
+  wedge.
 - python stdout through tee/pipes is block-buffered - bin/llmc sets
   PYTHONUNBUFFERED=1.
