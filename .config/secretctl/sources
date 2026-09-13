@@ -58,6 +58,9 @@ exclude *_IP *_IPV4 *_IPV6 *_CIDR
 # its SOPS .env. Role names sit next to *_USER, which was already excluded.
 exclude *_LISTEN_ADDRESS *_LISTEN *_BIND_ADDRESS
 exclude *_ROLE *_ANON_ROLE
+# 2026-09-10: PGRST_DB_PRE_REQUEST names the db-pre-request SQL function
+# (memledger self-auth) - configuration, not a credential.
+exclude PGRST_DB_PRE_REQUEST
 # 2026-09-07: runtime flags, initdb args and the in-cluster ML service URL are
 # configuration too - they were flagging ~/infra/immich-compose/docker-compose.yml
 # (NODE_OPTIONS, IMMICH_MACHINE_LEARNING_URL, POSTGRES_INITDB_ARGS). Kept narrow

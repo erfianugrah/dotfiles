@@ -114,6 +114,14 @@ Re-capture when topology changes (read-only ssh, re-sanitizes):
   command prints candidates).
 - **Remote shell is zsh on `router`** - `echo ===` separators explode
   ("== not found"); use `echo ---`.
+- **ntopng is NOT a client** (learned 2026-09-13): the router's ntopng
+  monitor sends periodic per-segment DHCP DISCOVER sweeps from its own
+  trunk-NIC MAC (58:47:ca:76:96:a7, ~15min cycle, one DISCOVER per VLAN,
+  tid +0x900/hop offset). A "new client" DISCOVER cycling all segments is
+  that probe, not a rogue device - the ntopng ARP-scan journal lines
+  ("ARP scan as 10.0.69.1" / "as 10.0.72.1") carry the matching
+  timestamps. Cross-check any mystery MAC against `ip link` before
+  calling it unknown.
 - **Filters are positional pairs**, not flags: `leases host foo ip 10.0.69.6`
   works; `--filter ip=...` / `--ip` do not exist. Invalid values exit 1.
 - **doctor is data-driven, not hardcoded**: kea-served ifaces come from
