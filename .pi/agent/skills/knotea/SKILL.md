@@ -110,7 +110,7 @@ Images (three Dockerfiles):
 - `resolver/Dockerfile` - the pre-merge standalone resolver build; cannot build standalone any more.
 - `resolver/Dockerfile.release` - GoReleaser path: skips the Go build stage, copies prebuilt binaries from the buildx context.
 
-Fly: `resolver/fly.toml` defines the services (HTTP API, app-terminated HTTPS via PROXY, the CF-API listener on 2096, DNS UDP + TCP on 53, DoT on 853) - read the file rather than a summary. Nothing builds locally: `make fly-image` mirrors the CI-built ghcr image into `registry.fly.io/knotea` (Fly machines cannot pull private ghcr), `make fly-deploy IMAGE_VERSION=x` mirrors then `flyctl deploy --image` (the Makefile's `FLY_APP` is `knotea` since the 2026-09-14 blue-green flip). `make fly-deploy-ci` only works for an app whose registry the release workflow pushes to - the release.yml mirror is still hardcoded to `registry.fly.io/glory-hole`, so during the migration the local mirror (`fly-deploy`) is the path. Persistent volume at `/var/lib/glory-hole` (2GB - the 2026-09-05 storm sized it); VM `shared-cpu-1x` / 512 MB with `GOMEMLIMIT=384MiB`. Volume + dedicated IP are CLI/API one-shots (`flyctl volumes create/extend`, `fly ips allocate-v4`), not toml-declarable.
+Fly: `resolver/fly.toml` defines the services (HTTP API, app-terminated HTTPS via PROXY, the CF-API listener on 2096, DNS UDP + TCP on 53, DoT on 853) - read the file rather than a summary. Nothing builds locally: `make fly-image` mirrors the CI-built ghcr image into `registry.fly.io/knotea` (Fly machines cannot pull private ghcr), `make fly-deploy IMAGE_VERSION=x` mirrors then `flyctl deploy --image` (the Makefile's `FLY_APP` is `knotea` since the 2026-09-14 blue-green flip). `make fly-deploy-ci` works for an app whose registry the release workflow pushes to - since v1.4.22 the release.yml mirror pushes BOTH `registry.fly.io/glory-hole` and `registry.fly.io/knotea` per tag, so the CI path is available for both apps (the local `fly-deploy` mirror stays the faster default). Persistent volume at `/var/lib/glory-hole` (2GB - the 2026-09-05 storm sized it); VM `shared-cpu-1x` / 512 MB with `GOMEMLIMIT=384MiB`. Volume + dedicated IP are CLI/API one-shots (`flyctl volumes create/extend`, `fly ips allocate-v4`), not toml-declarable.
 
 Router: bump the image tag in `deploy/edge/compose.yaml`, push, composer deploys the `knotea` stack (`composer` skill; the router itself is the `eaves` skill).
 
@@ -128,7 +128,13 @@ Release source: the knotea monorepo is canonical for every running instance. The
 
 ## Config schema
 
-Top-level keys (`pkg/config/config.go`): `telemetry, server, policy, auth, local_records, conditional_forwarding, forwarder (.circuit_breaker), upstream_dns_servers, blocklists, whitelist, logging, database, cache, block_page, unbound, knot_api, update_interval, auto_update_blocklists`.
+Top-level keys (`pkg/config/config.go`): `telemetry, server, policy, auth, local_records, conditional_forwarding, forwarder (.circuit_breaker), upstream_dns_servers, blocklists, whitelist, logging, database, cache, block_page, unbound, knot_api, knot, update_interval, auto_update_blocklists`.
+
+`knot` (authoritative half, embedded knotd): `enabled, listen, storage, nsid, served_zones, zone_apex`. `zone_apex` is a per-zone map (plus a `default` fallback; values may use the `{zone}` placeholder) that drives boot-time apex bootstrapping: `soa` (mbox/ns/refresh/retry/expire/minimum + ttl) and `ns` + `ns_ttl`. It exists because a fresh Knot confdb has no zones at all - a zoneless Knot answers REFUSED.
+
+### Boot: seed + zone-reconcile (v1.4.22+)
+
+Boot order for the authoritative half: render seed `knot.conf` from `resolver/config/config.fly.yml` + env (strict `${VAR}` - unresolved refs fail the boot), `knotc conf-check` -> `conf-import` to the confdb (only on a fresh/reseeded volume - existing confdb is the source of truth), start knotd, wait for the control socket (`<rundir>/knot.sock`), then **zone-reconcile**: for each `served_zones` entry, create-if-absent via the control client (missing -> zone create + apex SOA/NS from `zone_apex` + `knotea-auto` signing; existing with apex -> skip; existing without apex -> apex only). Per-zone failures are logged (`zone-reconcile: zone ... create: ...`) and are NOT fatal - the remaining zones still reconcile and knotd keeps serving. Apex bootstrap runs BEFORE `EnableDNSSEC` so the initial signing covers the apex. Zone CONTENT is not reconcile's job - that is `knotctl apply` of `authority/zones/*.yml` (see the knotctl skill). Post-deploy verification: `fly logs -a <app> | rg 'zone-reconcile|zone reconcile'` must show one line per served zone (action = created / exists-with-apex-skip / apex-bootstrapped).
 
 `config.yml` and `config.fly.yml` are gitignored (tokens, bcrypt hashes, allowlists); the repo ships `config/config.example.yml`. `config.test.yml` is in-repo but stale (pre-v0.5 `storage:` block, defunct `policies:`/`tls:`/`dot_*:` keys) - do not copy it. Per-profile differences (cache sizing, retention, listen addresses, allowlists, logger workers) live in `resolver/AGENTS.md`.
 
@@ -177,6 +183,7 @@ docker compose -f docker-compose.e2e.yml up
 
 # Fly (glory-hole = serving legacy, knotea = new staging app)
 fly logs -a glory-hole
+fly logs -a knotea | rg 'zone-reconcile|zone reconcile'   # v1.4.22+: one line per served zone after boot
 fly ssh console -a knotea -C 'tail -50 /var/log/unbound/unbound.log'
 fly ssh console -a knotea -C 'rm /var/lib/glory-hole/config.yml' && fly machine restart <id>   # reset UI-edited config
 
