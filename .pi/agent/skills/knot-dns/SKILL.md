@@ -1,11 +1,11 @@
 ---
 name: knot-dns
-description: "Use when working on the user's self-hosted authoritative DNS for erfi.io + lab.erfi.io (Knot DNS embedded in knotea on Fly anycast) - knotc confdb operations, TSIG keys and ACLs, RFC 2136 ACME from Caddy, AXFR/IXFR, DNSSEC/KASP and DS at the registrar, glue and NS delegation, or migrating another zone off Cloudflare. Fires on 'knotc', 'authoritative DNS', 'nameserver', 'AXFR/IXFR', 'glue records', 'zone migration', 'NOTAUTH'. NOT for record edits (knotctl) or the resolver (knotea)."
+description: "Use when working on the user's self-hosted authoritative DNS for erfi.io + lab.erfi.io + servarr.io + servarr.dev (Knot DNS embedded in knotea on Fly anycast) - knotc confdb operations, TSIG keys and ACLs, RFC 2136 ACME from Caddy, AXFR/IXFR, DNSSEC/KASP and DS at the registrar, glue and NS delegation, or migrating another zone off Cloudflare. Fires on 'knotc', 'authoritative DNS', 'nameserver', 'AXFR/IXFR', 'glue records', 'zone migration', 'NOTAUTH'. NOT for record edits (knotctl) or the resolver (knotea)."
 ---
 
 # knot-dns - authoritative DNS
 
-Live topology: the authority for `erfi.io` + `lab.erfi.io` is the knotea binary on the Fly app `glory-hole` (region `sin`, anycast v4 `137.66.1.170`; `ns1`/`ns2.erfi.io` glue point there). knotd runs loopback-only on `127.0.0.1:5354`; knotea owns the public sockets and proxies RFC 2136 UPDATE + AXFR inward. Source: `~/infra/knotea/authority/` in the `~/infra/knotea` monorepo; the image is the root `~/infra/knotea/Dockerfile`, which builds Knot from source (`ARG KNOT_VERSION`). The predecessor Fly app `knot-fly-mvp` is destroyed. Canonical gotcha list and live state: `~/infra/knotea/authority/AGENTS.md`. The resolver half is the `knotea` skill; record edits are the `knotctl` skill.
+Live topology: the authority for `erfi.io` + `lab.erfi.io` + `servarr.io` + `servarr.dev` (added 2026-09-14, bought at Porkbun; registrar side - glue/NS/DS - managed by `~/infra/dns-tf`, vitvio/porkbun provider) is the knotea binary on the Fly app `glory-hole` (region `sin`, anycast v4 `137.66.1.170`; `ns1`/`ns2.erfi.io` glue point there). knotd runs loopback-only on `127.0.0.1:5354`; knotea owns the public sockets and proxies RFC 2136 UPDATE + AXFR inward. Source: `~/infra/knotea/authority/` in the `~/infra/knotea` monorepo; the image is the root `~/infra/knotea/Dockerfile`, which builds Knot from source (`ARG KNOT_VERSION`). The predecessor Fly app `knot-fly-mvp` is destroyed. Canonical gotcha list and live state: `~/infra/knotea/authority/AGENTS.md`. The resolver half is the `knotea` skill; record edits are the `knotctl` skill.
 
 `~/infra/knotea/authority/deploy/knot-only/` is the historical bare-knotd Fly deploy (the `knot-fly` name comes from it). Its fly.toml, knot.conf template and entrypoint still document the TSIG / ACL / confdb pattern the live confdb inherited. Copy-paste versions of those files plus the Cloudflare -> Knot AXFR migration playbook are in reference.md - read when standing up a new zone, bootstrapping a bare knotd, or migrating a zone off Cloudflare.
 
@@ -101,6 +101,16 @@ In-bailiwick pattern for a zone served here:
 
 Propagation: the TLD servers and Google / Quad9 pick up a registrar NS change in about 15 minutes; Cloudflare's `1.1.1.1` holds the old delegation for the previous NS TTL. `dig +short @<tld-ns> NS <zone>` prints nothing because delegation lives in AUTHORITY + ADDITIONAL - use `dig +noall +authority +additional @a0.nic.io <zone> NS`.
 
+## Onboarding a NEW zone (no prior DNS host)
+
+Verified 2026-09-14 with servarr.io / servarr.dev (Porkbun):
+
+1. confdb (two-step, `conf-begin`/`conf-commit`): `conf-set 'zone[<zone>.]'`, then `.dnssec-signing = on` + `.dnssec-policy = knotea-auto`. ACLs are NOT zone-pinned, so all four TSIG roles apply to new zones automatically.
+2. Bootstrap apex (journal-only zones have no implicit SOA - knotctl can't write SOA, so do it server-side): `zone-begin`, `zone-set <zone>. @ 3600 SOA ns1.<zone>. hostmaster.<zone>. 1 7200 600 1209600 300`, `zone-set @ NS ns1/ns2.<zone>.`, `zone-commit`.
+3. Add the zone to `served_zones` in the LIVE config on the volume (`/var/lib/glory-hole/config.yml`, backup first) and `flyctl machine restart` - without this knotea answers REFUSED for the zone even though knotd serves it. The repo copy (`deploy/edge/config.yml`) ships `served_zones: []`; the volume copy is the live one.
+4. Zone YAML in `authority/zones/<zone>.yml` (untracked by design), `knotctl apply` for remaining records, add the zone to `known_zones` in `~/.config/knotctl/config.yml`.
+5. Registrar in `~/infra/dns-tf`: `porkbun_glue_record` ns1+ns2 -> 137.66.1.170, `porkbun_nameservers` (with `depends_on` the glue), and - once CDS exists (`knotc zone-read <zone>. @ CDS`, seconds after signing starts) - `porkbun_dnssec_record` from the CDS fields. Registry push is async (minutes); verify with `dig +noall +authority +additional @<tld-ns> <zone> NS` and `dig +dnssec SOA <zone> @1.1.1.1` (want the `ad` flag).
+
 ## Migrating another zone off Cloudflare
 
 CF outgoing AXFR requires Enterprise. The pattern: mirror the zone into Knot as a secondary via `deploy/knot-only/scripts/cf-axfr-setup.sh`, validate by resolved content, flip Knot to primary inside the daemon (reversible), then swap NS at the registry. Judgment that survives the details (which are in reference.md):
@@ -170,6 +180,8 @@ Distilled from `~/infra/knotea/authority/AGENTS.md`, which has the numbered cano
 21. CF's AXFR-out flattens CNAMEs; compare by resolved content when verifying sync.
 22. `knotc zone-set` / `zone-unset` accept the absolute owner with trailing dot (what `zone-read` prints) or a single relative label; a dotless multi-label owner such as `www.erfi.io` is read as relative and fails with the misleading `error: (no such node in zone found)`. `zone-begin` does not validate names - the error surfaces on the first `zone-set` inside the transaction; `knotc zone-abort <zone>` before retrying.
 23. knotd refuses to start when `<storage>/run/knot.pid` names a live PID (`server PID found, already running`), and the rundir is on the persistent Fly volume - after a machine restart the recorded PID can have been recycled by an unrelated process (hit on the 2026-09-06 v1.4.15 deploy reboot). Symptom chain is nasty: glory-hole logs `knotd failed to start (continuing without authoritative serving)`, HTTP health checks still pass so Fly shows healthy, no knot routing is installed, and the resolver's client ACL REFUSES everyone - all served zones go dark globally while the dashboard keeps working. Fixed in v1.4.16 (supervisor deletes knot.pid + knot.sock before start, so any restart self-heals); on older builds, ssh in, `rm /var/lib/glory-hole/knot/run/knot.pid`, restart the machine.
+
+24. An RFC 2136 UPDATE that replaces the apex NS rrset (knotctl `set`/`apply` through the knotea proxy) MERGED with the old rdata instead of replacing (observed 2026-09-14 on servarr.io/dev; both old and new NS survived, verify passed because it subset-checks). Unverified whether the knotea UPDATE proxy or knotd is responsible. Workaround: server-side `knotc zone-begin` + `zone-unset <zone> @ NS <old>` + `zone-commit`. Investigate in `pkg/dns` UPDATE relay before trusting `set` on apex NS again.
 
 ## Cost
 

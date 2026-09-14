@@ -1,6 +1,6 @@
 ---
 name: knotctl
-description: "Use when making live DNS edits against the user's Knot authoritative server (erfi.io + lab.erfi.io, TSIG-keyed RFC 2136 over TCP) - add/rm/set/ls records, declarative YAML zone apply from authority/zones/, TSIG key roles and NOTAUTH, or the live smoke test. Fires on 'knotctl', 'add/change a DNS record', 'RFC 2136', 'TSIG key', 'zone apply', 'zones-plan', '_acme-challenge TXT'. NOT for resolver work (knotea) or server-side config, ACLs and DNSSEC (knot-dns)."
+description: "Use when making live DNS edits against the user's Knot authoritative server (erfi.io + lab.erfi.io + servarr.io + servarr.dev, TSIG-keyed RFC 2136 over TCP) - add/rm/set/ls records, declarative YAML zone apply from authority/zones/, TSIG key roles and NOTAUTH, or the live smoke test. Fires on 'knotctl', 'add/change a DNS record', 'RFC 2136', 'TSIG key', 'zone apply', 'zones-plan', '_acme-challenge TXT'. NOT for resolver work (knotea) or server-side config, ACLs and DNSSEC (knot-dns)."
 ---
 
 # knotctl - TSIG-keyed DNS editor
@@ -171,13 +171,15 @@ server: 137.66.1.170:53
 known_zones:
   - erfi.io
   - lab.erfi.io
+  - servarr.io
+  - servarr.dev
 ```
 
 `keydir` defaults to `~/.config/knotctl/keys` and the role -> keyfile map (`write`/`axfr`/`acme`) has sane defaults, so neither is set.
 
 ## Sub-zone routing - `known_zones`
 
-Zone inference is longest-suffix-match against `known_zones` (default `[erfi.io, lab.erfi.io]`), so `foo.lab.erfi.io` routes to `lab.erfi.io`, never to `erfi.io` as a leaf record (which would answer NXDOMAIN publicly because resolvers follow the deeper delegation). Precedence: explicit `--zone=<name>`, then longest suffix in `known_zones`, then `default_zone` if set and a real suffix, else a hard error: `cannot infer zone for "X": not a subdomain of any known_zones (...)`. Add the zone to `known_zones` or pass `--zone`. Add new zones here as they migrate off CF.
+Zone inference is longest-suffix-match against `known_zones` (default `[erfi.io, lab.erfi.io]`; the live config adds servarr.io + servarr.dev), so `foo.lab.erfi.io` routes to `lab.erfi.io`, never to `erfi.io` as a leaf record (which would answer NXDOMAIN publicly because resolvers follow the deeper delegation). Precedence: explicit `--zone=<name>`, then longest suffix in `known_zones`, then `default_zone` if set and a real suffix, else a hard error: `cannot infer zone for "X": not a subdomain of any known_zones (...)`. Add the zone to `known_zones` or pass `--zone`. Add new zones here as they migrate off CF.
 
 ## Live smoke - `make smoke`
 
