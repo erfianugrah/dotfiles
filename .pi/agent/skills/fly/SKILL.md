@@ -25,6 +25,16 @@ flyctl auth whoami                                  # confirm logged in + org
 flyctl completion zsh      # or bash / fish
 ```
 
+**CI tokens: use org scope, not app scope.** `flyctl auth token` prints the
+session token; for a dedicated CI credential create one with
+`flyctl tokens create org -n <name>` (org deploy token, `fly tokens list
+--org <slug>` to audit, `fly tokens revoke <id>` to kill). App-scoped
+tokens break the `registry.fly.io/<app>` push for any OTHER app in the
+org - the registry answers `NAME_UNKNOWN: app repository not found` while
+pushes to the token's own app succeed, which looks nothing like an auth
+error. Verified 2026-09-14 (knotea repo CI: glory-hole push fine, knotea
+push failed; org token fixed it).
+
 ## fly.toml - what matters
 
 Minimum-viable example for a single-image deploy:
