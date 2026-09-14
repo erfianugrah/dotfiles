@@ -140,7 +140,7 @@
           "id": "qwen38-ninfer",
           "name": "Qwen3.8 27B NVFP4 on NInfer (2.2x decode, flat to 262K)",
           "reasoning": true,
-          "contextWindow": 252928,
+          "contextWindow": 262144,
           "input": [
             "text",
             "image"
@@ -156,7 +156,7 @@
           "id": "qwen38-ninfer-xhigh",
           "name": "Qwen3.8 27B NVFP4 on NInfer - xhigh effort (quality ceiling)",
           "reasoning": true,
-          "contextWindow": 252928,
+          "contextWindow": 262144,
           "input": [
             "text",
             "image"
@@ -172,7 +172,7 @@
           "id": "qwen38-ninfer-low",
           "name": "Qwen3.8 27B NVFP4 on NInfer - low effort (fast, least thinking)",
           "reasoning": true,
-          "contextWindow": 252928,
+          "contextWindow": 262144,
           "input": [
             "text",
             "image"
@@ -188,7 +188,7 @@
           "id": "qwen38-ninfer-d1",
           "name": "Qwen3.8 27B NVFP4 on NInfer - draft=1 no-lm-head (262K ceiling probe)",
           "reasoning": true,
-          "contextWindow": 252928,
+          "contextWindow": 262144,
           "input": [
             "text",
             "image"

@@ -191,14 +191,19 @@ rollback lane (swap published ports in compose.yaml to revert). Commands:
   resolving the active engine dynamically like the OpenAI-compatible route
   does. Fixed; if debugging an old session's notes about ninfer + Claude
   Code not working together, this was why.
-- **ninfer's `--max-concurrency 1` slot has an OPEN, unconfirmed wedge
-  risk** (upstream Neroued/ninfer#184): a client disconnect during context
-  materialization can allegedly stick the slot forever, recoverable only
-  by a full stack restart. 6 live reproduction attempts on 2026-09-10
-  (varying size/streaming/concurrency) did not trigger it - see
-  `docs/plans/2026-09-10-ninfer-wedge-mitigation.md` for what was tried and
-  what's still untried. A disabled-by-default `WedgeWatchdog`
-  (`LLMC_NINFER_WEDGE_WATCHDOG=1`) exists but is unverified against a real
-  wedge.
+- **ninfer's `--max-concurrency 1` slot HAS a confirmed wedge** (upstream
+  Neroued/ninfer#184, open): reproduced in the field 2026-09-14 - a client
+  abort mid-materialization (a 95k-token vision prompt cancelled at 8m49s)
+  left engine state that wedged the NEXT fresh request for 89 minutes
+  (17.6 tok/s prefill, host 0%, then self-recovered). The wedged request's
+  own client never disconnected - the damage lands one request later.
+  Defences now live: the engine image carries a local SSE-transport
+  watchdog patch (`patches/ninfer/0001`, applied by `make build-ninfer`),
+  the proxy's WedgeWatchdog is ENABLED (`LLMC_NINFER_WEDGE_WATCHDOG=1` in
+  compose.yaml), the pin is d492968 (includes the #176 materialization-
+  budget rework), and every request logs materialization diagnostics to
+  `~/docker-volumes/ninfer/logs/engine.jsonl` (preset key
+  `request_log_jsonl`). Details + timeline: the 8th-data-point section of
+  `docs/plans/2026-09-10-ninfer-wedge-mitigation.md`.
 - python stdout through tee/pipes is block-buffered - bin/llmc sets
   PYTHONUNBUFFERED=1.
