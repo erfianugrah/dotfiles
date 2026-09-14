@@ -103,11 +103,11 @@ Propagation: the TLD servers and Google / Quad9 pick up a registrar NS change in
 
 ## Onboarding a NEW zone (no prior DNS host)
 
-Verified 2026-09-14 with servarr.io / servarr.dev (Porkbun):
+Verified 2026-09-14 with servarr.io / servarr.dev (Porkbun). UPDATED 2026-09-14 for the declarative path (durability plan Tasks 2-3, commit 7fba67a):
 
-1. confdb (two-step, `conf-begin`/`conf-commit`): `conf-set 'zone[<zone>.]'`, then `.dnssec-signing = on` + `.dnssec-policy = knotea-auto`. ACLs are NOT zone-pinned, so all four TSIG roles apply to new zones automatically.
-2. Bootstrap apex (journal-only zones have no implicit SOA - knotctl can't write SOA, so do it server-side): `zone-begin`, `zone-set <zone>. @ 3600 SOA ns1.<zone>. hostmaster.<zone>. 1 7200 600 1209600 300`, `zone-set @ NS ns1/ns2.<zone>.`, `zone-commit`.
-3. Add the zone to `served_zones` in the LIVE config on the volume (`/var/lib/glory-hole/config.yml`, backup first) and `flyctl machine restart` - without this knotea answers REFUSED for the zone even though knotd serves it. The repo copy (`deploy/edge/config.yml`) ships `served_zones: []`; the volume copy is the live one.
+1. Declare the zone in the repo config: add it to `knot.served_zones` AND give it a `knot.zone_apex` entry (NS + SOA rname/timers; `{zone}` placeholder expands to the apex). Deploy with `(cd resolver && make fly-deploy IMAGE_VERSION=...)`.
+2. At boot the supervisor's zone-reconcile does the confdb work: creates the zone (template default), bootstraps the apex SOA (serial 1) + NS, assigns `knotea-auto` + `dnssec-signing on`, signs. Check the machine log for the per-zone `zone reconcile` action lines ("missing - creating zone + apex bootstrap + DNSSEC"). Reboots are idempotent ("exists with apex - skipping").
+3. Fallback (legacy confdb / zone NOT declared in config): manual confdb bootstrap: `conf-begin`/`conf-commit`: `conf-set 'zone[<zone>.]'`, then `.dnssec-signing = on` + `.dnssec-policy = knotea-auto` (ACLs are NOT zone-pinned, so all four TSIG roles apply to new zones automatically). Then apex (journal-only zones have no implicit SOA - knotctl can't write SOA, so do it server-side): `zone-begin`, `zone-set <zone>. @ 3600 SOA ns1.<zone>. hostmaster.<zone>. 1 7200 600 1209600 300`, `zone-set @ NS ns1/ns2.<zone>.`, `zone-commit`. (Pre-Task-2 note: if the zone is missing from `served_zones` knotea answers REFUSED for it even though knotd serves it - that volume-config dance is gone post-Task-2; config is repo-strict.)
 4. Zone YAML in `authority/zones/<zone>.yml` (untracked by design), `knotctl apply` for remaining records, add the zone to `known_zones` in `~/.config/knotctl/config.yml`.
 5. Registrar in `~/infra/dns-tf`: `porkbun_glue_record` ns1+ns2 -> 137.66.1.170, `porkbun_nameservers` (with `depends_on` the glue), and - once CDS exists (`knotc zone-read <zone>. @ CDS`, seconds after signing starts) - `porkbun_dnssec_record` from the CDS fields. Registry push is async (minutes); verify with `dig +noall +authority +additional @<tld-ns> <zone> NS` and `dig +dnssec SOA <zone> @1.1.1.1` (want the `ad` flag).
 
