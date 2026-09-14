@@ -88,6 +88,31 @@ describe("detection", () => {
   });
 });
 
+describe("2026-09-14 additions (Language Jones: metaphor incoherence + self-validation)", () => {
+  test("metaphor-incoherence markers with no honest technical use", () => {
+    expect(ids("The deployment was nestled amid a year of war in the region.")).toContain("slop_watchlist");
+    expect(ids("Two overarching pillars undergird the entire framework here.")).toContain("slop_watchlist");
+  });
+
+  test("the self-validating tag 'and that matters' is importance-announcing", () => {
+    expect(ids("The cache key is the object rather than the user, and that matters.")).toContain(
+      "importance_announcing",
+    );
+  });
+
+  test("literal senses of the model pet words are NOT blocked (guidance, not gate)", () => {
+    for (const s of [
+      "The move ran through migctl with a checksum re-verify on every file.",
+      "Hyperdrive pooling buys you the tighter write path, not a shorter wire.",
+      "Point the CNAME at the tunnel hostname and wait for propagation.",
+      "The NVIDIA container toolkit must be on for the GPU jobs to schedule.",
+      "A probe timeout comparable to the sampling interval quietly coarsens the data.",
+    ]) {
+      expect(ids(s)).toEqual([]);
+    }
+  });
+});
+
 describe("false positives must not fire", () => {
   test("plain technical prose from this repo", () => {
     const prose = [

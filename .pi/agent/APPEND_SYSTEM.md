@@ -62,6 +62,7 @@ AI-generated prose carries sentence-shape tells that readers recognise on sight 
 - **Decorative bold in short prose.** Under ~4 sentences, no bolded phrases at all - bold only literal identifiers (code, a term being defined).
 - **Rhythm triplets** ("fast, simple, and powerful"). Use as many items as are true; a triplet assembled for cadence is the tell.
 - **Significance inflation and the slop watchlist**: "stands as a testament", "underscores", "pivotal", "delve", "tapestry", "leverage", "seamless", "robust", "cutting-edge".
+- **Metaphor incoherence** ("nestled amid a year of war", "overarching pillars that undergird", "what a toolkit buys you when you point it at a problem"): words that co-occur but images that do not compose - the highest-signal tell, since a co-occurrence model cannot see that two figures collide. Literalise every figure; if the picture is impossible, write the literal fact. Model pet words in the same family: "toolkit", "the move" (verdict noun), "buys you", "quietly", "the catch", "and that matters".
 
 The tell test: replace a sentence's nouns with placeholders; if it still reads "correct", it is a template rather than a thought - delete it. Full catalogue with fixes: the erfi-voice skill's "Structural AI tells" section (applies to any prose, not just voice drafting). The `ai-tell-guard` extension blocks the regex-able subset in prose-file writes and commit messages; kill switch `PI_AI_TELL_GUARD_OFF=1`.
 

@@ -96,11 +96,12 @@ export const TELL_RULES: TellRule[] = [
     // ("worth knowing", "worth recording", "worth a thought"); those live in
     // the lexicanum LLM_MARKERS gate and erfi-voice, where judgement applies.
     // Here only the phrasings with no honest use in this user's prose:
-    // "worth noting" / "worth mentioning" / "important to note".
+    // "worth noting" / "worth mentioning" / "important to note", plus the self-validating
+    // tag "and that matters" (2026-09-14, Language Jones video).
     id: "importance_announcing",
-    pattern: /\bworth noting\b|\bworth mentioning\b|\bimportant to note\b/gi,
+    pattern: /\bworth noting\b|\bworth mentioning\b|\bimportant to note\b|\band that matters\b/gi,
     reason:
-      'importance-announcing ("worth noting", "important to note") - rating the point instead of stating it. Drop the frame and keep the fact; order content so the item that matters comes first. Catalogue: erfi-voice, "Importance-announcing".',
+      'importance-announcing ("worth noting", "important to note") - rating the point instead of stating it; "and that matters" is the same move as a self-validating tag. Drop the frame and keep the fact; order content so the item that matters comes first. Catalogue: erfi-voice, "Importance-announcing".',
   },
   {
     // Deliberately SHORTER than erfi-voice's watchlist. That list is GUIDANCE,
@@ -110,11 +111,15 @@ export const TELL_RULES: TellRule[] = [
     // honest technical use survive here. Dropped on review: `foster` (foster
     // care, the surname), `robust`/`seamless` (routine in upstream API docs the
     // agent quotes), `leverage` (finance//mechanics noun). Those stay in
-    // erfi-voice, which is where judgement belongs.
+    // erfi-voice, which is where judgement belongs. Added 2026-09-14 from the
+    // metaphor-incoherence tell (erfi-voice structural tell #10): `nestled` and
+    // `undergird` - LLM metaphor vocabulary with no honest use in technical prose.
+    // The other pet words from that tell (toolkit, the move, buys you, quietly,
+    // the catch) have literal senses and stay guidance.
     id: "slop_watchlist",
-    pattern: /\bdelve[sd]?\b|\btapestry\b|\bgame-chang(?:er|ing)\b|\bstands as a testament\b/gi,
+    pattern: /\bdelve[sd]?\b|\btapestry\b|\bgame-chang(?:er|ing)\b|\bnestled\b|\bundergird(?:s|ed|ing)?\b|\bstands as a testament\b/gi,
     reason:
-      "slop vocabulary with no honest use in this user's prose (delve, tapestry, game-changer, 'stands as a testament'). Replace with the plain verb or the number. Softer offenders (pivotal, cutting-edge, robust, seamless) are not blocked - see the erfi-voice watchlist and use judgement.",
+      "slop vocabulary with no honest use in this user's prose (delve, tapestry, game-changer, nestled, undergird, 'stands as a testament'). Replace with the plain verb or the number. Softer offenders (pivotal, cutting-edge, robust, seamless) are not blocked - see the erfi-voice watchlist and use judgement.",
   },
 ];
 
