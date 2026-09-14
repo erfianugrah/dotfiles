@@ -191,7 +191,8 @@ The smoke deliberately does not exercise wrong-key paths (it would pollute the K
 
 - `error: keyfile X has loose permissions Y; want 0600` -> `chmod 600 ~/.config/knotctl/keys/*.key`.
 - `error: server rejected with NOTAUTH (rcode=9)` (exit 2) -> wrong key role for the record type (`knotctl keys list`; pass `--key knotctl` explicitly), or the keyfile holds a rotated-out secret (compare with `secretctl cmp`, `secret-handling` skill; server-side rotation is in `~/infra/knotea/authority/AGENTS.md`).
-- `error: update: network error: ... i/o timeout` (exit 4) -> `knotctl` is TCP throughout, so this is a real reachability problem with `137.66.1.170:53`, not the Fly UDP-hairpin issue documented in knotea's AGENTS.
+- `error: server rejected with NOTZONE (rcode=10)` (exit 2) -> `rm`/`set` with a RELATIVE name fails NOTZONE even though `add`/`apply` accept relatives - pass a FQDN owner (`knotctl rm -zone erfi.io nzbget.erfi.io. A`). Discovered 2026-09-14 during the blue-green zone cleanup.
+- `error: update: network error: ... i/o timeout` (exit 4) -> `knotctl` is TCP throughout, so this is a real reachability problem with the configured server (137.66.1.170:53 on glory-hole, or override with `KNOTCTL_SERVER=137.66.57.23:53` for the new knotea app during the migration), not the Fly UDP-hairpin issue documented in knotea's AGENTS.
 - Verify timed out (exit 1) -> rare with a single primary. Extend with `--wait=30s`, or `--no-wait` then `knotctl ls` to see what landed.
 
 ## What knotctl is NOT
