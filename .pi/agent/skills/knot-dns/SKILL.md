@@ -5,7 +5,7 @@ description: "Use when working on the user's self-hosted authoritative DNS for e
 
 # knot-dns - authoritative DNS
 
-Live topology: the authority for `erfi.io` + `lab.erfi.io` + `servarr.io` + `servarr.dev` (added 2026-09-14, bought at Porkbun; registrar side - glue/NS/DS - managed by `~/infra/dns-tf`, vitvio/porkbun provider) is the knotea binary on the Fly app `knotea` (region `sin`, dedicated anycast v4 `137.66.57.23`; `ns1`/`ns2` glue point there) - **serving since the Phase 3 cutover (2026-09-18)**; the legacy app `glory-hole` (anycast `137.66.1.170`) stays up as the rollback target until the soak window clears, then retires. knotd runs loopback-only on `127.0.0.1:5354`; knotea owns the public sockets and proxies RFC 2136 UPDATE + AXFR inward. Source: `~/infra/knotea/authority/` in the `~/infra/knotea` monorepo; the image is the root `~/infra/knotea/Dockerfile`, which builds Knot from source (`ARG KNOT_VERSION`). The predecessor Fly app `knot-fly-mvp` is destroyed. Canonical gotcha list and live state: `~/infra/knotea/authority/AGENTS.md`; rebuild/restore runbook: `~/infra/knotea/docs/runbooks/knotea-rebuild.md` (drill-tested). The resolver half is the `knotea` skill; record edits are the `knotctl` skill.
+Live topology: the authority for `erfi.io` + `lab.erfi.io` + `servarr.io` + `servarr.dev` (added 2026-09-14, bought at Porkbun; registrar side - glue/NS/DS - managed by `~/infra/dns-tf`, vitvio/porkbun provider) is the knotea binary on the Fly app `knotea` (region `sin`, dedicated anycast v4 `137.66.57.23`; `ns1`/`ns2` glue point there) - **serving since the Phase 3 cutover (2026-09-18)**; the legacy app `glory-hole` (anycast `137.66.1.170`) was RETIRED the same day (machine destroyed; its 2GB volume + dedicated anycast stay attached to the app, so a rollback is a machine recreate + the dns-tf glue/DS flip back). knotd runs loopback-only on `127.0.0.1:5354`; knotea owns the public sockets and proxies RFC 2136 UPDATE + AXFR inward. Source: `~/infra/knotea/authority/` in the `~/infra/knotea` monorepo; the image is the root `~/infra/knotea/Dockerfile`, which builds Knot from source (`ARG KNOT_VERSION`). The predecessor Fly app `knot-fly-mvp` is destroyed. Canonical gotcha list and live state: `~/infra/knotea/authority/AGENTS.md`; rebuild/restore runbook: `~/infra/knotea/docs/runbooks/knotea-rebuild.md` (drill-tested). The resolver half is the `knotea` skill; record edits are the `knotctl` skill.
 
 `~/infra/knotea/authority/deploy/knot-only/` is the historical bare-knotd Fly deploy (the `knot-fly` name comes from it). Its fly.toml, knot.conf template and entrypoint still document the TSIG / ACL / confdb pattern the live confdb inherited. Copy-paste versions of those files plus the Cloudflare -> Knot AXFR migration playbook are in reference.md - read when standing up a new zone, bootstrapping a bare knotd, or migrating a zone off Cloudflare.
 
@@ -130,9 +130,9 @@ DNSKEY / RRSIG / NSEC3 / CDS / CDNSKEY are daemon-managed; `knotctl` refuses to 
 ## Day-2 operations
 
 ```bash
-fly status -a glory-hole
-fly logs   -a glory-hole
-fly ssh console -a glory-hole                  # then knotc inside; -C "cmd" needs sh -c for && chains
+fly status -a knotea
+fly logs   -a knotea
+fly ssh console -a knotea                  # then knotc inside; -C "cmd" needs sh -c for && chains
 
 knotc status
 knotc zone-status erfi.io                      # serial, role, NOTIFY/AXFR state
