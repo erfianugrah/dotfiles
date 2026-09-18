@@ -43,6 +43,7 @@ Forgejo's own docs say it aims for *familiarity, not compatibility* (`forgejo` d
 | `permissions:` | **IGNORED at job level**. The token scope is whatever the instance grants; there is no per-workflow scope narrowing |
 | `id-token` / OIDC | Not via `permissions: id-token: write`. Forgejo uses a top-level `enable-openid-connect` workflow key instead (`user/actions/security-openid-connect`) |
 | `concurrency:` | **Supported**, best-effort: `group` + `cancel-in-progress`. Without the key, Forgejo auto-cancels older runs of the same workflow on new `push` / `pull_request` events, which GitHub does not do |
+| `on.push.tags` | Tag-only push on an already-processed commit does NOT fire a run (observed 2026-09-18). Release ritual: tag out WITH a new commit (forgejo.md) |
 | `jobs.<id>.environment` | Not in the Forgejo reference; treat as unsupported (no environment protection rules) |
 | Expressions | `success()`, `failure()`, `always()` documented (`user/actions/basic-concepts.md`) |
 | `github.*` context | Works, but "some keys are missing" per the differences page; `forgejo.*` is the native context |
