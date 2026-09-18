@@ -91,7 +91,7 @@ ssh router 'docker logs caddy --since 2m 2>&1 | grep -E "<host>|tls\.obtain|obta
 
 Smoke the TSIG path itself with `knotctl add _acme-challenge.smoke.lab.erfi.io TXT '"hi"'` (uses the `knotctl.` key) or the nsupdate one-liner in reference.md.
 
-## Delegation - glue + NS at Namecheap
+## Delegation - glue + NS at the registrar (Porkbun)
 
 In-bailiwick pattern for a zone served here:
 
@@ -123,9 +123,9 @@ CF outgoing AXFR requires Enterprise. The pattern: mirror the zone into Knot as 
 
 ## DNSSEC - live
 
-Both zones are signed with Knot's KASP (`policy[knotea-auto]`, online signing, automatic KSK/ZSK rollover, CDS/CDNSKEY published). `erfi.io` + `lab.erfi.io` + `servarr.io` + `servarr.dev` have their DS at the parent (`.io` via Porkbun - `porkbun_dnssec_record` in `~/infra/dns-tf`); `lab.erfi.io` additionally has its DS inside `erfi.io`, reconciled automatically on KSK rollover by same-server ds-push (`remote[parent_loopback]` at `127.0.0.1@5354` + `zone[lab.erfi.io].ds-push` - per-zone, never on the policy, or `erfi.io` would try to DDNS its own DS to `.io`). Check with `dig DS <zone> +short`. Full wiring and the verification limit (ds-push fires only on a CDS change, so it cannot be proven without a real KSK rollover): gotcha #28 in `~/infra/knotea/authority/AGENTS.md`.
+All four zones are signed with Knot's KASP (`policy[knotea-auto]`, online signing, automatic KSK/ZSK rollover, CDS/CDNSKEY published). `erfi.io` + `lab.erfi.io` + `servarr.io` + `servarr.dev` have their DS at the parent (`.io` via Porkbun - `porkbun_dnssec_record` in `~/infra/dns-tf`); `lab.erfi.io` additionally has its DS inside `erfi.io`, reconciled automatically on KSK rollover by same-server ds-push (`remote[parent_loopback]` at `127.0.0.1@5354` + `zone[lab.erfi.io].ds-push` - per-zone, never on the policy, or `erfi.io` would try to DDNS its own DS to `.io`). Check with `dig DS <zone> +short`. Full wiring and the verification limit (ds-push fires only on a CDS change, so it cannot be proven without a real KSK rollover): gotcha #28 in `~/infra/knotea/authority/AGENTS.md`.
 
-DNSKEY / RRSIG / NSEC3 / CDS / CDNSKEY are daemon-managed; `knotctl` refuses to edit them. A child's delegation DS is the only DNSSEC record you edit by hand (`knotctl` skill).
+DNSKEY / RRSIG / NSEC3 / CDS / CDNSKEY are daemon-managed; `knotctl` refuses to edit them. A child's delegation DS is the only DNSSEC record you edit by hand: `knotctl add ... DS --zone=<parent>` when the child is delegated to another server, `knotc zone-set` over the control socket when the child is a zone this knotd also serves (foot-gun 29 - RFC 2136 routes the UPDATE to the child and answers NOTZONE). The value comes from `knotctl ds <child>` (foot-gun 28).
 
 ## Day-2 operations
 
@@ -203,11 +203,11 @@ Distilled from `~/infra/knotea/authority/AGENTS.md`, which has the numbered cano
 26. (drill 2026-09-18; canonical #30) NEVER `zone-purge` a zone AFTER a restore: the purged zone rebuilds its keyring from its own FRESH KASP keys instead of the restored ones - KSK identity loss, so the registrar DS pin target changes. Restart + re-apply did not bring the restored keyring back (reproduced on two zones). Verify per-zone DNSKEY set identity before any DS flip.
 27. (canonical #31) Bare `knotc` on a `fly ssh console` uses the compile-time socket default (`/opt/knot/var/run/knot/knot.sock` in this image), which does not exist - every control-socket command needs `-s /var/lib/glory-hole/knot/run/knot.sock`. `zone-purge` additionally needs `-f` (zonefile-sync is off).
 
-28. (cutover 2026-09-18) **CDS is the DS oracle; `knotctl ds` is the first-class re-pin tool.** To get the DS to pin at the parent, do NOT hand-compute tag/digest: `dig +short CDS <zone> @<app>` gives knotd's own value (computed from its KASP), or `knotctl ds <zone>` (computes it from the public DNSKEY RRset - no TSIG, no fly-ssh). Both must agree. The `knotctl ds` key tag is over the FULL rdata (knotd convention, oracle-verified) - see the knotctl skill. When re-pinning after a KSK rollover or a daemon cutover, pin the DS of the KSK the NEW app actually serves (CDS from the new app), not the old one.
+28. (cutover 2026-09-18; canonical #32) **CDS is the DS oracle; `knotctl ds` is the first-class re-pin tool.** To get the DS to pin at the parent, do NOT hand-compute tag/digest: `dig +short CDS <zone> @<app>` gives knotd's own value (computed from its KASP), or `knotctl ds <zone>` (computes it from the public DNSKEY RRset - no TSIG, no fly-ssh). Both must agree. The `knotctl ds` key tag is over the FULL rdata (knotd convention, oracle-verified) - see the knotctl skill. When re-pinning after a KSK rollover or a daemon cutover, pin the DS of the KSK the NEW app actually serves (CDS from the new app), not the old one.
 
-29. (cutover 2026-09-18) **RFC 2136 DDNS cannot write a name inside a delegated tree.** For an in-zone delegation DS at a delegated apex (e.g. `lab.erfi.io.` DS inside the `erfi.io` zone), `knotctl add/set` -> `NOTZONE`: knotd routes the UPDATE by longest-zone-match to the child zone, which rejects the owner. Fix: write it via the control protocol (`knotc zone-begin` / `zone-set` / `zone-commit` over `-s /var/lib/glory-hole/knot/run/knot.sock`), which bypasses RFC 2136 zone matching. Confirmed empirically for A, DS and TXT alike. `knotc zone-set` rdata is a single quoted argument; verify with `zone-read <zone> | grep <owner>`.
+29. (cutover 2026-09-18; canonical #33) **RFC 2136 DDNS cannot write a name inside a delegated tree.** For an in-zone delegation DS at a delegated apex (e.g. `lab.erfi.io.` DS inside the `erfi.io` zone), `knotctl add/set` -> `NOTZONE`: knotd routes the UPDATE by longest-zone-match to the child zone, which rejects the owner. Fix: write it via the control protocol (`knotc zone-begin` / `zone-set` / `zone-commit` over `-s /var/lib/glory-hole/knot/run/knot.sock`), which bypasses RFC 2136 zone matching. Confirmed empirically for A, DS and TXT alike. `knotc zone-set` rdata is a single quoted argument; verify with `zone-read <zone> | grep <owner>`.
 
-30. (cutover 2026-09-18) **ds-push is not retroactive and has no force-push verb.** `zone[<zone>].ds-push` only fires on a CDS CHANGE, so it will NOT push an already-published CDS - the initial in-zone DS seed must be written manually (gotcha #29's `knotc zone-set`). ds-push then maintains it on future KSK rollovers. Wiring is per-zone (`remote[parent_loopback]` at `127.0.0.1@5354` + `zone[<child>].ds-push`), never on the KASP policy (or a zone would DDNS its own DS to its parent).
+30. (cutover 2026-09-18; canonical #34) **ds-push is not retroactive and has no force-push verb.** `zone[<zone>].ds-push` only fires on a CDS CHANGE, so it will NOT push an already-published CDS - the initial in-zone DS seed must be written manually (gotcha #29's `knotc zone-set`). ds-push then maintains it on future KSK rollovers. Wiring is per-zone (`remote[parent_loopback]` at `127.0.0.1@5354` + `zone[<child>].ds-push`), never on the KASP policy (or a zone would DDNS its own DS to its parent).
 
 ## Cost
 

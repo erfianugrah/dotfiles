@@ -1,6 +1,6 @@
 ---
 name: knotctl
-description: "Use when making live DNS edits against the user's Knot authoritative server (erfi.io + lab.erfi.io + servarr.io + servarr.dev, TSIG-keyed RFC 2136 over TCP) - add/rm/set/ls records, declarative YAML zone apply from authority/zones/, TSIG key roles and NOTAUTH, or the live smoke test. Fires on 'knotctl', 'add/change a DNS record', 'RFC 2136', 'TSIG key', 'zone apply', 'zones-plan', '_acme-challenge TXT'. NOT for resolver work (knotea) or server-side config, ACLs and DNSSEC (knot-dns)."
+description: "Use when making live DNS edits against the user's Knot authoritative server (erfi.io + lab.erfi.io + servarr.io + servarr.dev, TSIG RFC 2136 over TCP) - record edits, YAML zone apply from authority/zones/, TSIG key roles and NOTAUTH, the DS re-pin, or the live smoke test. Fires on 'knotctl', 'add/change a DNS record', 'RFC 2136', 'TSIG key', 'zone apply', 'zones-plan', '_acme-challenge TXT', 'DS record', 'CDS'. NOT for the resolver (knotea) or server-side config/ACLs/DNSSEC (knot-dns)."
 ---
 
 # knotctl - TSIG-keyed DNS editor
@@ -11,7 +11,7 @@ Source `~/infra/knotea/authority/cmd/knotctl/` (knotea monorepo), binary `~/bin/
 
 | Want to ... | Reach for |
 |---|---|
-| One-off DNS edit on `erfi.io` or `lab.erfi.io` | `knotctl add/rm/set` |
+| One-off DNS edit on any served zone (`erfi.io`, `lab.erfi.io`, `servarr.io`, `servarr.dev`) | `knotctl add/rm/set` |
 | Replace ALL records of (name, type) with N values atomically | `knotctl set name TYPE v1 v2 v3` |
 | Treat a zone as YAML in git, reconcile drift | edit `~/infra/knotea/authority/zones/<zone>.yml`, `make zones-plan`, `make zones-apply` |
 | Preview what an apply would change | `knotctl apply <file> --dry-run` / `make zones-plan` |
@@ -74,11 +74,11 @@ knotctl rm www.erfi.io A                  # all A at this name
 knotctl rm staging.erfi.io                # everything at the name
 ```
 
-Validation happens client-side before anything hits the wire (`wire.Record.Validate()`): uneditable types (SOA, DNSKEY/RRSIG/NSEC*/CDS/CDNSKEY), empty content, missing name, TTL below 30s and a malformed `--wait` all exit 5 without writing. `DS` is editable (delegation glue for a child zone). Multi-value `set` shares (zone, name, type, ttl) across values; mixing types in one call errors client-side.
+Validation happens client-side before anything hits the wire (`wire.Record.Validate()`): uneditable types (SOA, DNSKEY/RRSIG/NSEC*/CDS/CDNSKEY), empty content, missing name, TTL below 30s and a malformed `--wait` all exit 5 without writing. `DS` is editable (delegation glue for a child zone) - but only when the child is delegated to some OTHER server; for a child this knotd also serves (`lab.erfi.io` inside `erfi.io`) the UPDATE is routed to the child zone and fails NOTZONE, so write it server-side with `knotc zone-set` (`knot-dns` skill, foot-gun 29). Multi-value `set` shares (zone, name, type, ttl) across values; mixing types in one call errors client-side.
 
 ### Declarative reconcile (apply) - zones as code
 
-The source of truth for both live zones is `~/infra/knotea/authority/zones/erfi.io.yml` and `lab.erfi.io.yml` (schema and workflow in `zones/README.md`). Edit in git, plan, apply:
+The source of truth for the four live zones is `~/infra/knotea/authority/zones/<zone>.yml` (`erfi.io`, `lab.erfi.io`, `servarr.io`, `servarr.dev`) (schema and workflow in `zones/README.md`). Edit in git, plan, apply:
 
 ```bash
 cd ~/infra/knotea/authority
@@ -105,7 +105,7 @@ Properties to internalise:
 
 - Additive by default. Live records absent from the YAML are left alone; `--prune` removes drift. Safer than `terraform apply` because hand edits at the apex are never at risk.
 - Idempotent. A second apply prints `0 set, 0 removed, N unchanged`. Diff is by rrset (`name`+`type`) content + TTL.
-- `--prune` never removes apex `NS`, `SOA`, DNSSEC records, or `DS`. DS is interactive-only (`add/rm/set/ls ... --zone=<parent>`) because a delegation DS may be daemon-managed by ds-push; apply rejects a DS entry with a pointer back to `knotctl add`. Reconcilable set = editable set minus DS.
+- `--prune` never removes apex `NS`, `SOA`, DNSSEC records, or `DS`. DS is interactive-only (`add/rm/set/ls ... --zone=<parent>`) because a delegation DS may be daemon-managed by ds-push; apply rejects a DS entry with a pointer back to `knotctl add` (and for a same-server child even the interactive path fails NOTZONE - see "What knotctl is NOT"). Reconcilable set = editable set minus DS.
 - Multi-value `content: [a, b, c]` becomes one rrset replaced atomically.
 - Name resolution: `@` = zone apex; bare label joins the zone; an FQDN must be inside the declared zone (else an error with the line number). BIND convention: no trailing dot = relative, even with internal dots.
 - Per-op timeout 10s; only Sets are verified (remove verification is racy on caches).
@@ -226,7 +226,7 @@ The smoke deliberately does not exercise wrong-key paths (it would pollute the K
 
 - Not a Cloudflare-API client: `erfi.dev` + `erfianugrah.com` stay on CF (`cloudflare-ops` skill).
 - Not the HTTP API: that is the in-process CF-shape REST surface described above; `knotctl` is the wire-level CLI.
-- Mostly not for DNSSEC: KASP manages keys and signing; DNSKEY/RRSIG/NSEC3/CDS/CDNSKEY are rejected client-side (exit 5) and filtered out of `apply --prune`. The one exception is a child delegation `DS` - interactive only: `knotctl add/rm/set/ls lab.erfi.io DS "<keytag> <alg> <digesttype> <digest>" --zone=erfi.io`. `lab.erfi.io`'s DS in `erfi.io` is also auto-reconciled on KSK rollover by same-server ds-push (`knot-dns` skill, AGENTS gotcha #28).
+- Mostly not for DNSSEC: KASP manages keys and signing; DNSKEY/RRSIG/NSEC3/CDS/CDNSKEY are rejected client-side (exit 5) and filtered out of `apply --prune`. The one exception is a child delegation `DS` - interactive only (`knotctl add/rm/set/ls <child> DS "<keytag> <alg> <digesttype> <digest>" --zone=<parent>`), and only for a child delegated to ANOTHER server. For a child this knotd also serves (`lab.erfi.io` inside `erfi.io`) that command returns NOTZONE - knotd routes the UPDATE by longest-zone-match to the child zone (hit 2026-09-18). Seed that DS server-side instead (`knotc -s /var/lib/glory-hole/knot/run/knot.sock zone-begin` / `zone-set` / `zone-commit`); same-server ds-push then maintains it on later KSK rollovers (`knot-dns` skill foot-guns 29-30; AGENTS gotchas #28, #33, #34). The value to write is `knotctl ds <child>`.
 - Not for zone-level config (apex NS/SOA, TSIG keys, ACLs): `knotc conf-set` server-side via the `knot-dns` skill. `apply --prune` never removes apex NS or SOA.
 
 ## Updating knotctl

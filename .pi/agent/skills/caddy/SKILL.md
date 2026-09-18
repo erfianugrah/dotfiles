@@ -1,6 +1,6 @@
 ---
 name: caddy
-description: Use when working on the user's custom Caddy edge reverse-proxy stack (now NATIVE on the MS-01 NixOS router; source/build repo is ~/infra/ergo/caddy-compose/) - adding or editing a site block in the router repo's edge/Caddyfile, debugging ACME issuance (Cloudflare or rfc2136/TSIG to Knot), bumping plugin pins (pkgs/caddy-edge.nix), or re-enabling the dormant edge HTTP cache (souin). Fires on 'caddy', 'Caddyfile', 'the edge proxy', 'ACME failure', 'souin'. NOT for wafctl/edgectl API routes or dashboard internals (waf-api).
+description: Use when working on the user's custom Caddy edge reverse-proxy stack (native on the MS-01 NixOS router; repo ~/infra/ergo/caddy-compose/) - adding/editing a site block in edge/Caddyfile, debugging ACME issuance (Cloudflare or rfc2136/TSIG to Knot), bumping plugin pins (pkgs/caddy-edge.nix), or re-enabling the dormant edge HTTP cache (souin). Fires on 'caddy', 'Caddyfile', 'the edge proxy', 'ACME failure', 'souin'. NOT for wafctl/edgectl API routes or dashboard internals (waf-api).
 ---
 
 # caddy - custom build + edge stack (NATIVE since 2026-09-08)

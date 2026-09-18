@@ -80,7 +80,8 @@ for p in skills:
     elif len(desc) > 500: add(s, "WARN", f"description {len(desc)} chars > 500 (paid every turn)")
     if not (desc.startswith("Use when") or desc.startswith("Use ONLY when")):
         add(s, "WARN", "description does not start with 'Use when'")
-    if WORKFLOW.search(desc): add(s, "WARN", "description looks like a workflow/coverage summary, not triggers")
+    # quoted trigger phrases ('update everything first') are user speech, not workflow prose
+    if WORKFLOW.search(re.sub(r"'[^']*'", "", desc)): add(s, "WARN", "description looks like a workflow/coverage summary, not triggers")
     nlines = body.count("\n")
     if nlines > 500: add(s, "WARN", f"body {nlines} lines > 500; move reference into a linked file")
     prose = strip_fences(t)
