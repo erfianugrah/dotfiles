@@ -74,3 +74,11 @@ On the user's runner, job containers cannot reach the runner's cache proxy port,
 ### Runner job containers can't reach Forgejo (per-workflow bridge isolation)
 
 act (the runner's job executor) creates a per-workflow bridge network on a random subnet. Docker's inter-bridge isolation blocks traffic between this network and the Forgejo bridge, so `git fetch` against `http://forgejo:3000` times out. Fix: set `container.network: <forgejo-bridge>` in the runner's `config.yml` (joins job containers to the forgejo network directly) and optionally add `--add-host forgejo:<ip>` to `container.options`. See `~/infra/forgejo-compose/AGENTS.md` for the user's setup.
+
+### knotea migration gotchas (2026-09-15, all verified on the router runner)
+
+- **Never `git push --tags` to a fresh native repo.** Forgejo evaluates tag-push workflows against the DEFAULT BRANCH's workflow files, so pushing history's tags fires one release run PER TAG - those would rebuild old commits and re-push them as `:latest`. Push `main` only; tags live upstream. If it happens: stop the runner, kill FORGEJO-ACTIONS-* containers, cancel runs + their action_run_job rows + tasks in Postgres (cancel must hit all three levels - run status is re-aggregated from jobs). Full procedure: forgejo-compose AGENTS.md, "Convert a repo from mirror to native".
+- **Repo secrets API**: `PUT /api/v1/repos/<owner>/<repo>/actions/secrets/<NAME>` with body `{"data": "<RAW value>"}` - raw string, NOT base64 (base64 gets stored literally and surfaces as registry "denied: denied"). Repo delete needs the `write:user` scope (MIRROR_CRON_TOKEN's write:repository is not enough).
+- **act job containers run as root**: chmod-based read-only tests (expect 500 on write) succeed as root (CAP_DAC_OVERRIDE) and fail the suite. Guard with `os.Geteuid() == 0 -> t.Skip`.
+- **Actions with internal cross-repo checkouts fail**: trivy-action syncs `aquasecurity/trivy` mid-step and that fetch dies on github.com auth from a self-hosted runner. Bare binary instead (trivy: `curl trivy_<ver>_Linux-64bit.tar.gz`, same pattern as gitleaks above).
+- **Job logs**: `/var/lib/gitea/actions_log/<owner>/<repo>/<dir>/<task>.log.zst` (workpath root, not data/); the path is `action_task.log_filename`; zstd lives on the host, not in the container - `docker exec forgejo cat <path>` out and decompress locally.
