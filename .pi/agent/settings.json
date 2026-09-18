@@ -21,7 +21,9 @@
       "maxRetryDelayMs": 60000
     }
   },
-  "hideThinkingBlock": true,
-  "packages": ["git:github.com/erfianugrah/pi-mcp-bridge"],
+  "hideThinkingBlock": false,
+  "packages": [
+    "git:github.com/erfianugrah/pi-mcp-bridge"
+  ],
   "quietStartup": false
 }

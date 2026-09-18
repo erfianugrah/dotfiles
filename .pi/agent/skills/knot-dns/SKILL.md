@@ -5,7 +5,7 @@ description: "Use when working on the user's self-hosted authoritative DNS for e
 
 # knot-dns - authoritative DNS
 
-Live topology: the authority for `erfi.io` + `lab.erfi.io` + `servarr.io` + `servarr.dev` (added 2026-09-14, bought at Porkbun; registrar side - glue/NS/DS - managed by `~/infra/dns-tf`, vitvio/porkbun provider) is the knotea binary on the Fly app `glory-hole` (region `sin`, anycast v4 `137.66.1.170`; `ns1`/`ns2.erfi.io` glue point there) - **serving, legacy**; the replacement app `knotea` (dedicated anycast v4 `137.66.57.23`) has all 4 zones live + signed (durability plan Tasks 0-5 done 2026-09-18, restore drill PASSED) and takes over when the dns-tf NS flip lands - then `glory-hole` retires. knotd runs loopback-only on `127.0.0.1:5354`; knotea owns the public sockets and proxies RFC 2136 UPDATE + AXFR inward. Source: `~/infra/knotea/authority/` in the `~/infra/knotea` monorepo; the image is the root `~/infra/knotea/Dockerfile`, which builds Knot from source (`ARG KNOT_VERSION`). The predecessor Fly app `knot-fly-mvp` is destroyed. Canonical gotcha list and live state: `~/infra/knotea/authority/AGENTS.md`; rebuild/restore runbook: `~/infra/knotea/docs/runbooks/knotea-rebuild.md` (drill-tested). The resolver half is the `knotea` skill; record edits are the `knotctl` skill.
+Live topology: the authority for `erfi.io` + `lab.erfi.io` + `servarr.io` + `servarr.dev` (added 2026-09-14, bought at Porkbun; registrar side - glue/NS/DS - managed by `~/infra/dns-tf`, vitvio/porkbun provider) is the knotea binary on the Fly app `knotea` (region `sin`, dedicated anycast v4 `137.66.57.23`; `ns1`/`ns2` glue point there) - **serving since the Phase 3 cutover (2026-09-18)**; the legacy app `glory-hole` (anycast `137.66.1.170`) stays up as the rollback target until the soak window clears, then retires. knotd runs loopback-only on `127.0.0.1:5354`; knotea owns the public sockets and proxies RFC 2136 UPDATE + AXFR inward. Source: `~/infra/knotea/authority/` in the `~/infra/knotea` monorepo; the image is the root `~/infra/knotea/Dockerfile`, which builds Knot from source (`ARG KNOT_VERSION`). The predecessor Fly app `knot-fly-mvp` is destroyed. Canonical gotcha list and live state: `~/infra/knotea/authority/AGENTS.md`; rebuild/restore runbook: `~/infra/knotea/docs/runbooks/knotea-rebuild.md` (drill-tested). The resolver half is the `knotea` skill; record edits are the `knotctl` skill.
 
 `~/infra/knotea/authority/deploy/knot-only/` is the historical bare-knotd Fly deploy (the `knot-fly` name comes from it). Its fly.toml, knot.conf template and entrypoint still document the TSIG / ACL / confdb pattern the live confdb inherited. Copy-paste versions of those files plus the Cloudflare -> Knot AXFR migration playbook are in reference.md - read when standing up a new zone, bootstrapping a bare knotd, or migrating a zone off Cloudflare.
 
@@ -67,10 +67,10 @@ foo.erfi.io {
                 key_name "caddy-acme."
                 key_alg  "hmac-sha256"
                 key      {$TSIG_CADDY_ACME}
-                server   "137.66.1.170:53"
+                server   "137.66.57.23:53"
             }
             propagation_delay 30s
-            resolvers 137.66.1.170
+            resolvers 137.66.57.23
         }
     }
 }
@@ -95,7 +95,7 @@ Smoke the TSIG path itself with `knotctl add _acme-challenge.smoke.lab.erfi.io T
 
 In-bailiwick pattern for a zone served here:
 
-1. Register host glue at the registrar (Namecheap: Domain List -> Manage -> Advanced DNS -> Personal DNS Server): `ns1` and `ns2` both -> `137.66.1.170`. Namecheap requires two glue names; the same IP under two names is fine.
+1. Register host glue at the registrar (now Porkbun via `~/infra/dns-tf`: `porkbun_glue_record` + `porkbun_nameservers`; the Namecheap UI path predates the 2026-09-05 migration): `ns1` and `ns2` both -> the current anycast IP (`137.66.57.23`). The registrar requires two glue names; the same IP under two names is fine.
 2. Set NS at the registrar to `ns1.<zone>`, `ns2.<zone>`.
 3. Put matching A records for `ns1` / `ns2` inside the zone. Without them resolvers cannot validate the delegation.
 
@@ -109,7 +109,7 @@ Verified 2026-09-14 with servarr.io / servarr.dev (Porkbun). UPDATED 2026-09-14 
 2. At boot the supervisor's zone-reconcile does the confdb work: creates the zone (template default), bootstraps the apex SOA (serial 1) + NS, assigns `knotea-auto` + `dnssec-signing on`, signs. Check the machine log for the per-zone `zone reconcile` action lines ("missing - creating zone + apex bootstrap + DNSSEC"). Reboots are idempotent ("exists with apex - skipping").
 3. Fallback (legacy confdb / zone NOT declared in config): manual confdb bootstrap: `conf-begin`/`conf-commit`: `conf-set 'zone[<zone>.]'`, then `.dnssec-signing = on` + `.dnssec-policy = knotea-auto` (ACLs are NOT zone-pinned, so all four TSIG roles apply to new zones automatically). Then apex (journal-only zones have no implicit SOA - knotctl can't write SOA, so do it server-side): `zone-begin`, `zone-set <zone>. @ 3600 SOA ns1.<zone>. hostmaster.<zone>. 1 7200 600 1209600 300`, `zone-set @ NS ns1/ns2.<zone>.`, `zone-commit`. (Pre-Task-2 note: if the zone is missing from `served_zones` knotea answers REFUSED for it even though knotd serves it - that volume-config dance is gone post-Task-2; config is repo-strict.)
 4. Zone YAML in `authority/zones/<zone>.yml` (untracked by design), `knotctl apply` for remaining records, add the zone to `known_zones` in `~/.config/knotctl/config.yml`.
-5. Registrar in `~/infra/dns-tf`: `porkbun_glue_record` ns1+ns2 -> 137.66.1.170, `porkbun_nameservers` (with `depends_on` the glue), and - once CDS exists (`knotc zone-read <zone>. @ CDS`, seconds after signing starts) - `porkbun_dnssec_record` from the CDS fields. Registry push is async (minutes); verify with `dig +noall +authority +additional @<tld-ns> <zone> NS` and `dig +dnssec SOA <zone> @1.1.1.1` (want the `ad` flag).
+5. Registrar in `~/infra/dns-tf`: `porkbun_glue_record` ns1+ns2 -> 137.66.57.23, `porkbun_nameservers` (with `depends_on` the glue), and - once CDS exists (seconds after signing starts) - `porkbun_dnssec_record` from the DS: `knotctl ds <zone>` (no fly-ssh; must equal `dig +short CDS <zone> @<app>`) or, on the box, `knotc -s /var/lib/glory-hole/knot/run/knot.sock zone-read <zone>. @ CDS`. Registry push is async (minutes); verify with `dig +noall +authority +additional @<tld-ns> <zone> NS` and `dig +dnssec SOA <zone> @1.1.1.1` (want the `ad` flag).
 
 ## Migrating another zone off Cloudflare
 
@@ -161,7 +161,7 @@ fresh KASP keys (KSK identity loss = wrong DS pin target).
 ## Verification one-liners
 
 ```bash
-dig +short @137.66.1.170 SOA erfi.io
+dig +short @137.66.57.23 SOA erfi.io
 dig +short SOA erfi.io @1.1.1.1                          # via a public resolver (proves delegation)
 dig +noall +authority +additional @a0.nic.io erfi.io NS   # delegation state at the TLD
 dig DS erfi.io +short                                     # DNSSEC chain at the parent
@@ -202,6 +202,12 @@ Distilled from `~/infra/knotea/authority/AGENTS.md`, which has the numbered cano
 25. (drill 2026-09-18; canonical #29) `knotc zone-restore +backupdir` on a journal-only zone **wipes the zone contents** (journals emptied; zones come back empty until the reconciler re-bootstraps apexes) AND leaves the RUNNING knotd SERVFAILing AXFR + TSIG UPDATE on every zone until a **machine restart** (per-zone `zone-purge -f` + `zone-keys-load` did not clear it). Order: restore -> restart -> `knotctl apply` -> `zone-sign`.
 26. (drill 2026-09-18; canonical #30) NEVER `zone-purge` a zone AFTER a restore: the purged zone rebuilds its keyring from its own FRESH KASP keys instead of the restored ones - KSK identity loss, so the registrar DS pin target changes. Restart + re-apply did not bring the restored keyring back (reproduced on two zones). Verify per-zone DNSKEY set identity before any DS flip.
 27. (canonical #31) Bare `knotc` on a `fly ssh console` uses the compile-time socket default (`/opt/knot/var/run/knot/knot.sock` in this image), which does not exist - every control-socket command needs `-s /var/lib/glory-hole/knot/run/knot.sock`. `zone-purge` additionally needs `-f` (zonefile-sync is off).
+
+28. (cutover 2026-09-18) **CDS is the DS oracle; `knotctl ds` is the first-class re-pin tool.** To get the DS to pin at the parent, do NOT hand-compute tag/digest: `dig +short CDS <zone> @<app>` gives knotd's own value (computed from its KASP), or `knotctl ds <zone>` (computes it from the public DNSKEY RRset - no TSIG, no fly-ssh). Both must agree. The `knotctl ds` key tag is over the FULL rdata (knotd convention, oracle-verified) - see the knotctl skill. When re-pinning after a KSK rollover or a daemon cutover, pin the DS of the KSK the NEW app actually serves (CDS from the new app), not the old one.
+
+29. (cutover 2026-09-18) **RFC 2136 DDNS cannot write a name inside a delegated tree.** For an in-zone delegation DS at a delegated apex (e.g. `lab.erfi.io.` DS inside the `erfi.io` zone), `knotctl add/set` -> `NOTZONE`: knotd routes the UPDATE by longest-zone-match to the child zone, which rejects the owner. Fix: write it via the control protocol (`knotc zone-begin` / `zone-set` / `zone-commit` over `-s /var/lib/glory-hole/knot/run/knot.sock`), which bypasses RFC 2136 zone matching. Confirmed empirically for A, DS and TXT alike. `knotc zone-set` rdata is a single quoted argument; verify with `zone-read <zone> | grep <owner>`.
+
+30. (cutover 2026-09-18) **ds-push is not retroactive and has no force-push verb.** `zone[<zone>].ds-push` only fires on a CDS CHANGE, so it will NOT push an already-published CDS - the initial in-zone DS seed must be written manually (gotcha #29's `knotc zone-set`). ds-push then maintains it on future KSK rollovers. Wiring is per-zone (`remote[parent_loopback]` at `127.0.0.1@5354` + `zone[<child>].ds-push`), never on the KASP policy (or a zone would DDNS its own DS to its parent).
 
 ## Cost
 

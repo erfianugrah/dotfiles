@@ -5,7 +5,7 @@ description: "Use when making live DNS edits against the user's Knot authoritati
 
 # knotctl - TSIG-keyed DNS editor
 
-Source `~/infra/knotea/authority/cmd/knotctl/` (knotea monorepo), binary `~/bin/knotctl`, built with `cd ~/infra/knotea/authority && make install-knotctl`. Static Go binary, `CGO_ENABLED=0`, speaks miekg/dns RFC 2136 over TCP to the live authority at `137.66.1.170:53` (knotea on the Fly app `glory-hole`, which proxies UPDATE to its loopback knotd - topology in the `knot-dns` skill). No shim, no Cloudflare token, no `nsupdate -y` (which leaks secrets to argv) - keyfiles + TSIG + auto-verify polling. Design doc: `~/infra/knotea/authority/docs/plans/2026-05-25-knotctl-foundation.md`.
+Source `~/infra/knotea/authority/cmd/knotctl/` (knotea monorepo), binary `~/bin/knotctl`, built with `cd ~/infra/knotea/authority && make install-knotctl`. Static Go binary, `CGO_ENABLED=0`, speaks miekg/dns RFC 2136 over TCP to the live authority at `137.66.57.23:53` (the `knotea` Fly app, which proxies UPDATE to its loopback knotd - topology in the `knot-dns` skill). No shim, no Cloudflare token, no `nsupdate -y` (which leaks secrets to argv) - keyfiles + TSIG + auto-verify polling. Design doc: `~/infra/knotea/authority/docs/plans/2026-05-25-knotctl-foundation.md`.
 
 ## When to reach for it
 
@@ -17,6 +17,7 @@ Source `~/infra/knotea/authority/cmd/knotctl/` (knotea monorepo), binary `~/bin/
 | Preview what an apply would change | `knotctl apply <file> --dry-run` / `make zones-plan` |
 | Inspect what is at a name | `knotctl ls` |
 | Dump the whole zone | `knotctl export <zone>` (TSIG'd AXFR; `--yaml` for the apply schema) |
+| Compute the registrar-ready DS for a zone's published KSKs | `knotctl ds <zone>` (public DNSKEY query, no TSIG/fly-ssh; output must equal `dig CDS <zone>`) |
 | Edit a CF-hosted zone (`erfi.dev`, `erfianugrah.com`) | `cloudflare-ops` skill - both still delegate to Cloudflare vanity NS (`dig NS <zone> +short`) |
 | Debug Knot ACLs / confdb / Fly deploy, add a TSIG key or ACL | `knot-dns` skill (`knotc conf-set` server-side) |
 | Run a Caddy ACME challenge | Caddy does this itself via `dns rfc2136` - `caddy` skill |
@@ -128,6 +129,32 @@ knotctl export erfi.io --yaml     # apply-compatible schema
 
 `ls` is an unauthenticated DNS query; `export` uses the `axfr` role. `--json`, `--no-wait`, `--wait` are global flags and work before or after the subcommand.
 
+### Compute the DS (registrar re-pin)
+
+```bash
+knotctl ds erfi.io
+# 38050 13 2 BA3D3119B322DBD91BDAACD76B67C742A42BF474BD0374270CBA407548060078
+knotctl ds lab.erfi.io --json     # tag/algorithm/digest/rdata_b64
+```
+
+Fetches the zone's PUBLIC `DNSKEY` RRset (UDP, TCP fallback - no TSIG, no
+`flyctl ssh`; DNSKEY is public data) and prints one `<tag> <alg> 2 <HEX>`
+line per KSK (flags 257). That line is exactly the value to pin at the
+parent: the TLD `DS` via the registrar (dns-tf `porkbun_dnssec_record`), or
+an in-zone delegation `DS`.
+
+Acceptance bar: when the zone publishes CDS
+(`cds-cdnskey-publish != none`), `dig +short CDS <zone> @<app>` is knotd's
+own answer and MUST equal this output (tag AND digest). Verified on all
+four live zones 2026-09-18. Works against any serving authority (handy
+mid-cutover: compare two daemons before you flip the glue).
+
+Convention (in `pkg/dnssec`): the key tag is computed over the FULL DNSKEY
+rdata including the 3-byte flags/proto/alg header - knotd's observed
+behaviour, oracle-verified. The RFC 4034 s4.1.6 "key field" wording is
+ambiguous and implementations disagree; if you port this, keep it over the
+full rdata or it will not match knotd's CDS.
+
 ### Manage keyfiles
 
 ```bash
@@ -167,7 +194,7 @@ Flag > env > YAML > compiled defaults (`pkg/config/loadConfig`). Flags: `--confi
 
 ```yaml
 # ~/.config/knotctl/config.yml
-server: 137.66.1.170:53
+server: 137.66.57.23:53
 known_zones:
   - erfi.io
   - lab.erfi.io
@@ -192,7 +219,7 @@ The smoke deliberately does not exercise wrong-key paths (it would pollute the K
 - `error: keyfile X has loose permissions Y; want 0600` -> `chmod 600 ~/.config/knotctl/keys/*.key`.
 - `error: server rejected with NOTAUTH (rcode=9)` (exit 2) -> wrong key role for the record type (`knotctl keys list`; pass `--key knotctl` explicitly), or the keyfile holds a rotated-out secret (compare with `secretctl cmp`, `secret-handling` skill; server-side rotation is in `~/infra/knotea/authority/AGENTS.md`).
 - `error: server rejected with NOTZONE (rcode=10)` (exit 2) -> `rm`/`set` with a RELATIVE name fails NOTZONE even though `add`/`apply` accept relatives - pass a FQDN owner (`knotctl rm -zone erfi.io nzbget.erfi.io. A`). Discovered 2026-09-14 during the blue-green zone cleanup.
-- `error: update: network error: ... i/o timeout` (exit 4) -> `knotctl` is TCP throughout, so this is a real reachability problem with the configured server (137.66.1.170:53 on glory-hole, or override with `KNOTCTL_SERVER=137.66.57.23:53` for the new knotea app during the migration), not the Fly UDP-hairpin issue documented in knotea's AGENTS.
+- `error: update: network error: ... i/o timeout` (exit 4) -> `knotctl` is TCP throughout, so this is a real reachability problem with the configured server (137.66.57.23:53 on the knotea app, or override with `KNOTCTL_SERVER=<ip>:53` - e.g. 137.66.1.170:53 to reach the legacy glory-hole app while it is the rollback target), not the Fly UDP-hairpin issue documented in knotea's AGENTS.
 - Verify timed out (exit 1) -> rare with a single primary. Extend with `--wait=30s`, or `--no-wait` then `knotctl ls` to see what landed.
 
 ## What knotctl is NOT
