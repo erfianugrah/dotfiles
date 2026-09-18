@@ -200,14 +200,22 @@ rollback lane (swap published ports in compose.yaml to revert). Commands:
   Defences now live: the engine image carries a local SSE-transport
   watchdog patch (`patches/ninfer/0001`, applied by `make build-ninfer`),
   the proxy's WedgeWatchdog is ENABLED (`LLMC_NINFER_WEDGE_WATCHDOG=1` in
-  compose.yaml), the pin is 6cc95cc5 (v3 artifact format; v2 artifacts are
-  rejected - the baseline was upgraded offline and the old v2 file + old
-  d492968 image kept for rollback). KNOWN OPEN REGRESSION on the new pin:
-  decode ~55-60 tok/s vs 127-131 on the old stack for an identical probe
-  (MTP acceptance healthy; attribution pending, see the 2026-09-18 section
-  of llmc/AGENTS.md), and every request logs materialization diagnostics to
+  compose.yaml), the pin is f76e19c0 (v3 artifact format; v2 artifacts are
+  rejected - upstream re-released the baseline as native v3, so all
+  presets again name the canonical artifact; the old v2 bytes + d492968
+  image stay on disk as the rollback path), and every request logs
+  materialization diagnostics to
   `~/docker-volumes/ninfer/logs/engine.jsonl` (preset key
   `request_log_jsonl`). Details + timeline: the 8th-data-point section of
   `docs/plans/2026-09-10-ninfer-wedge-mitigation.md`.
+- **Speed probes must hold a preset lock** (2026-09-18): an unlocked
+  probe through the proxy is silently contendable - a second client's
+  POSTs trigger swap churn (drain-before-swap lets both GPU containers
+  coexist) and decode craters to ~55-60 tok/s, looking exactly like an
+  engine regression. It cost a whole investigation. Lock first
+  (`llmc lock <preset> --owner <id>`), and name the locked model
+  explicitly in requests (`model: "auto"` is refused under a lock).
+  Clean numbers for reference, locked: old d492968+v2 127-131 tok/s,
+  f76e19c0+v3 baseline 129-131, f76e19c0+Swift CaptainArni 136-139.
 - python stdout through tee/pipes is block-buffered - bin/llmc sets
   PYTHONUNBUFFERED=1.
