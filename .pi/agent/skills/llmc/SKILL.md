@@ -200,8 +200,12 @@ rollback lane (swap published ports in compose.yaml to revert). Commands:
   Defences now live: the engine image carries a local SSE-transport
   watchdog patch (`patches/ninfer/0001`, applied by `make build-ninfer`),
   the proxy's WedgeWatchdog is ENABLED (`LLMC_NINFER_WEDGE_WATCHDOG=1` in
-  compose.yaml), the pin is d492968 (includes the #176 materialization-
-  budget rework), and every request logs materialization diagnostics to
+  compose.yaml), the pin is 6cc95cc5 (v3 artifact format; v2 artifacts are
+  rejected - the baseline was upgraded offline and the old v2 file + old
+  d492968 image kept for rollback). KNOWN OPEN REGRESSION on the new pin:
+  decode ~55-60 tok/s vs 127-131 on the old stack for an identical probe
+  (MTP acceptance healthy; attribution pending, see the 2026-09-18 section
+  of llmc/AGENTS.md), and every request logs materialization diagnostics to
   `~/docker-volumes/ninfer/logs/engine.jsonl` (preset key
   `request_log_jsonl`). Details + timeline: the 8th-data-point section of
   `docs/plans/2026-09-10-ninfer-wedge-mitigation.md`.
