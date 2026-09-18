@@ -5,7 +5,7 @@ description: "Use when working on the user's self-hosted authoritative DNS for e
 
 # knot-dns - authoritative DNS
 
-Live topology: the authority for `erfi.io` + `lab.erfi.io` + `servarr.io` + `servarr.dev` (added 2026-09-14, bought at Porkbun; registrar side - glue/NS/DS - managed by `~/infra/dns-tf`, vitvio/porkbun provider) is the knotea binary on the Fly app `glory-hole` (region `sin`, anycast v4 `137.66.1.170`; `ns1`/`ns2.erfi.io` glue point there) - **serving, legacy**; a replacement app `knotea` (dedicated anycast v4, blue-green staging since 2026-09-14, zones pending Tasks 3-5 of the durability plan) will take over and `glory-hole` will retire. knotd runs loopback-only on `127.0.0.1:5354`; knotea owns the public sockets and proxies RFC 2136 UPDATE + AXFR inward. Source: `~/infra/knotea/authority/` in the `~/infra/knotea` monorepo; the image is the root `~/infra/knotea/Dockerfile`, which builds Knot from source (`ARG KNOT_VERSION`). The predecessor Fly app `knot-fly-mvp` is destroyed. Canonical gotcha list and live state: `~/infra/knotea/authority/AGENTS.md`. The resolver half is the `knotea` skill; record edits are the `knotctl` skill.
+Live topology: the authority for `erfi.io` + `lab.erfi.io` + `servarr.io` + `servarr.dev` (added 2026-09-14, bought at Porkbun; registrar side - glue/NS/DS - managed by `~/infra/dns-tf`, vitvio/porkbun provider) is the knotea binary on the Fly app `glory-hole` (region `sin`, anycast v4 `137.66.1.170`; `ns1`/`ns2.erfi.io` glue point there) - **serving, legacy**; the replacement app `knotea` (dedicated anycast v4 `137.66.57.23`) has all 4 zones live + signed (durability plan Tasks 0-5 done 2026-09-18, restore drill PASSED) and takes over when the dns-tf NS flip lands - then `glory-hole` retires. knotd runs loopback-only on `127.0.0.1:5354`; knotea owns the public sockets and proxies RFC 2136 UPDATE + AXFR inward. Source: `~/infra/knotea/authority/` in the `~/infra/knotea` monorepo; the image is the root `~/infra/knotea/Dockerfile`, which builds Knot from source (`ARG KNOT_VERSION`). The predecessor Fly app `knot-fly-mvp` is destroyed. Canonical gotcha list and live state: `~/infra/knotea/authority/AGENTS.md`; rebuild/restore runbook: `~/infra/knotea/docs/runbooks/knotea-rebuild.md` (drill-tested). The resolver half is the `knotea` skill; record edits are the `knotctl` skill.
 
 `~/infra/knotea/authority/deploy/knot-only/` is the historical bare-knotd Fly deploy (the `knot-fly` name comes from it). Its fly.toml, knot.conf template and entrypoint still document the TSIG / ACL / confdb pattern the live confdb inherited. Copy-paste versions of those files plus the Cloudflare -> Knot AXFR migration playbook are in reference.md - read when standing up a new zone, bootstrapping a bare knotd, or migrating a zone off Cloudflare.
 
@@ -123,7 +123,7 @@ CF outgoing AXFR requires Enterprise. The pattern: mirror the zone into Knot as 
 
 ## DNSSEC - live
 
-Both zones are signed with Knot's KASP (`policy[knotea-auto]`, online signing, automatic KSK/ZSK rollover, CDS/CDNSKEY published). `erfi.io` has its DS at the `.io` parent via Namecheap; `lab.erfi.io` has its DS inside `erfi.io`, reconciled automatically on KSK rollover by same-server ds-push (`remote[parent_loopback]` at `127.0.0.1@5354` + `zone[lab.erfi.io].ds-push` - per-zone, never on the policy, or `erfi.io` would try to DDNS its own DS to `.io`). Check with `dig DS erfi.io +short` and `dig DS lab.erfi.io +short`. Full wiring and the verification limit (ds-push fires only on a CDS change, so it cannot be proven without a real KSK rollover): gotcha #28 in `~/infra/knotea/authority/AGENTS.md`.
+Both zones are signed with Knot's KASP (`policy[knotea-auto]`, online signing, automatic KSK/ZSK rollover, CDS/CDNSKEY published). `erfi.io` + `lab.erfi.io` + `servarr.io` + `servarr.dev` have their DS at the parent (`.io` via Porkbun - `porkbun_dnssec_record` in `~/infra/dns-tf`); `lab.erfi.io` additionally has its DS inside `erfi.io`, reconciled automatically on KSK rollover by same-server ds-push (`remote[parent_loopback]` at `127.0.0.1@5354` + `zone[lab.erfi.io].ds-push` - per-zone, never on the policy, or `erfi.io` would try to DDNS its own DS to `.io`). Check with `dig DS <zone> +short`. Full wiring and the verification limit (ds-push fires only on a CDS change, so it cannot be proven without a real KSK rollover): gotcha #28 in `~/infra/knotea/authority/AGENTS.md`.
 
 DNSKEY / RRSIG / NSEC3 / CDS / CDNSKEY are daemon-managed; `knotctl` refuses to edit them. A child's delegation DS is the only DNSSEC record you edit by hand (`knotctl` skill).
 
@@ -141,6 +141,22 @@ knotc conf-read 'zone'                         # zone list + per-zone overrides
 knotc conf-read 'key'                          # lists secrets too - avoid in a transcript
 knotc zone-retransfer <zone>                   # secondary role only
 ```
+
+### Volume loss / rebuild / restore
+
+**Runbook: `~/infra/knotea/docs/runbooks/knotea-rebuild.md` (drill-tested 2026-09-18).**
+Volume-intact rebuild: nothing to do (state lives on the volume; the boot
+reconciler recreates missing zones). Volume loss: fresh volume + deploy, pull
+the latest `r2:knotea-backups/<date>` via rclone, `chown -R
+glory-hole:glory-hole` the restore dir, `knotc -s <sock> -b zone-restore
++backupdir ...`, **restart the machine**, `knotctl apply` the zone YAMLs
+(4x), `knotc zone-sign` (4x), verify SOA + RRSIG + full DNSKEY-set identity
+vs the serving app. The restore protects KASP keys + timers + confdb; zone
+contents come from the YAMLs (the zones are journal-only, the R2 backup
+has no zone files). Drill findings that shape the procedure - see foot-guns
+25-27: the restore wipes journal contents, breaks the running knotd until a
+restart, and a `zone-purge` after restore silently switches a zone to its
+fresh KASP keys (KSK identity loss = wrong DS pin target).
 
 ## Verification one-liners
 
@@ -182,6 +198,10 @@ Distilled from `~/infra/knotea/authority/AGENTS.md`, which has the numbered cano
 23. knotd refuses to start when `<storage>/run/knot.pid` names a live PID (`server PID found, already running`), and the rundir is on the persistent Fly volume - after a machine restart the recorded PID can have been recycled by an unrelated process (hit on the 2026-09-06 v1.4.15 deploy reboot). Symptom chain is nasty: glory-hole logs `knotd failed to start (continuing without authoritative serving)`, HTTP health checks still pass so Fly shows healthy, no knot routing is installed, and the resolver's client ACL REFUSES everyone - all served zones go dark globally while the dashboard keeps working. Fixed in v1.4.16 (supervisor deletes knot.pid + knot.sock before start, so any restart self-heals); on older builds, ssh in, `rm /var/lib/glory-hole/knot/run/knot.pid`, restart the machine.
 
 24. Replacing the apex NS rrset via RFC 2136 DDNS (knotctl `set`/`apply`) MERGED old + new rdata instead of replacing (observed 2026-09-14 on servarr.io/dev; both old and new NS survived, verify passed because it subset-checks). **Root cause (verified 2026-09-14, not a relay or Knot bug): RFC 2136 section 7.13 mandates apex-NS special-casing that Knot implements faithfully** - (a) a type-wide (CLASS ANY) apex-NS rrset-delete is silently ignored (`process_rem_rrset` returns EOK for apex NS), and (b) the LAST apex NS RR cannot be removed (`process_rem_rr` refuses when the NS count is 1). So a plain `RemoveRRset` + `Insert` (knotctl's SetMany shape) leaves the old rdata behind. **Fixed in knotctl (`authority/pkg/tsigclient` SetMany): the apex-NS tuple is routed through the RFC 2136 "dummy NS sandwich" - one atomic UPDATE that ADDs an ephemeral dummy NS first, per-RR-deletes the current rdata, ADDs the new rdata, then per-RR-deletes the dummy (added + removed in the same transaction, never published).** Repro/characterization: `resolver/pkg/dns/update_proxy_e2e_test.go` `TestUpdateProxy_ApexNSReplace` (real knotd) + `authority/pkg/tsigclient/update_test.go` `TestUpdateClient_SetMany_apexNS_replace` (tsigtest now emulates the 7.13 trap). Pre-fix workaround for a stale apex: server-side `knotc zone-begin` + `zone-unset <zone> @ NS <old>` + `zone-commit`.
+
+25. (drill 2026-09-18; canonical #29) `knotc zone-restore +backupdir` on a journal-only zone **wipes the zone contents** (journals emptied; zones come back empty until the reconciler re-bootstraps apexes) AND leaves the RUNNING knotd SERVFAILing AXFR + TSIG UPDATE on every zone until a **machine restart** (per-zone `zone-purge -f` + `zone-keys-load` did not clear it). Order: restore -> restart -> `knotctl apply` -> `zone-sign`.
+26. (drill 2026-09-18; canonical #30) NEVER `zone-purge` a zone AFTER a restore: the purged zone rebuilds its keyring from its own FRESH KASP keys instead of the restored ones - KSK identity loss, so the registrar DS pin target changes. Restart + re-apply did not bring the restored keyring back (reproduced on two zones). Verify per-zone DNSKEY set identity before any DS flip.
+27. (canonical #31) Bare `knotc` on a `fly ssh console` uses the compile-time socket default (`/opt/knot/var/run/knot/knot.sock` in this image), which does not exist - every control-socket command needs `-s /var/lib/glory-hole/knot/run/knot.sock`. `zone-purge` additionally needs `-f` (zonefile-sync is off).
 
 ## Cost
 

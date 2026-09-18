@@ -320,6 +320,8 @@ flyctl volumes create app_data --snapshot-id <snap-id> --size 5 --region fra --a
 ```
 
 Volume gotchas:
+- Non-interactive flyctl (scripts, agents, piped) requires `--yes` on every mutating command (`volumes create`, `ips allocate-v4`, `machines destroy`, `apps destroy`, `volumes destroy`) - without a TTY it errors `yes flag must be specified when not running interactively` instead of proceeding. `volumes create --size` is plain GiB (`2`, not `2GB`).
+- `flyctl apps destroy <app> --yes` takes the app's volumes with it; a follow-up `volumes destroy` says "not found". If you need to keep the volume, `volumes destroy` is the wrong tool anyway (single-attach) - `volumes fork` it off the old app before destroying.
 - Volumes are **regional**, not global. A volume in `fra` can only attach to machines in `fra`. If you scale to multiple regions, each needs its own volume - they don't auto-replicate.
 - Snapshots are taken automatically daily and kept 5 days by default; retention is settable from 1 to 60 days and `--scheduled-snapshots=false` disables them (flyio docs, volumes/snapshots). Force one before risky upgrades.
 - Volumes grow in place with `flyctl volumes extend` but **cannot shrink**. To go smaller: snapshot, `volumes create --snapshot-id` at the smaller size, move the machine over, destroy the old one.
