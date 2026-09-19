@@ -72,7 +72,7 @@ Every NixOS host pins `networking.nameservers = ["10.0.10.5"]` (knotea on the ro
 
 ## Remote path mappings
 
-qBit reports `/media/torrents/...`; the arrs see the same tree as `/data/torrents/...`. Each of sonarr / radarr / lidarr needs `remotePath: /media/torrents/` -> `localPath: /data/torrents/` keyed to the EXACT host string the download client is configured with (currently `172.19.1.22`). Sonarr/Radarr match mappings by that field, so a mapping keyed to a hostname never applies to a client configured by IP and vice versa - the symptom is "directory does not exist inside the container" although the path exists. SAB and the arrs share `/data`, so SAB needs no mapping.
+qBit reports `/media/torrents/...`; the arrs see the same tree as `/data/torrents/...`. Each of sonarr / radarr / lidarr needs `remotePath: /media/torrents/` -> `localPath: /data/torrents/` keyed to the EXACT host string the download client is configured with (currently `qbit.servarr.io` in sonarr/radarr/lidarr). Sonarr/Radarr match mappings by that field, so a mapping keyed to a hostname never applies to a client configured by IP and vice versa - the symptom is "directory does not exist inside the container" although the path exists. (Bit in 2026-09: all three arrs had the mapping keyed to `qbit.erfi.io` while the client used `qbit.servarr.io` - all three flagged the error simultaneously.) SAB and the arrs share `/data`, so SAB needs no mapping.
 
 ## Prowlarr
 
