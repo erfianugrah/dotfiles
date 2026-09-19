@@ -78,6 +78,18 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function paintWidget(ctx: ExtensionContext): void {
+		// A ctx captured before a session replacement/reload throws on any
+		// property access (assertActive) - the async refreshEngine().then()
+		// gap is the one path where that can happen. Contain it: the widget
+		// repaints on the next event with a fresh ctx.
+		try {
+			paintWidgetInner(ctx);
+		} catch {
+			/* stale ctx after session replacement - nothing to repaint */
+		}
+	}
+
+	function paintWidgetInner(ctx: ExtensionContext): void {
 		if (!ctx.hasUI) return;
 		const { provider } = currentProvider(ctx);
 		const mine = reqs.filter((r) => r.provider === provider);
