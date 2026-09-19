@@ -8,7 +8,9 @@ check first).
 ## Layout rules
 
 - One repo per domain; each maps to a private GitHub repo under `erfianugrah/`.
-  Exceptions: `ai/llmc` is PUBLIC; `bombe/`, `lockstep/`, `mnemosyne/`
+  Exceptions: `slskarr` moved to Forgejo `git.erfi.io:erfi/slskarr` on
+  2026-09-19 (GitHub repo pending deletion - its Forgejo copy had been a
+  read-only mirror); `ai/llmc` is PUBLIC; `bombe/`, `lockstep/`, `mnemosyne/`
   are local-only (no remote yet); `openwrt/` tracks upstream
   `openwrt/openwrt` as origin (erfianugrah fork as `fork` remote,
   plus `ecsv` remote at ecsv/openwrt).
