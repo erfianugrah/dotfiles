@@ -125,6 +125,40 @@ ssh router "curl -s -X POST -H \"X-API-Key: $COMPOSER_API_KEY\" 'localhost:8080/
 
 If the key 401s, it was rotated - ASK the user for the current key; do NOT improvise manual git surgery as a first resort. Known-good manual fallback when no key is available (used for the v1.1.5/v1.1.6 edge deploys before the key was at hand): generate a throwaway ed25519 keypair inside the stack checkout, `gh repo deploy-key add` it read-only, `git -c core.sshCommand="ssh -i <key> -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" pull --ff-only`, `docker compose up -d --build` from the checkout, then delete the GH deploy key + `shred -u` the keypair. Why this is needed at all: composerd's startup hook **AES-encrypts every key under its ssh dir at rest** (`/var/lib/composer/ssh/id_github*`), so interactive git/ssh with those keys fails with "invalid format" - only composerd can decrypt and use them. The API is the intended path.
 
+### Resolver-down mode + direct IPs (learned 2026-09-19)
+
+The router LAN resolver (knotea stack, 10.0.10.5) serves DNS for the whole
+LAN including the dev box. While it is down, `composer.erfi.io` cannot
+resolve - hit the API on the direct LAN IP: `http://10.0.69.1:8080/api/v1/...`
+(same key). Forgejo git-over-SSH is reachable at `ssh://git@10.0.69.1:2223/<owner>/<repo>.git`
+(Caddy L4 proxy; NOT :22 = router sshd, NOT :2222 = compose-network-only).
+Any operation that can run while the knotea stack is down MUST use these
+IPs - including a composer git stack whose repo_url is a hostname, which
+is a hard circle (composer resolves through the same resolver).
+
+### Re-pointing a git stack's repo_url (delete + recreate; there is no UPDATE)
+
+`PUT /stacks/{name}` accepts only `compose`; `convert/git` refuses
+already-git-backed stacks. The only path is `DELETE /stacks/{name}` +
+`POST /stacks/git` (body: name, repo_url, branch, compose_path,
+auth_method `ssh_key`/`token`/`none`, ssh_key=<PEM>). The stack is gone
+between the two calls - for a stack that provides a LAN service (DNS),
+that is a real outage window: build the create JSON BEFORE the delete,
+run the block with `set -e`, and only shred key material after the
+create+deploy+verify all succeed. (2026-09-19 incident: a jq typo killed
+line 1 of the block, the shell kept going, and the delete + shred ran
+anyway - ~10 min resolver outage + shredded keypair. Full record:
+knotea docs/plans/2026-09-19-gh-retirement.md.)
+
+SSH plumbing: composer's Go ssh client strict-checks host keys against
+`/var/lib/composer/ssh/known_hosts` (plaintext - `known_hosts*` is on the
+encryption skip list). Forgejo host key: `docker exec forgejo sh -c
+"cat /var/lib/gitea/ssh/gitea.rsa.pub"` (ssh-keyscan cannot talk to the
+forge git sshd). Per-stack ssh keys from `POST /stacks/git` do NOT appear as files in
+the container's ~/.ssh. Global keys: `POST /system/config/ssh-keys`
+({name, content}); per-stack field state: `GET /stacks/{name}/credentials`.
+
+
 ## SOPS decryption and secret rotation
 
 Composer decrypts SOPS-encrypted `.env` files before every `up` or `sync`
